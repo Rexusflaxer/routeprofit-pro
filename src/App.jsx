@@ -17,6 +17,10 @@ import PersonnelDetail from './pages/PersonnelDetail';
 import EmployeePortal from './pages/EmployeePortal';
 import CompanyDetail from './pages/CompanyDetail';
 import EmailOAuthCallback from './pages/EmailOAuthCallback';
+import CustomerDetail from './pages/CustomerDetail';
+import CustomerPortal from './pages/CustomerPortal';
+import Commercial from './pages/Commercial';
+import Billing from './pages/Billing';
 // CAOBeheer removed from customer app — owner-only via Codex/Cloudflare governance
 
 const { Pages, Layout, mainPage } = pagesConfig;
@@ -68,6 +72,10 @@ const AuthenticatedApp = () => {
       <Route path="/CompanyDetail" element={<LayoutWrapper currentPageName="Companies"><CompanyDetail /></LayoutWrapper>} />
       <Route path="/email-oauth/callback" element={<LayoutWrapper currentPageName="Companies"><EmailOAuthCallback /></LayoutWrapper>} />
       <Route path="/PersonnelDetail" element={<LayoutWrapper currentPageName="Personnel"><PersonnelDetail /></LayoutWrapper>} />
+      <Route path="/CustomerDetail" element={<LayoutWrapper currentPageName="Customers"><CustomerDetail /></LayoutWrapper>} />
+      <Route path="/Commercial" element={<LayoutWrapper currentPageName="Commercial"><Commercial /></LayoutWrapper>} />
+      <Route path="/Billing" element={<LayoutWrapper currentPageName="Billing"><Billing /></LayoutWrapper>} />
+      <Route path="/CustomerPortal" element={<CustomerPortal />} />
       {/* CAOBeheer: geen route — CAO governance is owner-only via Codex/Cloudflare.
            Klanten kunnen CAO-regels/configuraties niet zien, goedkeuren of aanpassen. */}
       {Object.entries(Pages).map(([path, Page]) => (

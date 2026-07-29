@@ -1,141 +1,180 @@
 import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  ContactRound,
+  Edit,
+  Plus,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import PageTransition from "@/components/ui-custom/PageTransition";
+import PageHeader from "@/components/ui-custom/PageHeader";
 import { base44 } from "@/api/base44Client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import PageHeader from "../components/ui-custom/PageHeader";
-import CustomerWizard from "../components/customers/CustomerWizard";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useToast } from "@/components/ui/use-toast";
+import CustomerWizard from "@/components/customers/CustomerWizard";
+import {
+  CUSTOMER_STATUS_CLASSES,
+  CUSTOMER_STATUS_LABELS,
+  CUSTOMER_TYPE_LABELS,
+  createCustomerMutationKey,
+  formatAddress,
+  getCustomerName,
+  getCustomerStatus,
+  invokeCustomerPlatformMutation,
+} from "@/components/customers/customerDossierUtils";
 
-const TYPE_LABELS = {
-  bedrijf: "Bedrijf",
-  particulier: "Particulier",
-};
-
-function text(value) {
-  return String(value || "").toLowerCase();
+function normalized(value) {
+  return String(value || "").toLocaleLowerCase("nl-NL");
 }
 
 function objectLabel(object) {
   return `${object.object_code ? `[${object.object_code}] ` : ""}${object.name || "Object"}`;
 }
 
-function TypeBadge({ type }) {
-  return (
-    <Badge variant="outline" className="border-border bg-muted/40 text-xs font-medium text-foreground">
-      {TYPE_LABELS[type] || type || "Onbekend"}
-    </Badge>
-  );
-}
-
 function CustomerObjects({ objects }) {
-  if (!objects.length) {
-    return <span className="text-sm text-muted-foreground">Geen objecten</span>;
-  }
-
-  const visibleObjects = objects.slice(0, 2);
-  const remaining = objects.length - visibleObjects.length;
-
+  if (!objects.length) return <span className="text-xs text-muted-foreground">Geen objecten</span>;
+  const visible = objects.slice(0, 2);
   return (
-    <div className="flex max-w-[360px] flex-wrap gap-1.5">
-      {visibleObjects.map((object) => (
+    <div className="flex max-w-[340px] flex-wrap gap-1">
+      {visible.map(object => (
         <span
           key={object.id}
-          className="max-w-[170px] truncate rounded border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-foreground"
+          className="max-w-[160px] truncate rounded border border-border bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-foreground"
           title={objectLabel(object)}
         >
           {objectLabel(object)}
         </span>
       ))}
-      {remaining > 0 && (
-        <span className="rounded border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-          +{remaining} meer
+      {objects.length > visible.length && (
+        <span className="rounded border border-border bg-muted/35 px-2 py-0.5 text-[11px] text-muted-foreground">
+          +{objects.length - visible.length}
         </span>
       )}
     </div>
   );
 }
 
-function ContactCell({ customer }) {
-  const contactRows = [
-    customer.contact_person && `Contact: ${customer.contact_person}`,
-    customer.email,
-    customer.phone,
-  ].filter(Boolean);
-
-  if (!contactRows.length) {
-    return <span className="text-sm text-muted-foreground">—</span>;
-  }
-
+function CustomerStatus({ customer }) {
+  const status = getCustomerStatus(customer);
   return (
-    <div className="space-y-0.5">
-      {contactRows.map((row) => (
-        <div key={row} className="max-w-[260px] truncate text-sm text-muted-foreground" title={row}>
-          {row}
-        </div>
-      ))}
-    </div>
+    <Badge variant="outline" className={`text-[11px] ${CUSTOMER_STATUS_CLASSES[status] || ""}`}>
+      {CUSTOMER_STATUS_LABELS[status] || status}
+    </Badge>
   );
 }
 
-function CustomerRow({ customer, objects, onEdit, onDelete }) {
+export function customerDetailHref(customerId, { edit = false } = {}) {
+  const params = new URLSearchParams({
+    id: String(customerId),
+    tab: "overview",
+  });
+  if (edit) params.set("edit", "1");
+  return `/CustomerDetail?${params.toString()}`;
+}
+
+export function CustomerRow({ customer, objects, onOpen }) {
+  const contact = [customer.contact_person, customer.email, customer.phone].filter(Boolean);
+  const detailHref = customerDetailHref(customer.id);
+  const editHref = customerDetailHref(customer.id, { edit: true });
   return (
-    <TableRow className="hover:bg-muted/35">
-      <TableCell className="min-w-[220px]">
-        <div className="space-y-0.5">
-          <div className="font-medium text-foreground">{customer.name || "Naamloos"}</div>
-          {customer.notes && (
-            <div className="max-w-[280px] truncate text-xs text-muted-foreground" title={customer.notes}>
-              {customer.notes}
-            </div>
-          )}
-        </div>
+    <TableRow
+      tabIndex={0}
+      role="link"
+      aria-label={`${getCustomerName(customer)} openen`}
+      data-customer-id={customer.id}
+      className="cursor-pointer hover:bg-muted/30"
+      onClick={event => {
+        if (event.defaultPrevented || event.target.closest("a, button, input, select, textarea")) return;
+        onOpen(customer);
+      }}
+      onKeyDown={event => {
+        if (
+          event.currentTarget === event.target
+          && (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          onOpen(customer);
+        }
+      }}
+    >
+      <TableCell className="min-w-[230px]">
+        <Link
+          to={detailHref}
+          className="block rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          onClick={event => event.stopPropagation()}
+        >
+          <p className="font-medium text-foreground">{getCustomerName(customer)}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{customer.customer_number || customer.kvk_number || "Nog geen klantnummer"}</p>
+        </Link>
       </TableCell>
       <TableCell>
-        <TypeBadge type={customer.customer_type} />
+        <div className="flex flex-col items-start gap-1">
+          <Badge variant="outline" className="text-[11px]">{CUSTOMER_TYPE_LABELS[customer.customer_type] || customer.customer_type || "Klant"}</Badge>
+          <CustomerStatus customer={customer} />
+        </div>
       </TableCell>
       <TableCell className="min-w-[220px]">
-        <ContactCell customer={customer} />
-      </TableCell>
-      <TableCell className="min-w-[260px]">
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-muted-foreground">
-            {objects.length} object{objects.length !== 1 ? "en" : ""}
+        {contact.length ? (
+          <div className="space-y-0.5">
+            {contact.map(value => <p key={value} className="max-w-[250px] truncate text-xs text-muted-foreground">{value}</p>)}
           </div>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400"><ContactRound className="h-3.5 w-3.5" /> Contact ontbreekt</span>
+        )}
+      </TableCell>
+      <TableCell className="min-w-[250px]">
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium text-muted-foreground">{objects.length} object{objects.length === 1 ? "" : "en"}</p>
           <CustomerObjects objects={objects} />
         </div>
       </TableCell>
-      <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground" title={customer.address || ""}>
+      <TableCell className="max-w-[250px] truncate text-xs text-muted-foreground" title={customer.address || ""}>
         {customer.address || "—"}
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-        {customer.kvk_number || "—"}
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
           <Button
-            variant="ghost"
+            asChild
             size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => onEdit(customer)}
-            title="Klant wijzigen"
-            aria-label={`Klant ${customer.name || ""} wijzigen`}
+            variant="ghost"
+            className="h-8 w-8"
+            aria-label={`${getCustomerName(customer)} wijzigen`}
           >
-            <Pencil className="h-3.5 w-3.5" />
+            <Link to={editHref} onClick={event => event.stopPropagation()}>
+              <Edit className="h-3.5 w-3.5" />
+            </Link>
           </Button>
           <Button
-            variant="ghost"
+            asChild
             size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-            onClick={() => onDelete(customer, objects)}
-            title="Klant verwijderen"
-            aria-label={`Klant ${customer.name || ""} verwijderen`}
+            variant="ghost"
+            className="h-8 w-8"
+            aria-label={`${getCustomerName(customer)} openen`}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Link to={detailHref} onClick={event => event.stopPropagation()}>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
           </Button>
         </div>
       </TableCell>
@@ -144,139 +183,154 @@ function CustomerRow({ customer, objects, onEdit, onDelete }) {
 }
 
 export default function Customers() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showWizard, setShowWizard] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [objectFilter, setObjectFilter] = useState("all");
-  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState("current");
 
-  const { data: customers = [], isLoading } = useQuery({
+  const customersQuery = useQuery({
     queryKey: ["customers"],
     queryFn: () => base44.entities.Customer.list(),
+    retry: 1,
   });
-
-  const { data: objects = [] } = useQuery({
+  const objectsQuery = useQuery({
     queryKey: ["objects"],
     queryFn: () => base44.entities.SurveillanceObject.list(),
+    retry: 1,
   });
+  const customers = customersQuery.data || [];
+  const objects = objectsQuery.data || [];
 
-  const objectsByCustomer = useMemo(() => {
-    const grouped = {};
-    for (const object of objects) {
-      if (!object.customer_id) continue;
-      grouped[object.customer_id] = grouped[object.customer_id] || [];
-      grouped[object.customer_id].push(object);
-    }
+  const objectsByCustomer = useMemo(() => objects.reduce((grouped, object) => {
+    if (!object.customer_id) return grouped;
+    grouped[object.customer_id] = grouped[object.customer_id] || [];
+    grouped[object.customer_id].push(object);
     return grouped;
-  }, [objects]);
+  }, {}), [objects]);
 
   const filteredCustomers = useMemo(() => {
-    const query = text(searchTerm).trim();
-
-    return customers.filter((customer) => {
+    const query = normalized(searchTerm).trim();
+    return customers.filter(customer => {
       const customerObjects = objectsByCustomer[customer.id] || [];
-      const hasObjects = customerObjects.length > 0;
-
+      const status = getCustomerStatus(customer);
       if (typeFilter !== "all" && customer.customer_type !== typeFilter) return false;
-      if (objectFilter === "with" && !hasObjects) return false;
-      if (objectFilter === "without" && hasObjects) return false;
-
+      if (objectFilter === "with" && customerObjects.length === 0) return false;
+      if (objectFilter === "without" && customerObjects.length > 0) return false;
+      if (statusFilter === "current" && status === "archived") return false;
+      if (statusFilter === "archived" && status !== "archived") return false;
+      if (statusFilter === "attention" && !["concept", "on_hold", "inactive"].includes(status)) return false;
       if (!query) return true;
-
       const searchable = [
         customer.name,
+        customer.trade_name,
+        customer.legal_name,
+        customer.customer_number,
         customer.contact_person,
         customer.email,
         customer.phone,
         customer.address,
         customer.kvk_number,
+        customer.vat_number,
         customer.notes,
-        ...customerObjects.flatMap((object) => [object.name, object.object_code, object.address]),
-      ].map(text).join(" ");
-
+        ...customerObjects.flatMap(object => [object.name, object.object_code, object.address]),
+      ].map(normalized).join(" ");
       return searchable.includes(query);
     });
-  }, [customers, objectFilter, objectsByCustomer, searchTerm, typeFilter]);
-
-  const filteredCompanyCount = filteredCustomers.filter((customer) => customer.customer_type === "bedrijf").length;
-  const filteredPrivateCount = filteredCustomers.filter((customer) => customer.customer_type === "particulier").length;
-  const hasActiveFilters = searchTerm || typeFilter !== "all" || objectFilter !== "all";
+  }, [customers, objectFilter, objectsByCustomer, searchTerm, statusFilter, typeFilter]);
 
   const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.Customer.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+    mutationFn: async ({ setup, idempotencyKey }) => {
+      const primaryContact = setup.contact
+        ? {
+            ...Object.fromEntries(Object.entries(setup.contact).filter(([key]) => !["email", "phone", "roles", "version"].includes(key))),
+            contact_points: [
+              setup.contact.email && {
+                point_type: "email",
+                label: "Zakelijk",
+                value: setup.contact.email,
+                is_primary: true,
+                purposes: setup.contact.roles || ["primary"],
+                status: "active",
+              },
+              setup.contact.phone && {
+                point_type: "phone",
+                label: "Zakelijk",
+                value: setup.contact.phone,
+                is_primary: true,
+                purposes: setup.contact.roles || ["primary"],
+                status: "active",
+              },
+            ].filter(Boolean),
+            roles: [...new Set(setup.contact.roles || ["primary"])],
+          }
+        : null;
+      const result = await invokeCustomerPlatformMutation({
+        action: "create_customer",
+        idempotency_key: idempotencyKey,
+        expected_version: 0,
+        customer: setup.customer,
+        customer_account: setup.account,
+        company_id: setup.account.company_id,
+        addresses: (setup.addresses || []).map(address => ({
+          ...address,
+          country_code: address.country_name === "Nederland" ? "NL" : null,
+          formatted_address: formatAddress(address),
+          status: "active",
+        })),
+        primary_contact: primaryContact,
+      });
+      const setupIncomplete = result.setup_incomplete || {};
+      const warnings = [
+        setupIncomplete.requested_addresses_missing && "Niet alle adressen konden worden hersteld.",
+        setupIncomplete.requested_primary_contact_missing && "De primaire contactpersoon ontbreekt.",
+      ].filter(Boolean);
+      return { customer: result.customer, warnings };
+    },
+    onSuccess: async ({ customer, warnings }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["customers"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-dossier", customer.id] }),
+      ]);
+      if (warnings.length) {
+        toast({
+          title: "Klant aangemaakt met aandachtspunten",
+          description: "Open het dossier om de ontbrekende onderdelen aan te vullen.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Klant aangemaakt", description: "Het nieuwe klantdossier staat klaar." });
+      }
       setShowWizard(false);
-      setEditingCustomer(null);
+      navigate(`/CustomerDetail?id=${encodeURIComponent(customer.id)}&tab=overview&new=1${warnings.length ? "&setup=partial" : ""}`);
     },
   });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Customer.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      setShowWizard(false);
-      setEditingCustomer(null);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Customer.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers"] }),
-  });
-
-  const openCreateWizard = () => {
-    setEditingCustomer(null);
-    setShowWizard(true);
-  };
-
-  const openEditWizard = (customer) => {
-    setEditingCustomer(customer);
-    setShowWizard(true);
-  };
-
-  const closeWizard = () => {
-    setShowWizard(false);
-    setEditingCustomer(null);
-  };
 
   const resetFilters = () => {
     setSearchTerm("");
     setTypeFilter("all");
     setObjectFilter("all");
+    setStatusFilter("current");
   };
-
-  const handleSave = (data) => {
-    if (editingCustomer) {
-      updateMutation.mutate({ id: editingCustomer.id, data });
-    } else {
-      createMutation.mutate(data);
-    }
-  };
-
-  const handleDelete = (customer, customerObjects) => {
-    if (customerObjects.length > 0) {
-      alert(`Deze klant heeft nog ${customerObjects.length} gekoppeld object(en). Koppel de objecten eerst aan een andere klant.`);
-      return;
-    }
-
-    if (confirm(`Klant "${customer.name}" verwijderen?`)) {
-      deleteMutation.mutate(customer.id);
-    }
-  };
+  const hasFilters = Boolean(searchTerm || typeFilter !== "all" || objectFilter !== "all" || statusFilter !== "current");
 
   if (showWizard) {
     return (
       <PageTransition>
-        <Button variant="ghost" size="sm" onClick={closeWizard} className="w-fit text-muted-foreground hover:text-foreground">
+        <Button variant="ghost" size="sm" onClick={() => setShowWizard(false)} className="mb-4 text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Terug naar klanten
         </Button>
         <CustomerWizard
-          customer={editingCustomer}
-          onSave={handleSave}
-          onCancel={closeWizard}
-          saving={createMutation.isPending || updateMutation.isPending}
+          onSave={setup => createMutation.mutate({
+            setup,
+            idempotencyKey: createCustomerMutationKey("create_customer"),
+          })}
+          onCancel={() => setShowWizard(false)}
+          saving={createMutation.isPending}
+          error={createMutation.error}
         />
       </PageTransition>
     );
@@ -286,114 +340,110 @@ export default function Customers() {
     <PageTransition>
       <PageHeader
         title="Klanten"
-        subtitle="Beheer particulieren en bedrijven die gekoppeld zijn aan objecten"
-        actions={
-          <Button onClick={openCreateWizard}>
-            <Plus className="h-4 w-4" /> Nieuwe klant
-          </Button>
-        }
+        subtitle="Juridische en commerciële relaties met hun objecten, contacten en dossiers"
+        actions={<Button onClick={() => setShowWizard(true)}><Plus className="h-4 w-4" /> Nieuwe klant</Button>}
       />
 
-      {!isLoading && customers.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[minmax(280px,1fr)_180px_190px_auto] lg:items-center">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="text"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Zoek op naam, contact, e-mail, telefoon, adres, KVK of object..."
-                className="pl-9"
-              />
-            </div>
-
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Klanttype" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Alle klanttypes</SelectItem>
-                <SelectItem value="bedrijf">Bedrijven</SelectItem>
-                <SelectItem value="particulier">Particulieren</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={objectFilter} onValueChange={setObjectFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Objecten" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Alle objecten</SelectItem>
-                <SelectItem value="with">Met objecten</SelectItem>
-                <SelectItem value="without">Zonder objecten</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
-              <div className="whitespace-nowrap rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">{filteredCustomers.length}</span> klanten ·{" "}
-                <span className="font-semibold text-foreground">{filteredCompanyCount}</span> bedrijven ·{" "}
-                <span className="font-semibold text-foreground">{filteredPrivateCount}</span> particulieren
-              </div>
-              {hasActiveFilters && (
-                <Button variant="outline" size="sm" onClick={resetFilters}>
-                  Reset
-                </Button>
-              )}
-            </div>
+      <div className="mb-4 rounded-lg border border-border bg-card p-3 shadow-sm">
+        <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_160px_170px_170px_auto] xl:items-center">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchTerm}
+              onChange={event => setSearchTerm(event.target.value)}
+              placeholder="Zoek op klant, contact, KvK, adres of object..."
+              className="pl-9"
+            />
+          </div>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle klanttypes</SelectItem>
+              <SelectItem value="bedrijf">Bedrijven</SelectItem>
+              <SelectItem value="particulier">Particulieren</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={objectFilter} onValueChange={setObjectFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle objectkoppelingen</SelectItem>
+              <SelectItem value="with">Met objecten</SelectItem>
+              <SelectItem value="without">Zonder objecten</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="current">Actueel</SelectItem>
+              <SelectItem value="attention">Aandacht nodig</SelectItem>
+              <SelectItem value="archived">Archief</SelectItem>
+              <SelectItem value="all">Alle statussen</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center justify-end gap-2">
+            <span className="whitespace-nowrap rounded-md border border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+              <strong className="text-foreground">{filteredCustomers.length}</strong> van {customers.length}
+            </span>
+            {hasFilters && <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>}
           </div>
         </div>
-      )}
+      </div>
 
-      {isLoading ? (
-        <div className="rounded-lg border border-border bg-card py-10 text-center text-sm text-muted-foreground">
-          Laden...
+      {customersQuery.isLoading || objectsQuery.isLoading ? (
+        <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+          {[1, 2, 3, 4].map(value => <div key={value} className="h-12 animate-pulse rounded-md bg-muted/30" />)}
         </div>
-      ) : customers.length > 0 ? (
+      ) : customersQuery.isError || objectsQuery.isError ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-5">
+          <p className="text-sm font-medium text-destructive">De klantenlijst kon niet volledig worden geladen.</p>
+          <p className="mt-1 text-xs text-muted-foreground">{customersQuery.error?.message || objectsQuery.error?.message}</p>
+          <Button className="mt-4" size="sm" variant="outline" onClick={() => {
+            customersQuery.refetch();
+            objectsQuery.refetch();
+          }}><RefreshCw className="h-4 w-4" /> Opnieuw</Button>
+        </div>
+      ) : customers.length ? (
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="font-semibold text-muted-foreground">Klant</TableHead>
-                <TableHead className="font-semibold text-muted-foreground">Type</TableHead>
-                <TableHead className="font-semibold text-muted-foreground">Contact</TableHead>
-                <TableHead className="font-semibold text-muted-foreground">Objecten</TableHead>
-                <TableHead className="font-semibold text-muted-foreground">Adres</TableHead>
-                <TableHead className="font-semibold text-muted-foreground">KvK</TableHead>
-                <TableHead className="text-right font-semibold text-muted-foreground">Acties</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredCustomers.map((customer) => (
-                <CustomerRow
-                  key={customer.id}
-                  customer={customer}
-                  objects={objectsByCustomer[customer.id] || []}
-                  onEdit={openEditWizard}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </TableBody>
-          </Table>
-
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <TableHead className="text-xs font-semibold text-muted-foreground">Klant</TableHead>
+                  <TableHead className="text-xs font-semibold text-muted-foreground">Type & status</TableHead>
+                  <TableHead className="text-xs font-semibold text-muted-foreground">Contact</TableHead>
+                  <TableHead className="text-xs font-semibold text-muted-foreground">Objecten</TableHead>
+                  <TableHead className="text-xs font-semibold text-muted-foreground">Adres</TableHead>
+                  <TableHead className="text-right text-xs font-semibold text-muted-foreground">Acties</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredCustomers.map(customer => (
+                  <CustomerRow
+                    key={customer.id}
+                    customer={customer}
+                    objects={objectsByCustomer[customer.id] || []}
+                    onOpen={item => navigate(`/CustomerDetail?id=${encodeURIComponent(item.id)}&tab=overview`)}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           {filteredCustomers.length === 0 && (
-            <div className="border-t border-border px-4 py-10 text-center">
+            <div className="border-t border-border px-5 py-10 text-center">
               <p className="text-sm font-medium text-foreground">Geen klanten gevonden</p>
-              <p className="mt-1 text-sm text-muted-foreground">Pas de zoekterm of filters aan.</p>
-              <Button variant="outline" size="sm" className="mt-4" onClick={resetFilters}>
-                Filters wissen
-              </Button>
+              <p className="mt-1 text-xs text-muted-foreground">Pas de zoekopdracht of filters aan.</p>
+              <Button className="mt-4" size="sm" variant="outline" onClick={resetFilters}>Filters wissen</Button>
             </div>
           )}
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-card px-6 py-12 text-center shadow-sm">
-          <p className="text-sm font-medium text-foreground">Geen klanten</p>
-          <p className="mt-1 text-sm text-muted-foreground">Voeg de eerste klant toe om objecten aan te koppelen.</p>
-          <Button className="mt-4" size="sm" onClick={openCreateWizard}>
-            <Plus className="h-4 w-4" /> Klant toevoegen
-          </Button>
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted/30">
+            <ContactRound className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <p className="mt-4 text-sm font-medium text-foreground">Nog geen klanten</p>
+          <p className="mt-1 text-xs text-muted-foreground">Voeg de eerste juridische klantrelatie toe om een dossier op te bouwen.</p>
+          <Button className="mt-4" size="sm" onClick={() => setShowWizard(true)}><Plus className="h-4 w-4" /> Klant toevoegen</Button>
         </div>
       )}
     </PageTransition>

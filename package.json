@@ -9,6 +9,9 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "verify:cao-all": "node scripts/verify-cao-all.mjs",
     "verify:cao-foundation": "node scripts/verify-cao-foundation.mjs",
     "audit:cao-coverage": "node scripts/audit-cao-coverage.mjs",
@@ -16,6 +19,8 @@
     "verify:contract-template": "node scripts/verify-contract-template.mjs",
     "verify:korpschef-pass": "node scripts/verify-korpschef-pass.mjs",
     "verify:korpschef-permission": "node scripts/verify-korpschef-permission.mjs",
+    "verify:customer-platform": "node scripts/verify-customer-platform.mjs",
+    "audit:customer-platform": "node scripts/audit-customer-platform-readiness.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -89,6 +94,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@playwright/test": "^1.62.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.13.5",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
@@ -101,9 +109,11 @@
     "eslint-plugin-react-refresh": "^0.4.18",
     "eslint-plugin-unused-imports": "^4.3.0",
     "globals": "^15.14.0",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
-    "vite": "^6.1.0"
+    "vite": "^6.1.0",
+    "vitest": "^4.1.10"
   }
 }

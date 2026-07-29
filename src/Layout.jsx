@@ -5,7 +5,8 @@ import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
   Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle
+  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle,
+  ReceiptText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -26,9 +27,16 @@ const CONTEXT_SECTIONS = [
     ],
   },
   {
+    label: "Commercie",
+    items: [
+      { name: "Klanten", icon: Users, page: "Customers", pages: ["CustomerDetail"] },
+      { name: "Offertes & contracten", icon: Handshake, page: "Commercial" },
+      { name: "Facturatie", icon: ReceiptText, page: "Billing" },
+    ],
+  },
+  {
     label: "Mobiele surveillance",
     items: [
-      { name: "Klanten", icon: Users, page: "Customers" },
       { name: "Objecten", icon: MapPin, page: "Objects" },
       { name: "Collectieven", icon: Database, page: "Collectief" },
       { name: "Routes", icon: Route, page: "Routes" },
