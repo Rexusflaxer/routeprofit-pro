@@ -28,7 +28,6 @@ const JOB_TITLE_OPTIONS = [
   { key: "finance", label: "Financieel contactpersoon", description: "Facturen, betalingen en financiële vragen" },
   { key: "operations", label: "Operationeel manager", description: "Dagelijkse operatie en uitvoering" },
   { key: "facilities", label: "Facilitair manager", description: "Facilitaire dienstverlening en locaties" },
-  { key: "security", label: "Beveiligingscoördinator", description: "Beveiligingsafspraken en incidentopvolging" },
   { key: "object_manager", label: "Objectbeheerder", description: "Beheer van één of meer objecten" },
   { key: "location_manager", label: "Locatiemanager", description: "Verantwoordelijk voor een vestiging of locatie" },
   { key: "contract_manager", label: "Contractmanager", description: "Contractafspraken en evaluaties" },
