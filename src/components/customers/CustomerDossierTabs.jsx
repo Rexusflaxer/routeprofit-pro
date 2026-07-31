@@ -28,19 +28,29 @@ import {
   ReceiptText,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
   TriangleAlert,
   UserRound,
   UsersRound,
   WalletCards,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import CustomerContactWizard from "./CustomerContactWizard";
+import CustomerObjectWizard from "./CustomerObjectWizard";
 import {
   contactMatchesObject,
   formatContactObjectScope,
 } from "./customerContactScope";
+import {
+  objectAttentionItems,
+  objectMatchesSearch,
+  objectStatus,
+  objectTypeLabel,
+} from "./customerObjectConfig";
 import {
   Sheet,
   SheetContent,
@@ -634,15 +644,53 @@ export function ContactsTab({
   );
 }
 
-function ObjectsTab({ customerId, navigate, selectedRow, onSelectRow }) {
+export function ObjectsTab({
+  customer,
+  customerId,
+  navigate,
+  selectedRow,
+  onSelectRow,
+  onAddObject,
+  wizardOpen,
+  onCloseWizard,
+  onSaveObject,
+  objectSaving,
+  objectError,
+  searchTerm = "",
+  onSearchChange,
+  statusFilter = "all",
+  onStatusChange,
+}) {
   const objectsQuery = useCustomerRecords("SurveillanceObject", customerId, true, "name");
   const collectivesQuery = useCustomerRecords("Collectief", customerId, true, "name");
+  const contractLinesQuery = useCustomerRecords("CustomerContractLine", customerId, true, "+sequence");
 
   return (
-    <QueryGate queries={[objectsQuery, collectivesQuery]}>
+    <QueryGate queries={[objectsQuery, collectivesQuery, contractLinesQuery]}>
       {(() => {
         const objects = objectsQuery.data || [];
         const collectives = collectivesQuery.data || [];
+        const contractLines = contractLinesQuery.data || [];
+        const normalizedStatus = ["all", "concept", "active", "inactive", "archived"].includes(statusFilter)
+          ? statusFilter
+          : "all";
+        const filteredObjects = objects.filter(object => (
+          (normalizedStatus === "all" || objectStatus(object) === normalizedStatus)
+          && objectMatchesSearch(object, searchTerm)
+        ));
+        const collectiveIdsForObject = object => collectives
+          .filter(collective => (collective.object_ids || []).includes(object.id))
+          .map(collective => collective.id);
+        const servicesForObject = object => {
+          const collectiveIds = new Set(collectiveIdsForObject(object));
+          return [...new Set(contractLines
+            .filter(line => !["ended", "archived"].includes(line.status))
+            .filter(line => line.scope_type === "customer"
+              || line.object_id === object.id
+              || (line.collective_id && collectiveIds.has(line.collective_id)))
+            .map(line => line.name || line.service_code)
+            .filter(Boolean))];
+        };
         const columns = [
           {
             key: "object",
@@ -650,11 +698,20 @@ function ObjectsTab({ customerId, navigate, selectedRow, onSelectRow }) {
             render: object => (
               <div>
                 <p className="font-medium text-foreground">{object.name || "Naamloos object"}</p>
-                <p className="text-xs text-muted-foreground">{object.object_code || "Geen objectcode"}</p>
+                <p className="text-xs text-muted-foreground">{object.object_code || "Code wordt toegekend"} · {objectTypeLabel(object.object_type)}</p>
               </div>
             ),
           },
-          { key: "address", label: "Adres", render: object => <span>{objectAddress(object)}</span> },
+          {
+            key: "address",
+            label: "Locatie",
+            render: object => (
+              <div>
+                <p>{objectAddress(object)}</p>
+                {object.region && <p className="mt-0.5 text-xs text-muted-foreground">Regio {object.region}</p>}
+              </div>
+            ),
+          },
           {
             key: "collective",
             label: "Collectief / regio",
@@ -665,22 +722,111 @@ function ObjectsTab({ customerId, navigate, selectedRow, onSelectRow }) {
           },
           {
             key: "service",
-            label: "Dienstverlening",
-            render: object => object.service_summary || object.default_service_function_type || <span className="text-muted-foreground">Nog niet ingericht</span>,
+            label: "Contractdiensten",
+            render: object => {
+              const services = servicesForObject(object);
+              if (!services.length) return <span className="text-muted-foreground">Nog niet gekoppeld</span>;
+              return (
+                <div>
+                  <p>{services.slice(0, 2).join(", ")}</p>
+                  {services.length > 2 && <p className="text-xs text-muted-foreground">+{services.length - 2} meer</p>}
+                </div>
+              );
+            },
           },
-          { key: "status", label: "Status", render: object => <StatusBadge status={object.status || (object.is_active === false ? "inactive" : "active")} /> },
+          {
+            key: "attention",
+            label: "Aandachtspunt",
+            render: object => {
+              const attention = objectAttentionItems(object);
+              if (!servicesForObject(object).length) attention.push("Dienst koppelen");
+              return attention.length
+                ? <span className="text-xs text-amber-700 dark:text-amber-300">{attention[0]}{attention.length > 1 ? ` +${attention.length - 1}` : ""}</span>
+                : <span className="text-xs text-emerald-700 dark:text-emerald-300">Ingericht</span>;
+            },
+          },
+          { key: "status", label: "Status", render: object => <StatusBadge status={objectStatus(object)} /> },
+          { key: "changed", label: "Gewijzigd", render: object => <span className="whitespace-nowrap text-muted-foreground">{formatDate(object.updated_date || object.created_date)}</span> },
         ];
 
         return (
-          <div className="space-y-4 p-4 lg:p-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <StatCard icon={MapPin} label="Objecten" value={objects.length} />
-              <StatCard icon={Building2} label="Collectieven" value={collectives.length} />
-              <StatCard icon={TriangleAlert} label="Aandacht nodig" value={objects.filter(item => item.status === "inactive" || item.attention_required).length} />
+          <div className="flex min-h-[520px] flex-col bg-card">
+            {wizardOpen && (
+              <CustomerObjectWizard
+                customerName={customer?.trade_name || customer?.name || customer?.legal_name || "Deze klant"}
+                objects={objects}
+                onCancel={onCloseWizard}
+                onSave={onSaveObject}
+                saving={objectSaving}
+                error={objectError}
+              />
+            )}
+
+            <div className="border-b border-border bg-muted/10 px-4 py-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Objecten</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {filteredObjects.length} van {objects.length} object{objects.length === 1 ? "" : "en"}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="relative min-w-0 sm:w-72">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={searchTerm}
+                      onChange={event => onSearchChange?.(event.target.value)}
+                      placeholder="Zoek op naam, code, adres of regio..."
+                      className="h-9 pl-9 pr-9"
+                      aria-label="Objecten zoeken"
+                    />
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => onSearchChange?.("")}
+                        aria-label="Zoekopdracht wissen"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  {!wizardOpen && (
+                    <Button size="sm" onClick={onAddObject}>
+                      <Plus className="h-4 w-4" /> Object toevoegen
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div role="tablist" aria-label="Objectstatus" className="mt-3 flex overflow-x-auto">
+                {[
+                  ["all", "Alle"],
+                  ["concept", "Concept"],
+                  ["active", "Actief"],
+                  ["inactive", "Inactief"],
+                  ["archived", "Gearchiveerd"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={normalizedStatus === value}
+                    onClick={() => onStatusChange?.(value)}
+                    className={`shrink-0 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                      normalizedStatus === value
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <SectionPanel title="Objecten" description="Operationele codes, sleutels en instructies blijven uitsluitend op objectniveau.">
+
+            <div className="min-h-0 flex-1">
               <ResponsiveTable
-                rows={objects}
+                rows={filteredObjects}
                 columns={columns}
                 getRowKey={object => `object:${object.id}`}
                 selectedRowKey={selectedRow}
@@ -688,9 +834,23 @@ function ObjectsTab({ customerId, navigate, selectedRow, onSelectRow }) {
                   onSelectRow(`object:${object.id}`);
                   navigate(`/Objects?id=${encodeURIComponent(object.id)}`);
                 }}
-                empty={<EmptyState icon={MapPin} title="Geen objecten gekoppeld" description="Maak het eerste object aan vanuit de objectenmodule en koppel het aan deze klant." action={<Button size="sm" variant="outline" onClick={() => navigate("/Objects")}><ArrowUpRight className="h-4 w-4" /> Naar objecten</Button>} />}
+                empty={objects.length === 0 ? (
+                  <EmptyState
+                    icon={MapPin}
+                    title="Nog geen objecten"
+                    description="Voeg de eerste fysieke locatie toe. De operationele details richt je daarna in op de objectpagina."
+                    action={!wizardOpen ? <Button size="sm" onClick={onAddObject}><Plus className="h-4 w-4" /> Object toevoegen</Button> : null}
+                  />
+                ) : (
+                  <EmptyState
+                    icon={Search}
+                    title="Geen objecten gevonden"
+                    description="Pas de zoekopdracht of statusfilter aan."
+                    action={<Button size="sm" variant="outline" onClick={() => { onSearchChange?.(""); onStatusChange?.("all"); }}>Filters wissen</Button>}
+                  />
+                )}
               />
-            </SectionPanel>
+            </div>
           </div>
         );
       })()}
@@ -1324,6 +1484,16 @@ export default function CustomerDossierTabs({
   contactError,
   activeContactObjectId,
   onContactObjectChange,
+  onAddObject,
+  objectWizardOpen,
+  onCloseObjectWizard,
+  onSaveObject,
+  objectSaving,
+  objectError,
+  objectSearchTerm,
+  onObjectSearchChange,
+  objectStatusFilter,
+  onObjectStatusChange,
   onAddAccount,
   onAddRequest,
   onEditCustomer,
@@ -1364,7 +1534,25 @@ export default function CustomerDossierTabs({
           </QueryGate>
         );
       case "objects":
-        return <ObjectsTab customerId={customerId} navigate={navigate} selectedRow={selectedRow} onSelectRow={onSelectRow} />;
+        return (
+          <ObjectsTab
+            customer={customer}
+            customerId={customerId}
+            navigate={navigate}
+            selectedRow={selectedRow}
+            onSelectRow={onSelectRow}
+            onAddObject={onAddObject}
+            wizardOpen={objectWizardOpen}
+            onCloseWizard={onCloseObjectWizard}
+            onSaveObject={onSaveObject}
+            objectSaving={objectSaving}
+            objectError={objectError}
+            searchTerm={objectSearchTerm}
+            onSearchChange={onObjectSearchChange}
+            statusFilter={objectStatusFilter}
+            onStatusChange={onObjectStatusChange}
+          />
+        );
       case "commercial":
         return <CommercialTab customerId={customerId} accounts={core.accounts} navigate={navigate} selectedRow={selectedRow} onSelectRow={onSelectRow} />;
       case "planning":

@@ -6,9 +6,52 @@
       "type": "string",
       "description": "Objectcode"
     },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Technische sleutel waarmee herhaalde create-verzoeken hetzelfde object opleveren"
+    },
     "customer_id": {
       "type": "string",
       "description": "ID van de gekoppelde klant"
+    },
+    "object_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "office",
+        "retail_hospitality",
+        "industrial_logistics",
+        "construction_site",
+        "healthcare_education",
+        "residential",
+        "event_temporary",
+        "parking",
+        "other",
+        null
+      ],
+      "description": "Functioneel locatietype; bepaalt alleen de vervolgconfiguratie"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "active",
+        "inactive",
+        "archived"
+      ],
+      "description": "Kleine objectlevenscyclus; operationele readiness wordt afzonderlijk bepaald"
+    },
+    "region": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Operationele regio voor zoeken en latere planning"
     },
     "cao_key": {
       "type": [
@@ -144,12 +187,78 @@
       "type": "string",
       "description": "Volledig adres van het object"
     },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "NL"
+    },
+    "country_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "Nederland"
+    },
+    "geocoding_status": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "verified",
+        "manual"
+      ],
+      "default": "unverified"
+    },
+    "bag_address_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optionele BAG-identificatie van het gekozen adres"
+    },
     "latitude": {
-      "type": "number",
+      "type": [
+        "number",
+        "null"
+      ],
       "description": "Breedtegraad"
     },
     "longitude": {
-      "type": "number",
+      "type": [
+        "number",
+        "null"
+      ],
       "description": "Lengtegraad"
     },
     "task_spacing_groups": {
@@ -316,6 +425,10 @@
     "notes": {
       "type": "string",
       "description": "Opmerkingen"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
     }
   },
   "required": [

@@ -28,6 +28,7 @@ import {
   CustomerRecordDialog,
 } from "@/components/customers/CustomerRecordDialogs";
 import { createCustomerContactRecords } from "@/components/customers/customerContactWorkflow";
+import { createCustomerObject } from "@/components/customers/customerObjectWorkflow";
 import {
   CUSTOMER_STATUS_CLASSES,
   CUSTOMER_STATUS_LABELS,
@@ -226,11 +227,15 @@ export default function CustomerDetail() {
   const [basisOpen, setBasisOpen] = useState(false);
   const [recordDialog, setRecordDialog] = useState(null);
   const [contactWizardOpen, setContactWizardOpen] = useState(false);
+  const [objectWizardOpen, setObjectWizardOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const initializedEdit = useRef(false);
   const contactMutationKeyRef = useRef(null);
+  const objectMutationKeyRef = useRef(null);
   const activeContactObjectId = searchParams.get("contact_object") || "all";
+  const objectSearchTerm = searchParams.get("object_query") || "";
+  const objectStatusFilter = searchParams.get("object_status") || "all";
 
   const customersQuery = useQuery({
     queryKey: ["customers"],
@@ -435,6 +440,30 @@ export default function CustomerDetail() {
     },
   });
 
+  const objectMutation = useMutation({
+    mutationFn: ({ form, idempotencyKey }) => createCustomerObject({
+      customerId,
+      form,
+      idempotencyKey,
+      invoke: invokeCustomerPlatformMutation,
+    }),
+    onSuccess: async () => {
+      await invalidateCustomer([["objects"]]);
+      setObjectWizardOpen(false);
+      objectMutationKeyRef.current = null;
+      const next = new URLSearchParams(searchParams);
+      next.delete("object_query");
+      next.delete("object_status");
+      next.delete("row");
+      next.delete("view");
+      setSearchParams(next);
+      toast({
+        title: "Object toegevoegd",
+        description: "Het concept staat in de tabel. De verdere inrichting gebeurt op de objectpagina.",
+      });
+    },
+  });
+
   const archiveMutation = useMutation({
     mutationFn: async ({ restore = false, idempotencyKey }) => {
       await invokeCustomerPlatformMutation({
@@ -466,6 +495,12 @@ export default function CustomerDetail() {
       setContactWizardOpen(false);
       contactMutationKeyRef.current = null;
     }
+    if (tab !== "objects") {
+      next.delete("object_query");
+      next.delete("object_status");
+      setObjectWizardOpen(false);
+      objectMutationKeyRef.current = null;
+    }
     setSearchParams(next);
   };
 
@@ -473,6 +508,24 @@ export default function CustomerDetail() {
     const next = new URLSearchParams(searchParams);
     if (objectId && objectId !== "all") next.set("contact_object", objectId);
     else next.delete("contact_object");
+    next.delete("row");
+    next.delete("view");
+    setSearchParams(next);
+  };
+
+  const setObjectSearch = value => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("object_query", value);
+    else next.delete("object_query");
+    next.delete("row");
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  };
+
+  const setObjectStatus = status => {
+    const next = new URLSearchParams(searchParams);
+    if (status && status !== "all") next.set("object_status", status);
+    else next.delete("object_status");
     next.delete("row");
     next.delete("view");
     setSearchParams(next);
@@ -492,6 +545,22 @@ export default function CustomerDetail() {
     setContactWizardOpen(false);
     contactMutationKeyRef.current = null;
     recordMutation.reset();
+  };
+
+  const openObjectWizard = () => {
+    objectMutation.reset();
+    if (!objectMutationKeyRef.current) {
+      objectMutationKeyRef.current = createCustomerMutationKey("create_customer_object");
+    }
+    setObjectWizardOpen(true);
+    setTab("objects");
+  };
+
+  const closeObjectWizard = () => {
+    if (objectMutation.isPending) return;
+    setObjectWizardOpen(false);
+    objectMutationKeyRef.current = null;
+    objectMutation.reset();
   };
 
   const setSelectedRow = row => {
@@ -591,6 +660,24 @@ export default function CustomerDetail() {
         contactError={recordMutation.error}
         activeContactObjectId={activeContactObjectId}
         onContactObjectChange={setContactObject}
+        onAddObject={openObjectWizard}
+        objectWizardOpen={objectWizardOpen}
+        onCloseObjectWizard={closeObjectWizard}
+        onSaveObject={form => {
+          if (!objectMutationKeyRef.current) {
+            objectMutationKeyRef.current = createCustomerMutationKey("create_customer_object");
+          }
+          objectMutation.mutate({
+            form,
+            idempotencyKey: objectMutationKeyRef.current,
+          });
+        }}
+        objectSaving={objectMutation.isPending}
+        objectError={objectMutation.error}
+        objectSearchTerm={objectSearchTerm}
+        onObjectSearchChange={setObjectSearch}
+        objectStatusFilter={objectStatusFilter}
+        onObjectStatusChange={setObjectStatus}
         onAddAccount={() => setRecordDialog("account")}
         onAddRequest={openRequestDialog}
         onEditCustomer={() => setBasisOpen(true)}

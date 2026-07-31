@@ -125,6 +125,13 @@ async function handleSearchAddress(req) {
       const coords = doc.centroide_ll ? doc.centroide_ll.replace("POINT(", "").replace(")", "").split(" ") : null;
       return {
         address: doc.weergavenaam || doc.straatnaam,
+        street_name: doc.straatnaam || null,
+        house_number: doc.huisnummer ? String(doc.huisnummer) : null,
+        house_number_addition: [doc.huisletter, doc.huisnummertoevoeging].filter(Boolean).join("-") || null,
+        postal_code: doc.postcode || null,
+        city: doc.woonplaatsnaam || null,
+        country: "Nederland",
+        bag_address_id: doc.nummeraanduiding_id || doc.adresseerbaarobject_id || null,
         latitude: coords ? parseFloat(coords[1]) : null,
         longitude: coords ? parseFloat(coords[0]) : null
       };

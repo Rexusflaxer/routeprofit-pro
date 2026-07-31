@@ -90,6 +90,7 @@ const MUTATION_ACTIONS = new Set([
   'update_customer',
   'set_customer_status',
   'delete_empty_customer',
+  'create_customer_object',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -240,6 +241,17 @@ const CONTACT_ROLE_PATCH_FIELDS = [
   'valid_until',
   'notes',
 ];
+const OBJECT_TYPES = new Set([
+  'office',
+  'retail_hospitality',
+  'industrial_logistics',
+  'construction_site',
+  'healthcare_education',
+  'residential',
+  'event_temporary',
+  'parking',
+  'other',
+]);
 const QUOTE_PATCH_FIELDS = [
   'title',
   'description',
@@ -649,6 +661,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.contact ||
     result.contact_point ||
     result.contact_role ||
+    result.object ||
     result.request ||
     result.quote ||
     result.contract ||
@@ -665,7 +678,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     company_id: candidate.company_id || result.company_id || body.company_id || null,
     customer_id: candidate.customer_id || (result.customer ? result.customer.id : null) || result.customer_id || body.customer_id || null,
     customer_account_id: candidate.customer_account_id || (result.account ? result.account.id : null) || body.customer_account_id || null,
-    object_id: candidate.object_id || body.object_id || null,
+    object_id: candidate.object_id || (result.object ? result.object.id : null) || body.object_id || null,
     resource_type: result.resource_type || null,
     resource_id: result.resource_id || candidate.id || null,
     category: result.category || 'change',
@@ -2064,6 +2077,157 @@ async function handleDeleteEmptyCustomer(base44: LooseRecord, body: LooseRecord,
     customer_id: customer.id,
     resource_type: 'Customer',
     resource_id: customer.id,
+  };
+}
+
+function objectCoordinate(value: unknown, minimum: number, maximum: number, field: string) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) {
+    throw new ApiError(400, `${field} bevat geen geldige coördinaat`);
+  }
+  return number;
+}
+
+function normalizedObjectCode(value: unknown) {
+  const code = asString(value).toUpperCase().replace(/\s+/g, '-');
+  if (!code) return '';
+  if (code.length > 50) throw new ApiError(400, 'Objectcode mag maximaal 50 tekens bevatten');
+  if (!/^[A-Z0-9][A-Z0-9._/-]*$/.test(code)) {
+    throw new ApiError(400, 'Objectcode bevat ongeldige tekens');
+  }
+  return code;
+}
+
+async function objectCodeExists(base44: LooseRecord, code: string) {
+  const matches = await getEntity(base44, 'SurveillanceObject').filter({
+    object_code: { $regex: `^${escapeRegex(code)}$`, $options: 'i' },
+  }, '-created_date', 2);
+  return matches[0] || null;
+}
+
+async function generatedObjectCode(base44: LooseRecord, customer: LooseRecord) {
+  const source = asString(customer.customer_number || customer.id)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(-8) || 'LOQ';
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
+    const code = `OBJ-${source}-${suffix}`;
+    if (!(await objectCodeExists(base44, code))) return code;
+  }
+  throw new ApiError(503, 'Er kon geen unieke objectcode worden gereserveerd');
+}
+
+async function markCustomerFirstObject(base44: LooseRecord, customer: LooseRecord) {
+  if (customer.onboarding_state?.first_object === true) return customer;
+  return casUpdateLatest(base44, 'Customer', customer.id, {
+    onboarding_state: {
+      ...(customer.onboarding_state || {}),
+      first_object: true,
+    },
+  });
+}
+
+async function handleCreateCustomerObject(
+  base44: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw object verwacht expected_version 0');
+  const customerId = requireString(body, 'customer_id');
+  const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+  if (customer.status === 'archived') throw new ApiError(409, 'Aan een gearchiveerde klant kan geen object worden toegevoegd');
+
+  const previousCreations = await getEntity(base44, 'SurveillanceObject').filter({
+    creation_idempotency_key: idempotencyKey,
+  }, '-created_date', 2);
+  if (previousCreations.length > 1) {
+    throw new ApiError(409, 'Meerdere objecten delen dezelfde creation_idempotency_key; handmatige reconciliatie vereist');
+  }
+  if (previousCreations.length === 1) {
+    const object = previousCreations[0];
+    if (object.customer_id !== customerId) {
+      throw new ApiError(409, 'De idempotency-sleutel hoort bij een object van een andere klant');
+    }
+    await markCustomerFirstObject(base44, customer);
+    return {
+      object,
+      customer_id: customerId,
+      replayed: true,
+      recovered_partial_creation: true,
+      resource_type: 'SurveillanceObject',
+      resource_id: object.id,
+      category: 'operations',
+    };
+  }
+
+  const data = requireObject(body);
+  const name = asString(data.name);
+  const address = asString(data.address);
+  const objectType = asString(data.object_type);
+  if (!name) throw new ApiError(400, 'Objectnaam is verplicht');
+  if (name.length > 160) throw new ApiError(400, 'Objectnaam mag maximaal 160 tekens bevatten');
+  if (!address) throw new ApiError(400, 'Objectadres is verplicht');
+  if (!OBJECT_TYPES.has(objectType)) throw new ApiError(400, 'Kies een geldig objecttype');
+
+  let objectCode = normalizedObjectCode(data.object_code);
+  if (objectCode) {
+    const duplicateCode = await objectCodeExists(base44, objectCode);
+    if (duplicateCode) {
+      throw new ApiError(409, 'Objectcode is al in gebruik', { duplicate_object_id: duplicateCode.id });
+    }
+  } else {
+    objectCode = await generatedObjectCode(base44, customer);
+  }
+
+  const customerObjects = await getEntity(base44, 'SurveillanceObject').filter({ customer_id: customerId }, '-updated_date', 1000);
+  const normalizedName = normalizeName(name);
+  const normalizedAddress = normalizeName(address);
+  const possibleDuplicates = customerObjects.filter((object: LooseRecord) =>
+    normalizeName(object.name) === normalizedName || normalizeName(object.address) === normalizedAddress);
+  if (possibleDuplicates.length && body.duplicate_reviewed !== true) {
+    throw new ApiError(409, 'Mogelijk dubbel object gevonden; controleer de bestaande objecten', {
+      duplicate_object_ids: possibleDuplicates.map((object: LooseRecord) => object.id),
+    });
+  }
+
+  const latitude = objectCoordinate(data.latitude, -90, 90, 'Breedtegraad');
+  const longitude = objectCoordinate(data.longitude, -180, 180, 'Lengtegraad');
+  const locationVerified = latitude !== null && longitude !== null && data.geocoding_status === 'verified';
+  const object = await getEntity(base44, 'SurveillanceObject').create({
+    customer_id: customerId,
+    object_code: objectCode,
+    creation_idempotency_key: idempotencyKey,
+    name,
+    object_type: objectType,
+    status: 'concept',
+    address,
+    street_name: asString(data.street_name) || null,
+    house_number: asString(data.house_number) || null,
+    house_number_addition: asString(data.house_number_addition) || null,
+    postal_code: asString(data.postal_code).toUpperCase() || null,
+    city: asString(data.city) || null,
+    country_code: asString(data.country_code).toUpperCase() || 'NL',
+    country_name: asString(data.country_name) || 'Nederland',
+    latitude,
+    longitude,
+    geocoding_status: locationVerified ? 'verified' : 'unverified',
+    bag_address_id: asString(data.bag_address_id) || null,
+    region: asString(data.region) || null,
+    is_active_customer_object: true,
+    show_on_mobile_map: false,
+    mobile_map_priority: 0,
+    version: 1,
+  });
+  await markCustomerFirstObject(base44, customer);
+  return {
+    object,
+    customer_id: customerId,
+    resource_type: 'SurveillanceObject',
+    resource_id: object.id,
+    category: 'operations',
   };
 }
 
@@ -4549,6 +4713,8 @@ async function executeMutation(
       return handleSetCustomerStatus(base44, user, body, expectedVersion);
     case 'delete_empty_customer':
       return handleDeleteEmptyCustomer(base44, body, expectedVersion);
+    case 'create_customer_object':
+      return handleCreateCustomerObject(base44, body, expectedVersion, idempotencyKey);
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':

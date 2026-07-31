@@ -8,7 +8,7 @@ import {
   formatAddress,
 } from "@/lib/addressFormatting";
 
-export default function AddressAutocomplete({ value = {}, onAddressSelect, placeholder, className = "" }) {
+export default function AddressAutocomplete({ id, value = {}, onAddressSelect, onQueryChange, placeholder, className = "" }) {
   const formattedAddress = formatAddress(value, { omitDefaultCountry: true });
   const [query, setQuery] = useState(formattedAddress);
   const [suggestions, setSuggestions] = useState([]);
@@ -57,8 +57,16 @@ export default function AddressAutocomplete({ value = {}, onAddressSelect, place
   };
 
   const selectAddress = (suggestion) => {
-    const address = addressPartsFromSuggestion(suggestion, value);
-    onAddressSelect?.(address);
+    const address = {
+      ...addressPartsFromSuggestion(suggestion, value),
+      latitude: Number.isFinite(Number(suggestion.latitude)) ? Number(suggestion.latitude) : null,
+      longitude: Number.isFinite(Number(suggestion.longitude)) ? Number(suggestion.longitude) : null,
+      bag_address_id: suggestion.bag_address_id || suggestion.nummeraanduiding_id || null,
+      geocoding_status: Number.isFinite(Number(suggestion.latitude)) && Number.isFinite(Number(suggestion.longitude))
+        ? "verified"
+        : "unverified",
+    };
+    onAddressSelect?.(address, suggestion);
     setQuery(formatAddress(address, { omitDefaultCountry: true }));
     setSuggestions([]);
     setOpen(false);
@@ -67,10 +75,12 @@ export default function AddressAutocomplete({ value = {}, onAddressSelect, place
   return (
     <div className="relative">
       <Input
+        id={id}
         value={query}
         onChange={event => {
           const nextQuery = event.target.value;
           setQuery(nextQuery);
+          onQueryChange?.(nextQuery);
           search(nextQuery);
         }}
         onFocus={() => suggestions.length > 0 && setOpen(true)}

@@ -203,6 +203,9 @@ for (const field of ["idempotency_key", "provider_idempotency_key", "version"]) 
   property("SalesInvoice", field);
 }
 property("Customer", "creation_idempotency_key");
+property("SurveillanceObject", "creation_idempotency_key");
+property("SurveillanceObject", "version");
+enumContains("SurveillanceObject", "status", ["concept", "active", "inactive", "archived"]);
 for (const entity of ["CustomerQuote", "CustomerContract"]) {
   property(entity, "signature_lock_key");
   property(entity, "signature_lock_started_at");
@@ -236,7 +239,7 @@ for (const [file, source] of [
 ]) {
   assert.doesNotMatch(
     source,
-    /base44\.entities\.(Customer|CustomerAccount|CustomerAddress|CustomerContact|CustomerContactPoint|CustomerContactRole|CustomerRequest|CustomerEvent)\.(create|update|delete)\(/,
+    /base44\.entities\.(Customer|CustomerAccount|CustomerAddress|CustomerContact|CustomerContactPoint|CustomerContactRole|CustomerRequest|CustomerEvent|SurveillanceObject)\.(create|update|delete)\(/,
     `${file} mag klantmutaties niet rechtstreeks uitvoeren`,
   );
   assert.doesNotMatch(
@@ -288,6 +291,7 @@ assert.doesNotMatch(
 );
 for (const action of [
   "create_customer",
+  "create_customer_object",
   "list_commercial",
   "list_billing",
   "create_quote",
