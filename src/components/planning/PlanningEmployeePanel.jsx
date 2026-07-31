@@ -66,13 +66,13 @@ function CandidateCard({ candidate, index, selectedShift, onAssign }) {
             >
               <GripVertical className="h-4 w-4" />
             </button>
-            <Avatar className="h-7 w-7 border border-border">
+            <Avatar className="h-9 w-7 rounded-sm border border-border">
               <AvatarImage
                 src={candidate.personnel?.photo_file_url || undefined}
                 alt={`Profielfoto van ${name}`}
-                className="object-cover"
+                className="object-cover object-top"
               />
-              <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+              <AvatarFallback className="rounded-sm bg-primary/10 text-[10px] font-bold text-primary">
                 {initials(name)}
               </AvatarFallback>
             </Avatar>
