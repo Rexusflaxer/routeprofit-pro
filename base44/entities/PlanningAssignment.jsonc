@@ -1,0 +1,176 @@
+{
+  "name": "PlanningAssignment",
+  "type": "object",
+  "properties": {
+    "shift_id": {
+      "type": "string"
+    },
+    "slot_index": {
+      "type": "number",
+      "description": "Nulgebaseerde bezettingsplaats; planningApi bewaakt logisch één record per shift_id + slot_index."
+    },
+    "personnel_id": {
+      "type": "string"
+    },
+    "personnel_name_snapshot": {
+      "type": "string"
+    },
+    "personnel_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "removed"
+      ],
+      "default": "draft"
+    },
+    "warning_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "warning_snapshot": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "details": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "additionalProperties": true
+      },
+      "default": [],
+      "description": "Herleidbare waarschuwingssnapshot op het moment van toewijzen of herberekenen."
+    },
+    "has_critical_warnings": {
+      "type": "boolean",
+      "default": false
+    },
+    "contract_routing_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "assigned_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "assigned_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "removed_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "removed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revision": {
+      "type": "number",
+      "default": 1
+    },
+    "published_revision": {
+      "type": "number",
+      "default": 0
+    },
+    "last_published_correlation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "shift_id",
+    "slot_index",
+    "personnel_id",
+    "personnel_name_snapshot",
+    "status",
+    "warning_codes",
+    "warning_snapshot",
+    "has_critical_warnings",
+    "revision",
+    "published_revision"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

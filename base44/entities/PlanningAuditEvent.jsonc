@@ -1,0 +1,161 @@
+{
+  "name": "PlanningAuditEvent",
+  "type": "object",
+  "description": "Append-only auditlog voor alle planningmutaties en undo/restore-acties.",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "bootstrap_range",
+        "assign",
+        "unassign",
+        "move",
+        "copy",
+        "publish",
+        "restore_assignment",
+        "undo"
+      ]
+    },
+    "resource_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "PlanningShift",
+        "PlanningAssignment",
+        "PlanningPublication",
+        "PlanningRange",
+        null
+      ]
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "shift_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "assignment_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "publication_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "before_state": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "after_state": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "undoable": {
+      "type": "boolean",
+      "default": false
+    },
+    "undo_token": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Eenmalig token dat de UI samen met audit_event_id moet terugsturen voor een veilige undo."
+    },
+    "undo_of_event_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "undo_payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "action",
+    "occurred_at",
+    "correlation_id",
+    "undoable"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

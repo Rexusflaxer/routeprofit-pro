@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "./utils";
 import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
-  Search, Route, MapPin, CalendarCheck,
+  Search, Route, MapPin, CalendarCheck, CalendarRange,
   FileText, SlidersHorizontal,
   Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle,
   ReceiptText
@@ -22,6 +22,7 @@ const CONTEXT_SECTIONS = [
     label: "Control Center",
     items: [
       { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
+      { name: "Planning", icon: CalendarRange, page: "Planning" },
       { name: "Personeel", icon: Users, page: "Personnel" },
       { name: "LOQ Teamhub", icon: Handshake, page: "Teamhub" },
     ],
@@ -251,6 +252,7 @@ function AppShell({ children, currentPageName }) {
   const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1280);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
+  const isPlanningWorkspace = currentPageName === "Planning";
 
   useEffect(() => {
     const handleResize = () => {
@@ -292,7 +294,11 @@ function AppShell({ children, currentPageName }) {
   };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeaveApp}>
+    <div
+      className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} bg-background text-foreground antialiased`}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeaveApp}
+    >
       <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
@@ -320,8 +326,8 @@ function AppShell({ children, currentPageName }) {
         )}
       </header>
 
-      <main className={`min-h-screen min-w-0 overflow-x-hidden transition-[padding] duration-200 ease-in-out ${collapsed ? "xl:pl-16" : "xl:pl-64"}`}>
-        <div className="px-4 py-3 sm:px-5 lg:px-6">
+      <main className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} min-w-0 transition-[padding] duration-200 ease-in-out ${collapsed ? "xl:pl-16" : "xl:pl-64"}`}>
+        <div className={isPlanningWorkspace ? "h-full min-h-0 overflow-hidden" : "px-4 py-3 sm:px-5 lg:px-6"}>
           {children}
         </div>
       </main>
