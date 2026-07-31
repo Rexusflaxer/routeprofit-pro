@@ -140,6 +140,14 @@
       "additionalProperties": true,
       "description": "Afgeleide checkliststatus; geen autorisatiebron."
     },
+    "object_creation_reservation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurende, atomair via de klantversie geclaimde reservering die dubbele gelijktijdige objectaanmaak voorkomt."
+    },
     "creation_idempotency_key": {
       "type": [
         "string",

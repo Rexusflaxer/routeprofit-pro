@@ -91,6 +91,9 @@ const MUTATION_ACTIONS = new Set([
   'set_customer_status',
   'delete_empty_customer',
   'create_customer_object',
+  'update_customer_object_identity',
+  'update_customer_object_operations',
+  'set_customer_object_status',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -252,6 +255,60 @@ const OBJECT_TYPES = new Set([
   'parking',
   'other',
 ]);
+const OBJECT_GEOCODING_STATUSES = new Set(['unverified', 'verified', 'manual']);
+const OBJECT_STATUS_TRANSITIONS: Record<string, string[]> = {
+  concept: ['active', 'inactive', 'archived'],
+  active: ['inactive', 'archived'],
+  inactive: ['active', 'archived'],
+  archived: ['inactive'],
+};
+const CUSTOMER_OBJECT_MUTATION_ACTIONS = new Set([
+  'create_customer_object',
+  'update_customer_object_identity',
+  'update_customer_object_operations',
+  'set_customer_object_status',
+]);
+const CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS = new Set([
+  'update_customer_object_identity',
+  'update_customer_object_operations',
+  'set_customer_object_status',
+]);
+const CUSTOMER_OBJECT_RECOVERY_LIMIT = 50;
+const CUSTOMER_OBJECT_CREATE_RESERVATION_TTL_MS = 30 * 60 * 1000;
+const OBJECT_IDENTITY_PATCH_FIELDS = [
+  'name',
+  'object_type',
+  'address',
+  'street_name',
+  'house_number',
+  'house_number_addition',
+  'postal_code',
+  'city',
+  'country_code',
+  'country_name',
+  'latitude',
+  'longitude',
+  'geocoding_status',
+  'bag_address_id',
+  'region',
+];
+const OBJECT_OPERATIONS_PATCH_FIELDS = [
+  'parking_instruction',
+  'entry_instruction',
+  'walking_instruction',
+  'object_notes',
+  'safety_notes',
+  'show_on_mobile_map',
+  'mobile_map_priority',
+  'notes',
+];
+const OBJECT_INSTRUCTION_FIELDS = [
+  'parking_instruction',
+  'entry_instruction',
+  'walking_instruction',
+  'object_notes',
+  'safety_notes',
+];
 const QUOTE_PATCH_FIELDS = [
   'title',
   'description',
@@ -589,12 +646,20 @@ async function casUpdate(
     });
   }
 
-  const versionQuery = record.version == null
-    ? { $or: [{ version: expectedVersion }, { version: { $exists: false } }] }
-    : { version: expectedVersion };
+  const hasPersistedVersion = typeof record.version === 'number'
+    && Number.isInteger(record.version)
+    && record.version > 0;
+  const versionQuery = hasPersistedVersion
+    ? { version: expectedVersion }
+    : record.version == null
+      ? { $or: [{ version: null }, { version: { $exists: false } }] }
+      : { version: record.version };
+  const update = hasPersistedVersion
+    ? { $set: patch, $inc: { version: 1 } }
+    : { $set: { ...patch, version: expectedVersion + 1 } };
   const result = await getEntity(base44, entityName).updateMany(
     { id: record.id, ...versionQuery },
-    { $set: patch, $inc: { version: 1 } },
+    update,
   );
   if (!result?.success || result.updated !== 1) {
     throw new ApiError(409, 'Record is intussen gewijzigd', {
@@ -618,12 +683,226 @@ async function casUpdateLatest(base44: LooseRecord, entityName: string, id: stri
   throw new ApiError(409, 'Record kon niet veilig worden bijgewerkt');
 }
 
-async function mutationReplay(base44: LooseRecord, action: string, idempotencyKey: string) {
+function canonicalMutationValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(item => canonicalMutationValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as LooseRecord)
+        .sort()
+        .map(key => [key, canonicalMutationValue((value as LooseRecord)[key])]),
+    );
+  }
+  return value;
+}
+
+async function mutationRequestFingerprint(action: string, body: LooseRecord) {
+  const requestBody = Object.fromEntries(
+    Object.entries(body).filter(([key]) => key !== 'idempotency_key'),
+  );
+  return sha256(JSON.stringify(canonicalMutationValue({ action, body: requestBody })));
+}
+
+function mutationTarget(action: string, body: LooseRecord) {
+  const targetFields = [
+    'customer_id',
+    'object_id',
+    'customer_account_id',
+    'request_id',
+    'quote_id',
+    'contract_id',
+    'contract_line_id',
+    'contract_rate_id',
+    'billing_candidate_id',
+    'invoice_id',
+    'payment_id',
+    'allocation_id',
+    'reminder_id',
+    'indexation_run_id',
+    'task_execution_id',
+  ];
+  const identifiers = targetFields
+    .map(field => [field, asString(body[field])] as const)
+    .filter(([, value]) => Boolean(value))
+    .map(([field, value]) => `${field}:${value}`);
+  return [action, ...identifiers].join('|');
+}
+
+function rejectIdempotencyReuse() {
+  throw new ApiError(409, 'idempotency_key is al voor een andere mutatie gebruikt');
+}
+
+function sanitizedCustomerObjectReplay(storedResult: LooseRecord, customerId: string) {
+  const storedObject = storedResult?.object;
+  if (
+    !storedResult ||
+    typeof storedResult !== 'object' ||
+    Array.isArray(storedResult) ||
+    !storedObject ||
+    typeof storedObject !== 'object' ||
+    Array.isArray(storedObject) ||
+    !asString(storedObject.id)
+  ) {
+    rejectIdempotencyReuse();
+  }
+  const transition = storedResult.transition;
+  return {
+    object: safeObjectMutationSummary({ ...storedObject, customer_id: customerId }, []),
+    customer_id: customerId,
+    ...(transition && typeof transition === 'object' && !Array.isArray(transition) ? {
+      transition: pick(transition, ['from', 'to', 'reason']),
+    } : {}),
+    replayed: true,
+    recovered_partial_creation: storedResult.recovered_partial_creation === true,
+    resource_type: 'SurveillanceObject',
+    resource_id: storedObject.id,
+    category: 'operations',
+  };
+}
+
+function legacyCustomerObjectCreateReplay(
+  matching: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+) {
+  const storedResult = matching.payload?.result;
+  const storedObject = storedResult?.object;
+  const data = requireObject(body);
+  const customerId = requireString(body, 'customer_id');
+  if (
+    !storedResult ||
+    typeof storedResult !== 'object' ||
+    Array.isArray(storedResult) ||
+    !storedObject ||
+    typeof storedObject !== 'object' ||
+    Array.isArray(storedObject) ||
+    !asString(storedObject.id) ||
+    matching.actor_id !== user.id ||
+    asString(matching.customer_id || storedResult.customer_id || storedObject.customer_id) !== customerId ||
+    normalizeName(storedObject.name) !== normalizeName(data.name) ||
+    normalizeName(storedObject.address) !== normalizeName(data.address) ||
+    asString(storedObject.object_type) !== asString(data.object_type) ||
+    !asString(data.name) ||
+    !asString(data.address) ||
+    !asString(data.object_type)
+  ) {
+    rejectIdempotencyReuse();
+  }
+  return {
+    ...sanitizedCustomerObjectReplay(storedResult, customerId),
+    legacy_event_replay: true,
+  };
+}
+
+async function mutationReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
   const events = await getEntity(base44, 'CustomerEvent').filter({ idempotency_key: idempotencyKey }, '-created_date', 20);
   const matching = events.find((event: LooseRecord) => event.payload?.action === action && event.payload?.result);
-  if (matching) return matching.payload.result;
-  if (events.length) throw new ApiError(409, 'idempotency_key is al voor een andere mutatie gebruikt');
+  if (matching) {
+    const storedFingerprint = asString(matching.payload?.request_fingerprint);
+    if (CUSTOMER_OBJECT_MUTATION_ACTIONS.has(action)) {
+      if (!storedFingerprint) {
+        if (action === 'create_customer_object') {
+          return legacyCustomerObjectCreateReplay(matching, user, body);
+        }
+        rejectIdempotencyReuse();
+      }
+      if (
+        matching.actor_id !== user.id ||
+        storedFingerprint !== requestFingerprint ||
+        asString(matching.payload?.mutation_target) !== target
+      ) {
+        rejectIdempotencyReuse();
+      }
+      const customerId = requireString(body, 'customer_id');
+      if (asString(matching.customer_id || matching.payload.result?.customer_id) !== customerId) {
+        rejectIdempotencyReuse();
+      }
+      if (action === 'create_customer_object') {
+        await releaseMatchingCustomerObjectCreation(
+          base44,
+          user,
+          customerId,
+          idempotencyKey,
+          requestFingerprint,
+          target,
+        );
+      }
+      return sanitizedCustomerObjectReplay(matching.payload.result, customerId);
+    } else if (
+      storedFingerprint &&
+      (
+        matching.actor_id !== user.id ||
+        storedFingerprint !== requestFingerprint ||
+        asString(matching.payload?.mutation_target) !== target
+      )
+    ) {
+      rejectIdempotencyReuse();
+    }
+    return matching.payload.result;
+  }
+  if (events.length) rejectIdempotencyReuse();
   return null;
+}
+
+async function customerObjectMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (!CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS.has(action)) return null;
+  const keyHash = await sha256(idempotencyKey);
+  const matches = await getEntity(base44, 'SurveillanceObject').filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (matches.length > 1) {
+    throw new ApiError(409, 'Mutatieherstel is niet eenduidig; handmatige reconciliatie vereist');
+  }
+  if (!matches.length) return null;
+
+  const object = matches[0];
+  const customerId = requireString(body, 'customer_id');
+  const objectId = requireString(body, 'object_id');
+  const recoveries = object.customer_platform_mutation_recoveries;
+  const loggedRecovery = recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries)
+    ? recoveries[keyHash]
+    : null;
+  const recovery = loggedRecovery || (
+    object.customer_platform_last_mutation_key_hash === keyHash
+      ? object.customer_platform_last_mutation_recovery
+      : null
+  );
+  if (
+    object.id !== objectId ||
+    object.customer_id !== customerId ||
+    !recovery ||
+    typeof recovery !== 'object' ||
+    Array.isArray(recovery) ||
+    recovery.action !== action ||
+    recovery.actor_id !== user.id ||
+    recovery.request_fingerprint !== requestFingerprint ||
+    recovery.mutation_target !== target ||
+    !recovery.result ||
+    typeof recovery.result !== 'object' ||
+    Array.isArray(recovery.result)
+  ) {
+    rejectIdempotencyReuse();
+  }
+  await requireRecord(base44, 'Customer', customerId, 'Klant');
+  return recovery.result as LooseRecord;
 }
 
 async function appendEvent(base44: LooseRecord, input: LooseRecord) {
@@ -692,6 +971,8 @@ async function recordMutationResult(
   idempotencyKey: string,
   result: LooseRecord,
   body: LooseRecord,
+  requestFingerprint: string,
+  target: string,
 ) {
   const context = eventContext(result, body);
   if (!context.customer_id) return;
@@ -701,7 +982,12 @@ async function recordMutationResult(
     action,
     actor_id: user.id,
     idempotency_key: idempotencyKey,
-    payload: { action, result },
+    payload: {
+      action,
+      result,
+      request_fingerprint: requestFingerprint,
+      mutation_target: target,
+    },
   });
 }
 
@@ -2089,6 +2375,296 @@ function objectCoordinate(value: unknown, minimum: number, maximum: number, fiel
   return number;
 }
 
+function objectText(value: unknown, field: string, maximumLength: number, nullable = true) {
+  if (value === null || value === undefined || value === '') {
+    if (nullable) return null;
+    throw new ApiError(400, `${field} is verplicht`);
+  }
+  if (typeof value !== 'string') throw new ApiError(400, `${field} moet tekst zijn`);
+  const normalized = value.trim();
+  if (!normalized && !nullable) throw new ApiError(400, `${field} is verplicht`);
+  if (normalized.length > maximumLength) {
+    throw new ApiError(400, `${field} mag maximaal ${maximumLength} tekens bevatten`);
+  }
+  return normalized || null;
+}
+
+function objectLifecycleStatus(object: LooseRecord) {
+  if (asString(object.status)) return asString(object.status);
+  if (object.is_active_customer_object === false || object.is_active === false) return 'inactive';
+  return 'active';
+}
+
+function safeObjectMutationSummary(object: LooseRecord, changedFields: string[]) {
+  const configuredInstructionCount = Number(object.configured_instruction_count);
+  const effectiveChangedFields = changedFields.length
+    ? changedFields
+    : Array.isArray(object.changed_fields)
+      ? object.changed_fields.filter((field: unknown) => typeof field === 'string')
+      : [];
+  return {
+    id: object.id,
+    customer_id: object.customer_id,
+    object_code: object.object_code || null,
+    name: object.name,
+    object_type: object.object_type || null,
+    status: objectLifecycleStatus(object),
+    version: versionOf(object),
+    geocoding_status: object.geocoding_status || 'unverified',
+    show_on_mobile_map: object.show_on_mobile_map === true,
+    is_active_customer_object: object.is_active_customer_object === true,
+    configured_instruction_count: Number.isInteger(configuredInstructionCount) && configuredInstructionCount >= 0
+      ? configuredInstructionCount
+      : OBJECT_INSTRUCTION_FIELDS.filter(field => Boolean(asString(object[field]))).length,
+    has_object_map: typeof object.has_object_map === 'boolean'
+      ? object.has_object_map
+      : Boolean(object.object_map_url || object.object_map_file_url),
+    changed_fields: [...new Set(effectiveChangedFields)].sort(),
+  };
+}
+
+function customerObjectMutationResult(
+  object: LooseRecord,
+  changedFields: string[],
+  extra: LooseRecord = {},
+) {
+  return {
+    object: safeObjectMutationSummary(object, changedFields),
+    object_id: object.id,
+    customer_id: object.customer_id,
+    ...extra,
+    resource_type: 'SurveillanceObject',
+    resource_id: object.id,
+    category: 'operations',
+  };
+}
+
+async function customerObjectPatchWithRecovery(
+  input: {
+    object: LooseRecord;
+    patch: LooseRecord;
+    expectedVersion: number;
+    user: LooseRecord;
+    action: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    target: string;
+    extraResult?: LooseRecord;
+  },
+) {
+  const mutationPatch = input.object.status
+    ? input.patch
+    : { status: objectLifecycleStatus(input.object), ...input.patch };
+  const changedFields = Object.keys(mutationPatch);
+  const projected = {
+    ...input.object,
+    ...mutationPatch,
+    version: input.expectedVersion + 1,
+  };
+  const result = customerObjectMutationResult(projected, changedFields, input.extraResult);
+  const keyHash = await sha256(input.idempotencyKey);
+  const priorRecoveries = input.object.customer_platform_mutation_recoveries;
+  const recoveryLog = priorRecoveries && typeof priorRecoveries === 'object' && !Array.isArray(priorRecoveries)
+    ? priorRecoveries
+    : {};
+  const keyHashes = Array.isArray(input.object.customer_platform_mutation_key_hashes)
+    ? input.object.customer_platform_mutation_key_hashes.filter((value: unknown) => typeof value === 'string')
+    : [];
+  const recovery = {
+    action: input.action,
+    actor_id: input.user.id,
+    request_fingerprint: input.requestFingerprint,
+    mutation_target: input.target,
+    result,
+    recorded_at: nowIso(),
+  };
+  const boundedKeyHashes = [
+    ...new Set(keyHashes.filter((hash: string) => hash !== keyHash)),
+    keyHash,
+  ].slice(-CUSTOMER_OBJECT_RECOVERY_LIMIT);
+  const boundedRecoveries = Object.fromEntries(
+    boundedKeyHashes
+      .map(hash => [hash, hash === keyHash ? recovery : recoveryLog[hash]])
+      .filter(([, value]) => Boolean(value)),
+  );
+  return {
+    changedFields,
+    result,
+    patch: {
+      ...mutationPatch,
+      customer_platform_last_mutation_key_hash: keyHash,
+      customer_platform_last_mutation_recovery: recovery,
+      customer_platform_mutation_key_hashes: boundedKeyHashes,
+      customer_platform_mutation_recoveries: boundedRecoveries,
+    },
+  };
+}
+
+async function requireCustomerObjectForMutation(base44: LooseRecord, body: LooseRecord) {
+  const customerId = requireString(body, 'customer_id');
+  const objectId = requireString(body, 'object_id');
+  const [customer, object] = await Promise.all([
+    requireRecord(base44, 'Customer', customerId, 'Klant'),
+    requireRecord(base44, 'SurveillanceObject', objectId, 'Object'),
+  ]);
+  if (customer.status === 'archived') {
+    throw new ApiError(409, 'Objecten van een gearchiveerde klant kunnen niet worden gewijzigd');
+  }
+  if (object.customer_id !== customer.id) {
+    throw new ApiError(409, 'Object hoort niet bij deze klant', { object_id: object.id, customer_id: customer.id });
+  }
+  return { customer, object };
+}
+
+function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
+  const patch = pick(data, OBJECT_IDENTITY_PATCH_FIELDS);
+  if (!Object.keys(patch).length) throw new ApiError(400, 'Geen objectgegevens opgegeven');
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'name')) {
+    patch.name = objectText(patch.name, 'Objectnaam', 160, false);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'address')) {
+    patch.address = objectText(patch.address, 'Objectadres', 320, false);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'object_type')) {
+    patch.object_type = asString(patch.object_type);
+  }
+
+  const nullableTextLimits: Record<string, number> = {
+    street_name: 180,
+    house_number: 30,
+    house_number_addition: 30,
+    postal_code: 20,
+    city: 120,
+    country_name: 120,
+    bag_address_id: 120,
+    region: 120,
+  };
+  for (const [field, maximum] of Object.entries(nullableTextLimits)) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      patch[field] = objectText(patch[field], field, maximum);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'postal_code') && patch.postal_code) {
+    patch.postal_code = patch.postal_code.toUpperCase();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'country_code')) {
+    const countryCode = asString(patch.country_code).toUpperCase();
+    if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) {
+      throw new ApiError(400, 'country_code moet uit twee letters bestaan');
+    }
+    patch.country_code = countryCode || null;
+  }
+
+  const addressFields = [
+    'address',
+    'street_name',
+    'house_number',
+    'house_number_addition',
+    'postal_code',
+    'city',
+    'country_code',
+    'country_name',
+  ];
+  const addressChanged = addressFields.some(field => Object.prototype.hasOwnProperty.call(patch, field));
+  const latitudeProvided = Object.prototype.hasOwnProperty.call(patch, 'latitude');
+  const longitudeProvided = Object.prototype.hasOwnProperty.call(patch, 'longitude');
+  if (latitudeProvided !== longitudeProvided) {
+    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden gewijzigd');
+  }
+  const coordinatePairProvided = latitudeProvided && longitudeProvided;
+  const geocodingStatusProvided = Object.prototype.hasOwnProperty.call(patch, 'geocoding_status');
+  if (coordinatePairProvided && !geocodingStatusProvided) {
+    throw new ApiError(400, 'Coördinaten vereisen een expliciete geocodestatus');
+  }
+  if (addressChanged && !coordinatePairProvided) {
+    patch.latitude = null;
+    patch.longitude = null;
+    patch.bag_address_id = null;
+    patch.geocoding_status = 'unverified';
+    patch.show_on_mobile_map = false;
+  }
+
+  if (coordinatePairProvided) {
+    patch.latitude = objectCoordinate(patch.latitude, -90, 90, 'Breedtegraad');
+    patch.longitude = objectCoordinate(patch.longitude, -180, 180, 'Lengtegraad');
+    if ((patch.latitude === null) !== (patch.longitude === null)) {
+      throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
+    }
+    if (addressChanged && !Object.prototype.hasOwnProperty.call(patch, 'bag_address_id')) {
+      patch.bag_address_id = null;
+    }
+    if (patch.latitude === null) patch.bag_address_id = null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'geocoding_status')) {
+    patch.geocoding_status = asString(patch.geocoding_status) || 'unverified';
+  }
+
+  const merged = { ...object, ...patch };
+  const name = asString(merged.name);
+  const address = asString(merged.address);
+  const objectType = asString(merged.object_type);
+  const geocodingStatus = asString(merged.geocoding_status) || 'unverified';
+  const latitude = objectCoordinate(merged.latitude, -90, 90, 'Breedtegraad');
+  const longitude = objectCoordinate(merged.longitude, -180, 180, 'Lengtegraad');
+  if (!name) throw new ApiError(400, 'Objectnaam is verplicht');
+  if (name.length > 160) throw new ApiError(400, 'Objectnaam mag maximaal 160 tekens bevatten');
+  if (!address) throw new ApiError(400, 'Objectadres is verplicht');
+  if (!OBJECT_TYPES.has(objectType)) throw new ApiError(400, 'Kies een geldig objecttype');
+  if (!OBJECT_GEOCODING_STATUSES.has(geocodingStatus)) throw new ApiError(400, 'Ongeldige geocodestatus');
+  if ((latitude === null) !== (longitude === null)) {
+    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
+  }
+  if (geocodingStatus !== 'unverified' && latitude === null) {
+    throw new ApiError(400, 'Een geverifieerde of handmatige locatie vereist geldige coördinaten');
+  }
+  if (
+    objectLifecycleStatus(object) !== 'active' ||
+    latitude === null ||
+    !['verified', 'manual'].includes(geocodingStatus)
+  ) {
+    patch.show_on_mobile_map = false;
+  }
+  return patch;
+}
+
+function objectOperationsPatch(data: LooseRecord, object: LooseRecord) {
+  const patch = pick(data, OBJECT_OPERATIONS_PATCH_FIELDS);
+  if (!Object.keys(patch).length) throw new ApiError(400, 'Geen operationele objectgegevens opgegeven');
+
+  const longTextFields = [...OBJECT_INSTRUCTION_FIELDS, 'notes'];
+  for (const field of longTextFields) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      patch[field] = objectText(patch[field], field, 20_000);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'show_on_mobile_map') && typeof patch.show_on_mobile_map !== 'boolean') {
+    throw new ApiError(400, 'show_on_mobile_map moet ja of nee zijn');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'mobile_map_priority')) {
+    const priority = Number(patch.mobile_map_priority);
+    if (!Number.isInteger(priority) || priority < -1_000 || priority > 1_000) {
+      throw new ApiError(400, 'mobile_map_priority moet een geheel getal tussen -1000 en 1000 zijn');
+    }
+    patch.mobile_map_priority = priority;
+  }
+
+  if (patch.show_on_mobile_map === true) {
+    if (objectLifecycleStatus(object) !== 'active') {
+      throw new ApiError(409, 'Alleen een actief object kan op de mobiele objectkaart worden getoond');
+    }
+    const latitude = objectCoordinate(object.latitude, -90, 90, 'Breedtegraad');
+    const longitude = objectCoordinate(object.longitude, -180, 180, 'Lengtegraad');
+    if (latitude === null || longitude === null) {
+      throw new ApiError(409, 'Het object heeft geldige locatiecoördinaten nodig voor de mobiele kaart');
+    }
+    if (!['verified', 'manual'].includes(object.geocoding_status)) {
+      throw new ApiError(409, 'Controleer de kaartpositie voordat het object mobiel zichtbaar wordt');
+    }
+  }
+  return patch;
+}
+
 function normalizedObjectCode(value: unknown) {
   const code = asString(value).toUpperCase().replace(/\s+/g, '-');
   if (!code) return '';
@@ -2129,41 +2705,205 @@ async function markCustomerFirstObject(base44: LooseRecord, customer: LooseRecor
   });
 }
 
-async function handleCreateCustomerObject(
-  base44: LooseRecord,
-  body: LooseRecord,
-  expectedVersion: number,
-  idempotencyKey: string,
+function customerObjectCreateBindingMatches(
+  object: LooseRecord,
+  user: LooseRecord,
+  data: LooseRecord,
+  requestFingerprint: string,
+  target: string,
 ) {
-  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw object verwacht expected_version 0');
-  const customerId = requireString(body, 'customer_id');
-  const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
-  if (customer.status === 'archived') throw new ApiError(409, 'Aan een gearchiveerde klant kan geen object worden toegevoegd');
+  const bindingValues = [
+    asString(object.creation_request_fingerprint),
+    asString(object.creation_actor_user_id),
+    asString(object.creation_mutation_target),
+  ];
+  const hasCreationBinding = bindingValues.some(Boolean);
+  if (hasCreationBinding) {
+    return object.creation_request_fingerprint === requestFingerprint
+      && object.creation_actor_user_id === user.id
+      && object.creation_mutation_target === target;
+  }
+  return normalizeName(object.name) === normalizeName(data.name)
+    && normalizeName(object.address) === normalizeName(data.address)
+    && asString(object.object_type) === asString(data.object_type)
+    && Boolean(asString(data.name))
+    && Boolean(asString(data.address))
+    && Boolean(asString(data.object_type));
+}
 
+async function existingCustomerObjectCreation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  customer: LooseRecord,
+  data: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
   const previousCreations = await getEntity(base44, 'SurveillanceObject').filter({
     creation_idempotency_key: idempotencyKey,
   }, '-created_date', 2);
   if (previousCreations.length > 1) {
     throw new ApiError(409, 'Meerdere objecten delen dezelfde creation_idempotency_key; handmatige reconciliatie vereist');
   }
-  if (previousCreations.length === 1) {
-    const object = previousCreations[0];
-    if (object.customer_id !== customerId) {
-      throw new ApiError(409, 'De idempotency-sleutel hoort bij een object van een andere klant');
+  if (!previousCreations.length) return null;
+
+  const object = previousCreations[0];
+  if (
+    object.customer_id !== customer.id ||
+    !customerObjectCreateBindingMatches(object, user, data, requestFingerprint, target)
+  ) {
+    rejectIdempotencyReuse();
+  }
+  await markCustomerFirstObject(base44, customer);
+  return {
+    object: customerObjectResponseRecord(object),
+    customer_id: customer.id,
+    replayed: true,
+    recovered_partial_creation: true,
+    resource_type: 'SurveillanceObject',
+    resource_id: object.id,
+    category: 'operations',
+  };
+}
+
+function reservationIsCurrent(reservation: LooseRecord) {
+  const expiresAt = Date.parse(asString(reservation.expires_at));
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+async function reserveCustomerObjectCreation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  customerId: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const ownerToken = crypto.randomUUID();
+  const keyHash = await sha256(idempotencyKey);
+  const reservedAt = nowIso();
+  const reservation = {
+    owner_token: ownerToken,
+    key_hash: keyHash,
+    actor_id: user.id,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    reserved_at: reservedAt,
+    expires_at: new Date(Date.parse(reservedAt) + CUSTOMER_OBJECT_CREATE_RESERVATION_TTL_MS).toISOString(),
+  };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+    if (customer.status === 'archived') {
+      throw new ApiError(409, 'Aan een gearchiveerde klant kan geen object worden toegevoegd');
     }
-    await markCustomerFirstObject(base44, customer);
-    return {
-      object,
-      customer_id: customerId,
-      replayed: true,
-      recovered_partial_creation: true,
-      resource_type: 'SurveillanceObject',
-      resource_id: object.id,
-      category: 'operations',
-    };
+    const current = customer.object_creation_reservation;
+    if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
+      const sameRequest = current.key_hash === keyHash
+        && current.actor_id === user.id
+        && current.request_fingerprint === requestFingerprint
+        && current.mutation_target === target;
+      throw new ApiError(409, sameRequest
+        ? 'Objectaanmaak met deze sleutel is nog in verwerking; probeer opnieuw'
+        : 'Voor deze klant wordt al een object aangemaakt; probeer opnieuw', {
+        retryable: true,
+        reservation_expires_at: current.expires_at || null,
+      });
+    }
+    try {
+      const updated = await casUpdate(base44, 'Customer', customer, versionOf(customer), {
+        object_creation_reservation: reservation,
+      });
+      if (updated.object_creation_reservation?.owner_token === ownerToken) return ownerToken;
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
+  throw new ApiError(409, 'Objectaanmaak kon niet veilig worden gereserveerd; probeer opnieuw', { retryable: true });
+}
+
+async function releaseCustomerObjectCreation(base44: LooseRecord, customerId: string, ownerToken: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+    if (customer.object_creation_reservation?.owner_token !== ownerToken) return;
+    try {
+      await casUpdate(base44, 'Customer', customer, versionOf(customer), {
+        object_creation_reservation: null,
+      });
+      return;
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
+}
+
+async function releaseMatchingCustomerObjectCreation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  customerId: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+  const reservation = customer.object_creation_reservation;
+  if (!reservation || typeof reservation !== 'object' || Array.isArray(reservation)) return;
+  const keyHash = await sha256(idempotencyKey);
+  if (
+    reservation.key_hash !== keyHash ||
+    reservation.actor_id !== user.id ||
+    reservation.request_fingerprint !== requestFingerprint ||
+    reservation.mutation_target !== target ||
+    !asString(reservation.owner_token)
+  ) return;
+  try {
+    await releaseCustomerObjectCreation(base44, customerId, reservation.owner_token);
+  } catch (error) {
+    console.error('[customerPlatformApi] object creation reservation cleanup failed', customerId, error);
+  }
+}
+
+function customerObjectResponseRecord(object: LooseRecord) {
+  return safeObjectMutationSummary(object, []);
+}
+
+async function handleCreateCustomerObject(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw object verwacht expected_version 0');
+  const customerId = requireString(body, 'customer_id');
+  const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+  if (customer.status === 'archived') throw new ApiError(409, 'Aan een gearchiveerde klant kan geen object worden toegevoegd');
+  const data = requireObject(body);
+
+  const existingCreation = await existingCustomerObjectCreation(
+    base44,
+    user,
+    customer,
+    data,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  if (existingCreation) {
+    await releaseMatchingCustomerObjectCreation(
+      base44,
+      user,
+      customerId,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    );
+    return existingCreation;
   }
 
-  const data = requireObject(body);
   const name = asString(data.name);
   const address = asString(data.address);
   const objectType = asString(data.object_type);
@@ -2193,42 +2933,221 @@ async function handleCreateCustomerObject(
     });
   }
 
+  const latitudeProvided = Object.prototype.hasOwnProperty.call(data, 'latitude');
+  const longitudeProvided = Object.prototype.hasOwnProperty.call(data, 'longitude');
+  if (latitudeProvided !== longitudeProvided) {
+    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
+  }
   const latitude = objectCoordinate(data.latitude, -90, 90, 'Breedtegraad');
   const longitude = objectCoordinate(data.longitude, -180, 180, 'Lengtegraad');
-  const locationVerified = latitude !== null && longitude !== null && data.geocoding_status === 'verified';
-  const object = await getEntity(base44, 'SurveillanceObject').create({
-    customer_id: customerId,
-    object_code: objectCode,
-    creation_idempotency_key: idempotencyKey,
-    name,
-    object_type: objectType,
-    status: 'concept',
-    address,
-    street_name: asString(data.street_name) || null,
-    house_number: asString(data.house_number) || null,
-    house_number_addition: asString(data.house_number_addition) || null,
-    postal_code: asString(data.postal_code).toUpperCase() || null,
-    city: asString(data.city) || null,
-    country_code: asString(data.country_code).toUpperCase() || 'NL',
-    country_name: asString(data.country_name) || 'Nederland',
-    latitude,
-    longitude,
-    geocoding_status: locationVerified ? 'verified' : 'unverified',
-    bag_address_id: asString(data.bag_address_id) || null,
-    region: asString(data.region) || null,
-    is_active_customer_object: true,
-    show_on_mobile_map: false,
-    mobile_map_priority: 0,
-    version: 1,
-  });
-  await markCustomerFirstObject(base44, customer);
-  return {
+  if ((latitude === null) !== (longitude === null)) {
+    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
+  }
+  const requestedGeocodingStatus = asString(data.geocoding_status) || 'unverified';
+  if (!OBJECT_GEOCODING_STATUSES.has(requestedGeocodingStatus)) {
+    throw new ApiError(400, 'Ongeldige geocodestatus');
+  }
+  if (requestedGeocodingStatus !== 'unverified' && latitude === null) {
+    throw new ApiError(400, 'Een geverifieerde of handmatige locatie vereist geldige coördinaten');
+  }
+  const reservationOwner = await reserveCustomerObjectCreation(
+    base44,
+    user,
+    customerId,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    const reservedCustomer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+    if (reservedCustomer.object_creation_reservation?.owner_token !== reservationOwner) {
+      throw new ApiError(409, 'Objectaanmaakreservering is verlopen; probeer opnieuw', { retryable: true });
+    }
+    const racedCreation = await existingCustomerObjectCreation(
+      base44,
+      user,
+      reservedCustomer,
+      data,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    );
+    if (racedCreation) return racedCreation;
+
+    const duplicateCode = await objectCodeExists(base44, objectCode);
+    if (duplicateCode) {
+      throw new ApiError(409, 'Objectcode is al in gebruik', { duplicate_object_id: duplicateCode.id });
+    }
+    const keyHash = await sha256(idempotencyKey);
+    const object = await getEntity(base44, 'SurveillanceObject').create({
+      customer_id: customerId,
+      object_code: objectCode,
+      creation_idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint,
+      creation_actor_user_id: user.id,
+      creation_mutation_target: target,
+      customer_platform_last_mutation_key_hash: keyHash,
+      customer_platform_last_mutation_recovery: {
+        action: 'create_customer_object',
+        actor_id: user.id,
+        request_fingerprint: requestFingerprint,
+        mutation_target: target,
+        recorded_at: nowIso(),
+      },
+      customer_platform_mutation_key_hashes: [keyHash],
+      customer_platform_mutation_recoveries: {
+        [keyHash]: {
+          action: 'create_customer_object',
+          actor_id: user.id,
+          request_fingerprint: requestFingerprint,
+          mutation_target: target,
+          recorded_at: nowIso(),
+        },
+      },
+      name,
+      object_type: objectType,
+      status: 'concept',
+      address,
+      street_name: asString(data.street_name) || null,
+      house_number: asString(data.house_number) || null,
+      house_number_addition: asString(data.house_number_addition) || null,
+      postal_code: asString(data.postal_code).toUpperCase() || null,
+      city: asString(data.city) || null,
+      country_code: asString(data.country_code).toUpperCase() || 'NL',
+      country_name: asString(data.country_name) || 'Nederland',
+      latitude,
+      longitude,
+      geocoding_status: requestedGeocodingStatus,
+      bag_address_id: latitude === null ? null : asString(data.bag_address_id) || null,
+      region: asString(data.region) || null,
+      is_active_customer_object: false,
+      show_on_mobile_map: false,
+      mobile_map_priority: 0,
+      version: 1,
+    });
+    await markCustomerFirstObject(base44, reservedCustomer);
+    return {
+      object: customerObjectResponseRecord(object),
+      customer_id: customerId,
+      resource_type: 'SurveillanceObject',
+      resource_id: object.id,
+      category: 'operations',
+    };
+  } finally {
+    try {
+      await releaseCustomerObjectCreation(base44, customerId, reservationOwner);
+    } catch (error) {
+      console.error('[customerPlatformApi] object creation reservation release failed', customerId, error);
+    }
+  }
+}
+
+async function handleUpdateCustomerObjectIdentity(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') {
+    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  }
+  const patch = objectIdentityPatch(requireObject(body), object);
+  const prepared = await customerObjectPatchWithRecovery({
     object,
-    customer_id: customerId,
-    resource_type: 'SurveillanceObject',
-    resource_id: object.id,
-    category: 'operations',
+    patch,
+    expectedVersion,
+    user,
+    action: 'update_customer_object_identity',
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  });
+  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+  return customerObjectMutationResult(updated, prepared.changedFields);
+}
+
+async function handleUpdateCustomerObjectOperations(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') {
+    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  }
+  const patch = objectOperationsPatch(requireObject(body), object);
+  const prepared = await customerObjectPatchWithRecovery({
+    object,
+    patch,
+    expectedVersion,
+    user,
+    action: 'update_customer_object_operations',
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  });
+  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+  // Bewust alleen een samenvatting: instructies en notities komen niet in recovery of CustomerEvent.payload.
+  return customerObjectMutationResult(updated, prepared.changedFields);
+}
+
+async function handleSetCustomerObjectStatus(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  const current = objectLifecycleStatus(object);
+  const requested = requireString(body, 'status');
+  validateTransition(OBJECT_STATUS_TRANSITIONS, current, requested, 'Object');
+  const reason = asString(body.reason);
+  if (requested === 'archived' && !reason) throw new ApiError(400, 'Reden voor archiveren is verplicht');
+  if (reason.length > 1_000) throw new ApiError(400, 'Reden mag maximaal 1000 tekens bevatten');
+
+  const patch: LooseRecord = {
+    status: requested,
+    is_active_customer_object: requested === 'active',
   };
+  if (requested !== 'active') patch.show_on_mobile_map = false;
+  if (requested === 'archived') {
+    patch.archived_at = nowIso();
+    patch.archived_by_user_id = user.id;
+    patch.archive_reason = reason;
+  } else if (current === 'archived') {
+    patch.archived_at = null;
+    patch.archived_by_user_id = null;
+    patch.archive_reason = null;
+  }
+  const transition = {
+    from: current,
+    to: requested,
+    reason: reason || null,
+  };
+  const prepared = await customerObjectPatchWithRecovery({
+    object,
+    patch,
+    expectedVersion,
+    user,
+    action: 'set_customer_object_status',
+    idempotencyKey,
+    requestFingerprint,
+    target,
+    extraResult: { transition },
+  });
+  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+  return customerObjectMutationResult(updated, prepared.changedFields, { transition });
 }
 
 async function handleCustomerAccount(
@@ -4703,6 +5622,8 @@ async function executeMutation(
   body: LooseRecord,
   expectedVersion: number,
   idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
 ): Promise<LooseRecord> {
   switch (action) {
     case 'create_customer':
@@ -4714,7 +5635,45 @@ async function executeMutation(
     case 'delete_empty_customer':
       return handleDeleteEmptyCustomer(base44, body, expectedVersion);
     case 'create_customer_object':
-      return handleCreateCustomerObject(base44, body, expectedVersion, idempotencyKey);
+      return handleCreateCustomerObject(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+      );
+    case 'update_customer_object_identity':
+      return handleUpdateCustomerObjectIdentity(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+      );
+    case 'update_customer_object_operations':
+      return handleUpdateCustomerObjectOperations(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+      );
+    case 'set_customer_object_status':
+      return handleSetCustomerObjectStatus(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+      );
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':
@@ -4867,11 +5826,53 @@ export async function handleCustomerPlatformRequest(req: Request) {
 
     if (!MUTATION_ACTIONS.has(action)) throw new ApiError(400, 'Onbekende actie');
     const { idempotencyKey, expectedVersion } = requireMutationEnvelope(body);
-    const replay = await mutationReplay(base44, action, idempotencyKey);
+    const requestFingerprint = await mutationRequestFingerprint(action, body);
+    const target = mutationTarget(action, body);
+    const replay = await mutationReplay(base44, user, action, body, idempotencyKey, requestFingerprint, target);
     if (replay) return json({ ok: true, ...replay, replayed: true });
-    const result = await executeMutation(base44, user, action, body, expectedVersion, idempotencyKey);
+    const recovered = await customerObjectMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    );
+    if (recovered) {
+      await recordMutationResult(
+        base44,
+        user,
+        action,
+        idempotencyKey,
+        recovered,
+        body,
+        requestFingerprint,
+        target,
+      );
+      return json({ ok: true, ...recovered, replayed: true, recovered_from_object_marker: true });
+    }
+    const result = await executeMutation(
+      base44,
+      user,
+      action,
+      body,
+      expectedVersion,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    );
     if (!(action === 'migrate_legacy_customers' && result.dry_run)) {
-      await recordMutationResult(base44, user, action, idempotencyKey, result, body);
+      await recordMutationResult(
+        base44,
+        user,
+        action,
+        idempotencyKey,
+        result,
+        body,
+        requestFingerprint,
+        target,
+      );
     }
     return json({ ok: true, ...result, replayed: Boolean(result.replayed) }, action.startsWith('create_') ? 201 : 200);
   } catch (error) {

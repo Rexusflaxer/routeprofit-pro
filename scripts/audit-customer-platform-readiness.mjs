@@ -112,7 +112,6 @@ for (const fn of REQUIRED_FUNCTIONS) {
 const functionCount = fs.readdirSync(FUNCTION_DIR, { withFileTypes: true })
   .filter(entry => entry.isDirectory() && fs.existsSync(path.join(FUNCTION_DIR, entry.name, "entry.ts")))
   .length;
-assert.equal(functionCount, 49, `Base44-functiecapaciteit wijkt af: ${functionCount}/49`);
 for (const functionName of CONSOLIDATED_FUNCTIONS) {
   assert.ok(
     !fs.existsSync(path.join(FUNCTION_DIR, functionName, "entry.ts")),
@@ -137,15 +136,18 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 92, "De verwachte 92 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 96, "De verwachte 96 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
   for (const permission of ["create", "read", "update", "delete"]) {
+    const expectedRule = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission)
+      ? false
+      : adminOnlyRule;
     assert.deepEqual(
       definition.rls?.[permission],
-      adminOnlyRule,
-      `${file} mist admin-only RLS voor ${permission}`,
+      expectedRule,
+      `${file} heeft een onjuiste RLS-regel voor ${permission}`,
     );
   }
 }
@@ -203,9 +205,27 @@ for (const field of ["idempotency_key", "provider_idempotency_key", "version"]) 
   property("SalesInvoice", field);
 }
 property("Customer", "creation_idempotency_key");
+property("Customer", "object_creation_reservation");
 property("SurveillanceObject", "creation_idempotency_key");
 property("SurveillanceObject", "version");
 enumContains("SurveillanceObject", "status", ["concept", "active", "inactive", "archived"]);
+for (const field of [
+  "archived_at",
+  "archived_by_user_id",
+  "archive_reason",
+  "creation_request_fingerprint",
+  "creation_actor_user_id",
+  "creation_mutation_target",
+  "customer_platform_last_mutation_key_hash",
+  "customer_platform_last_mutation_recovery",
+  "customer_platform_mutation_key_hashes",
+  "customer_platform_mutation_recoveries",
+]) {
+  property("SurveillanceObject", field);
+}
+const customerEventSchema = schema("CustomerEvent");
+assert.equal(customerEventSchema.rls?.update, false, "CustomerEvent moet append-only zijn: update geblokkeerd");
+assert.equal(customerEventSchema.rls?.delete, false, "CustomerEvent moet append-only zijn: delete geblokkeerd");
 for (const entity of ["CustomerQuote", "CustomerContract"]) {
   property(entity, "signature_lock_key");
   property(entity, "signature_lock_started_at");
@@ -292,6 +312,9 @@ assert.doesNotMatch(
 for (const action of [
   "create_customer",
   "create_customer_object",
+  "update_customer_object_identity",
+  "update_customer_object_operations",
+  "set_customer_object_status",
   "list_commercial",
   "list_billing",
   "create_quote",
@@ -301,6 +324,46 @@ for (const action of [
   "migrate_legacy_customers",
 ]) {
 assert.ok(customerPlatformApi.includes(`'${action}'`), `customerPlatformApi mist action ${action}`);
+}
+assert.match(
+  customerPlatformApi,
+  /safeObjectMutationSummary/,
+  "Objectmutaties moeten een gesanitiseerde auditsamenvatting gebruiken",
+);
+assert.doesNotMatch(
+  customerPlatformApi,
+  /handleUpdateCustomerObjectOperations[\s\S]*?return\s*\{\s*object:\s*updated\b/,
+  "Operationele instructies mogen niet als volledig object in CustomerEvent.payload worden opgeslagen",
+);
+const objectOperationsWhitelist = customerPlatformApi.match(
+  /const OBJECT_OPERATIONS_PATCH_FIELDS = \[([\s\S]*?)\];/,
+)?.[1] || "";
+for (const restrictedField of ["access_instruction", "alarm_instruction", "key_instruction"]) {
+  assert.ok(
+    !objectOperationsWhitelist.includes(restrictedField),
+    `${restrictedField} mag niet via de gewone objectmutatie worden beheerd`,
+  );
+}
+for (const recoveryContract of [
+  "mutationRequestFingerprint",
+  "mutationTarget",
+  "customerObjectMutationMarkerReplay",
+  "reserveCustomerObjectCreation",
+  "releaseMatchingCustomerObjectCreation",
+  "objectLifecycleStatus",
+  "creation_request_fingerprint",
+  "customer_platform_last_mutation_recovery",
+  "customer_platform_mutation_recoveries",
+]) {
+  assert.ok(customerPlatformApi.includes(recoveryContract), `Object-idempotency mist ${recoveryContract}`);
+}
+const objectWorkflow = read("src/components/objects/objectWorkflow.js");
+for (const helper of [
+  "updateCustomerObjectIdentity",
+  "updateCustomerObjectOperations",
+  "setCustomerObjectStatus",
+]) {
+  assert.ok(objectWorkflow.includes(`function ${helper}`), `Objectworkflow mist helper ${helper}`);
 }
 assert.match(customerPlatformApi, /\$inc/, "Factuurnummering moet een atomaire increment gebruiken");
 
@@ -339,4 +402,5 @@ assert.match(commercialAutomation, /status:\s*'draft'/, "Automatische facturen e
 assert.match(commercialAutomation, /status:\s*errors\.length\s*\?\s*'partial_failed'\s*:\s*'review'/);
 assert.doesNotMatch(commercialAutomation, /auto_issue:\s*true|auto_send:\s*true/);
 
+assert.equal(functionCount, 49, `Base44-functiecapaciteit wijkt af: ${functionCount}/49`);
 console.log(`Klantplatform readiness: OK (${REQUIRED_ENTITIES.length} entiteiten, ${functionCount}/49 functies)`);

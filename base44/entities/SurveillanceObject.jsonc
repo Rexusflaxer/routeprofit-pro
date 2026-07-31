@@ -13,6 +13,58 @@
       ],
       "description": "Technische sleutel waarmee herhaalde create-verzoeken hetzelfde object opleveren"
     },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256-fingerprint van het canonieke create-verzoek voor gebonden partial-create recovery"
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Backofficegebruiker aan wie de create-idempotency-sleutel is gebonden"
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke klant/object-create target voor gebonden partial-create recovery"
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256-hash van de laatste gecontroleerde objectmutatie; uitsluitend voor idempotent crashherstel"
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Gesanitiseerde technische recovery-marker die atomair met de laatste objectmutatie wordt opgeslagen"
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Begrensde hashes van de laatste gecontroleerde objectmutaties voor crashherstel en idempotency-binding"
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Gesanitiseerd, begrensd recoverylog per mutatiehash; voorkomt dat een directe opvolger een nog niet geaudite mutatie overschrijft"
+    },
     "customer_id": {
       "type": "string",
       "description": "ID van de gekoppelde klant"
@@ -45,6 +97,28 @@
         "archived"
       ],
       "description": "Kleine objectlevenscyclus; operationele readiness wordt afzonderlijk bepaald"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Tijdstip waarop het object gecontroleerd is gearchiveerd"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Backofficegebruiker die het object heeft gearchiveerd"
+    },
+    "archive_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Verplichte reden voor archivering; blijft onderdeel van de historie"
     },
     "region": {
       "type": [
@@ -412,18 +486,21 @@
     },
     "show_on_mobile_map": {
       "type": "boolean",
-      "default": true
+      "default": false
     },
     "is_active_customer_object": {
       "type": "boolean",
-      "default": true
+      "default": false
     },
     "mobile_map_priority": {
       "type": "number",
       "default": 0
     },
     "notes": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Opmerkingen"
     },
     "version": {

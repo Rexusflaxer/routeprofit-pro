@@ -2,19 +2,42 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, MapPin, Layers } from "lucide-react";
+import { ChevronRight, MapPin, Layers } from "lucide-react";
+import {
+  OBJECT_STATUS_CLASSES,
+  OBJECT_STATUS_LABELS,
+  getObjectStatus,
+} from "./objectDossierConfig";
 
-export default function ObjectTable({ objects, onEdit, onDelete, onSelect }) {
+export default function ObjectTable({ objects, onSelect }) {
+  const objectIds = objects.map(object => object.id).filter(Boolean);
+  const objectScopeKey = [...objectIds].sort().join(",");
   const { data: allTasks = [] } = useQuery({
-    queryKey: ['all-tasks'],
-    queryFn: () => base44.entities.Task.list(),
+    queryKey: ["object-table", "tasks", objectScopeKey],
+    queryFn: () => base44.entities.Task.filter(
+      { $or: objectIds.flatMap(objectId => [
+        { object_id: objectId },
+        { selected_object_ids: { $all: [objectId] } },
+      ]) },
+      "task_type",
+      500,
+      0,
+      ["id", "object_id", "collectief_id", "selected_object_ids", "repeat_count"],
+    ),
+    enabled: objectIds.length > 0,
   });
 
   const { data: allCollectieven = [] } = useQuery({
-    queryKey: ['collectieven'],
-    queryFn: () => base44.entities.Collectief.list(),
+    queryKey: ["object-table", "collectives", objectScopeKey],
+    queryFn: () => base44.entities.Collectief.filter(
+      { $or: objectIds.map(objectId => ({ object_ids: { $all: [objectId] } })) },
+      "name",
+      100,
+      0,
+      ["id", "name", "object_ids"],
+    ),
+    enabled: objectIds.length > 0,
   });
 
   const getTaskCount = (objectId) => {
@@ -45,7 +68,8 @@ export default function ObjectTable({ objects, onEdit, onDelete, onSelect }) {
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Object</TableHead>
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Adres</TableHead>
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Collectief / Taken</TableHead>
-            <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500 text-right">Acties</TableHead>
+            <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Status</TableHead>
+            <TableHead className="w-8" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -54,15 +78,30 @@ export default function ObjectTable({ objects, onEdit, onDelete, onSelect }) {
             const directTaskCount = getTaskCount(obj.id);
             const directExecutionCount = getExecutionCount(obj.id);
             const collectiefTasks = getCollectiefTasks(obj.id);
+            const status = getObjectStatus(obj);
             return (
-              <TableRow key={obj.id} onClick={() => onSelect?.(obj)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
+              <TableRow
+                key={obj.id}
+                onClick={() => onSelect?.(obj)}
+                className="cursor-pointer transition-colors hover:bg-slate-50/50"
+              >
                 <TableCell>
                   {obj.object_code
                     ? <span className="text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{obj.object_code}</span>
                     : <span className="text-slate-300 text-xs">—</span>}
                 </TableCell>
                 <TableCell className="font-medium text-slate-900">
-                  {obj.name}
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation();
+                      onSelect?.(obj);
+                    }}
+                    className="rounded-sm text-left font-medium text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                    aria-label={`Objectdossier van ${obj.name || "naamloos object"} openen`}
+                  >
+                    {obj.name}
+                  </button>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5 text-slate-600">
@@ -90,16 +129,12 @@ export default function ObjectTable({ objects, onEdit, onDelete, onSelect }) {
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onEdit(obj); }} className="h-8 w-8 text-slate-400 hover:text-slate-700">
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onDelete(obj.id); }} className="h-8 w-8 text-slate-400 hover:text-red-600">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
+                <TableCell>
+                  <Badge variant="outline" className={`text-[11px] ${OBJECT_STATUS_CLASSES[status] || ""}`}>
+                    {OBJECT_STATUS_LABELS[status] || status}
+                  </Badge>
                 </TableCell>
+                <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></TableCell>
               </TableRow>
             );
           })}

@@ -1,174 +1,308 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
-  Box, Image, CalendarDays, User, GitBranch, AlertTriangle,
-  Camera, Siren, Phone, Key, Shield, Flame, Eye, Zap,
-  Bell, Lock, Smartphone, HelpCircle
+  AlertTriangle,
+  Box,
+  Image as ImageIcon,
+  RefreshCw,
 } from "lucide-react";
+import { base44 } from "@/api/base44Client";
+import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-const SENSOR_ICONS = {
-  zones:           { label: "Zones",           icon: Shield,      color: "text-blue-500" },
-  pir:             { label: "PIR",             icon: Eye,         color: "text-amber-500" },
-  magneetcontact:  { label: "Magneetcontact",  icon: Lock,        color: "text-slate-500" },
-  glasbreuk:       { label: "Glasbreuk",       icon: Zap,         color: "text-orange-500" },
-  rook_brand:      { label: "Rook/Brand",      icon: Flame,       color: "text-red-500" },
-  sabotage:        { label: "Sabotage",        icon: AlertTriangle, color: "text-red-600" },
-  camera:          { label: "Camera",          icon: Camera,      color: "text-purple-500" },
-  sirene_flitser:  { label: "Sirene/Flitser",  icon: Siren,       color: "text-yellow-500" },
-  alarmcentrale:   { label: "Alarmcentrale",   icon: Bell,        color: "text-blue-600" },
-  keypad:          { label: "Keypad",          icon: Smartphone,  color: "text-teal-500" },
-  sleutelkluis:    { label: "Sleutelkluis",    icon: Key,         color: "text-amber-600" },
-  noodknop:        { label: "Noodknop",        icon: Phone,       color: "text-red-400" },
-  overig:          { label: "Overig",          icon: HelpCircle,  color: "text-slate-400" },
+const STATUS_LABELS = {
+  draft: "Concept",
+  published: "Gepubliceerd",
+  archived: "Gearchiveerd",
+  failed: "Mislukt",
 };
 
-function SensorCount({ type, annotations }) {
-  const config = SENSOR_ICONS[type];
-  if (!config) return null;
-  const items = annotations?.[type];
-  const count = Array.isArray(items) ? items.length : (items ? 1 : 0);
-  if (!count) return null;
-  const Icon = config.icon;
+const STATUS_STYLES = {
+  draft: "border-amber-200 bg-amber-50 text-amber-800",
+  published: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  archived: "border-border bg-muted text-muted-foreground",
+  failed: "border-red-200 bg-red-50 text-red-700",
+};
+
+const SOURCE_LABELS = {
+  ios_roomplan: "iOS RoomPlan",
+  manual: "Handmatig",
+  import: "Import",
+};
+
+const FLOORPLAN_FIELDS = [
+  "id",
+  "object_id",
+  "status",
+  "revision",
+  "is_current",
+  "title",
+  "source",
+  "captured_at",
+  "published_at",
+  "preview_2d_file_id",
+  "preview_2d_download_filename",
+  "usdz_file_id",
+  "usdz_download_filename",
+];
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("nl-NL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function planFiles(plan) {
+  const revision = plan.revision || 1;
+  return [
+    plan.preview_2d_file_id && {
+      kind: "2D",
+      label: "2D-plattegrond",
+      icon: ImageIcon,
+      managedFileId: plan.preview_2d_file_id,
+      filename: plan.preview_2d_download_filename || `objectplattegrond-revisie-${revision}.png`,
+    },
+    plan.usdz_file_id && {
+      kind: "3D",
+      label: "3D-model",
+      icon: Box,
+      managedFileId: plan.usdz_file_id,
+      filename: plan.usdz_download_filename || `objectmodel-revisie-${revision}.usdz`,
+    },
+  ].filter(Boolean);
+}
+
+function FileButton({ file, revision, onOpen }) {
+  const Icon = file.icon;
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-      <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
-      <span className="text-sm font-medium text-slate-700">{config.label}</span>
-      <Badge variant="secondary" className="ml-auto text-xs">{count}</Badge>
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-8 border-border bg-background text-xs shadow-none"
+      onClick={() => onOpen({ ...file, revision })}
+      aria-label={`${file.label} van revisie ${revision} veilig bekijken`}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      {file.kind}
+    </Button>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="space-y-4" aria-label="Plattegronden laden" aria-busy="true">
+      <div className="rounded-lg border border-border bg-card p-4">
+        <Skeleton className="h-5 w-48" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <Skeleton className="h-10 w-full rounded-none" />
+        <Skeleton className="h-14 w-full rounded-none" />
+        <Skeleton className="h-14 w-full rounded-none" />
+      </div>
     </div>
   );
 }
 
 export default function ObjectFloorPlanTab({ objectId }) {
-  const { data: plans = [], isLoading } = useQuery({
+  const [previewFile, setPreviewFile] = useState(null);
+  const {
+    data: plans = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ["object-floorplans", objectId],
-    queryFn: () => base44.entities.ObjectFloorPlan.filter({ object_id: objectId }),
+    queryFn: () => base44.entities.ObjectFloorPlan.filter(
+      { object_id: objectId },
+      "-revision",
+      100,
+      0,
+      FLOORPLAN_FIELDS,
+    ),
     enabled: !!objectId,
   });
 
-  const current = plans.find(p => p.is_current && p.status === "published");
+  const sortedPlans = useMemo(
+    () => [...plans].sort((left, right) => Number(right.revision || 0) - Number(left.revision || 0)),
+    [plans],
+  );
+  const current = sortedPlans.find((plan) => plan.is_current && plan.status === "published") || null;
 
-  if (isLoading) {
-    return <div className="py-12 text-center text-sm text-slate-400">Laden...</div>;
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (!current) {
+  if (isError) {
     return (
-      <div className="py-12 text-center text-sm text-slate-400">
-        <Box className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-        <p>Nog geen plattegrond gepubliceerd voor dit object.</p>
-        <p className="mt-1 text-xs text-slate-300">Scan het object via de iOS app met RoomPlan/LiDAR.</p>
+      <div className="flex min-h-64 items-center justify-center rounded-lg border border-red-200 bg-red-50/40 p-6 text-center">
+        <div className="max-w-md">
+          <AlertTriangle className="mx-auto h-6 w-6 text-red-600" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium text-foreground">Plattegronden konden niet worden geladen.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Probeer het opnieuw of controleer uw toegang tot dit object.
+          </p>
+          <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            Opnieuw proberen
+          </Button>
+        </div>
       </div>
     );
   }
 
-  const annotations = current.annotations_json || {};
-  const sensorTypes = Object.keys(SENSOR_ICONS);
-  const hasSensors = sensorTypes.some(type => {
-    const items = annotations[type];
-    return Array.isArray(items) ? items.length > 0 : !!items;
-  });
+  if (sortedPlans.length === 0) {
+    return (
+      <div className="flex min-h-64 items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 p-6 text-center">
+        <div className="max-w-md">
+          <Box className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium text-foreground">Nog geen plattegrond</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Zodra een opname voor dit object is verwerkt, verschijnt hier de actuele revisie en de revisiehistorie.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-5">
-      {/* Meta info */}
-      <Card className="border-0 shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Box className="h-4 w-4 text-slate-500" />
-            {current.title || "Objectplattegrond"}
-            <Badge className="ml-2 bg-green-100 text-green-800">Revisie {current.revision}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
-          {current.captured_by && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <User className="h-4 w-4 text-slate-400" />
-              <span><span className="text-slate-400">Vastgelegd door:</span> {current.captured_by}</span>
+    <div className="space-y-4">
+      {current ? (
+        <section className="overflow-hidden rounded-lg border border-border bg-card" aria-labelledby="current-floorplan-title">
+          <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 id="current-floorplan-title" className="truncate text-sm font-semibold text-foreground">
+                  {current.title || "Actuele objectplattegrond"}
+                </h3>
+                <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                  Revisie {current.revision || 1}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">De gepubliceerde versie voor operationeel gebruik.</p>
             </div>
-          )}
-          {current.published_at && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <CalendarDays className="h-4 w-4 text-slate-400" />
-              <span><span className="text-slate-400">Gepubliceerd:</span> {new Date(current.published_at).toLocaleDateString("nl-NL")}</span>
-            </div>
-          )}
-          {current.source && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <GitBranch className="h-4 w-4 text-slate-400" />
-              <span><span className="text-slate-400">Bron:</span> {current.source}</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 2D Preview */}
-      {current.preview_2d_file_url && (
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Image className="h-4 w-4 text-slate-500" /> 2D Plattegrond
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <img
-              src={current.preview_2d_file_url}
-              alt="2D plattegrond preview"
-              className="w-full max-h-96 rounded-lg object-contain border border-slate-100 bg-slate-50"
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 3D USDZ */}
-      {current.usdz_file_url && (
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Box className="h-4 w-4 text-slate-500" /> 3D Model (USDZ)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <a
-              href={current.usdz_file_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <Box className="h-5 w-5 text-blue-500" />
-              USDZ bestand openen / downloaden
-            </a>
-            <p className="mt-2 text-xs text-slate-400">Open op een Apple-apparaat voor AR-weergave.</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Sensoren & Zones */}
-      {hasSensors && (
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Shield className="h-4 w-4 text-slate-500" /> Zones &amp; Sensoren
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {sensorTypes.map(type => (
-                <SensorCount key={type} type={type} annotations={annotations} />
+            <div className="flex flex-wrap gap-2">
+              {planFiles(current).map((file) => (
+                <FileButton
+                  key={file.kind}
+                  file={file}
+                  revision={current.revision || 1}
+                  onOpen={setPreviewFile}
+                />
               ))}
+              {planFiles(current).length === 0 && (
+                <span className="text-xs text-muted-foreground">ManagedFile-koppeling vereist</span>
+              )}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
 
-      {/* Revision history */}
-      {plans.length > 1 && (
-        <div className="text-xs text-slate-400 text-right">
-          {plans.length} revisies aanwezig — alleen de huidige is actief.
+          <dl className="grid divide-y divide-border text-sm sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <div className="px-4 py-3">
+              <dt className="text-xs text-muted-foreground">Bron</dt>
+              <dd className="mt-1 font-medium text-foreground">{SOURCE_LABELS[current.source] || current.source || "—"}</dd>
+            </div>
+            <div className="px-4 py-3">
+              <dt className="text-xs text-muted-foreground">Opgenomen</dt>
+              <dd className="mt-1 font-medium text-foreground">{formatDate(current.captured_at)}</dd>
+            </div>
+            <div className="px-4 py-3">
+              <dt className="text-xs text-muted-foreground">Gepubliceerd</dt>
+              <dd className="mt-1 font-medium text-foreground">{formatDate(current.published_at)}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Geen actuele publicatie</p>
+          <p className="mt-1 text-xs text-amber-800">
+            Er zijn wel revisies aanwezig, maar geen gepubliceerde revisie is als actueel gemarkeerd.
+          </p>
         </div>
       )}
+
+      <section className="overflow-hidden rounded-lg border border-border bg-card" aria-labelledby="revision-history-title">
+        <div className="border-b border-border px-4 py-3">
+          <h3 id="revision-history-title" className="text-sm font-semibold text-foreground">Revisiehistorie</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Alle versies blijven herkenbaar; alleen een actuele publicatie geldt operationeel.</p>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-4">Revisie</TableHead>
+              <TableHead>Titel</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Opgenomen</TableHead>
+              <TableHead>Gepubliceerd</TableHead>
+              <TableHead className="pr-4 text-right">Bestanden</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedPlans.map((plan) => {
+              const files = planFiles(plan);
+              return (
+                <TableRow key={plan.id || `${plan.object_id}-${plan.revision}`}>
+                  <TableCell className="pl-4 font-medium tabular-nums">
+                    {plan.revision || 1}
+                    {plan.is_current && (
+                      <span className="ml-2 text-[11px] font-normal text-muted-foreground">Actueel</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-56 truncate">{plan.title || "Objectplattegrond"}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={STATUS_STYLES[plan.status] || STATUS_STYLES.archived}>
+                      {STATUS_LABELS[plan.status] || plan.status || "Onbekend"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(plan.captured_at)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(plan.published_at)}</TableCell>
+                  <TableCell className="pr-4">
+                    <div className="flex justify-end gap-1.5">
+                      {files.map((file) => (
+                        <FileButton
+                          key={file.kind}
+                          file={file}
+                          revision={plan.revision || 1}
+                          onOpen={setPreviewFile}
+                        />
+                      ))}
+                      {files.length === 0 && (
+                        <span className="text-xs text-muted-foreground">ManagedFile-koppeling vereist</span>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </section>
+
+      <ManagedFilePreviewDialog
+        open={!!previewFile}
+        onOpenChange={(open) => { if (!open) setPreviewFile(null); }}
+        managedFileId={previewFile?.managedFileId}
+        fileUrl={undefined}
+        filename={previewFile?.filename}
+        title={previewFile ? `${previewFile.label} — revisie ${previewFile.revision}` : "Plattegrond bekijken"}
+      />
     </div>
   );
 }
