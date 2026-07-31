@@ -8,6 +8,7 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import SurveillanceNavigation from './pages/SurveillanceNavigation';
+import Planning from './pages/Planning';
 import Uitvoering from './pages/Uitvoering';
 import RouteExecutions from './pages/RouteExecutions';
 import RouteExecutionDetails from './pages/RouteExecutionDetails';
@@ -63,6 +64,7 @@ const AuthenticatedApp = () => {
         </LayoutWrapper>
       } />
       <Route path="/SurveillanceNavigation" element={<SurveillanceNavigation />} />
+      <Route path="/Planning" element={<LayoutWrapper currentPageName="Planning"><Planning /></LayoutWrapper>} />
       <Route path="/Uitvoering" element={<LayoutWrapper currentPageName="Uitvoering"><Uitvoering /></LayoutWrapper>} />
       <Route path="/RouteExecutions" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutions /></LayoutWrapper>} />
       <Route path="/RouteExecutionDetails" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutionDetails /></LayoutWrapper>} />

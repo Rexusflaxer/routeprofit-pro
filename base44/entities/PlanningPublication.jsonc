@@ -1,0 +1,183 @@
+{
+  "name": "PlanningPublication",
+  "type": "object",
+  "description": "Append-only, onveranderlijke publicatiesnapshot. planningApi maakt uitsluitend nieuwe versies aan en wijzigt of verwijdert bestaande publicaties nooit.",
+  "properties": {
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "day",
+        "week",
+        "selection",
+        "range"
+      ]
+    },
+    "scope_key": {
+      "type": "string",
+      "description": "Stabiele sleutel voor dezelfde publicatiescope, gebruikt voor versie-opvolging."
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "period_start": {
+      "type": "string",
+      "format": "date"
+    },
+    "period_end": {
+      "type": "string",
+      "format": "date"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "supersedes_publication_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "critical_warning_acknowledgement_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "acknowledged_critical_warning_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "shift_count": {
+      "type": "number"
+    },
+    "assignment_count": {
+      "type": "number"
+    },
+    "warning_count": {
+      "type": "number"
+    },
+    "critical_warning_count": {
+      "type": "number"
+    },
+    "shift_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assignment_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Volledige, onveranderlijke dienst- en toewijzingssnapshot die medewerkers/afnemers later kunnen lezen."
+    },
+    "checksum": {
+      "type": "string",
+      "description": "SHA-256 over de stabiel geserialiseerde snapshot en publicatiemetadata."
+    },
+    "published_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "published_by_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "published_by_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "scope_type",
+    "scope_key",
+    "period_start",
+    "period_end",
+    "version",
+    "reason",
+    "shift_count",
+    "assignment_count",
+    "warning_count",
+    "critical_warning_count",
+    "shift_ids",
+    "assignment_ids",
+    "snapshot",
+    "checksum",
+    "published_at",
+    "correlation_id"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
