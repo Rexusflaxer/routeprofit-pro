@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
 function personnelName(personnel) {
@@ -65,9 +66,16 @@ function CandidateCard({ candidate, index, selectedShift, onAssign }) {
             >
               <GripVertical className="h-4 w-4" />
             </button>
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-              {initials(name)}
-            </div>
+            <Avatar className="h-7 w-7 border border-border">
+              <AvatarImage
+                src={candidate.personnel?.photo_file_url || undefined}
+                alt={`Profielfoto van ${name}`}
+                className="object-cover"
+              />
+              <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+                {initials(name)}
+              </AvatarFallback>
+            </Avatar>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1">
                 <p className="truncate text-[12px] font-semibold text-foreground">{name}</p>
