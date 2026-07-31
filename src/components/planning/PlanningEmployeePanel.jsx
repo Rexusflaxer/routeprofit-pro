@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   BriefcaseBusiness,
   CheckCircle2,
+  ChevronDown,
   GripVertical,
   Search,
   ShieldCheck,
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import PersonnelCredentialsDetails from "@/components/planning/PersonnelCredentialsDetails";
 
 function personnelName(personnel) {
   return personnel?.name
@@ -38,7 +40,8 @@ function initials(name) {
     .toUpperCase();
 }
 
-function CandidateCard({ candidate, index, selectedShift, onAssign }) {
+function CandidateCard({ candidate, index, selectedShift, onAssign, qualifications, passes }) {
+  const [expanded, setExpanded] = useState(false);
   const name = personnelName(candidate.personnel);
   const critical = Number(candidate.criticalCount || 0);
   const warnings = Number(candidate.warningCount || 0);
@@ -110,18 +113,32 @@ function CandidateCard({ candidate, index, selectedShift, onAssign }) {
                 ) : null}
               </div>
             </div>
-            {selectedShift && (
+            <div className="flex shrink-0 items-center">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 text-primary"
-                onClick={() => onAssign(candidate)}
-                aria-label={`${name} inplannen op ${selectedShift.name}`}
+                className="h-7 w-7 text-muted-foreground"
+                onClick={() => setExpanded(value => !value)}
+                aria-expanded={expanded}
+                aria-label={`${name} gegevens ${expanded ? "inklappen" : "uitklappen"}`}
               >
-                <UserRoundPlus className="h-3.5 w-3.5" />
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
               </Button>
-            )}
+              {selectedShift && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-primary"
+                  onClick={() => onAssign(candidate)}
+                  aria-label={`${name} inplannen op ${selectedShift.name}`}
+                >
+                  <UserRoundPlus className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
+
+          {expanded && <PersonnelCredentialsDetails qualifications={qualifications} passes={passes} />}
 
           {selectedShift && candidate.warnings?.length > 0 && (
             <div className="mt-2 space-y-1 border-t border-border/70 pt-1.5">
@@ -152,6 +169,8 @@ export default function PlanningEmployeePanel({
   onAssign,
   onCloseShift,
   personnelCount,
+  qualifications,
+  securityPasses,
 }) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
@@ -231,6 +250,8 @@ export default function PlanningEmployeePanel({
                 index={index}
                 selectedShift={selectedShift}
                 onAssign={onAssign}
+                qualifications={qualifications.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}
+                passes={securityPasses.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}
               />
             )) : (
               <div className="m-2 rounded-md border border-dashed border-border bg-card p-4 text-center">

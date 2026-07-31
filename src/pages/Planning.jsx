@@ -610,6 +610,8 @@ export default function Planning() {
               onAssign={candidate => handleCandidateAssign(candidate).catch(() => undefined)}
               onCloseShift={() => setSelectedShiftId(null)}
               personnelCount={activePersonnel.length}
+              qualifications={qualifications}
+              securityPasses={securityPasses}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
