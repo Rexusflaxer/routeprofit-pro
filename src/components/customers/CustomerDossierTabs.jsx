@@ -832,7 +832,7 @@ export function ObjectsTab({
                 selectedRowKey={selectedRow}
                 onRowClick={object => {
                   onSelectRow(`object:${object.id}`);
-                  navigate(`/Objects?id=${encodeURIComponent(object.id)}`);
+                  navigate(`/Objects?id=${encodeURIComponent(object.id)}&tab=warning-addresses`);
                 }}
                 empty={objects.length === 0 ? (
                   <EmptyState

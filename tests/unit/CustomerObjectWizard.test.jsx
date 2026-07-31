@@ -61,7 +61,7 @@ describe("CustomerObjectWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
 
     expect(await screen.findByText(/Controleer het conceptobject/i)).toBeInTheDocument();
-    expect(screen.getByText(/Verdere inrichting gebeurt onder de tabs/i)).toBeInTheDocument();
+    expect(screen.getByText(/Waarschuwingsadressen en wijzigingen beheer je daarna/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Object aanmaken/i }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({

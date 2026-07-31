@@ -257,6 +257,34 @@
       "type": "string",
       "description": "Naam van het object/locatie"
     },
+    "logo_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Weergave-URL van het objectlogo"
+    },
+    "logo_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID van het objectlogo"
+    },
+    "logo_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Veilige downloadbestandsnaam van het objectlogo"
+    },
+    "logo_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Logisch ManagedFile-pad van het objectlogo"
+    },
     "address": {
       "type": "string",
       "description": "Volledig adres van het object"

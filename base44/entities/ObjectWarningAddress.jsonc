@@ -1,0 +1,189 @@
+{
+  "name": "ObjectWarningAddress",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "description": "Klant waartoe de objectgebonden waarschuwingsadresregel behoort"
+    },
+    "object_id": {
+      "type": "string",
+      "description": "Object waarvoor deze contactpersoon in de belvolgorde staat"
+    },
+    "contact_id": {
+      "type": "string",
+      "description": "Genormaliseerde CustomerContact-koppeling"
+    },
+    "contact_role_id": {
+      "type": "string",
+      "description": "Objectspecifieke CustomerContactRole met rol warning"
+    },
+    "primary_contact_point_id": {
+      "type": "string",
+      "description": "Primair telefoon- of mobiel contactpunt voor alarmering"
+    },
+    "secondary_contact_point_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optioneel tweede telefoon- of mobiel contactpunt"
+    },
+    "relationship_type": {
+      "type": "string",
+      "enum": [
+        "keyholder",
+        "object_manager",
+        "facility_manager",
+        "owner_director",
+        "alarm_contact",
+        "emergency_service",
+        "other"
+      ],
+      "description": "Operationele relatie van de contactpersoon tot het object"
+    },
+    "relationship_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vrije omschrijving wanneer relationship_type other is"
+    },
+    "call_order": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Expliciete belvolgorde binnen het object"
+    },
+    "availability_mode": {
+      "type": "string",
+      "enum": [
+        "always",
+        "not_call_periods"
+      ],
+      "default": "always"
+    },
+    "not_call_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat",
+                "sun"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+          }
+        },
+        "required": [
+          "days",
+          "start_time",
+          "end_time"
+        ],
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Genormaliseerde niet-bellenperiodes; eindtijd mag op de volgende dag liggen"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": ["string", "null"],
+      "description": "Hash van de laatste gecontroleerde update voor crashherstel"
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "contact_id",
+    "contact_role_id",
+    "primary_contact_point_id",
+    "relationship_type",
+    "call_order",
+    "availability_mode",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": false
+  }
+}

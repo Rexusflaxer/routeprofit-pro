@@ -74,9 +74,11 @@ describe("objectnavigatie", () => {
     fireEvent.click(await screen.findByText("Hoofdkantoor"));
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(
-      "/Objects?id=object%2F1&tab=overview",
+      "/Objects?id=object%2F1&tab=warning-addresses",
     ));
-    expect(await screen.findByText("Object gereedmaken")).toBeInTheDocument();
+    expect(await screen.findAllByRole("tab", { name: "Waarschuwingsadressen" })).toHaveLength(2);
+    expect(screen.getAllByRole("tab", { name: "Logboek" })).toHaveLength(2);
+    expect(screen.getByText("OBJ-001")).toBeInTheDocument();
   });
 
   it("laadt een directe deeplink los van de eerste objecttabelpagina en zonder afgeschermde velden", async () => {
@@ -85,7 +87,7 @@ describe("objectnavigatie", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/Objects?id=object-51&tab=overview"]}>
+        <MemoryRouter initialEntries={["/Objects?id=object-51&tab=warning-addresses"]}>
           <Routes>
             <Route path="/Objects" element={<><Objects /><LocationProbe /></>} />
           </Routes>
@@ -100,6 +102,7 @@ describe("objectnavigatie", () => {
     expect(fields).not.toContain("alarm_instruction");
     expect(fields).not.toContain("key_instruction");
     expect(fields).not.toContain("access_instruction");
+    expect(fields).toEqual(expect.arrayContaining(["logo_file_url", "logo_file_id"]));
   });
 
   it("zoekt hoofdletterongevoelig met alleen de gedocumenteerde regex-operator", async () => {

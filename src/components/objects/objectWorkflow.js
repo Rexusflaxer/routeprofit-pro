@@ -31,6 +31,10 @@ const IDENTITY_FIELDS = new Set([
   "geocoding_status",
   "bag_address_id",
   "region",
+  "logo_file_url",
+  "logo_file_id",
+  "logo_download_filename",
+  "logo_logical_path",
 ]);
 
 const OPERATIONS_FIELDS = new Set([
@@ -133,6 +137,22 @@ function identityData(form) {
     if (data.geocoding_status !== "unverified" && (!hasLatitude || data.latitude === null)) {
       throw new Error("Een geverifieerde of handmatige locatie vereist coördinaten.");
     }
+  }
+  const logoFieldLimits = {
+    logo_file_url: 4096,
+    logo_file_id: 240,
+    logo_download_filename: 255,
+    logo_logical_path: 2048,
+  };
+  for (const [field, maximumLength] of Object.entries(logoFieldLimits)) {
+    if (!Object.hasOwn(data, field)) continue;
+    if (data[field] === null || data[field] === undefined || data[field] === "") {
+      data[field] = null;
+      continue;
+    }
+    if (typeof data[field] !== "string") throw new Error(`${field} moet tekst zijn.`);
+    data[field] = data[field].trim();
+    if (data[field].length > maximumLength) throw new Error(`${field} is te lang.`);
   }
   return data;
 }

@@ -132,7 +132,7 @@ describe("ObjectsTab", () => {
 
     fireEvent.click(within(table).getByText("Hoofdkantoor"));
 
-    expect(navigate).toHaveBeenCalledWith("/Objects?id=object%2F1");
+    expect(navigate).toHaveBeenCalledWith("/Objects?id=object%2F1&tab=warning-addresses");
   });
 
   it("biedt vanuit de lege tabel direct de basiswizard aan", async () => {

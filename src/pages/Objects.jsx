@@ -23,6 +23,10 @@ const OBJECT_LIST_FIELDS = [
   "postal_code",
   "city",
   "region",
+  "logo_file_url",
+  "logo_file_id",
+  "logo_download_filename",
+  "logo_logical_path",
   "is_active_customer_object",
   "updated_date",
 ];
@@ -146,7 +150,7 @@ export default function Objects() {
   const selectObject = object => {
     const next = new URLSearchParams(searchParams);
     next.set("id", object.id);
-    next.set("tab", "overview");
+    next.set("tab", "warning-addresses");
     next.delete("row");
     next.delete("view");
     next.delete("query");

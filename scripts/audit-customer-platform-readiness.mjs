@@ -17,6 +17,7 @@ const REQUIRED_ENTITIES = [
   "CustomerContactRole",
   "CustomerRequest",
   "CustomerEvent",
+  "ObjectWarningAddress",
   "CustomerQuote",
   "CustomerQuoteLine",
   "CustomerContract",
@@ -136,12 +137,14 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 96, "De verwachte 96 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 97, "De verwachte 97 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
   for (const permission of ["create", "read", "update", "delete"]) {
-    const expectedRule = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission)
+    const immutableEvent = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission);
+    const retainedWarningAddress = file === "ObjectWarningAddress.jsonc" && permission === "delete";
+    const expectedRule = immutableEvent || retainedWarningAddress
       ? false
       : adminOnlyRule;
     assert.deepEqual(
@@ -213,6 +216,10 @@ for (const field of [
   "archived_at",
   "archived_by_user_id",
   "archive_reason",
+  "logo_file_url",
+  "logo_file_id",
+  "logo_download_filename",
+  "logo_logical_path",
   "creation_request_fingerprint",
   "creation_actor_user_id",
   "creation_mutation_target",
@@ -226,6 +233,25 @@ for (const field of [
 const customerEventSchema = schema("CustomerEvent");
 assert.equal(customerEventSchema.rls?.update, false, "CustomerEvent moet append-only zijn: update geblokkeerd");
 assert.equal(customerEventSchema.rls?.delete, false, "CustomerEvent moet append-only zijn: delete geblokkeerd");
+const warningAddressSchema = schema("ObjectWarningAddress");
+assert.equal(warningAddressSchema.rls?.delete, false, "Waarschuwingsadressen mogen niet hard worden verwijderd");
+for (const field of [
+  "customer_id",
+  "object_id",
+  "contact_id",
+  "primary_contact_point_id",
+  "relationship_type",
+  "call_order",
+  "availability_mode",
+  "status",
+  "customer_platform_last_mutation_key_hash",
+  "customer_platform_last_mutation_recovery",
+  "customer_platform_mutation_key_hashes",
+  "customer_platform_mutation_recoveries",
+  "version",
+]) {
+  property("ObjectWarningAddress", field);
+}
 for (const entity of ["CustomerQuote", "CustomerContract"]) {
   property(entity, "signature_lock_key");
   property(entity, "signature_lock_started_at");
@@ -315,6 +341,10 @@ for (const action of [
   "update_customer_object_identity",
   "update_customer_object_operations",
   "set_customer_object_status",
+  "list_object_warning_addresses",
+  "create_object_warning_address",
+  "update_object_warning_address",
+  "list_object_logbook",
   "list_commercial",
   "list_billing",
   "create_quote",
@@ -329,6 +359,21 @@ assert.match(
   customerPlatformApi,
   /safeObjectMutationSummary/,
   "Objectmutaties moeten een gesanitiseerde auditsamenvatting gebruiken",
+);
+assert.match(
+  customerPlatformApi,
+  /handleListObjectLogbook/,
+  "De objectkaart moet een afzonderlijk objectbreed logboek aanbieden",
+);
+assert.match(
+  customerPlatformApi,
+  /actor_name:\s*actorName/,
+  "Objectmutaties moeten de uitvoerende gebruiker leesbaar vastleggen",
+);
+assert.match(
+  customerPlatformApi,
+  /LOGBOOK_VALUE_FIELDS/,
+  "Logboekwaarden moeten via een expliciete allowlist worden gesanitiseerd",
 );
 assert.doesNotMatch(
   customerPlatformApi,
@@ -354,6 +399,8 @@ for (const recoveryContract of [
   "creation_request_fingerprint",
   "customer_platform_last_mutation_recovery",
   "customer_platform_mutation_recoveries",
+  "warningAddressMutationMarkerReplay",
+  "WARNING_ADDRESS_RECOVERY_LIMIT",
 ]) {
   assert.ok(customerPlatformApi.includes(recoveryContract), `Object-idempotency mist ${recoveryContract}`);
 }

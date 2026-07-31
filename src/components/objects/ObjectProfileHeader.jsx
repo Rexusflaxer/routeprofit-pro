@@ -1,110 +1,122 @@
 import React from "react";
-import {
-  Building2,
-  Edit3,
-  Layers3,
-  MapPin,
-  Navigation,
-  Route,
-  TriangleAlert,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Check, Edit, Loader2, Upload, X } from "lucide-react";
+import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { OBJECT_TYPE_OPTIONS, objectTypeLabel } from "@/components/customers/customerObjectConfig";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  GEOCODING_CLASSES,
-  GEOCODING_LABELS,
-  OBJECT_STATUS_CLASSES,
-  OBJECT_STATUS_LABELS,
-  getObjectStatus,
-  getObjectTypeLabel,
-  objectAddress,
-} from "./objectDossierConfig";
-
-function InlineMeta({ icon: Icon, children, onClick = null }) {
-  const className = "flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground";
-  if (onClick) {
-    return (
-      <button type="button" onClick={onClick} className={`${className} text-left hover:text-foreground hover:underline`}>
-        <Icon className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{children}</span>
-      </button>
-    );
-  }
-  return (
-    <div className={className}>
-      <Icon className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">{children}</span>
-    </div>
-  );
-}
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function ObjectProfileHeader({
   object,
-  customer,
-  collectives = [],
-  taskCount = 0,
-  readinessOpenCount = 0,
-  onEdit,
-  onOpenCustomer,
+  editing,
+  form,
+  onChange,
+  onAddressQueryChange,
+  onAddressSelect,
+  onUploadLogo,
+  onStartEdit,
+  onCancel,
+  onSave,
+  saving = false,
+  uploadingLogo = false,
+  error = null,
 }) {
-  const status = getObjectStatus(object);
-  const geocodingStatus = object.geocoding_status || "unverified";
-  const customerName = customer?.trade_name || customer?.name || customer?.legal_name || "Geen klant gekoppeld";
+  const data = editing ? form : object;
+  const disabled = saving || uploadingLogo;
+  const addressValue = {
+    address: data?.address || "",
+    formatted_address: data?.address || "",
+    street_name: data?.street_name || "",
+    house_number: data?.house_number || "",
+    house_number_addition: data?.house_number_addition || "",
+    postal_code: data?.postal_code || "",
+    city: data?.city || "",
+    country_name: data?.country_name || "Nederland",
+  };
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      {status === "archived" && (
-        <div className="flex items-start gap-3 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>Dit object is gearchiveerd. Historie blijft beschikbaar; controleer eventuele toekomstige planning voordat het dossier gesloten blijft.</p>
+      <div className="flex flex-col gap-5 border-b border-border bg-muted/40 px-5 py-5 sm:px-6 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 items-start gap-5">
+          <div className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
+            {data?.logo_file_url ? (
+              <img src={data.logo_file_url} alt={`Logo van ${data.name || "object"}`} className="h-full w-full object-contain p-1" />
+            ) : (
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">Logo</span>
+            )}
+            {editing && (
+              <label className={`absolute inset-0 flex cursor-pointer items-center justify-center rounded-xl bg-black/45 ${uploadingLogo ? "cursor-wait" : ""}`}>
+                <input type="file" accept="image/*" className="hidden" disabled={disabled} onChange={event => event.target.files?.[0] && onUploadLogo(event.target.files[0])} />
+                {uploadingLogo ? <Loader2 className="h-5 w-5 animate-spin text-white" /> : <Upload className="h-5 w-5 text-white" />}
+                <span className="sr-only">Objectlogo uploaden</span>
+              </label>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {editing ? (
+              <div className="grid max-w-3xl gap-4 md:grid-cols-2">
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label htmlFor="object-profile-name" className="text-xs text-muted-foreground">Objectnaam</Label>
+                  <Input id="object-profile-name" value={data.name || ""} onChange={event => onChange("name", event.target.value)} className="h-9 text-lg font-bold" maxLength={160} autoFocus />
+                  <p className="font-mono text-lg font-semibold tracking-wider text-foreground">{object.object_code || "Code wordt toegekend"}</p>
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label htmlFor="object-profile-address" className="text-xs text-muted-foreground">Adres</Label>
+                  <AddressAutocomplete
+                    id="object-profile-address"
+                    value={addressValue}
+                    onQueryChange={onAddressQueryChange}
+                    onAddressSelect={onAddressSelect}
+                    placeholder="Zoek straat, huisnummer en plaats"
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Objecttype</Label>
+                  <Select value={data.object_type || ""} onValueChange={value => onChange("object_type", value)}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Kies een objecttype" /></SelectTrigger>
+                    <SelectContent>{OBJECT_TYPE_OPTIONS.map(option => <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <h1 className="truncate text-xl font-bold text-foreground">{object.name || "Naamloos object"}</h1>
+                <p className="mt-1 font-mono text-lg font-semibold tracking-wider text-foreground">{object.object_code || "Code wordt toegekend"}</p>
+                <p className="mt-3 truncate text-sm text-muted-foreground">{object.address || "Geen adres vastgelegd"}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{objectTypeLabel(object.object_type)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          {editing ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={disabled}><X className="h-4 w-4" /> Annuleren</Button>
+              <Button type="button" size="sm" onClick={onSave} disabled={disabled || !data.name?.trim() || !data.address?.trim() || !data.object_type}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {saving ? "Opslaan..." : "Opslaan"}
+              </Button>
+            </>
+          ) : (
+            <Button type="button" variant="outline" onClick={onStartEdit} disabled={object.status === "archived"}><Edit className="h-4 w-4" /> Wijzigen</Button>
+          )}
+        </div>
+      </div>
+      {editing && error && (
+        <div className="border-t border-border px-5 py-3 sm:px-6">
+          <Alert variant="destructive">
+            <AlertDescription>
+              {error.message || "De objectgegevens konden niet worden opgeslagen."}
+              {error.requestId && <span className="mt-1 block text-[11px]">Referentie: {error.requestId}</span>}
+            </AlertDescription>
+          </Alert>
         </div>
       )}
-      <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start">
-        <div className="flex min-w-0 flex-1 items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/40 text-foreground">
-            <MapPin className="h-6 w-6" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-bold text-foreground">{object.name || "Naamloos object"}</h1>
-              <Badge variant="outline" className="text-[11px]">{getObjectTypeLabel(object.object_type)}</Badge>
-              <Badge variant="outline" className={`text-[11px] ${OBJECT_STATUS_CLASSES[status] || ""}`}>
-                {OBJECT_STATUS_LABELS[status] || status}
-              </Badge>
-              {readinessOpenCount > 0 && (
-                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[11px] text-amber-700">
-                  {readinessOpenCount} aandachtspunt{readinessOpenCount === 1 ? "" : "en"}
-                </Badge>
-              )}
-            </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{objectAddress(object)}</p>
-            <div className="mt-3 grid max-w-4xl gap-x-5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
-              <InlineMeta icon={Building2} onClick={customer?.id ? onOpenCustomer : undefined}>{customerName}</InlineMeta>
-              <InlineMeta icon={Layers3}>{collectives.length ? collectives.map(item => item.name).join(", ") : "Geen collectief"}</InlineMeta>
-              <InlineMeta icon={Route}>{taskCount} operationele taak{taskCount === 1 ? "" : "en"}</InlineMeta>
-              <InlineMeta icon={Navigation}>{object.region || "Geen regio vastgelegd"}</InlineMeta>
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-          <Button size="sm" variant="outline" onClick={onEdit} disabled={status === "archived"}>
-            <Edit3 className="h-4 w-4" /> Gegevens wijzigen
-          </Button>
-        </div>
-      </div>
-      <div className="grid gap-px border-t border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          ["Objectcode", object.object_code || "Niet toegekend"],
-          ["Locatiestatus", GEOCODING_LABELS[geocodingStatus] || geocodingStatus, GEOCODING_CLASSES[geocodingStatus]],
-          ["Mobiele kaart", object.show_on_mobile_map ? "Zichtbaar" : "Niet zichtbaar"],
-          ["Dossierversie", `Versie ${Number(object.version || 1)}`],
-        ].map(([label, value, tone]) => (
-          <div key={label} className="bg-card px-5 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-            <p className={`mt-1 truncate text-sm font-medium ${tone ? `inline-flex rounded border px-1.5 py-0.5 text-xs ${tone}` : "text-foreground"}`}>{value}</p>
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

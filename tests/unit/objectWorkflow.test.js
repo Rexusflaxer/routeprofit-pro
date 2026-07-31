@@ -40,6 +40,10 @@ describe("objectWorkflow", () => {
         latitude: "52.3791",
         longitude: "4.9003",
         geocoding_status: "verified",
+        logo_file_url: "https://files.example/object-logo.png",
+        logo_file_id: "managed-logo-1",
+        logo_download_filename: "Object - Logo.png",
+        logo_logical_path: "objects/object-1/branding/logo/Object - Logo.png",
         status: "archived",
       },
     })).resolves.toMatchObject({ ok: true });
@@ -59,6 +63,10 @@ describe("objectWorkflow", () => {
         latitude: 52.3791,
         longitude: 4.9003,
         geocoding_status: "verified",
+        logo_file_url: "https://files.example/object-logo.png",
+        logo_file_id: "managed-logo-1",
+        logo_download_filename: "Object - Logo.png",
+        logo_logical_path: "objects/object-1/branding/logo/Object - Logo.png",
       },
     });
   });

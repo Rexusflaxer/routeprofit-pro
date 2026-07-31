@@ -80,6 +80,8 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 
 const READ_ACTIONS = new Set([
   'get_customer_overview',
+  'list_object_warning_addresses',
+  'list_object_logbook',
   'list_commercial',
   'list_billing',
   'validate_contract_rates',
@@ -94,6 +96,8 @@ const MUTATION_ACTIONS = new Set([
   'update_customer_object_identity',
   'update_customer_object_operations',
   'set_customer_object_status',
+  'create_object_warning_address',
+  'update_object_warning_address',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -274,10 +278,15 @@ const CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS = new Set([
   'set_customer_object_status',
 ]);
 const CUSTOMER_OBJECT_RECOVERY_LIMIT = 50;
+const WARNING_ADDRESS_RECOVERY_LIMIT = 50;
 const CUSTOMER_OBJECT_CREATE_RESERVATION_TTL_MS = 30 * 60 * 1000;
 const OBJECT_IDENTITY_PATCH_FIELDS = [
   'name',
   'object_type',
+  'logo_file_url',
+  'logo_file_id',
+  'logo_download_filename',
+  'logo_logical_path',
   'address',
   'street_name',
   'house_number',
@@ -292,6 +301,19 @@ const OBJECT_IDENTITY_PATCH_FIELDS = [
   'bag_address_id',
   'region',
 ];
+const WARNING_RELATIONSHIP_TYPES = new Set([
+  'keyholder',
+  'object_manager',
+  'facility_manager',
+  'owner_director',
+  'alarm_contact',
+  'emergency_service',
+  'other',
+]);
+const WARNING_AVAILABILITY_MODES = new Set(['always', 'not_call_periods']);
+const WARNING_STATUSES = new Set(['active', 'inactive']);
+const WARNING_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const WARNING_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const OBJECT_OPERATIONS_PATCH_FIELDS = [
   'parking_instruction',
   'entry_instruction',
@@ -706,6 +728,7 @@ function mutationTarget(action: string, body: LooseRecord) {
   const targetFields = [
     'customer_id',
     'object_id',
+    'warning_address_id',
     'customer_account_id',
     'request_id',
     'quote_id',
@@ -905,6 +928,76 @@ async function customerObjectMutationMarkerReplay(
   return recovery.result as LooseRecord;
 }
 
+async function warningAddressMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (action !== 'update_object_warning_address') return null;
+  const keyHash = await sha256(idempotencyKey);
+  const matches = await getEntity(base44, 'ObjectWarningAddress').filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (matches.length > 1) {
+    throw new ApiError(409, 'Waarschuwingsadresherstel is niet eenduidig; handmatige reconciliatie vereist');
+  }
+  if (!matches.length) return null;
+  const warningAddress = matches[0];
+  const recoveries = warningAddress.customer_platform_mutation_recoveries;
+  const loggedRecovery = recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries)
+    ? recoveries[keyHash]
+    : null;
+  const recovery = loggedRecovery || (
+    warningAddress.customer_platform_last_mutation_key_hash === keyHash
+      ? warningAddress.customer_platform_last_mutation_recovery
+      : null
+  );
+  if (!recovery) return null;
+  if (
+    warningAddress.id !== requireString(body, 'warning_address_id') ||
+    warningAddress.customer_id !== requireString(body, 'customer_id') ||
+    warningAddress.object_id !== requireString(body, 'object_id') ||
+    recovery.action !== action ||
+    recovery.actor_id !== user.id ||
+    recovery.request_fingerprint !== requestFingerprint ||
+    recovery.mutation_target !== target ||
+    !recovery.result ||
+    typeof recovery.result !== 'object' ||
+    Array.isArray(recovery.result)
+  ) rejectIdempotencyReuse();
+  await requireCustomerObjectScope(base44, body);
+  return recovery.result as LooseRecord;
+}
+
+const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
+  create_customer_object: 'Object toegevoegd',
+  update_customer_object_identity: 'Objectgegevens gewijzigd',
+  update_customer_object_operations: 'Operationele objectgegevens gewijzigd',
+  set_customer_object_status: 'Objectstatus gewijzigd',
+  create_object_warning_address: 'Waarschuwingsadres toegevoegd',
+  update_object_warning_address: 'Waarschuwingsadres gewijzigd',
+  create_customer_contact: 'Contactpersoon toegevoegd',
+  update_customer_contact: 'Contactpersoon gewijzigd',
+  archive_customer_contact: 'Contactpersoon gearchiveerd',
+  create_contact_point: 'Contactkanaal toegevoegd',
+  update_contact_point: 'Contactkanaal gewijzigd',
+  archive_contact_point: 'Contactkanaal gearchiveerd',
+  create_contact_role: 'Contactbevoegdheid toegevoegd',
+  update_contact_role: 'Contactbevoegdheid gewijzigd',
+  archive_contact_role: 'Contactbevoegdheid gearchiveerd',
+};
+
+function mutationActionSummary(action: string) {
+  return MUTATION_ACTION_SUMMARIES[action] || action.replaceAll('_', ' ');
+}
+
 async function appendEvent(base44: LooseRecord, input: LooseRecord) {
   const customerId = asString(input.customer_id);
   if (!customerId) return null;
@@ -922,6 +1015,10 @@ async function appendEvent(base44: LooseRecord, input: LooseRecord) {
     action: input.action,
     actor_type: input.actor_type || 'user',
     actor_id: input.actor_id || null,
+    actor_name: input.actor_name || null,
+    actor_user_id: input.actor_user_id || (input.actor_type === 'user' ? input.actor_id || null : null),
+    outcome: input.outcome || null,
+    summary: input.summary || null,
     source: input.source || 'customerPlatformApi',
     resource_type: input.resource_type || null,
     resource_id: input.resource_id || null,
@@ -940,6 +1037,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.contact ||
     result.contact_point ||
     result.contact_role ||
+    result.warning_address ||
     result.object ||
     result.request ||
     result.quote ||
@@ -976,11 +1074,16 @@ async function recordMutationResult(
 ) {
   const context = eventContext(result, body);
   if (!context.customer_id) return;
+  const actorName = asString(user.full_name || user.display_name || user.name || user.email) || 'Backofficegebruiker';
   await appendEvent(base44, {
     ...context,
     event_type: action.replaceAll('_', '.'),
     action,
     actor_id: user.id,
+    actor_user_id: user.id,
+    actor_name: actorName,
+    outcome: result.outcome || 'success',
+    summary: result.summary || mutationActionSummary(action),
     idempotency_key: idempotencyKey,
     payload: {
       action,
@@ -2395,6 +2498,50 @@ function objectLifecycleStatus(object: LooseRecord) {
   return 'active';
 }
 
+const OBJECT_TYPE_LOG_LABELS: Record<string, string> = {
+  office: 'Kantoor',
+  retail_hospitality: 'Winkel of horeca',
+  industrial_logistics: 'Industrie of logistiek',
+  construction_site: 'Bouwplaats',
+  healthcare_education: 'Zorg of onderwijs',
+  residential: 'Wonen',
+  event_temporary: 'Evenement of tijdelijk object',
+  parking: 'Parkeerlocatie',
+  other: 'Anders',
+};
+
+function objectIdentityChanges(before: LooseRecord, after: LooseRecord, changedFields: string[]) {
+  const fields = new Set(changedFields);
+  const changes: LooseRecord[] = [];
+  if (fields.has('name') && asString(before.name) !== asString(after.name)) {
+    changes.push({ field: 'name', label: 'Objectnaam', before: asString(before.name) || null, after: asString(after.name) || null });
+  }
+  if (
+    ['address', 'street_name', 'house_number', 'house_number_addition', 'postal_code', 'city', 'country_code', 'country_name']
+      .some(field => fields.has(field)) &&
+    asString(before.address) !== asString(after.address)
+  ) {
+    changes.push({ field: 'address', label: 'Adres', before: asString(before.address) || null, after: asString(after.address) || null });
+  }
+  if (fields.has('object_type') && asString(before.object_type) !== asString(after.object_type)) {
+    changes.push({
+      field: 'object_type',
+      label: 'Objecttype',
+      before: OBJECT_TYPE_LOG_LABELS[asString(before.object_type)] || asString(before.object_type) || null,
+      after: OBJECT_TYPE_LOG_LABELS[asString(after.object_type)] || asString(after.object_type) || null,
+    });
+  }
+  if (['logo_file_url', 'logo_file_id', 'logo_download_filename', 'logo_logical_path'].some(field => fields.has(field))) {
+    changes.push({
+      field: 'logo',
+      label: 'Logo',
+      before: before.logo_file_id || before.logo_file_url ? 'Gewijzigd' : 'Niet ingesteld',
+      after: after.logo_file_id || after.logo_file_url ? 'Gewijzigd' : 'Niet ingesteld',
+    });
+  }
+  return changes;
+}
+
 function safeObjectMutationSummary(object: LooseRecord, changedFields: string[]) {
   const configuredInstructionCount = Number(object.configured_instruction_count);
   const effectiveChangedFields = changedFields.length
@@ -2407,7 +2554,12 @@ function safeObjectMutationSummary(object: LooseRecord, changedFields: string[])
     customer_id: object.customer_id,
     object_code: object.object_code || null,
     name: object.name,
+    address: object.address,
     object_type: object.object_type || null,
+    logo_file_url: object.logo_file_url || null,
+    logo_file_id: object.logo_file_id || null,
+    logo_download_filename: object.logo_download_filename || null,
+    logo_logical_path: object.logo_logical_path || null,
     status: objectLifecycleStatus(object),
     version: versionOf(object),
     geocoding_status: object.geocoding_status || 'unverified',
@@ -2516,6 +2668,821 @@ async function requireCustomerObjectForMutation(base44: LooseRecord, body: Loose
   return { customer, object };
 }
 
+async function requireCustomerObjectScope(base44: LooseRecord, body: LooseRecord) {
+  const customerId = requireString(body, 'customer_id');
+  const objectId = requireString(body, 'object_id');
+  const [customer, object] = await Promise.all([
+    requireRecord(base44, 'Customer', customerId, 'Klant'),
+    requireRecord(base44, 'SurveillanceObject', objectId, 'Object'),
+  ]);
+  if (object.customer_id !== customer.id) {
+    throw new ApiError(409, 'Object hoort niet bij deze klant', { object_id: object.id, customer_id: customer.id });
+  }
+  return { customer, object };
+}
+
+function warningContactDisplayName(contact: LooseRecord) {
+  return asString(contact.display_name) ||
+    [contact.first_name, contact.middle_name, contact.last_name].map(asString).filter(Boolean).join(' ') ||
+    'Onbekende contactpersoon';
+}
+
+const WARNING_RELATIONSHIP_LABELS: Record<string, string> = {
+  keyholder: 'Sleutelhouder',
+  object_manager: 'Objectbeheerder',
+  facility_manager: 'Facilitair beheerder',
+  owner_director: 'Eigenaar of directie',
+  alarm_contact: 'Alarmcontact',
+  emergency_service: 'Hulpdienst',
+  other: 'Anders',
+};
+
+function warningRelationshipDisplay(type: unknown, customLabel: unknown) {
+  return asString(customLabel) || WARNING_RELATIONSHIP_LABELS[asString(type)] || asString(type) || 'Onbekend';
+}
+
+function normalizeWarningNotCallPeriods(value: unknown, availabilityMode: string) {
+  if (availabilityMode === 'always') return [];
+  if (!Array.isArray(value)) throw new ApiError(400, 'not_call_periods moet een lijst zijn');
+  if (!value.length) throw new ApiError(400, 'Voeg minimaal één niet-bellenperiode toe');
+  if (value.length > 21) throw new ApiError(400, 'Maximaal 21 niet-bellenperiodes toegestaan');
+  return value.map((period, index) => {
+    if (!period || typeof period !== 'object' || Array.isArray(period)) {
+      throw new ApiError(400, `Niet-bellenperiode ${index + 1} is ongeldig`);
+    }
+    const daysInput = (period as LooseRecord).days;
+    if (!Array.isArray(daysInput) || !daysInput.length) {
+      throw new ApiError(400, `Kies minimaal één dag voor niet-bellenperiode ${index + 1}`);
+    }
+    const days = [...new Set(daysInput.map(asString))];
+    if (days.some(day => !WARNING_DAYS.includes(day))) {
+      throw new ApiError(400, `Niet-bellenperiode ${index + 1} bevat een ongeldige dag`);
+    }
+    const startTime = asString((period as LooseRecord).start_time);
+    const endTime = asString((period as LooseRecord).end_time);
+    if (!WARNING_TIME_PATTERN.test(startTime) || !WARNING_TIME_PATTERN.test(endTime)) {
+      throw new ApiError(400, `Gebruik HH:MM voor niet-bellenperiode ${index + 1}`);
+    }
+    if (startTime === endTime) {
+      throw new ApiError(400, `Begin- en eindtijd van niet-bellenperiode ${index + 1} moeten verschillen`);
+    }
+    return {
+      days: WARNING_DAYS.filter(day => days.includes(day)),
+      start_time: startTime,
+      end_time: endTime,
+    };
+  });
+}
+
+function safeWarningPoint(point: LooseRecord) {
+  return {
+    id: point.id,
+    point_type: point.point_type,
+    label: point.label || null,
+    value: point.value,
+    is_primary: point.is_primary === true,
+    status: point.status || 'active',
+    version: versionOf(point),
+  };
+}
+
+function safeWarningContactOption(
+  contact: LooseRecord,
+  points: LooseRecord[],
+  assignedPointIds: Set<string> = new Set<string>(),
+) {
+  return {
+    id: contact.id,
+    display_name: warningContactDisplayName(contact),
+    first_name: contact.first_name || null,
+    middle_name: contact.middle_name || null,
+    last_name: contact.last_name || null,
+    job_title: contact.job_title || null,
+    points: points
+      .filter(point => point.contact_id === contact.id && (point.status === 'active' || assignedPointIds.has(point.id)))
+      .filter(point => ['email', 'phone', 'mobile'].includes(asString(point.point_type)))
+      .sort((left, right) => Number(right.is_primary === true) - Number(left.is_primary === true))
+      .map(safeWarningPoint),
+  };
+}
+
+function safeObjectWarningAddress(
+  warningAddress: LooseRecord,
+  contact: LooseRecord | null,
+  points: LooseRecord[],
+) {
+  const contactPoints = points.filter(point => point.contact_id === warningAddress.contact_id);
+  const primaryPoint = contactPoints.find(point => point.id === warningAddress.primary_contact_point_id) || null;
+  const secondaryPoint = contactPoints.find(point => point.id === warningAddress.secondary_contact_point_id) || null;
+  const emailPoint = contactPoints.find(point => point.status === 'active' && point.point_type === 'email' && point.is_primary) ||
+    contactPoints.find(point => point.status === 'active' && point.point_type === 'email') ||
+    null;
+  return {
+    id: warningAddress.id,
+    customer_id: warningAddress.customer_id,
+    object_id: warningAddress.object_id,
+    contact_id: warningAddress.contact_id,
+    contact_role_id: warningAddress.contact_role_id,
+    primary_contact_point_id: warningAddress.primary_contact_point_id,
+    secondary_contact_point_id: warningAddress.secondary_contact_point_id || null,
+    display_name: contact ? warningContactDisplayName(contact) : 'Onbekende contactpersoon',
+    job_title: contact?.job_title || null,
+    email: emailPoint?.value || null,
+    primary_phone: primaryPoint?.value || null,
+    secondary_phone: secondaryPoint?.value || null,
+    contact_points: [primaryPoint, secondaryPoint].filter(Boolean).map(safeWarningPoint),
+    relationship_type: warningAddress.relationship_type,
+    relationship_label: warningAddress.relationship_label || null,
+    call_order: Number(warningAddress.call_order),
+    availability_mode: warningAddress.availability_mode || 'always',
+    not_call_periods: Array.isArray(warningAddress.not_call_periods) ? warningAddress.not_call_periods : [],
+    status: warningAddress.status || 'active',
+    version: versionOf(warningAddress),
+    updated_date: warningAddress.updated_date || null,
+    created_date: warningAddress.created_date || null,
+  };
+}
+
+async function warningAddressReferenceData(base44: LooseRecord, customerId: string) {
+  const [contacts, points] = await Promise.all([
+    getEntity(base44, 'CustomerContact').filter({ customer_id: customerId }, '+display_name', 500),
+    getEntity(base44, 'CustomerContactPoint').filter({ customer_id: customerId }, '-is_primary', 1000),
+  ]);
+  return {
+    contacts,
+    points,
+    contactById: new Map(contacts.map((contact: LooseRecord) => [contact.id, contact])),
+  };
+}
+
+async function safeWarningAddressByRecord(base44: LooseRecord, warningAddress: LooseRecord) {
+  const references = await warningAddressReferenceData(base44, warningAddress.customer_id);
+  return safeObjectWarningAddress(
+    warningAddress,
+    references.contactById.get(warningAddress.contact_id) || null,
+    references.points,
+  );
+}
+
+async function handleListObjectWarningAddresses(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const [warningAddresses, references] = await Promise.all([
+    getEntity(base44, 'ObjectWarningAddress').filter({
+      customer_id: customer.id,
+      object_id: object.id,
+    }, '+call_order', 500),
+    warningAddressReferenceData(base44, customer.id),
+  ]);
+  const items = warningAddresses
+    .map((warningAddress: LooseRecord) => safeObjectWarningAddress(
+      warningAddress,
+      references.contactById.get(warningAddress.contact_id) || null,
+      references.points,
+    ))
+    .sort((left: LooseRecord, right: LooseRecord) =>
+      left.call_order - right.call_order || left.display_name.localeCompare(right.display_name, 'nl'));
+  const highestCallOrder = items.reduce((highest: number, item: LooseRecord) =>
+    Math.max(highest, Number(item.call_order) || 0), 0);
+  const assignedPointIds = new Set<string>(warningAddresses.flatMap((item: LooseRecord) =>
+    [asString(item.primary_contact_point_id), asString(item.secondary_contact_point_id)].filter(Boolean)));
+  const assignedContactIds = new Set<string>(warningAddresses.map((item: LooseRecord) => asString(item.contact_id)).filter(Boolean));
+  return {
+    items,
+    contact_options: references.contacts
+      .filter((contact: LooseRecord) => contact.status === 'active' && !assignedContactIds.has(contact.id))
+      .map((contact: LooseRecord) => safeWarningContactOption(contact, references.points, assignedPointIds)),
+    next_call_order: highestCallOrder + 1,
+  };
+}
+
+const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
+  name: 'Objectnaam',
+  address: 'Adres',
+  street_name: 'Straat',
+  house_number: 'Huisnummer',
+  house_number_addition: 'Toevoeging',
+  postal_code: 'Postcode',
+  city: 'Plaats',
+  country_code: 'Landcode',
+  country_name: 'Land',
+  object_type: 'Objecttype',
+  logo_file_url: 'Logo',
+  logo_file_id: 'Logo',
+  logo_download_filename: 'Logo',
+  logo_logical_path: 'Logo',
+  status: 'Status',
+  is_active_customer_object: 'Operationele status',
+  geocoding_status: 'Adrescontrole',
+  latitude: 'Kaartpositie',
+  longitude: 'Kaartpositie',
+  region: 'Regio',
+  parking_instruction: 'Parkeerinstructie',
+  entry_instruction: 'Toegangsinstructie',
+  walking_instruction: 'Looproute',
+  object_notes: 'Objectnotitie',
+  safety_notes: 'Veiligheidsnotitie',
+  show_on_mobile_map: 'Mobiele kaart',
+  mobile_map_priority: 'Kaartprioriteit',
+  notes: 'Notitie',
+};
+
+const LOGBOOK_VALUE_FIELDS = new Set([
+  'name',
+  'address',
+  'object_type',
+  'logo',
+  'contact',
+  'relationship',
+  'primary_phone',
+  'secondary_phone',
+  'call_order',
+  'availability',
+  'status',
+]);
+
+function safeLogbookValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  if (!['string', 'number', 'boolean'].includes(typeof value)) return null;
+  return String(value).slice(0, 500);
+}
+
+function safeExplicitLogbookChanges(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const field = asString((item as LooseRecord).field);
+    const label = asString((item as LooseRecord).label);
+    if (!LOGBOOK_VALUE_FIELDS.has(field) || !label) return [];
+    return [{
+      field,
+      label: label.slice(0, 120),
+      before: safeLogbookValue((item as LooseRecord).before),
+      after: safeLogbookValue((item as LooseRecord).after),
+    }];
+  });
+}
+
+function derivedLogbookChanges(event: LooseRecord) {
+  const result = event.payload?.result;
+  const explicitValuesAreSafe =
+    event.resource_type === 'ObjectWarningAddress' ||
+    (
+      event.resource_type === 'SurveillanceObject' &&
+      event.action === 'update_customer_object_identity'
+    );
+  const explicit = explicitValuesAreSafe ? safeExplicitLogbookChanges(result?.changes) : [];
+  if (explicit.length) return explicit;
+  const changedFields = Array.isArray(result?.object?.changed_fields)
+    ? result.object.changed_fields
+    : Array.isArray(result?.changed_fields)
+      ? result.changed_fields
+      : [];
+  const seenLabels = new Set<string>();
+  return changedFields.slice(0, 50).flatMap((value: unknown) => {
+    const field = asString(value);
+    const label = LOGBOOK_CHANGED_FIELD_LABELS[field];
+    if (!label || seenLabels.has(label)) return [];
+    seenLabels.add(label);
+    return [{ field, label, before: 'Gewijzigd', after: 'Gewijzigd', value_state: 'changed' }];
+  });
+}
+
+function traceableActorName(event: LooseRecord, actorNames: Map<string, string> = new Map()) {
+  if (asString(event.actor_name)) return asString(event.actor_name).slice(0, 180);
+  if (event.actor_type === 'system') return 'LOQ systeem';
+  if (event.actor_type === 'integration') return 'Integratie';
+  const rawId = asString(event.actor_user_id || event.actor_id).replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!rawId) return event.actor_type === 'customer_portal_user' ? 'Portaalgebruiker' : 'Onbekende gebruiker';
+  if (actorNames.has(rawId)) return actorNames.get(rawId) as string;
+  const reference = rawId.length > 14 ? `${rawId.slice(0, 8)}…${rawId.slice(-4)}` : rawId;
+  return `${event.actor_type === 'customer_portal_user' ? 'Portaalgebruiker' : 'Gebruiker'} ${reference}`;
+}
+
+function safeObjectLogbookEvent(event: LooseRecord, actorNames: Map<string, string> = new Map()) {
+  const result = event.payload?.result;
+  return {
+    id: event.id,
+    occurred_at: event.occurred_at || event.created_at || event.created_date || null,
+    action: event.action || event.event_type || 'object_change',
+    summary: event.summary || result?.summary || mutationActionSummary(asString(event.action || event.event_type)),
+    actor_name: traceableActorName(event, actorNames),
+    category: event.category || 'change',
+    outcome: event.outcome || result?.outcome || 'success',
+    changes: derivedLogbookChanges(event),
+  };
+}
+
+async function handleListObjectLogbook(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const page = requireInteger(body.page ?? 1, 'page', 1);
+  const pageSize = Math.min(100, requireInteger(body.page_size ?? 25, 'page_size', 1));
+  const search = asString(body.search).slice(0, 120);
+  const warningAddresses = await getEntity(base44, 'ObjectWarningAddress').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+  }, '-updated_date', 500);
+  const objectEvents = await getEntity(base44, 'CustomerEvent').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+  }, '-occurred_at', 5000);
+  const relatedIds: Record<string, Set<string>> = {
+    ObjectWarningAddress: new Set(warningAddresses.map((item: LooseRecord) => asString(item.id)).filter(Boolean)),
+    CustomerContact: new Set(warningAddresses.map((item: LooseRecord) => asString(item.contact_id)).filter(Boolean)),
+    CustomerContactPoint: new Set(warningAddresses.flatMap((item: LooseRecord) => [
+      asString(item.primary_contact_point_id),
+      asString(item.secondary_contact_point_id),
+    ]).filter(Boolean)),
+    CustomerContactRole: new Set(warningAddresses.map((item: LooseRecord) => asString(item.contact_role_id)).filter(Boolean)),
+  };
+  objectEvents.forEach((event: LooseRecord) => {
+    const historicalWarning = event.payload?.result?.warning_address;
+    if (
+      !historicalWarning ||
+      historicalWarning.customer_id !== customer.id ||
+      historicalWarning.object_id !== object.id
+    ) return;
+    relatedIds.ObjectWarningAddress.add(asString(historicalWarning.id));
+    relatedIds.CustomerContact.add(asString(historicalWarning.contact_id));
+    relatedIds.CustomerContactRole.add(asString(historicalWarning.contact_role_id));
+    relatedIds.CustomerContactPoint.add(asString(historicalWarning.primary_contact_point_id));
+    relatedIds.CustomerContactPoint.add(asString(historicalWarning.secondary_contact_point_id));
+  });
+  Object.values(relatedIds).forEach(ids => ids.delete(''));
+  const relatedTypes = Object.entries(relatedIds).filter(([, ids]) => ids.size > 0);
+  const relatedEventBatches = await Promise.all(
+    relatedTypes.map(([resourceType]) => getEntity(base44, 'CustomerEvent').filter({
+      customer_id: customer.id,
+      resource_type: resourceType,
+    }, '-occurred_at', 5000)),
+  );
+  const eventBatches = [objectEvents, ...relatedEventBatches];
+  const totalIsCapped = eventBatches.some(batch => batch.length === 5000);
+  const merged = new Map<string, LooseRecord>();
+  eventBatches.flat().forEach((event: LooseRecord) => {
+    const belongsToObject = event.object_id === object.id;
+    const belongsToRelatedRecord = relatedIds[asString(event.resource_type)]?.has(asString(event.resource_id)) === true;
+    if ((belongsToObject || belongsToRelatedRecord) && asString(event.id)) merged.set(event.id, event);
+  });
+  const unresolvedActorIds = new Set([...merged.values()]
+    .filter((event: LooseRecord) => !asString(event.actor_name))
+    .map((event: LooseRecord) => asString(event.actor_user_id || event.actor_id))
+    .filter(Boolean));
+  const actorNames = new Map<string, string>();
+  if (unresolvedActorIds.size) {
+    const personnel = await getEntity(base44, 'Personnel').list('+name', 2000, 0, [
+      'name',
+      'linked_user_id',
+      'canonical_profile_user_id',
+    ]);
+    personnel.forEach((person: LooseRecord) => {
+      const name = asString(person.name).slice(0, 180);
+      if (!name) return;
+      [person.linked_user_id, person.canonical_profile_user_id].map(asString).filter(Boolean).forEach(userId => {
+        if (unresolvedActorIds.has(userId)) actorNames.set(userId, name);
+      });
+    });
+  }
+  const safeEvents = [...merged.values()]
+    .sort((left, right) => {
+      const leftTime = Date.parse(asString(left.occurred_at || left.created_at || left.created_date)) || 0;
+      const rightTime = Date.parse(asString(right.occurred_at || right.created_at || right.created_date)) || 0;
+      return rightTime - leftTime || asString(right.id).localeCompare(asString(left.id));
+    })
+    .map(event => safeObjectLogbookEvent(event, actorNames));
+  const normalizedSearch = search.toLocaleLowerCase('nl-NL');
+  const filtered = !normalizedSearch ? safeEvents : safeEvents.filter(event => [
+    event.summary,
+    event.action,
+    event.actor_name,
+    event.category,
+    ...event.changes.flatMap((change: LooseRecord) => [change.label, change.before, change.after]),
+  ].some(value => asString(value).toLocaleLowerCase('nl-NL').includes(normalizedSearch)));
+  const skip = (page - 1) * pageSize;
+  return {
+    items: filtered.slice(skip, skip + pageSize),
+    total: filtered.length,
+    page,
+    page_size: pageSize,
+    total_is_capped: totalIsCapped,
+  };
+}
+
+function hasExactWarningObjectScope(role: LooseRecord, objectId: string) {
+  const objectIds = Array.isArray(role.object_ids) ? role.object_ids.map(asString).filter(Boolean) : [];
+  return objectIds.length === 1 && objectIds[0] === objectId;
+}
+
+async function ensureObjectWarningContactRole(
+  base44: LooseRecord,
+  customerId: string,
+  objectId: string,
+  contactId: string,
+) {
+  const roles = await getEntity(base44, 'CustomerContactRole').filter({
+    customer_id: customerId,
+    contact_id: contactId,
+    role: 'warning',
+  }, '-updated_date', 250);
+  const activeRole = roles.find((role: LooseRecord) =>
+    role.status === 'active' && hasExactWarningObjectScope(role, objectId));
+  if (activeRole) return activeRole;
+  const inactiveRole = roles.find((role: LooseRecord) =>
+    role.status === 'inactive' && hasExactWarningObjectScope(role, objectId));
+  if (inactiveRole) {
+    return casUpdateLatest(base44, 'CustomerContactRole', inactiveRole.id, {
+      status: 'active',
+      valid_until: null,
+    });
+  }
+  return getEntity(base44, 'CustomerContactRole').create({
+    customer_id: customerId,
+    customer_account_id: null,
+    contact_id: contactId,
+    role: 'warning',
+    object_ids: [objectId],
+    is_primary: false,
+    status: 'active',
+    valid_from: null,
+    valid_until: null,
+    notes: null,
+    version: 1,
+  });
+}
+
+async function requireWarningPhonePoint(
+  base44: LooseRecord,
+  pointId: string,
+  customerId: string,
+  contactId: string,
+  label: string,
+) {
+  const point = await requireRecord(base44, 'CustomerContactPoint', pointId, label);
+  if (point.customer_id !== customerId || point.contact_id !== contactId) {
+    throw new ApiError(409, `${label} hoort niet bij de gekozen contactpersoon`);
+  }
+  if (!['phone', 'mobile'].includes(asString(point.point_type))) {
+    throw new ApiError(400, `${label} moet een telefoon- of mobiel nummer zijn`);
+  }
+  if (point.status !== 'active') throw new ApiError(409, `${label} is niet actief; kies een ander nummer`);
+  const normalizedNumber = normalizePhone(asString(point.normalized_value) || point.value);
+  if (!/^\+?\d{7,15}$/.test(normalizedNumber)) {
+    throw new ApiError(409, `${label} bevat geen belbaar telefoonnummer`);
+  }
+  return point;
+}
+
+const WARNING_MUTABLE_FIELDS = [
+  'contact_id',
+  'primary_contact_point_id',
+  'secondary_contact_point_id',
+  'relationship_type',
+  'relationship_label',
+  'call_order',
+  'availability_mode',
+  'not_call_periods',
+  'status',
+];
+
+async function normalizedWarningAddressData(
+  base44: LooseRecord,
+  customerId: string,
+  objectId: string,
+  data: LooseRecord,
+  current?: LooseRecord | null,
+) {
+  if (current && !WARNING_MUTABLE_FIELDS.some(field => Object.prototype.hasOwnProperty.call(data, field))) {
+    throw new ApiError(400, 'Geen wijzigingen voor het waarschuwingsadres opgegeven');
+  }
+  const contactId = asString(
+    Object.prototype.hasOwnProperty.call(data, 'contact_id') ? data.contact_id : current?.contact_id,
+  );
+  if (!contactId) throw new ApiError(400, 'contact_id is verplicht');
+  const contact = await requireRecord(base44, 'CustomerContact', contactId, 'Contactpersoon');
+  if (contact.customer_id !== customerId) {
+    throw new ApiError(409, 'Contactpersoon hoort bij een andere klant');
+  }
+  if (contact.status !== 'active' && current?.contact_id !== contactId) {
+    throw new ApiError(409, 'Alleen een actieve contactpersoon kan worden gekozen');
+  }
+
+  const primaryContactPointId = asString(
+    Object.prototype.hasOwnProperty.call(data, 'primary_contact_point_id')
+      ? data.primary_contact_point_id
+      : current?.primary_contact_point_id,
+  );
+  if (!primaryContactPointId) throw new ApiError(400, 'primary_contact_point_id is verplicht');
+  await requireWarningPhonePoint(
+    base44,
+    primaryContactPointId,
+    customerId,
+    contactId,
+    'Primair contactnummer',
+  );
+
+  const secondaryContactPointId = Object.prototype.hasOwnProperty.call(data, 'secondary_contact_point_id')
+    ? asString(data.secondary_contact_point_id) || null
+    : asString(current?.secondary_contact_point_id) || null;
+  if (secondaryContactPointId) {
+    if (secondaryContactPointId === primaryContactPointId) {
+      throw new ApiError(400, 'Primair en tweede contactnummer moeten verschillen');
+    }
+    await requireWarningPhonePoint(
+      base44,
+      secondaryContactPointId,
+      customerId,
+      contactId,
+      'Tweede contactnummer',
+    );
+  }
+
+  const relationshipType = asString(
+    Object.prototype.hasOwnProperty.call(data, 'relationship_type')
+      ? data.relationship_type
+      : current?.relationship_type,
+  );
+  if (!WARNING_RELATIONSHIP_TYPES.has(relationshipType)) {
+    throw new ApiError(400, 'Kies een geldige relatie tot het object');
+  }
+  const relationshipLabel = objectText(
+    Object.prototype.hasOwnProperty.call(data, 'relationship_label')
+      ? data.relationship_label
+      : current?.relationship_label,
+    'relationship_label',
+    120,
+  );
+  if (relationshipType === 'other' && !relationshipLabel) {
+    throw new ApiError(400, 'Omschrijf de andere relatie tot het object');
+  }
+
+  const callOrder = requireInteger(
+    Object.prototype.hasOwnProperty.call(data, 'call_order') ? data.call_order : current?.call_order,
+    'call_order',
+    1,
+  );
+  if (callOrder > 9_999) throw new ApiError(400, 'call_order mag maximaal 9999 zijn');
+  const availabilityMode = asString(
+    Object.prototype.hasOwnProperty.call(data, 'availability_mode')
+      ? data.availability_mode
+      : current?.availability_mode || 'always',
+  );
+  if (!WARNING_AVAILABILITY_MODES.has(availabilityMode)) {
+    throw new ApiError(400, 'Kies een geldige bereikbaarheid');
+  }
+  const notCallPeriods = normalizeWarningNotCallPeriods(
+    Object.prototype.hasOwnProperty.call(data, 'not_call_periods')
+      ? data.not_call_periods
+      : current?.not_call_periods || [],
+    availabilityMode,
+  );
+  const status = asString(
+    Object.prototype.hasOwnProperty.call(data, 'status') ? data.status : current?.status || 'active',
+  );
+  if (!WARNING_STATUSES.has(status)) throw new ApiError(400, 'Kies een geldige status');
+
+  const objectAssignments = await getEntity(base44, 'ObjectWarningAddress').filter({
+    customer_id: customerId,
+    object_id: objectId,
+  }, '+call_order', 500);
+  const otherAssignments = objectAssignments.filter((item: LooseRecord) => item.id !== current?.id);
+  const duplicateContact = otherAssignments.find((item: LooseRecord) => item.contact_id === contactId);
+  if (duplicateContact) {
+    throw new ApiError(409, 'Deze contactpersoon staat al bij de waarschuwingsadressen van dit object', {
+      warning_address_id: duplicateContact.id,
+    });
+  }
+  const duplicateOrder = otherAssignments.find((item: LooseRecord) => Number(item.call_order) === callOrder);
+  if (duplicateOrder) {
+    throw new ApiError(409, `Belvolgorde ${callOrder} is al in gebruik`, {
+      warning_address_id: duplicateOrder.id,
+    });
+  }
+
+  const contactRole = await ensureObjectWarningContactRole(base44, customerId, objectId, contactId);
+  return {
+    contact,
+    patch: {
+      contact_id: contactId,
+      contact_role_id: contactRole.id,
+      primary_contact_point_id: primaryContactPointId,
+      secondary_contact_point_id: secondaryContactPointId,
+      relationship_type: relationshipType,
+      relationship_label: relationshipLabel,
+      call_order: callOrder,
+      availability_mode: availabilityMode,
+      not_call_periods: notCallPeriods,
+      status,
+    },
+  };
+}
+
+const WARNING_DAY_LOG_LABELS: Record<string, string> = {
+  mon: 'ma',
+  tue: 'di',
+  wed: 'wo',
+  thu: 'do',
+  fri: 'vr',
+  sat: 'za',
+  sun: 'zo',
+};
+
+function warningAvailabilityDisplay(warningAddress: LooseRecord) {
+  if (warningAddress.availability_mode !== 'not_call_periods') return 'Altijd bereikbaar';
+  const periods = Array.isArray(warningAddress.not_call_periods) ? warningAddress.not_call_periods : [];
+  return periods.map((period: LooseRecord) => {
+    const days = Array.isArray(period.days)
+      ? period.days.map((day: string) => WARNING_DAY_LOG_LABELS[day] || day).join(', ')
+      : '';
+    return `${days} ${asString(period.start_time)}–${asString(period.end_time)}`.trim();
+  }).filter(Boolean).join('; ') || 'Niet-bellenperiodes ingesteld';
+}
+
+function warningStatusDisplay(value: unknown) {
+  return asString(value) === 'inactive' ? 'Inactief' : 'Actief';
+}
+
+function warningAddressChanges(before: LooseRecord | null, after: LooseRecord) {
+  const descriptors = [
+    { field: 'contact', label: 'Contactpersoon', value: (item: LooseRecord) => item.display_name || null },
+    {
+      field: 'relationship',
+      label: 'Relatie tot object',
+      value: (item: LooseRecord) => warningRelationshipDisplay(item.relationship_type, item.relationship_label),
+    },
+    { field: 'primary_phone', label: 'Primair telefoonnummer', value: (item: LooseRecord) => item.primary_phone || null },
+    { field: 'secondary_phone', label: 'Tweede telefoonnummer', value: (item: LooseRecord) => item.secondary_phone || null },
+    { field: 'call_order', label: 'Belvolgorde', value: (item: LooseRecord) => String(item.call_order) },
+    { field: 'availability', label: 'Bereikbaarheid', value: warningAvailabilityDisplay },
+    { field: 'status', label: 'Status', value: (item: LooseRecord) => warningStatusDisplay(item.status) },
+  ];
+  return descriptors.flatMap(descriptor => {
+    const beforeValue = before ? descriptor.value(before) : null;
+    const afterValue = descriptor.value(after);
+    if (before && beforeValue === afterValue) return [];
+    return [{
+      field: descriptor.field,
+      label: descriptor.label,
+      before: beforeValue,
+      after: afterValue,
+    }];
+  });
+}
+
+function warningAddressMutationResult(
+  warningAddress: LooseRecord,
+  before: LooseRecord | null,
+  replayed = false,
+) {
+  const changes = warningAddressChanges(before, warningAddress);
+  const displayName = warningAddress.display_name || 'contactpersoon';
+  return {
+    warning_address: warningAddress,
+    warning_address_id: warningAddress.id,
+    customer_id: warningAddress.customer_id,
+    object_id: warningAddress.object_id,
+    changes,
+    summary: before
+      ? `Waarschuwingsadres van ${displayName} gewijzigd`
+      : `Waarschuwingsadres van ${displayName} toegevoegd`,
+    outcome: 'success',
+    replayed,
+    resource_type: 'ObjectWarningAddress',
+    resource_id: warningAddress.id,
+    category: 'operations',
+  };
+}
+
+async function existingWarningAddressCreation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  customerId: string,
+  objectId: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const matches = await getEntity(base44, 'ObjectWarningAddress').filter({
+    creation_idempotency_key: idempotencyKey,
+  }, '-created_date', 2);
+  if (matches.length > 1) {
+    throw new ApiError(409, 'Meerdere waarschuwingsadressen delen dezelfde idempotency_key; handmatige controle vereist');
+  }
+  if (!matches.length) return null;
+  const warningAddress = matches[0];
+  if (
+    warningAddress.customer_id !== customerId ||
+    warningAddress.object_id !== objectId ||
+    warningAddress.creation_actor_user_id !== user.id ||
+    warningAddress.creation_request_fingerprint !== requestFingerprint ||
+    warningAddress.creation_mutation_target !== target
+  ) {
+    rejectIdempotencyReuse();
+  }
+  const safeWarningAddress = await safeWarningAddressByRecord(base44, warningAddress);
+  return warningAddressMutationResult(safeWarningAddress, null, true);
+}
+
+async function handleObjectWarningAddress(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+  mode: 'create' | 'update',
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') {
+    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  }
+  const data = requireObject(body);
+  if (mode === 'create') {
+    if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw waarschuwingsadres verwacht expected_version 0');
+    const replay = await existingWarningAddressCreation(
+      base44,
+      user,
+      customer.id,
+      object.id,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    );
+    if (replay) return replay;
+    const normalized = await normalizedWarningAddressData(base44, customer.id, object.id, data);
+    const warningAddress = await getEntity(base44, 'ObjectWarningAddress').create({
+      customer_id: customer.id,
+      object_id: object.id,
+      ...normalized.patch,
+      creation_idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint,
+      creation_actor_user_id: user.id,
+      creation_mutation_target: target,
+      version: 1,
+    });
+    const safeWarningAddress = await safeWarningAddressByRecord(base44, warningAddress);
+    return warningAddressMutationResult(safeWarningAddress, null);
+  }
+
+  const warningAddress = await requireRecord(
+    base44,
+    'ObjectWarningAddress',
+    requireString(body, 'warning_address_id'),
+    'Waarschuwingsadres',
+  );
+  if (warningAddress.customer_id !== customer.id || warningAddress.object_id !== object.id) {
+    throw new ApiError(409, 'Waarschuwingsadres hoort niet bij dit object');
+  }
+  const before = await safeWarningAddressByRecord(base44, warningAddress);
+  const normalized = await normalizedWarningAddressData(
+    base44,
+    customer.id,
+    object.id,
+    data,
+    warningAddress,
+  );
+  const meaningfulChange = Object.entries(normalized.patch).some(([field, value]) =>
+    JSON.stringify(canonicalMutationValue(warningAddress[field])) !== JSON.stringify(canonicalMutationValue(value)));
+  if (!meaningfulChange) throw new ApiError(400, 'Er zijn geen gewijzigde gegevens om op te slaan');
+  const projected = { ...warningAddress, ...normalized.patch, version: expectedVersion + 1 };
+  const references = await warningAddressReferenceData(base44, customer.id);
+  const safeProjected = safeObjectWarningAddress(
+    projected,
+    references.contactById.get(projected.contact_id) || null,
+    references.points,
+  );
+  const recoveryResult = warningAddressMutationResult(safeProjected, before);
+  const keyHash = await sha256(idempotencyKey);
+  const priorRecoveries = warningAddress.customer_platform_mutation_recoveries;
+  const recoveryLog = priorRecoveries && typeof priorRecoveries === 'object' && !Array.isArray(priorRecoveries)
+    ? priorRecoveries
+    : {};
+  const priorHashes = Array.isArray(warningAddress.customer_platform_mutation_key_hashes)
+    ? warningAddress.customer_platform_mutation_key_hashes.filter((value: unknown) => typeof value === 'string')
+    : [];
+  const recovery = {
+    action: 'update_object_warning_address',
+    actor_id: user.id,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    result: recoveryResult,
+    recorded_at: nowIso(),
+  };
+  const boundedHashes = [...new Set([...priorHashes.filter((hash: string) => hash !== keyHash), keyHash])]
+    .slice(-WARNING_ADDRESS_RECOVERY_LIMIT);
+  const boundedRecoveries = Object.fromEntries(boundedHashes
+    .map(hash => [hash, hash === keyHash ? recovery : recoveryLog[hash]])
+    .filter(([, value]) => Boolean(value)));
+  const updated = await casUpdate(base44, 'ObjectWarningAddress', warningAddress, expectedVersion, {
+    ...normalized.patch,
+    customer_platform_last_mutation_key_hash: keyHash,
+    customer_platform_last_mutation_recovery: recovery,
+    customer_platform_mutation_key_hashes: boundedHashes,
+    customer_platform_mutation_recoveries: boundedRecoveries,
+  });
+  const safeUpdated = await safeWarningAddressByRecord(base44, updated);
+  return warningAddressMutationResult(safeUpdated, before);
+}
+
 function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
   const patch = pick(data, OBJECT_IDENTITY_PATCH_FIELDS);
   if (!Object.keys(patch).length) throw new ApiError(400, 'Geen objectgegevens opgegeven');
@@ -2528,6 +3495,29 @@ function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'object_type')) {
     patch.object_type = asString(patch.object_type);
+  }
+  const logoTextLimits: Record<string, number> = {
+    logo_file_url: 4_096,
+    logo_file_id: 240,
+    logo_download_filename: 255,
+    logo_logical_path: 2_048,
+  };
+  for (const [field, maximum] of Object.entries(logoTextLimits)) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      patch[field] = objectText(patch[field], field, maximum);
+    }
+  }
+  if (
+    patch.logo_file_url &&
+    !patch.logo_file_url.startsWith('https://') &&
+    !patch.logo_file_url.startsWith('/')
+  ) {
+    throw new ApiError(400, 'logo_file_url moet een veilige HTTPS- of applicatie-URL zijn');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'logo_file_url') && !patch.logo_file_url) {
+    patch.logo_file_id = null;
+    patch.logo_download_filename = null;
+    patch.logo_logical_path = null;
   }
 
   const nullableTextLimits: Record<string, number> = {
@@ -3055,7 +4045,16 @@ async function handleUpdateCustomerObjectIdentity(
   if (object.status === 'archived') {
     throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
   }
-  const patch = objectIdentityPatch(requireObject(body), object);
+  const requested = pick(requireObject(body), OBJECT_IDENTITY_PATCH_FIELDS);
+  const changedInput = Object.fromEntries(Object.entries(requested).filter(([field, value]) =>
+    JSON.stringify(canonicalMutationValue(object[field])) !== JSON.stringify(canonicalMutationValue(value))));
+  if (!Object.keys(changedInput).length) throw new ApiError(400, 'Er zijn geen gewijzigde objectgegevens om op te slaan');
+  const normalizedPatch = objectIdentityPatch(changedInput, object);
+  const patch = Object.fromEntries(Object.entries(normalizedPatch).filter(([field, value]) =>
+    JSON.stringify(canonicalMutationValue(object[field])) !== JSON.stringify(canonicalMutationValue(value))));
+  if (!Object.keys(patch).length) throw new ApiError(400, 'Er zijn geen gewijzigde objectgegevens om op te slaan');
+  const projected = { ...object, ...patch, version: expectedVersion + 1 };
+  const changes = objectIdentityChanges(object, projected, Object.keys(patch));
   const prepared = await customerObjectPatchWithRecovery({
     object,
     patch,
@@ -3065,9 +4064,18 @@ async function handleUpdateCustomerObjectIdentity(
     idempotencyKey,
     requestFingerprint,
     target,
+    extraResult: {
+      changes,
+      summary: 'Objectgegevens gewijzigd',
+      outcome: 'success',
+    },
   });
   const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
-  return customerObjectMutationResult(updated, prepared.changedFields);
+  return customerObjectMutationResult(updated, prepared.changedFields, {
+    changes,
+    summary: 'Objectgegevens gewijzigd',
+    outcome: 'success',
+  });
 }
 
 async function handleUpdateCustomerObjectOperations(
@@ -5674,6 +6682,28 @@ async function executeMutation(
         requestFingerprint,
         target,
       );
+    case 'create_object_warning_address':
+      return handleObjectWarningAddress(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+        'create',
+      );
+    case 'update_object_warning_address':
+      return handleObjectWarningAddress(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+        'update',
+      );
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':
@@ -5808,6 +6838,8 @@ export async function handleCustomerPlatformRequest(req: Request) {
 
     if (READ_ACTIONS.has(action)) {
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
+      if (action === 'list_object_warning_addresses') return json(await handleListObjectWarningAddresses(base44, body));
+      if (action === 'list_object_logbook') return json(await handleListObjectLogbook(base44, body));
       if (action === 'list_commercial') return json(await listRecords(base44, body, ['quote', 'contract', 'rate']));
       if (action === 'list_billing') return json(await listRecords(base44, body, ['candidate', 'invoice', 'payment', 'reminder', 'run']));
       if (action === 'validate_contract_rates') {
@@ -5830,7 +6862,15 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const target = mutationTarget(action, body);
     const replay = await mutationReplay(base44, user, action, body, idempotencyKey, requestFingerprint, target);
     if (replay) return json({ ok: true, ...replay, replayed: true });
-    const recovered = await customerObjectMutationMarkerReplay(
+    const recovered = await warningAddressMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    ) || await customerObjectMutationMarkerReplay(
       base44,
       user,
       action,

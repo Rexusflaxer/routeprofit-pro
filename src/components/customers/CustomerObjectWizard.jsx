@@ -296,7 +296,7 @@ export default function CustomerObjectWizard({
                     <p className="mt-0.5 text-xs text-muted-foreground">{addressVerified ? "Kaartpositie gevonden" : "Kaartpositie moet nog worden gecontroleerd"}</p>
                   </SummaryItem>
                   <SummaryItem label="Vervolg">
-                    <p className="text-muted-foreground">Verdere inrichting gebeurt onder de tabs op de objectpagina.</p>
+                    <p className="text-muted-foreground">Waarschuwingsadressen en wijzigingen beheer je daarna op de objectkaart.</p>
                   </SummaryItem>
                 </div>
 
@@ -316,9 +316,9 @@ export default function CustomerObjectWizard({
                 )}
 
                 <div className="rounded-md border border-border bg-card p-4">
-                  <p className="text-sm font-medium text-foreground">Vervolg op de objectpagina</p>
+                  <p className="text-sm font-medium text-foreground">Vervolg op de objectkaart</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Contacten, contract/dienst, instructies, documenten, checkpoints, sleutels, installaties, waarschuwingsadressen en rapportage-instellingen krijgen ieder hun eigen gecontroleerde inrichting.
+                    De objectkaart start bewust compact met Waarschuwingsadressen en een volledig Logboek. Andere onderdelen worden pas toegevoegd zodra hun workflow gereed is.
                   </p>
                 </div>
               </>
