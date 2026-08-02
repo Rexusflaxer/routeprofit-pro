@@ -281,7 +281,7 @@ const CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS = new Set([
 const CUSTOMER_OBJECT_RECOVERY_LIMIT = 50;
 const WARNING_ADDRESS_RECOVERY_LIMIT = 50;
 const CUSTOMER_OBJECT_CREATE_RESERVATION_TTL_MS = 30 * 60 * 1000;
-const OBJECT_CODE_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const OBJECT_CODE_MUTATION_LOCK_TTL_MS = 30 * 60 * 1000;
 const OBJECT_IDENTITY_PATCH_FIELDS = [
   'object_code',
   'external_object_code',
@@ -3837,7 +3837,12 @@ function normalizedExternalObjectCode(value: unknown) {
   return normalized;
 }
 
-async function objectCodeExists(base44: LooseRecord, code: string, excludedObjectId = '') {
+async function objectCodeExists(
+  base44: LooseRecord,
+  code: string,
+  excludedObjectId = '',
+  reservation: LooseRecord | null = null,
+) {
   const normalized = normalizedObjectCode(code);
   const display = canonicalObjectCode(code, true) as string;
   const legacyDisplayPattern = `^${display
@@ -3871,6 +3876,7 @@ async function objectCodeExists(base44: LooseRecord, code: string, excludedObjec
       skip,
       ['id', 'object_code', 'object_code_normalized'],
     );
+    if (reservation) await renewGlobalObjectCodeMutation(base44, reservation);
     const legacyMatch = legacyPage.find((object: LooseRecord) => {
       if (object.id === excludedObjectId || object.object_code_normalized) return false;
       try {
@@ -4108,6 +4114,44 @@ async function releaseGlobalObjectCodeMutation(
   }
 }
 
+async function assertGlobalObjectCodeMutation(
+  base44: LooseRecord,
+  reservation: LooseRecord | null,
+) {
+  if (!reservation) throw new ApiError(409, 'Objectcode-reservering ontbreekt; probeer opnieuw', { retryable: true });
+  const coordinator = await requireRecord(base44, 'Customer', reservation.coordinator_id, 'Objectcodecoördinator');
+  const current = coordinator.object_code_mutation_lock;
+  if (current?.owner_token !== reservation.owner_token || !reservationIsCurrent(current)) {
+    throw new ApiError(409, 'Objectcode-reservering is verlopen of overgenomen; probeer opnieuw', {
+      retryable: true,
+    });
+  }
+  return coordinator;
+}
+
+async function renewGlobalObjectCodeMutation(
+  base44: LooseRecord,
+  reservation: LooseRecord,
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const coordinator = await assertGlobalObjectCodeMutation(base44, reservation);
+    const current = coordinator.object_code_mutation_lock;
+    try {
+      return await casUpdate(base44, 'Customer', coordinator, versionOf(coordinator), {
+        object_code_mutation_lock: {
+          ...current,
+          expires_at: new Date(Date.now() + OBJECT_CODE_MUTATION_LOCK_TTL_MS).toISOString(),
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
+  throw new ApiError(409, 'Objectcode-reservering kon niet worden verlengd; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
 async function reserveCustomerObjectCreation(
   base44: LooseRecord,
   user: LooseRecord,
@@ -4327,10 +4371,11 @@ async function handleCreateCustomerObject(
       idempotencyKey,
       target,
     );
-    const duplicateCode = await objectCodeExists(base44, objectCode);
+    const duplicateCode = await objectCodeExists(base44, objectCode, '', objectCodeReservation);
     if (duplicateCode) {
       throw new ApiError(409, 'Objectcode is al in gebruik', { duplicate_object_id: duplicateCode.id });
     }
+    await assertGlobalObjectCodeMutation(base44, objectCodeReservation);
     const keyHash = await sha256(idempotencyKey);
     const object = await getEntity(base44, 'SurveillanceObject').create({
       customer_id: customerId,
@@ -4381,7 +4426,7 @@ async function handleCreateCustomerObject(
       mobile_map_priority: 0,
       version: 1,
     });
-    const racedCode = await objectCodeExists(base44, objectCode, object.id);
+    const racedCode = await objectCodeExists(base44, objectCode, object.id, objectCodeReservation);
     if (racedCode) {
       try {
         await getEntity(base44, 'SurveillanceObject').delete(object.id);
@@ -4448,7 +4493,7 @@ async function handleUpdateCustomerObjectIdentity(
     : null;
   try {
     if (changesObjectCode) {
-      const duplicateCode = await objectCodeExists(base44, patch.object_code, object.id);
+      const duplicateCode = await objectCodeExists(base44, patch.object_code, object.id, objectCodeReservation);
       if (duplicateCode) {
         throw new ApiError(409, 'Objectcode is al in gebruik', {
           duplicate_object_id: duplicateCode.id,
@@ -4473,9 +4518,10 @@ async function handleUpdateCustomerObjectIdentity(
         outcome: 'success',
       },
     });
+    if (changesObjectCode) await assertGlobalObjectCodeMutation(base44, objectCodeReservation);
     const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
     if (changesObjectCode) {
-      const racedCode = await objectCodeExists(base44, updated.object_code, updated.id);
+      const racedCode = await objectCodeExists(base44, updated.object_code, updated.id, objectCodeReservation);
       if (racedCode) {
         await rollbackRejectedObjectCodeMutation(base44, updated, object, updated.object_code, idempotencyKey);
         throw new ApiError(409, 'Objectcode is buiten de applicatie gelijktijdig door een ander object vastgelegd', {

@@ -24,12 +24,14 @@ beforeAll(async () => {
     )
     .concat(`\nexport {
       canonicalObjectCode,
+      assertGlobalObjectCodeMutation,
       handleSearchCustomerObjects,
       normalizedExternalObjectCode,
       objectCodeExists,
       objectIdentityChanges,
       objectIdentityPatch,
       releaseGlobalObjectCodeMutation,
+      renewGlobalObjectCodeMutation,
       reserveGlobalObjectCodeMutation,
       safeObjectMutationSummary
     };`);
@@ -143,18 +145,39 @@ describe("customerPlatformApi objectcodes", () => {
     const start = source.indexOf("async function handleUpdateCustomerObjectIdentity");
     const end = source.indexOf("async function handleUpdateCustomerObjectOperations", start);
     const updateSource = source.slice(start, end);
-    const preflight = updateSource.indexOf("objectCodeExists(base44, patch.object_code, object.id)");
+    const preflight = updateSource.indexOf("objectCodeExists(base44, patch.object_code, object.id, objectCodeReservation)");
     const reservation = updateSource.indexOf("reserveGlobalObjectCodeMutation");
     const casWrite = updateSource.indexOf("const updated = await casUpdate");
-    const postflight = updateSource.indexOf("objectCodeExists(base44, updated.object_code, updated.id)");
+    const fenceCheck = updateSource.indexOf("assertGlobalObjectCodeMutation");
+    const postflight = updateSource.indexOf("objectCodeExists(base44, updated.object_code, updated.id, objectCodeReservation)");
     const rollback = updateSource.indexOf("rollbackRejectedObjectCodeMutation");
     expect(preflight).toBeGreaterThan(-1);
     expect(reservation).toBeGreaterThan(-1);
     expect(preflight).toBeGreaterThan(reservation);
     expect(casWrite).toBeGreaterThan(preflight);
+    expect(fenceCheck).toBeGreaterThan(preflight);
+    expect(casWrite).toBeGreaterThan(fenceCheck);
     expect(postflight).toBeGreaterThan(casWrite);
     expect(rollback).toBeGreaterThan(postflight);
     expect(updateSource).toContain("releaseGlobalObjectCodeMutation");
+  });
+
+  it("houdt de globale reservering tijdens de definitieve createcheck en write vast", () => {
+    const start = source.indexOf("async function handleCreateCustomerObject");
+    const end = source.indexOf("async function handleUpdateCustomerObjectIdentity", start);
+    const createSource = source.slice(start, end);
+    const declaration = createSource.indexOf("let objectCodeReservation");
+    const reservation = createSource.indexOf("objectCodeReservation = await reserveGlobalObjectCodeMutation");
+    const protectedPreflight = createSource.indexOf("objectCodeExists(base44, objectCode, '', objectCodeReservation)");
+    const fenceCheck = createSource.indexOf("assertGlobalObjectCodeMutation(base44, objectCodeReservation)");
+    const createWrite = createSource.indexOf("getEntity(base44, 'SurveillanceObject').create");
+
+    expect(declaration).toBeGreaterThan(-1);
+    expect(reservation).toBeGreaterThan(declaration);
+    expect(protectedPreflight).toBeGreaterThan(reservation);
+    expect(fenceCheck).toBeGreaterThan(protectedPreflight);
+    expect(createWrite).toBeGreaterThan(fenceCheck);
+    expect(createSource).toContain("releaseGlobalObjectCodeMutation");
   });
 
   it("laat bij twee gelijktijdige globale reserveringen precies één schrijver toe", async () => {
@@ -191,6 +214,12 @@ describe("customerPlatformApi objectcodes", () => {
     const rejected = outcomes.find(outcome => outcome.status === "rejected");
     expect(rejected.reason).toMatchObject({ status: 409, details: expect.objectContaining({ retryable: true }) });
     const reservation = outcomes.find(outcome => outcome.status === "fulfilled").value;
+    await expect(backend.assertGlobalObjectCodeMutation(base44, reservation)).resolves.toMatchObject({
+      id: "customer-coordinator",
+    });
+    const versionBeforeRenewal = state.version;
+    await backend.renewGlobalObjectCodeMutation(base44, reservation);
+    expect(state.version).toBe(versionBeforeRenewal + 1);
     await backend.releaseGlobalObjectCodeMutation(base44, reservation);
     expect(state.object_code_mutation_lock).toBeNull();
   });
