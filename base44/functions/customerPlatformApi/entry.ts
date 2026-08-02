@@ -99,6 +99,7 @@ const MUTATION_ACTIONS = new Set([
   'set_customer_object_status',
   'create_object_warning_address',
   'update_object_warning_address',
+  'reorder_object_warning_addresses',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -987,6 +988,7 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   set_customer_object_status: 'Objectstatus gewijzigd',
   create_object_warning_address: 'Waarschuwingsadres toegevoegd',
   update_object_warning_address: 'Waarschuwingsadres gewijzigd',
+  reorder_object_warning_addresses: 'Belvolgorde waarschuwingsadressen gewijzigd',
   create_customer_contact: 'Contactpersoon toegevoegd',
   update_customer_contact: 'Contactpersoon gewijzigd',
   archive_customer_contact: 'Contactpersoon gearchiveerd',
@@ -3495,105 +3497,49 @@ async function existingWarningAddressCreation(
 }
 
 async function handleObjectWarningAddress(
-  base44: LooseRecord,
-  user: LooseRecord,
-  body: LooseRecord,
-  expectedVersion: number,
-  idempotencyKey: string,
-  requestFingerprint: string,
-  target: string,
-  mode: 'create' | 'update',
+  base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number,
+  idempotencyKey: string, requestFingerprint: string, target: string, mode: 'create' | 'update',
 ) {
   const { customer, object } = await requireCustomerObjectForMutation(base44, body);
-  if (object.status === 'archived') {
-    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
-  }
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
   const data = requireObject(body);
   if (mode === 'create') {
     if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw waarschuwingsadres verwacht expected_version 0');
-    const replay = await existingWarningAddressCreation(
-      base44,
-      user,
-      customer.id,
-      object.id,
-      idempotencyKey,
-      requestFingerprint,
-      target,
-    );
+    const replay = await existingWarningAddressCreation(base44, user, customer.id, object.id, idempotencyKey, requestFingerprint, target);
     if (replay) return replay;
     const normalized = await normalizedWarningAddressData(base44, customer.id, object.id, data);
-    const warningAddress = await getEntity(base44, 'ObjectWarningAddress').create({
-      customer_id: customer.id,
-      object_id: object.id,
-      ...normalized.patch,
-      creation_idempotency_key: idempotencyKey,
-      creation_request_fingerprint: requestFingerprint,
-      creation_actor_user_id: user.id,
-      creation_mutation_target: target,
-      version: 1,
-    });
-    const safeWarningAddress = await safeWarningAddressByRecord(base44, warningAddress);
-    return warningAddressMutationResult(safeWarningAddress, null);
+    const warningAddress = await getEntity(base44, 'ObjectWarningAddress').create({ customer_id: customer.id, object_id: object.id, ...normalized.patch, creation_idempotency_key: idempotencyKey, creation_request_fingerprint: requestFingerprint, creation_actor_user_id: user.id, creation_mutation_target: target, version: 1 });
+    return warningAddressMutationResult(await safeWarningAddressByRecord(base44, warningAddress), null);
   }
-
-  const warningAddress = await requireRecord(
-    base44,
-    'ObjectWarningAddress',
-    requireString(body, 'warning_address_id'),
-    'Waarschuwingsadres',
-  );
-  if (warningAddress.customer_id !== customer.id || warningAddress.object_id !== object.id) {
-    throw new ApiError(409, 'Waarschuwingsadres hoort niet bij dit object');
-  }
+  const warningAddress = await requireRecord(base44, 'ObjectWarningAddress', requireString(body, 'warning_address_id'), 'Waarschuwingsadres');
+  if (warningAddress.customer_id !== customer.id || warningAddress.object_id !== object.id) throw new ApiError(409, 'Waarschuwingsadres hoort niet bij dit object');
   const before = await safeWarningAddressByRecord(base44, warningAddress);
-  const normalized = await normalizedWarningAddressData(
-    base44,
-    customer.id,
-    object.id,
-    data,
-    warningAddress,
-  );
-  const meaningfulChange = Object.entries(normalized.patch).some(([field, value]) =>
-    JSON.stringify(canonicalMutationValue(warningAddress[field])) !== JSON.stringify(canonicalMutationValue(value)));
-  if (!meaningfulChange) throw new ApiError(400, 'Er zijn geen gewijzigde gegevens om op te slaan');
+  const normalized = await normalizedWarningAddressData(base44, customer.id, object.id, data, warningAddress);
+  if (!Object.entries(normalized.patch).some(([field, value]) => JSON.stringify(canonicalMutationValue(warningAddress[field])) !== JSON.stringify(canonicalMutationValue(value)))) throw new ApiError(400, 'Er zijn geen gewijzigde gegevens om op te slaan');
   const projected = { ...warningAddress, ...normalized.patch, version: expectedVersion + 1 };
   const references = await warningAddressReferenceData(base44, customer.id);
-  const safeProjected = safeObjectWarningAddress(
-    projected,
-    references.contactById.get(projected.contact_id) || null,
-    references.points,
-  );
-  const recoveryResult = warningAddressMutationResult(safeProjected, before);
-  const keyHash = await sha256(idempotencyKey);
-  const priorRecoveries = warningAddress.customer_platform_mutation_recoveries;
-  const recoveryLog = priorRecoveries && typeof priorRecoveries === 'object' && !Array.isArray(priorRecoveries)
-    ? priorRecoveries
-    : {};
-  const priorHashes = Array.isArray(warningAddress.customer_platform_mutation_key_hashes)
-    ? warningAddress.customer_platform_mutation_key_hashes.filter((value: unknown) => typeof value === 'string')
-    : [];
-  const recovery = {
-    action: 'update_object_warning_address',
-    actor_id: user.id,
-    request_fingerprint: requestFingerprint,
-    mutation_target: target,
-    result: recoveryResult,
-    recorded_at: nowIso(),
-  };
-  const boundedHashes = [...new Set([...priorHashes.filter((hash: string) => hash !== keyHash), keyHash])]
-    .slice(-WARNING_ADDRESS_RECOVERY_LIMIT);
-  const boundedRecoveries = Object.fromEntries(boundedHashes
-    .map(hash => [hash, hash === keyHash ? recovery : recoveryLog[hash]])
-    .filter(([, value]) => Boolean(value)));
-  const updated = await casUpdate(base44, 'ObjectWarningAddress', warningAddress, expectedVersion, {
-    ...normalized.patch,
-    customer_platform_last_mutation_key_hash: keyHash,
-    customer_platform_last_mutation_recovery: recovery,
-    customer_platform_mutation_key_hashes: boundedHashes,
-    customer_platform_mutation_recoveries: boundedRecoveries,
+  const recoveryResult = warningAddressMutationResult(safeObjectWarningAddress(projected, references.contactById.get(projected.contact_id) || null, references.points), before);
+  const keyHash = await sha256(idempotencyKey), prior = warningAddress.customer_platform_mutation_recoveries, recoveryLog = prior && typeof prior === 'object' && !Array.isArray(prior) ? prior : {}, priorHashes = Array.isArray(warningAddress.customer_platform_mutation_key_hashes) ? warningAddress.customer_platform_mutation_key_hashes.filter((value: unknown) => typeof value === 'string') : [];
+  const recovery = { action: 'update_object_warning_address', actor_id: user.id, request_fingerprint: requestFingerprint, mutation_target: target, result: recoveryResult, recorded_at: nowIso() };
+  const boundedHashes = [...new Set([...priorHashes.filter((hash: string) => hash !== keyHash), keyHash])].slice(-WARNING_ADDRESS_RECOVERY_LIMIT), boundedRecoveries = Object.fromEntries(boundedHashes.map(hash => [hash, hash === keyHash ? recovery : recoveryLog[hash]]).filter(([, value]) => Boolean(value)));
+  const updated = await casUpdate(base44, 'ObjectWarningAddress', warningAddress, expectedVersion, { ...normalized.patch, customer_platform_last_mutation_key_hash: keyHash, customer_platform_last_mutation_recovery: recovery, customer_platform_mutation_key_hashes: boundedHashes, customer_platform_mutation_recoveries: boundedRecoveries });
+  return warningAddressMutationResult(await safeWarningAddressByRecord(base44, updated), before);
+}
+
+async function handleReorderObjectWarningAddresses(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  const orderedIds = Array.isArray(body.ordered_ids) ? body.ordered_ids.map(asString).filter(Boolean) : [];
+  if (!orderedIds.length || orderedIds.length > 500 || new Set(orderedIds).size !== orderedIds.length) throw new ApiError(400, 'ordered_ids bevat geen geldige unieke volgorde');
+  const records = await getEntity(base44, 'ObjectWarningAddress').filter({ customer_id: customer.id, object_id: object.id }, '+call_order', 500);
+  if (records.length !== orderedIds.length || records.some((record: LooseRecord) => !orderedIds.includes(record.id))) throw new ApiError(409, 'De lijst is intussen gewijzigd; vernieuw en probeer opnieuw');
+  const expectedVersions = body.expected_versions && typeof body.expected_versions === 'object' ? body.expected_versions : {};
+  records.forEach((record: LooseRecord) => {
+    if (Number(expectedVersions[record.id]) !== versionOf(record)) throw new ApiError(409, 'Een waarschuwingsadres is intussen gewijzigd');
   });
-  const safeUpdated = await safeWarningAddressByRecord(base44, updated);
-  return warningAddressMutationResult(safeUpdated, before);
+  const byId = new Map(records.map((record: LooseRecord) => [record.id, record]));
+  await getEntity(base44, 'ObjectWarningAddress').bulkUpdate(orderedIds.map((id: string, index: number) => ({ id, call_order: index + 1, version: versionOf(byId.get(id)) + 1 })));
+  return { customer_id: customer.id, object_id: object.id, ordered_ids: orderedIds, summary: 'Belvolgorde waarschuwingsadressen gewijzigd', resource_type: 'SurveillanceObject', resource_id: object.id, category: 'operations' };
 }
 
 function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
@@ -7171,6 +7117,8 @@ async function executeMutation(
         target,
         'update',
       );
+    case 'reorder_object_warning_addresses':
+      return handleReorderObjectWarningAddresses(base44, body);
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':

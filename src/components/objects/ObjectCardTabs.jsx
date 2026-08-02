@@ -10,7 +10,6 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
 import ObjectWarningAddressWizard from "./ObjectWarningAddressWizard";
+import ObjectWarningAddressesTable from "./ObjectWarningAddressesTable";
 import {
   OBJECT_CARD_TABS,
   formatObjectLogValue,
@@ -34,6 +34,8 @@ import {
   createObjectWarningAddressKey,
   listObjectLogbook,
   listObjectWarningAddresses,
+  reorderObjectWarningAddresses,
+  reorderObjectWarningAddressesKey,
   updateObjectWarningAddress,
   updateObjectWarningAddressKey,
 } from "./objectWarningAddressWorkflow";
@@ -100,78 +102,6 @@ function SearchField({ value, onChange, placeholder, label }) {
       <Input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} aria-label={label} className="h-9 pl-9 pr-9" />
       {value && <button type="button" onClick={() => onChange("")} aria-label="Zoekopdracht wissen" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>}
     </div>
-  );
-}
-
-function WarningAddressesTable({ rows, onEdit, editingId }) {
-  if (!rows.length) return null;
-  return (
-    <>
-      <div className="hidden overflow-x-auto md:block">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/25 hover:bg-muted/25">
-              {[
-                ["order", "Volgorde"],
-                ["contact", "Contactpersoon"],
-                ["relationship", "Relatie"],
-                ["phone", "Telefoon"],
-                ["availability", "Bereikbaarheid"],
-                ["status", "Status"],
-                ["changed", "Gewijzigd"],
-              ].map(([key, label]) => <TableHead key={key} className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{label}</TableHead>)}
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map(row => (
-              <TableRow
-                key={row.id}
-                tabIndex={0}
-                aria-selected={editingId === row.id}
-                onClick={() => onEdit(row)}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onEdit(row);
-                  }
-                }}
-                className={`cursor-pointer ${editingId === row.id ? "bg-primary/5" : "hover:bg-muted/25"}`}
-              >
-                <TableCell><span className="inline-flex h-7 min-w-7 items-center justify-center rounded-md border border-border bg-muted/30 px-2 text-sm font-semibold">{row.call_order}</span></TableCell>
-                <TableCell>
-                  <p className="font-medium text-foreground">{row.display_name || "Naamloos contact"}</p>
-                  {row.job_title && <p className="mt-0.5 text-xs text-muted-foreground">{row.job_title}</p>}
-                </TableCell>
-                <TableCell>{warningRelationshipLabel(row)}</TableCell>
-                <TableCell>
-                  <a href={`tel:${row.primary_phone}`} onClick={event => event.stopPropagation()} className="font-medium hover:underline">{row.primary_phone || "—"}</a>
-                  {row.secondary_phone && <p className="mt-0.5 text-xs text-muted-foreground">Alt. {row.secondary_phone}</p>}
-                </TableCell>
-                <TableCell><span className="text-sm">{warningAvailabilityLabel(row)}</span></TableCell>
-                <TableCell><Badge variant="outline" className={row.status === "inactive" ? "text-muted-foreground" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>{row.status === "inactive" ? "Inactief" : "Actief"}</Badge></TableCell>
-                <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{formatDateTime(row.updated_date || row.created_date)}</TableCell>
-                <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <div className="divide-y divide-border md:hidden">
-        {rows.map(row => (
-          <button key={row.id} type="button" onClick={() => onEdit(row)} className={`w-full px-4 py-3 text-left ${editingId === row.id ? "bg-primary/5" : "hover:bg-muted/25"}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{row.call_order}. {row.display_name || "Naamloos contact"}</p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">{warningRelationshipLabel(row)} · {row.primary_phone || "Geen nummer"}</p>
-              </div>
-              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">{warningAvailabilityLabel(row)}</p>
-          </button>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -371,6 +301,18 @@ export default function ObjectCardTabs({
       toast({ title: "Waarschuwingsadres bijgewerkt" });
     },
   });
+  const reorderMutation = useMutation({
+    mutationFn: orderedRows => reorderObjectWarningAddresses({
+      customerId: object.customer_id,
+      objectId: object.id,
+      orderedRows,
+      idempotencyKey: reorderObjectWarningAddressesKey(),
+    }),
+    onSuccess: async () => {
+      await invalidate();
+      toast({ title: "Belvolgorde bijgewerkt" });
+    },
+  });
 
   const archived = object.status === "archived";
   const logbook = logbookQuery.data?.items || [];
@@ -408,7 +350,7 @@ export default function ObjectCardTabs({
                 </div>
               </div>
               <div className="min-h-0 flex-1">
-                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <WarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} onEdit={row => !archived && onOpenEdit(row.id)} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
+                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <ObjectWarningAddressesTable rows={filteredWarnings.map(row => ({ ...row, updated_label: formatDateTime(row.updated_date || row.created_date) }))} editingId={selectedWarning?.id} onEdit={row => !archived && onOpenEdit(row.id)} onReorder={orderedRows => reorderMutation.mutateAsync(orderedRows)} reorderDisabled={archived || Boolean(searchTerm.trim()) || reorderMutation.isPending} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
               </div>
             </div>
           ) : (

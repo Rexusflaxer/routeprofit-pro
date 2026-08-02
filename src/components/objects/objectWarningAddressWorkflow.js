@@ -110,6 +110,10 @@ export function updateObjectWarningAddressKey() {
   return createCustomerMutationKey("update_object_warning_address");
 }
 
+export function reorderObjectWarningAddressesKey() {
+  return createCustomerMutationKey("reorder_object_warning_addresses");
+}
+
 export async function listObjectWarningAddresses({ customerId, objectId, invoke = undefined } = {}) {
   return mutationInvoke({ invoke })({
     action: "list_object_warning_addresses",
@@ -273,6 +277,20 @@ export async function createObjectWarningAddress(input = {}) {
       secondary_contact_point_id: contact.secondaryPointId,
       ...assignment,
     },
+  });
+}
+
+export async function reorderObjectWarningAddresses(input = {}) {
+  const rows = Array.isArray(input.orderedRows) ? input.orderedRows : [];
+  if (!rows.length) throw new Error("Er zijn geen waarschuwingsadressen om te sorteren.");
+  return mutationInvoke(input)({
+    action: "reorder_object_warning_addresses",
+    idempotency_key: requiredText(input.idempotencyKey, "Mutatiesleutel"),
+    expected_version: 0,
+    customer_id: requiredText(input.customerId, "Klant-ID"),
+    object_id: requiredText(input.objectId, "Object-ID"),
+    ordered_ids: rows.map(row => row.id),
+    expected_versions: Object.fromEntries(rows.map(row => [row.id, Number(row.version)])),
   });
 }
 
