@@ -10,7 +10,7 @@ export default function ObjectWarningAddressesDesktop({ rows, onEdit, editingId,
       <DragDropContext onDragEnd={onDragEnd}>
         <Table><TableHeader><TableRow className="bg-muted/25 hover:bg-muted/25">
           <TableHead className="w-16 text-xs font-semibold text-muted-foreground">Volgorde</TableHead>
-          {[["contact", "Contactpersoon"], ["relationship", "Relatie"], ["phone", "Telefoon"], ["availability", "Bereikbaarheid"], ["changed", "Gewijzigd"]].map(([key, label]) => <TableHead key={key} className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{label}</TableHead>)}
+          {[["contact", "Contactpersoon"], ["relationship", "Relatie"], ["phone", "Telefoon"], ["availability", "Bereikbaarheid"]].map(([key, label]) => <TableHead key={key} className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{label}</TableHead>)}
           <TableHead className="w-10" />
         </TableRow></TableHeader>
         <Droppable droppableId="warning-addresses-desktop" direction="vertical">
@@ -22,7 +22,6 @@ export default function ObjectWarningAddressesDesktop({ rows, onEdit, editingId,
                 <TableCell>{warningRelationshipLabel(row)}</TableCell>
                 <TableCell><a href={`tel:${row.primary_phone}`} onClick={event => event.stopPropagation()} className="font-medium hover:underline">{row.primary_phone || "—"}</a>{row.secondary_phone && <p className="mt-0.5 text-xs text-muted-foreground">Alt. {row.secondary_phone}</p>}</TableCell>
                 <TableCell className="text-sm">{warningAvailabilityLabel(row)}</TableCell>
-                <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{row.updated_label}</TableCell>
                 <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
               </TableRow>}
             </Draggable>)}
