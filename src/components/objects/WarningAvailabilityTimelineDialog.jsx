@@ -3,8 +3,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import { availableIntervalsByDay } from "./warningAvailabilityTimeline";
 
-const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
-const DAY_HEIGHT = 768;
+const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);
+const DAY_HEIGHT = 384;
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange }) {
   const available = availableIntervalsByDay(record);
@@ -23,11 +23,11 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           <div className="grid flex-1 grid-cols-7" style={{ height: DAY_HEIGHT }}>
             {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="relative border-l border-border">
               {HOURS.map(hour => <div key={hour} className="h-8 border-t border-border/70" />)}
-              {available[dayIndex].map((interval, index) => <div key={index} className="absolute inset-x-1 rounded-sm border border-emerald-500/40 bg-emerald-500/25" style={{ top: `${(interval.start / 1440) * 100}%`, height: `${((interval.end - interval.start) / 1440) * 100}%` }} title={`Bereikbaar ${Math.floor(interval.start / 60).toString().padStart(2, "0")}:${(interval.start % 60).toString().padStart(2, "0")}–${Math.floor(interval.end / 60).toString().padStart(2, "0")}:${(interval.end % 60).toString().padStart(2, "0")}`} />)}
+              {available[dayIndex].map((interval, index) => <div key={index} className="absolute inset-x-1 rounded-sm border border-primary/40 bg-primary/25" style={{ top: `${(interval.start / 1440) * 100}%`, height: `${((interval.end - interval.start) / 1440) * 100}%` }} title={`Bereikbaar ${Math.floor(interval.start / 60).toString().padStart(2, "0")}:${(interval.start % 60).toString().padStart(2, "0")}–${Math.floor(interval.end / 60).toString().padStart(2, "0")}:${(interval.end % 60).toString().padStart(2, "0")}`} />)}
             </div>)}
           </div>
         </div>
-        <div className="sticky bottom-0 flex items-center gap-2 border-t border-border bg-background py-3 text-xs text-muted-foreground"><span className="h-3 w-3 rounded-sm border border-emerald-500/40 bg-emerald-500/25" /> Bereikbaar</div>
+        <div className="sticky bottom-0 flex items-center gap-2 border-t border-border bg-background py-3 text-xs text-muted-foreground"><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" /> Bereikbaar</div>
       </div>
     </DialogContent>
   </Dialog>;
