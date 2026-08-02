@@ -1,11 +1,10 @@
 import React from "react";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ChevronDown, GripVertical } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import ObjectWarningAddressActions from "./ObjectWarningAddressActions";
-import WarningAvailabilityDetails from "./WarningAvailabilityDetails";
 import { warningAvailabilityLabel, warningRelationshipLabel } from "./objectWarningAddressConfig";
 
-export default function ObjectWarningAddressesMobile({ rows, onEdit, onDelete, editingId, deletingId, onDragEnd, reorderDisabled, actionsDisabled, expandedId, onToggleExpanded }) {
+export default function ObjectWarningAddressesMobile({ rows, onEdit, onDelete, editingId, deletingId, onDragEnd, reorderDisabled, actionsDisabled, onShowAvailability }) {
   return (
     <div className="md:hidden">
       <DragDropContext onDragEnd={onDragEnd}>
@@ -15,10 +14,9 @@ export default function ObjectWarningAddressesMobile({ rows, onEdit, onDelete, e
               {(drag, snapshot) => <div ref={drag.innerRef} {...drag.draggableProps} className={`${editingId === row.id ? "bg-primary/5" : "bg-card"} ${snapshot.isDragging ? "shadow-lg" : ""}`}>
                 <div className="flex items-start gap-2 px-3 py-3">
                   <button type="button" {...drag.dragHandleProps} aria-label={`${row.display_name} verslepen`} className="mt-0.5 cursor-grab rounded p-1 text-muted-foreground hover:bg-muted active:cursor-grabbing"><GripVertical className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => onToggleExpanded(row.id)} aria-expanded={expandedId === row.id} className="min-w-0 flex-1 text-left">
+                  <button type="button" onClick={() => onShowAvailability(row)} className="min-w-0 flex-1 text-left">
                     <div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{row.display_name || "Naamloos contact"}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{warningRelationshipLabel(row)} · {row.primary_phone || "Geen nummer"}</p></div>
-                    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>{warningAvailabilityLabel(row)}</span><ChevronDown className={`h-4 w-4 transition-transform ${expandedId === row.id ? "rotate-180" : ""}`} /></div>
-                    {expandedId === row.id && <WarningAvailabilityDetails record={row} />}
+                    <p className="mt-2 text-xs text-muted-foreground">{warningAvailabilityLabel(row)}</p>
                   </button>
                   <ObjectWarningAddressActions row={row} onEdit={onEdit} onDelete={onDelete} deleting={deletingId === row.id} disabled={actionsDisabled} />
                 </div>

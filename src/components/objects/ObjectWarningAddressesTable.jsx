@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import ObjectWarningAddressesDesktop from "./ObjectWarningAddressesDesktop";
 import ObjectWarningAddressesMobile from "./ObjectWarningAddressesMobile";
+import WarningAvailabilityTimelineDialog from "./WarningAvailabilityTimelineDialog";
 
 export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled }) {
   const [orderedRows, setOrderedRows] = useState(rows);
-  const [expandedId, setExpandedId] = useState(null);
+  const [availabilityRecord, setAvailabilityRecord] = useState(null);
 
   useEffect(() => setOrderedRows(rows), [rows]);
 
@@ -18,11 +19,12 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
   };
 
   if (!orderedRows.length) return null;
-  const shared = { rows: orderedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled, expandedId, onToggleExpanded: id => setExpandedId(current => current === id ? null : id) };
+  const shared = { rows: orderedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled, onShowAvailability: setAvailabilityRecord };
   return (
     <>
       <ObjectWarningAddressesDesktop {...shared} />
       <ObjectWarningAddressesMobile {...shared} />
+      <WarningAvailabilityTimelineDialog record={availabilityRecord} open={Boolean(availabilityRecord)} onOpenChange={open => { if (!open) setAvailabilityRecord(null); }} />
     </>
   );
 }
