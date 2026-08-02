@@ -26,12 +26,13 @@ const STEPS = [
   { key: "relationship", label: "Relatie" },
   { key: "phone", label: "Telefoon" },
   { key: "availability", label: "Wanneer bellen" },
+  { key: "schedule", label: "Dagen & tijden" },
 ];
 
-function WizardSteps({ stepIndex }) {
+function WizardSteps({ stepIndex, steps }) {
   return (
     <ol className="mb-5 flex items-center gap-1" aria-label="Voortgang waarschuwingsadres">
-      {STEPS.map((step, index) => {
+      {steps.map((step, index) => {
         const active = index === stepIndex;
         const completed = index < stepIndex;
         return (
@@ -51,7 +52,7 @@ function WizardSteps({ stepIndex }) {
               </span>
               <span className={active ? "block" : "hidden sm:block"}>{step.label}</span>
             </li>
-            {index < STEPS.length - 1 && <li aria-hidden="true" className={`h-px min-w-3 flex-1 ${completed ? "bg-emerald-200 dark:bg-emerald-900" : "bg-border"}`} />}
+            {index < steps.length - 1 && <li aria-hidden="true" className={`h-px min-w-3 flex-1 ${completed ? "bg-emerald-200 dark:bg-emerald-900" : "bg-border"}`} />}
           </React.Fragment>
         );
       })}
@@ -177,6 +178,7 @@ export default function ObjectWarningAddressWizard({
     || availablePhones.some(point => point.id === form.secondary_contact_point_id);
   const hasAvailability = form.availability_mode === "always"
     || (form.not_call_periods.length > 0 && form.not_call_periods.every(period => period.days.length === 1 && period.start_time && period.end_time && period.start_time !== period.end_time));
+  const steps = form.availability_mode === "not_call_periods" ? STEPS : STEPS.slice(0, 4);
   const canContinue = [
     editing
       ? Boolean(form.contact_id)
@@ -185,9 +187,10 @@ export default function ObjectWarningAddressWizard({
         : Boolean(form.first_name.trim() && form.last_name.trim()),
     Boolean(relationshipLabel),
     hasPrimaryPhone && hasValidSecondaryPhone && hasValidSelectedSecondary && hasValidEmail,
+    AVAILABILITY_OPTIONS.some(option => option.key === form.availability_mode),
     hasAvailability,
   ][stepIndex];
-  const finalStep = stepIndex === STEPS.length - 1;
+  const finalStep = stepIndex === steps.length - 1;
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const chooseContact = contactId => {
@@ -237,12 +240,12 @@ export default function ObjectWarningAddressWizard({
         {editing ? "Waarschuwingsadres wijzigen" : "Nieuw waarschuwingsadres"}
       </p>
       <h2 id={`${fieldId}-title`} className="sr-only">{editing ? "Waarschuwingsadres wijzigen" : "Waarschuwingsadres toevoegen"}</h2>
-      <WizardSteps stepIndex={stepIndex} />
+      <WizardSteps stepIndex={stepIndex} steps={steps} />
 
       <form onSubmit={event => { event.preventDefault(); continueWizard(); }} noValidate>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={STEPS[stepIndex].key}
+            key={steps[stepIndex].key}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
@@ -348,15 +351,19 @@ export default function ObjectWarningAddressWizard({
 
             {stepIndex === 3 && (
               <>
-                <StepHeading icon={Clock3} title="Wanneer mag deze contactpersoon worden gebeld?" description="Leg vast wanneer deze persoon bereikbaar is en voorkom ongewenste oproepen buiten de afgesproken tijden." />
+                <StepHeading icon={Clock3} title="Wanneer mag deze contactpersoon worden gebeld?" description="Kies of deze persoon altijd gebeld mag worden of dat er niet-bellenperioden gelden." />
                 <div className="grid gap-2 sm:grid-cols-2">
                   {AVAILABILITY_OPTIONS.map(option => <ChoiceCard key={option.key} selected={form.availability_mode === option.key} onClick={() => set("availability_mode", option.key)} title={option.label} description={option.description} />)}
                 </div>
-                {form.availability_mode === "not_call_periods" && (
-                  <div className="rounded-lg border border-border bg-card p-4">
-                    <WarningAvailabilitySchedule periods={form.not_call_periods} onToggleDay={toggleDay} onChangeTime={setDayTime} />
-                  </div>
-                )}
+              </>
+            )}
+
+            {stepIndex === 4 && (
+              <>
+                <StepHeading icon={Clock3} title="Op welke dagen en tijden mag niet worden gebeld?" description="Vink de betreffende dagen aan en stel voor iedere dag een eigen tijdsblok in." />
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <WarningAvailabilitySchedule periods={form.not_call_periods} onToggleDay={toggleDay} onChangeTime={setDayTime} />
+                </div>
                 <div className="rounded-md border border-border bg-card px-3 py-2.5 text-sm">
                   <span className="font-medium">{selectedContact?.display_name || [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(" ")}</span>
                   <span className="text-muted-foreground"> · {warningRelationshipLabel({ relationship_type: form.relationship_type, relationship_label: relationshipLabel })}</span>
