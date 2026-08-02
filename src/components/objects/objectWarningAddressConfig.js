@@ -75,14 +75,7 @@ export function warningRelationshipLabel(record) {
 }
 
 export function warningAvailabilityLabel(record) {
-  if (record?.availability_mode !== "not_call_periods") return "24/7 bereikbaar";
-  const periods = Array.isArray(record.not_call_periods) ? record.not_call_periods : [];
-  if (!periods.length) return "Niet-bellenperiode ingesteld";
-  return periods.flatMap(period => (period.days || []).map(day => {
-    const dayLabel = WEEKDAY_OPTIONS.find(option => option.key === day)?.shortLabel || day;
-    const timeLabel = period.start_time && period.end_time ? `${period.start_time}–${period.end_time}` : "tijdvak ingesteld";
-    return `${dayLabel} ${timeLabel}`;
-  })).join(" · ");
+  return record?.availability_mode === "not_call_periods" ? "Aangepast" : "24 uur bereikbaar";
 }
 
 export function formatObjectLogValue(value) {

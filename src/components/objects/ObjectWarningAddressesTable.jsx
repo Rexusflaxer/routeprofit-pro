@@ -4,6 +4,7 @@ import ObjectWarningAddressesMobile from "./ObjectWarningAddressesMobile";
 
 export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled }) {
   const [orderedRows, setOrderedRows] = useState(rows);
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => setOrderedRows(rows), [rows]);
 
@@ -17,7 +18,7 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
   };
 
   if (!orderedRows.length) return null;
-  const shared = { rows: orderedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled };
+  const shared = { rows: orderedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled, expandedId, onToggleExpanded: id => setExpandedId(current => current === id ? null : id) };
   return (
     <>
       <ObjectWarningAddressesDesktop {...shared} />

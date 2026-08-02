@@ -108,9 +108,9 @@ function ChoiceCard({ selected, onClick, title, description = "" }) {
 function initialForm(initialValue, nextCallOrder) {
   const storedPeriods = Array.isArray(initialValue?.not_call_periods) ? initialValue.not_call_periods : [];
   const periods = WEEKDAY_OPTIONS.flatMap(day => {
-    const stored = storedPeriods.find(period => Array.isArray(period.days) && period.days.includes(day.key));
-    if (storedPeriods.length && !stored) return [];
-    return [{ days: [day.key], start_time: stored?.start_time || "22:00", end_time: stored?.end_time || "07:00" }];
+    const stored = storedPeriods.filter(period => Array.isArray(period.days) && period.days.includes(day.key));
+    if (storedPeriods.length) return stored.map(period => ({ days: [day.key], start_time: period.start_time, end_time: period.end_time }));
+    return [{ days: [day.key], start_time: "22:00", end_time: "07:00" }];
   });
   return {
     contact_mode: initialValue ? "existing" : "new",
@@ -215,9 +215,14 @@ export default function ObjectWarningAddressWizard({
       : [...current.not_call_periods, { days: [day], start_time: "22:00", end_time: "07:00" }];
     return { ...current, not_call_periods: WEEKDAY_OPTIONS.flatMap(option => periods.filter(period => period.days.includes(option.key))) };
   });
-  const setDayTime = (day, field, value) => setForm(current => ({
+  const addDayPeriod = day => setForm(current => ({
     ...current,
-    not_call_periods: current.not_call_periods.map(period => period.days.includes(day) ? { ...period, [field]: value } : period),
+    not_call_periods: [...current.not_call_periods, { days: [day], start_time: "22:00", end_time: "07:00" }].sort((a, b) => WEEKDAY_OPTIONS.findIndex(option => option.key === a.days[0]) - WEEKDAY_OPTIONS.findIndex(option => option.key === b.days[0])),
+  }));
+  const removePeriod = index => setForm(current => ({ ...current, not_call_periods: current.not_call_periods.filter((_, itemIndex) => itemIndex !== index) }));
+  const setDayTime = (index, field, value) => setForm(current => ({
+    ...current,
+    not_call_periods: current.not_call_periods.map((period, itemIndex) => itemIndex === index ? { ...period, [field]: value } : period),
   }));
 
   const continueWizard = () => {
@@ -362,7 +367,7 @@ export default function ObjectWarningAddressWizard({
               <>
                 <StepHeading icon={Clock3} title="Op welke dagen en tijden mag niet worden gebeld?" description="Vink de betreffende dagen aan en stel voor iedere dag een eigen tijdsblok in." />
                 <div className="rounded-lg border border-border bg-card p-4">
-                  <WarningAvailabilitySchedule periods={form.not_call_periods} onToggleDay={toggleDay} onChangeTime={setDayTime} />
+                  <WarningAvailabilitySchedule periods={form.not_call_periods} onToggleDay={toggleDay} onAddPeriod={addDayPeriod} onRemovePeriod={removePeriod} onChangeTime={setDayTime} />
                 </div>
                 <div className="rounded-md border border-border bg-card px-3 py-2.5 text-sm">
                   <span className="font-medium">{selectedContact?.display_name || [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(" ")}</span>
