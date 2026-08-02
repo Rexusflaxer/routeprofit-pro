@@ -53,32 +53,22 @@ function validOrder(value) {
 
 function normalizedAvailability(form) {
   const availabilityMode = cleanText(form?.availability_mode) || "always";
-  if (!AVAILABILITY_MODES.has(availabilityMode)) {
-    throw new Error("Kies een geldige bereikbaarheid.");
-  }
-  if (availabilityMode === "always") {
-    return { availability_mode: "always", not_call_periods: [] };
-  }
-
-  const source = Array.isArray(form?.not_call_periods) ? form.not_call_periods[0] : null;
-  const days = [...new Set(
-    (Array.isArray(source?.days) ? source.days : [])
-      .map(cleanText)
-      .filter(day => WEEKDAYS.has(day)),
-  )];
-  const startTime = cleanText(source?.start_time);
-  const endTime = cleanText(source?.end_time);
-  if (!days.length) throw new Error("Kies minimaal één dag voor de niet-bellenperiode.");
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)) {
-    throw new Error("Vul een geldige begin- en eindtijd in.");
-  }
-  if (startTime === endTime) {
-    throw new Error("Begin- en eindtijd van de niet-bellenperiode mogen niet gelijk zijn.");
-  }
-  return {
-    availability_mode: availabilityMode,
-    not_call_periods: [{ days, start_time: startTime, end_time: endTime }],
-  };
+  if (!AVAILABILITY_MODES.has(availabilityMode)) throw new Error("Kies een geldige bereikbaarheid.");
+  if (availabilityMode === "always") return { availability_mode: "always", not_call_periods: [] };
+  const source = Array.isArray(form?.not_call_periods) ? form.not_call_periods : [];
+  if (!source.length) throw new Error("Kies minimaal één dag voor de niet-bellenperiode.");
+  const usedDays = new Set();
+  const periods = source.map(period => {
+    const days = [...new Set((Array.isArray(period?.days) ? period.days : []).map(cleanText).filter(day => WEEKDAYS.has(day)))];
+    const startTime = cleanText(period?.start_time), endTime = cleanText(period?.end_time);
+    if (!days.length) throw new Error("Kies een dag voor elke niet-bellenperiode.");
+    if (days.some(day => usedDays.has(day))) throw new Error("Een dag mag maar één tijdsblok hebben.");
+    days.forEach(day => usedDays.add(day));
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)) throw new Error("Vul per dag een geldige begin- en eindtijd in.");
+    if (startTime === endTime) throw new Error("Begin- en eindtijd mogen niet gelijk zijn.");
+    return { days, start_time: startTime, end_time: endTime };
+  });
+  return { availability_mode: availabilityMode, not_call_periods: periods };
 }
 
 function assignmentData(form) {
