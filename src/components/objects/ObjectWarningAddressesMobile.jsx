@@ -1,9 +1,10 @@
 import React from "react";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ChevronRight, GripVertical } from "lucide-react";
+import { GripVertical } from "lucide-react";
+import ObjectWarningAddressActions from "./ObjectWarningAddressActions";
 import { warningAvailabilityLabel, warningRelationshipLabel } from "./objectWarningAddressConfig";
 
-export default function ObjectWarningAddressesMobile({ rows, onEdit, editingId, onDragEnd, reorderDisabled }) {
+export default function ObjectWarningAddressesMobile({ rows, onEdit, onDelete, editingId, deletingId, onDragEnd, reorderDisabled, actionsDisabled }) {
   return (
     <div className="md:hidden">
       <DragDropContext onDragEnd={onDragEnd}>
@@ -14,12 +15,10 @@ export default function ObjectWarningAddressesMobile({ rows, onEdit, editingId, 
                 <div className="flex items-start gap-2 px-3 py-3">
                   <button type="button" {...drag.dragHandleProps} aria-label={`${row.display_name} verslepen`} className="mt-0.5 cursor-grab rounded p-1 text-muted-foreground hover:bg-muted active:cursor-grabbing"><GripVertical className="h-4 w-4" /></button>
                   <button type="button" onClick={() => onEdit(row)} className="min-w-0 flex-1 text-left">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{row.display_name || "Naamloos contact"}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{warningRelationshipLabel(row)} · {row.primary_phone || "Geen nummer"}</p></div>
-                      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    </div>
+                    <div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{row.display_name || "Naamloos contact"}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{warningRelationshipLabel(row)} · {row.primary_phone || "Geen nummer"}</p></div>
                     <p className="mt-2 text-xs text-muted-foreground">{warningAvailabilityLabel(row)}</p>
                   </button>
+                  <ObjectWarningAddressActions row={row} onEdit={onEdit} onDelete={onDelete} deleting={deletingId === row.id} disabled={actionsDisabled} />
                 </div>
               </div>}
             </Draggable>)}

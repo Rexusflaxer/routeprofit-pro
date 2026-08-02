@@ -1,10 +1,11 @@
 import React from "react";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ChevronRight, GripVertical } from "lucide-react";
+import { GripVertical } from "lucide-react";
+import ObjectWarningAddressActions from "./ObjectWarningAddressActions";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { warningAvailabilityLabel, warningRelationshipLabel } from "./objectWarningAddressConfig";
 
-export default function ObjectWarningAddressesDesktop({ rows, onEdit, editingId, onDragEnd, reorderDisabled }) {
+export default function ObjectWarningAddressesDesktop({ rows, onEdit, onDelete, editingId, deletingId, onDragEnd, reorderDisabled, actionsDisabled }) {
   return (
     <div className="hidden overflow-x-auto md:block">
       <DragDropContext onDragEnd={onDragEnd}>
@@ -22,7 +23,7 @@ export default function ObjectWarningAddressesDesktop({ rows, onEdit, editingId,
                 <TableCell>{warningRelationshipLabel(row)}</TableCell>
                 <TableCell><a href={`tel:${row.primary_phone}`} onClick={event => event.stopPropagation()} className="font-medium hover:underline">{row.primary_phone || "—"}</a>{row.secondary_phone && <p className="mt-0.5 text-xs text-muted-foreground">Alt. {row.secondary_phone}</p>}</TableCell>
                 <TableCell className="text-sm">{warningAvailabilityLabel(row)}</TableCell>
-                <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
+                <TableCell><ObjectWarningAddressActions row={row} onEdit={onEdit} onDelete={onDelete} deleting={deletingId === row.id} disabled={actionsDisabled} /></TableCell>
               </TableRow>}
             </Draggable>)}
             {provided.placeholder}

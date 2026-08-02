@@ -97,9 +97,8 @@ const MUTATION_ACTIONS = new Set([
   'update_customer_object_identity',
   'update_customer_object_operations',
   'set_customer_object_status',
-  'create_object_warning_address',
-  'update_object_warning_address',
-  'reorder_object_warning_addresses',
+  'create_object_warning_address', 'update_object_warning_address',
+  'delete_object_warning_address', 'reorder_object_warning_addresses',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -986,9 +985,8 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   update_customer_object_identity: 'Objectgegevens gewijzigd',
   update_customer_object_operations: 'Operationele objectgegevens gewijzigd',
   set_customer_object_status: 'Objectstatus gewijzigd',
-  create_object_warning_address: 'Waarschuwingsadres toegevoegd',
-  update_object_warning_address: 'Waarschuwingsadres gewijzigd',
-  reorder_object_warning_addresses: 'Belvolgorde waarschuwingsadressen gewijzigd',
+  create_object_warning_address: 'Waarschuwingsadres toegevoegd', update_object_warning_address: 'Waarschuwingsadres gewijzigd',
+  delete_object_warning_address: 'Waarschuwingsadres verwijderd', reorder_object_warning_addresses: 'Belvolgorde waarschuwingsadressen gewijzigd',
   create_customer_contact: 'Contactpersoon toegevoegd',
   update_customer_contact: 'Contactpersoon gewijzigd',
   archive_customer_contact: 'Contactpersoon gearchiveerd',
@@ -3526,19 +3524,22 @@ async function handleObjectWarningAddress(
   return warningAddressMutationResult(await safeWarningAddressByRecord(base44, updated), before);
 }
 
-async function handleReorderObjectWarningAddresses(base44: LooseRecord, body: LooseRecord) {
-  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+async function handleDeleteObjectWarningAddress(base44: LooseRecord, body: LooseRecord, expectedVersion: number) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body), record = await requireRecord(base44, 'ObjectWarningAddress', requireString(body, 'warning_address_id'), 'Waarschuwingsadres');
   if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
-  const orderedIds = Array.isArray(body.ordered_ids) ? body.ordered_ids.map(asString).filter(Boolean) : [];
+  if (record.customer_id !== customer.id || record.object_id !== object.id) throw new ApiError(409, 'Waarschuwingsadres hoort niet bij dit object');
+  if (versionOf(record) !== expectedVersion) throw new ApiError(409, 'Waarschuwingsadres is intussen gewijzigd');
+  const warningAddress = await safeWarningAddressByRecord(base44, record); await getEntity(base44, 'ObjectWarningAddress').delete(record.id);
+  return { warning_address: warningAddress, warning_address_id: record.id, customer_id: customer.id, object_id: object.id, deleted: true, summary: `Waarschuwingsadres van ${warningAddress.display_name} verwijderd`, resource_type: 'ObjectWarningAddress', resource_id: record.id, category: 'operations' };
+}
+async function handleReorderObjectWarningAddresses(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body), orderedIds = Array.isArray(body.ordered_ids) ? body.ordered_ids.map(asString).filter(Boolean) : [];
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
   if (!orderedIds.length || orderedIds.length > 500 || new Set(orderedIds).size !== orderedIds.length) throw new ApiError(400, 'ordered_ids bevat geen geldige unieke volgorde');
-  const records = await getEntity(base44, 'ObjectWarningAddress').filter({ customer_id: customer.id, object_id: object.id }, '+call_order', 500);
+  const records = await getEntity(base44, 'ObjectWarningAddress').filter({ customer_id: customer.id, object_id: object.id }, '+call_order', 500), expectedVersions = body.expected_versions && typeof body.expected_versions === 'object' ? body.expected_versions : {};
   if (records.length !== orderedIds.length || records.some((record: LooseRecord) => !orderedIds.includes(record.id))) throw new ApiError(409, 'De lijst is intussen gewijzigd; vernieuw en probeer opnieuw');
-  const expectedVersions = body.expected_versions && typeof body.expected_versions === 'object' ? body.expected_versions : {};
-  records.forEach((record: LooseRecord) => {
-    if (Number(expectedVersions[record.id]) !== versionOf(record)) throw new ApiError(409, 'Een waarschuwingsadres is intussen gewijzigd');
-  });
-  const byId = new Map(records.map((record: LooseRecord) => [record.id, record]));
-  await getEntity(base44, 'ObjectWarningAddress').bulkUpdate(orderedIds.map((id: string, index: number) => ({ id, call_order: index + 1, version: versionOf(byId.get(id)) + 1 })));
+  records.forEach((record: LooseRecord) => { if (Number(expectedVersions[record.id]) !== versionOf(record)) throw new ApiError(409, 'Een waarschuwingsadres is intussen gewijzigd'); });
+  const byId = new Map(records.map((record: LooseRecord) => [record.id, record])); await getEntity(base44, 'ObjectWarningAddress').bulkUpdate(orderedIds.map((id: string, index: number) => ({ id, call_order: index + 1, version: versionOf(byId.get(id)) + 1 })));
   return { customer_id: customer.id, object_id: object.id, ordered_ids: orderedIds, summary: 'Belvolgorde waarschuwingsadressen gewijzigd', resource_type: 'SurveillanceObject', resource_id: object.id, category: 'operations' };
 }
 
@@ -7106,17 +7107,8 @@ async function executeMutation(
         target,
         'create',
       );
-    case 'update_object_warning_address':
-      return handleObjectWarningAddress(
-        base44,
-        user,
-        body,
-        expectedVersion,
-        idempotencyKey,
-        requestFingerprint,
-        target,
-        'update',
-      );
+    case 'update_object_warning_address': return handleObjectWarningAddress(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target, 'update');
+    case 'delete_object_warning_address': return handleDeleteObjectWarningAddress(base44, body, expectedVersion);
     case 'reorder_object_warning_addresses':
       return handleReorderObjectWarningAddresses(base44, body);
     case 'create_customer_account':

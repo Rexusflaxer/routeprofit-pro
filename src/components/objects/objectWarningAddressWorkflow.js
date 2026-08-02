@@ -110,6 +110,10 @@ export function updateObjectWarningAddressKey() {
   return createCustomerMutationKey("update_object_warning_address");
 }
 
+export function deleteObjectWarningAddressKey() {
+  return createCustomerMutationKey("delete_object_warning_address");
+}
+
 export function reorderObjectWarningAddressesKey() {
   return createCustomerMutationKey("reorder_object_warning_addresses");
 }
@@ -277,6 +281,19 @@ export async function createObjectWarningAddress(input = {}) {
       secondary_contact_point_id: contact.secondaryPointId,
       ...assignment,
     },
+  });
+}
+
+export async function deleteObjectWarningAddress(input = {}) {
+  const expectedVersion = Number(input.expectedVersion);
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw new Error("De actuele versie ontbreekt. Vernieuw de pagina en probeer opnieuw.");
+  return mutationInvoke(input)({
+    action: "delete_object_warning_address",
+    idempotency_key: requiredText(input.idempotencyKey, "Mutatiesleutel"),
+    expected_version: expectedVersion,
+    customer_id: requiredText(input.customerId, "Klant-ID"),
+    object_id: requiredText(input.objectId, "Object-ID"),
+    warning_address_id: requiredText(input.warningAddressId, "Waarschuwingsadres-ID"),
   });
 }
 

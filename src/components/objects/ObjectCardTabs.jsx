@@ -32,6 +32,8 @@ import {
 import {
   createObjectWarningAddress,
   createObjectWarningAddressKey,
+  deleteObjectWarningAddress,
+  deleteObjectWarningAddressKey,
   listObjectLogbook,
   listObjectWarningAddresses,
   reorderObjectWarningAddresses,
@@ -313,6 +315,21 @@ export default function ObjectCardTabs({
       toast({ title: "Belvolgorde bijgewerkt" });
     },
   });
+  const deleteMutation = useMutation({
+    mutationFn: row => deleteObjectWarningAddress({
+      customerId: object.customer_id,
+      objectId: object.id,
+      warningAddressId: row.id,
+      expectedVersion: row.version,
+      idempotencyKey: deleteObjectWarningAddressKey(),
+    }),
+    onSuccess: async () => {
+      await invalidate();
+      onCloseView();
+      toast({ title: "Waarschuwingsadres verwijderd" });
+    },
+    onError: error => toast({ title: "Verwijderen mislukt", description: error.message, variant: "destructive" }),
+  });
 
   const archived = object.status === "archived";
   const logbook = logbookQuery.data?.items || [];
@@ -350,7 +367,7 @@ export default function ObjectCardTabs({
                 </div>
               </div>
               <div className="min-h-0 flex-1">
-                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <ObjectWarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} onEdit={row => !archived && onOpenEdit(row.id)} onReorder={orderedRows => reorderMutation.mutateAsync(orderedRows)} reorderDisabled={archived || Boolean(searchTerm.trim()) || reorderMutation.isPending} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
+                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <ObjectWarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} deletingId={deleteMutation.variables?.id} onEdit={row => !archived && onOpenEdit(row.id)} onDelete={row => deleteMutation.mutate(row)} onReorder={orderedRows => reorderMutation.mutateAsync(orderedRows)} reorderDisabled={archived || Boolean(searchTerm.trim()) || reorderMutation.isPending || deleteMutation.isPending} actionsDisabled={archived || deleteMutation.isPending} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
               </div>
             </div>
           ) : (

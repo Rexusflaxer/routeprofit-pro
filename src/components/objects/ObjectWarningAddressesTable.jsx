@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import ObjectWarningAddressesDesktop from "./ObjectWarningAddressesDesktop";
 import ObjectWarningAddressesMobile from "./ObjectWarningAddressesMobile";
 
-export default function ObjectWarningAddressesTable({ rows, onEdit, editingId, onReorder, reorderDisabled }) {
+export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled }) {
   const [orderedRows, setOrderedRows] = useState(rows);
 
   useEffect(() => setOrderedRows(rows), [rows]);
@@ -17,7 +17,7 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, editingId, o
   };
 
   if (!orderedRows.length) return null;
-  const shared = { rows: orderedRows, onEdit, editingId, onDragEnd: handleDragEnd, reorderDisabled };
+  const shared = { rows: orderedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled };
   return (
     <>
       <ObjectWarningAddressesDesktop {...shared} />
