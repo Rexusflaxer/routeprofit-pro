@@ -236,7 +236,7 @@ export default function Customers() {
         customer.kvk_number,
         customer.vat_number,
         customer.notes,
-        ...customerObjects.flatMap(object => [object.name, object.object_code, object.address]),
+        ...customerObjects.flatMap(object => [object.name, object.object_code, object.external_object_code, object.address]),
       ].map(normalized).join(" ");
       return searchable.includes(query);
     });

@@ -4,13 +4,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-const { entities, objectList, objectFilter } = vi.hoisted(() => {
+const { entities, functionInvoke, objectList, objectFilter } = vi.hoisted(() => {
   const emptyList = vi.fn(async () => []);
   const emptyFilter = vi.fn(async () => []);
   const object = {
     id: "object/1",
     customer_id: "customer-1",
     object_code: "OBJ-001",
+    external_object_code: "MKA-7788",
     name: "Hoofdkantoor",
     object_type: "office",
     status: "active",
@@ -26,7 +27,15 @@ const { entities, objectList, objectFilter } = vi.hoisted(() => {
     id: query.id || object.id,
     name: query.id === "object-51" ? "Object eenenvijftig" : object.name,
   }]);
+  const functionInvoke = vi.fn(async (_functionName, payload) => ({
+    data: {
+      data: payload?.action === "search_customer_objects"
+        ? { items: [object], has_more: false }
+        : {},
+    },
+  }));
   return {
+    functionInvoke,
     objectList,
     objectFilter,
     entities: {
@@ -49,7 +58,7 @@ const { entities, objectList, objectFilter } = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/api/base44Client", () => ({ base44: { entities, functions: { invoke: vi.fn() } } }));
+vi.mock("@/api/base44Client", () => ({ base44: { entities, functions: { invoke: functionInvoke } } }));
 
 import Objects from "@/pages/Objects";
 
@@ -103,10 +112,12 @@ describe("objectnavigatie", () => {
     expect(fields).not.toContain("key_instruction");
     expect(fields).not.toContain("access_instruction");
     expect(fields).toEqual(expect.arrayContaining(["logo_file_url", "logo_file_id"]));
+    expect(fields).toContain("external_object_code");
   });
 
-  it("zoekt hoofdletterongevoelig met alleen de gedocumenteerde regex-operator", async () => {
+  it("zoekt genormaliseerde interne en externe codes via de afgeschermde backendroute", async () => {
     objectFilter.mockClear();
+    functionInvoke.mockClear();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
@@ -119,8 +130,13 @@ describe("objectnavigatie", () => {
     );
 
     await screen.findByText("Hoofdkantoor");
-    const [query] = objectFilter.mock.calls[0];
-    expect(query.$or[0]).toEqual({ object_code: { $regex: "[aA][cC]\\.[mM][eE]" } });
-    expect(JSON.stringify(query)).not.toContain("$options");
+    expect(objectFilter).not.toHaveBeenCalled();
+    expect(functionInvoke).toHaveBeenCalledWith("customerPlatformApi", {
+      action: "search_customer_objects",
+      customer_id: undefined,
+      search: "Ac.Me",
+      page: 1,
+      page_size: 50,
+    });
   });
 });

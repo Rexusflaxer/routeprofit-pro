@@ -32,6 +32,8 @@ describe("objectWorkflow", () => {
       idempotencyKey: "identity-key",
       invoke,
       form: {
+        object_code: "  rtm 001 ",
+        external_object_code: "  MELDKAMER 88  ",
         name: "  Hoofdkantoor ",
         object_type: "office",
         address: "Stationsplein 1, Amsterdam",
@@ -55,6 +57,8 @@ describe("objectWorkflow", () => {
       expected_version: 3,
       idempotency_key: "identity-key",
       data: {
+        object_code: "RTM-001",
+        external_object_code: "MELDKAMER 88",
         name: "Hoofdkantoor",
         object_type: "office",
         address: "Stationsplein 1, Amsterdam",
@@ -69,6 +73,31 @@ describe("objectWorkflow", () => {
         logo_logical_path: "objects/object-1/branding/logo/Object - Logo.png",
       },
     });
+  });
+
+  it("valideert de unieke objectcode lokaal maar laat een lege externe code wissen", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true });
+
+    await expect(updateCustomerObjectIdentity({
+      objectId: "object-1",
+      customerId: "customer-1",
+      expectedVersion: 2,
+      invoke,
+      form: { object_code: "code met #" },
+    })).rejects.toThrow("alleen letters, cijfers");
+
+    await updateCustomerObjectIdentity({
+      objectId: "object-1",
+      customerId: "customer-1",
+      expectedVersion: 2,
+      idempotencyKey: "clear-external-code",
+      invoke,
+      form: { external_object_code: "   " },
+    });
+
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      data: { external_object_code: null },
+    }));
   });
 
   it("blokkeert een geverifieerde locatie zonder volledig coördinatenpaar", async () => {

@@ -70,7 +70,7 @@ function Harness({ onOpenCreate = vi.fn(), onOpenEdit = vi.fn() }) {
 }
 
 function renderHarness(props = {}) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
   return render(<QueryClientProvider client={client}><Harness {...props} /></QueryClientProvider>);
 }
 
@@ -138,6 +138,21 @@ describe("ObjectCardTabs", () => {
     expect(within(table).getByText("Objectnaam: Oud → Nieuw")).toBeInTheDocument();
     expect(within(table).getByText("Status: Gewijzigd")).toBeInTheDocument();
     expect(within(table).getByText("David Beheerder")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Waarschuwingsadres toevoegen" })).not.toBeInTheDocument();
+  });
+
+  it("benoemt een laadfout specifiek en toont de technische referentie", async () => {
+    const error = Object.assign(new Error("Klantplatformactie mislukt"), {
+      status: 500,
+      requestId: "request-warning-1",
+    });
+    listWarnings.mockRejectedValue(error);
+
+    renderHarness();
+
+    expect(await screen.findByText("De waarschuwingsadressen konden niet worden geladen.")).toBeInTheDocument();
+    expect(screen.getByText("Klantplatformactie mislukt")).toBeInTheDocument();
+    expect(screen.getByText("Status 500 · Referentie request-warning-1")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Waarschuwingsadres toevoegen" })).not.toBeInTheDocument();
   });
 });

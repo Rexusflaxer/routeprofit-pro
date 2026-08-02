@@ -61,7 +61,36 @@ export default function ObjectProfileHeader({
                 <div className="space-y-1.5 md:col-span-2">
                   <Label htmlFor="object-profile-name" className="text-xs text-muted-foreground">Objectnaam</Label>
                   <Input id="object-profile-name" value={data.name || ""} onChange={event => onChange("name", event.target.value)} className="h-9 text-lg font-bold" maxLength={160} autoFocus />
-                  <p className="font-mono text-lg font-semibold tracking-wider text-foreground">{object.object_code || "Code wordt toegekend"}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="object-profile-code" className="text-xs text-muted-foreground">
+                    Objectcode <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="object-profile-code"
+                    value={data.object_code || ""}
+                    onChange={event => onChange("object_code", event.target.value)}
+                    placeholder="Bijv. RTM-001"
+                    className="h-9 font-mono uppercase"
+                    maxLength={50}
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    required
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">Uniek binnen LOQ. Gebruik hier de eigen objectcodering.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="object-profile-external-code" className="text-xs text-muted-foreground">Externe objectcode</Label>
+                  <Input
+                    id="object-profile-external-code"
+                    value={data.external_object_code || ""}
+                    onChange={event => onChange("external_object_code", event.target.value)}
+                    placeholder="Bijv. code van opdrachtgever of meldkamer"
+                    className="h-9 font-mono"
+                    maxLength={120}
+                    spellCheck={false}
+                  />
+                  <p className="text-[11px] leading-4 text-muted-foreground">Mag bij meerdere objecten gelijk zijn en is ook doorzoekbaar.</p>
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
                   <Label htmlFor="object-profile-address" className="text-xs text-muted-foreground">Adres</Label>
@@ -86,6 +115,11 @@ export default function ObjectProfileHeader({
               <div className="min-w-0">
                 <h1 className="truncate text-xl font-bold text-foreground">{object.name || "Naamloos object"}</h1>
                 <p className="mt-1 font-mono text-lg font-semibold tracking-wider text-foreground">{object.object_code || "Code wordt toegekend"}</p>
+                {object.external_object_code && (
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    Externe code <span className="font-mono font-medium text-foreground">{object.external_object_code}</span>
+                  </p>
+                )}
                 <p className="mt-3 truncate text-sm text-muted-foreground">{object.address || "Geen adres vastgelegd"}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{objectTypeLabel(object.object_type)}</p>
               </div>
@@ -97,7 +131,7 @@ export default function ObjectProfileHeader({
           {editing ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={disabled}><X className="h-4 w-4" /> Annuleren</Button>
-              <Button type="button" size="sm" onClick={onSave} disabled={disabled || !data.name?.trim() || !data.address?.trim() || !data.object_type}>
+              <Button type="button" size="sm" onClick={onSave} disabled={disabled || !data.name?.trim() || !data.object_code?.trim() || !data.address?.trim() || !data.object_type}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 {saving ? "Opslaan..." : "Opslaan"}
               </Button>

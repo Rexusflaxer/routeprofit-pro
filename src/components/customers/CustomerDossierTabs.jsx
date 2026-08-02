@@ -699,6 +699,7 @@ export function ObjectsTab({
               <div>
                 <p className="font-medium text-foreground">{object.name || "Naamloos object"}</p>
                 <p className="text-xs text-muted-foreground">{object.object_code || "Code wordt toegekend"} · {objectTypeLabel(object.object_type)}</p>
+                {object.external_object_code && <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">Extern: {object.external_object_code}</p>}
               </div>
             ),
           },
@@ -776,7 +777,7 @@ export function ObjectsTab({
                     <Input
                       value={searchTerm}
                       onChange={event => onSearchChange?.(event.target.value)}
-                      placeholder="Zoek op naam, code, adres of regio..."
+                      placeholder="Zoek op naam, objectcode, externe code, adres of regio..."
                       className="h-9 pl-9 pr-9"
                       aria-label="Objecten zoeken"
                     />

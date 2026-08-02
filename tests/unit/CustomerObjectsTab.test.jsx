@@ -62,6 +62,7 @@ describe("ObjectsTab", () => {
       {
         id: "object/1",
         object_code: "OBJ-001",
+        external_object_code: "MKA-7788",
         name: "Hoofdkantoor",
         object_type: "office",
         address: "Coolsingel 1, Rotterdam",
@@ -103,11 +104,22 @@ describe("ObjectsTab", () => {
     expect(screen.queryByText(/^Collectieven$/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Object toevoegen" })).toBeInTheDocument();
     expect(within(table).getByText("Hoofdkantoor")).toBeInTheDocument();
+    expect(within(table).getByText("Extern: MKA-7788")).toBeInTheDocument();
     expect(within(table).getByText("Mobiele surveillance")).toBeInTheDocument();
     expect(within(table).getByText(/Locatie controleren/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Object toevoegen" }));
     expect(onAddObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("vindt een object ook op de niet-unieke externe objectcode", async () => {
+    renderObjects();
+
+    fireEvent.change(await screen.findByLabelText("Objecten zoeken"), { target: { value: "mka-7788" } });
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Hoofdkantoor")).toBeInTheDocument();
+    expect(within(table).queryByText("Distributiecentrum")).not.toBeInTheDocument();
   });
 
   it("zoekt en filtert de tabel zonder de objectcontext kwijt te raken", async () => {

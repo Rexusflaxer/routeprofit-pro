@@ -179,7 +179,7 @@ function customerPlatformError(error, action) {
   return normalized;
 }
 
-export async function invokeCustomerPlatformMutation(payload) {
+async function invokeCustomerPlatformRequest(payload) {
   try {
     const response = await base44.functions.invoke("customerPlatformApi", payload);
     const result = response?.data?.data || response?.data || {};
@@ -192,6 +192,14 @@ export async function invokeCustomerPlatformMutation(payload) {
     if (error?.action || error?.requestId || error?.details) throw error;
     throw customerPlatformError(error, payload?.action);
   }
+}
+
+export function invokeCustomerPlatformRead(payload) {
+  return invokeCustomerPlatformRequest(payload);
+}
+
+export function invokeCustomerPlatformMutation(payload) {
+  return invokeCustomerPlatformRequest(payload);
 }
 
 export function getRecordStatus(record) {

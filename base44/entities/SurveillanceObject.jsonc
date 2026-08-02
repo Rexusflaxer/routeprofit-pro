@@ -4,7 +4,33 @@
   "properties": {
     "object_code": {
       "type": "string",
-      "description": "Objectcode"
+      "minLength": 1,
+      "maxLength": 50,
+      "description": "Door de gebruiker beheerde, hoofdletterongevoelig unieke interne objectcode"
+    },
+    "object_code_normalized": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 50,
+      "description": "Technische NFKC/hoofdletter-normalisatie voor eenduidige objectcodecontrole en zoekacties"
+    },
+    "external_object_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120,
+      "description": "Niet-unieke referentiecode van bijvoorbeeld opdrachtgever, hoofdaannemer of ander beveiligingsbedrijf"
+    },
+    "external_object_code_normalized": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120,
+      "description": "Technische NFKC/hoofdletter-normalisatie waarmee op de externe objectcode kan worden gezocht"
     },
     "creation_idempotency_key": {
       "type": [

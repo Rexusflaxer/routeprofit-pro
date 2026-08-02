@@ -60,14 +60,19 @@ function LoadingState({ label }) {
   );
 }
 
-function ErrorState({ error, onRetry }) {
+function ErrorState({ error, onRetry, title = "De gegevens konden niet worden geladen." }) {
   return (
     <div className="m-4 rounded-md border border-destructive/30 bg-destructive/10 p-4">
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-destructive">De objectgegevens konden niet worden geladen.</p>
+          <p className="text-sm font-medium text-destructive">{title}</p>
           <p className="mt-1 text-xs text-muted-foreground">{error?.message || "Probeer het opnieuw."}</p>
+          {(error?.status || error?.requestId) && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {[error.status && `Status ${error.status}`, error.requestId && `Referentie ${error.requestId}`].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
         <Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="h-3.5 w-3.5" /> Opnieuw</Button>
       </div>
@@ -327,8 +332,8 @@ export default function ObjectCardTabs({
   }, [selectedRow, view]);
 
   useEffect(() => {
-    if (view === "edit" && !warningQuery.isLoading && !selectedWarning) onCloseView();
-  }, [onCloseView, selectedWarning, view, warningQuery.isLoading]);
+    if (view === "edit" && !warningQuery.isLoading && !warningQuery.isError && !selectedWarning) onCloseView();
+  }, [onCloseView, selectedWarning, view, warningQuery.isError, warningQuery.isLoading]);
 
   const invalidate = async () => {
     await Promise.all([
@@ -379,7 +384,7 @@ export default function ObjectCardTabs({
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
           {activeTab === "warning-addresses" ? (
             <div className="flex min-h-[620px] flex-col bg-card">
-              {(view === "new" || selectedWarning) && (
+              {!warningQuery.isError && (view === "new" || selectedWarning) && (
                 <ObjectWarningAddressWizard
                   key={view === "new" ? "new-warning-address" : `edit-${selectedWarning.id}-${selectedWarning.version}`}
                   mode={view === "new" ? "create" : "edit"}
@@ -399,11 +404,11 @@ export default function ObjectCardTabs({
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <SearchField value={searchTerm} onChange={onSearchChange} placeholder="Zoek op naam, rol of telefoon..." label="Waarschuwingsadressen zoeken" />
-                  {view !== "new" && !selectedWarning && <Button size="sm" onClick={onOpenCreate} disabled={archived}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button>}
+                  {!warningQuery.isError && view !== "new" && !selectedWarning && <Button size="sm" onClick={onOpenCreate} disabled={archived}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button>}
                 </div>
               </div>
               <div className="min-h-0 flex-1">
-                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <WarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} onEdit={row => !archived && onOpenEdit(row.id)} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
+                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <WarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} onEdit={row => !archived && onOpenEdit(row.id)} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
               </div>
             </div>
           ) : (
@@ -416,7 +421,7 @@ export default function ObjectCardTabs({
                 <SearchField value={searchTerm} onChange={onSearchChange} placeholder="Zoek op handeling, veld of gebruiker..." label="Logboek doorzoeken" />
               </div>
               <div className="min-h-0 flex-1">
-                {logbookQuery.isLoading ? <LoadingState label="Logboek laden..." /> : logbookQuery.isError ? <ErrorState error={logbookQuery.error} onRetry={() => logbookQuery.refetch()} /> : logbook.length ? <LogbookTable rows={logbook} /> : <EmptyTable icon={Clock3} title={searchTerm ? "Geen logboekregels gevonden" : "Nog geen logboekregels"} description={searchTerm ? "Pas de zoekopdracht aan." : "Toevoegingen en wijzigingen op de objectkaart verschijnen hier automatisch met de uitvoerende gebruiker."} />}
+                {logbookQuery.isLoading ? <LoadingState label="Logboek laden..." /> : logbookQuery.isError ? <ErrorState title="Het objectlogboek kon niet worden geladen." error={logbookQuery.error} onRetry={() => logbookQuery.refetch()} /> : logbook.length ? <LogbookTable rows={logbook} /> : <EmptyTable icon={Clock3} title={searchTerm ? "Geen logboekregels gevonden" : "Nog geen logboekregels"} description={searchTerm ? "Pas de zoekopdracht aan." : "Toevoegingen en wijzigingen op de objectkaart verschijnen hier automatisch met de uitvoerende gebruiker."} />}
               </div>
               {(page > 1 || logbookHasNext) && (
                 <div className="flex items-center justify-between border-t border-border px-4 py-3">

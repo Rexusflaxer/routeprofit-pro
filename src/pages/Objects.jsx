@@ -5,6 +5,7 @@ import { AlertCircle, ArrowLeft, MapPin, Plus, RefreshCw, Search, X } from "luci
 import { base44 } from "@/api/base44Client";
 import ObjectDetailView from "@/components/objects/ObjectDetailView";
 import ObjectTable from "@/components/objects/ObjectTable";
+import { invokeCustomerPlatformRead } from "@/components/customers/customerDossierUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import EmptyState from "@/components/ui-custom/EmptyState";
@@ -16,6 +17,7 @@ const OBJECT_LIST_FIELDS = [
   "id",
   "customer_id",
   "object_code",
+  "external_object_code",
   "name",
   "object_type",
   "status",
@@ -55,33 +57,22 @@ const OBJECT_DETAIL_FIELDS = [
   "created_date",
 ];
 
-function escapeRegex(value) {
-  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function escapeRegexClassCharacter(value) {
-  return value.replace(/[\\\]\[\^-]/g, "\\$&");
-}
-
-function caseFoldedRegex(value) {
-  return Array.from(String(value || "")).map(character => {
-    const lower = character.toLocaleLowerCase("nl-NL");
-    const upper = character.toLocaleUpperCase("nl-NL");
-    if (lower.length === 1 && upper.length === 1 && lower !== upper) {
-      return `[${[...new Set([lower, upper])].map(escapeRegexClassCharacter).join("")}]`;
-    }
-    return escapeRegex(character);
-  }).join("");
-}
-
 async function listObjects({ customerId, search, page }) {
   const query = {};
   if (customerId) query.customer_id = customerId;
   const boundedSearch = String(search || "").trim().slice(0, 120);
   if (boundedSearch) {
-    const regex = caseFoldedRegex(boundedSearch);
-    query.$or = ["object_code", "name", "address", "city", "region"]
-      .map(field => ({ [field]: { $regex: regex } }));
+    const result = await invokeCustomerPlatformRead({
+      action: "search_customer_objects",
+      customer_id: customerId || undefined,
+      search: boundedSearch,
+      page,
+      page_size: OBJECT_PAGE_SIZE,
+    });
+    return {
+      rows: Array.isArray(result.items) ? result.items : [],
+      hasNext: result.has_more === true,
+    };
   }
   const skip = (page - 1) * OBJECT_PAGE_SIZE;
   const rows = Object.keys(query).length
@@ -204,7 +195,7 @@ export default function Objects() {
         <div className="space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input placeholder="Zoek op objectcode, naam, adres of regio..." value={searchTerm} onChange={event => setSearchTerm(event.target.value)} maxLength={120} className="pl-9 pr-9" />
+            <Input placeholder="Zoek op objectcode, externe code, naam, adres of regio..." value={searchTerm} onChange={event => setSearchTerm(event.target.value)} maxLength={120} className="pl-9 pr-9" />
             {searchTerm && <button type="button" onClick={() => setSearchTerm("")} aria-label="Zoekopdracht wissen" className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>}
           </div>
           {objects.length === 0

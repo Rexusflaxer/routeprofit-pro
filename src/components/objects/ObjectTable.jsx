@@ -86,9 +86,16 @@ export default function ObjectTable({ objects, onSelect }) {
                 className="cursor-pointer transition-colors hover:bg-slate-50/50"
               >
                 <TableCell>
-                  {obj.object_code
-                    ? <span className="text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{obj.object_code}</span>
-                    : <span className="text-slate-300 text-xs">—</span>}
+                  <div className="flex flex-col items-start gap-1">
+                    {obj.object_code
+                      ? <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">{obj.object_code}</span>
+                      : <span className="text-xs text-slate-300">—</span>}
+                    {obj.external_object_code && (
+                      <span className="max-w-[180px] truncate font-mono text-[11px] text-muted-foreground" title={`Externe objectcode: ${obj.external_object_code}`}>
+                        Extern: {obj.external_object_code}
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="font-medium text-slate-900">
                   <button

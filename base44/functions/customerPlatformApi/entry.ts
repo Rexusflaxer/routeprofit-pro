@@ -80,6 +80,7 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 
 const READ_ACTIONS = new Set([
   'get_customer_overview',
+  'search_customer_objects',
   'list_object_warning_addresses',
   'list_object_logbook',
   'list_commercial',
@@ -280,7 +281,10 @@ const CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS = new Set([
 const CUSTOMER_OBJECT_RECOVERY_LIMIT = 50;
 const WARNING_ADDRESS_RECOVERY_LIMIT = 50;
 const CUSTOMER_OBJECT_CREATE_RESERVATION_TTL_MS = 30 * 60 * 1000;
+const OBJECT_CODE_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const OBJECT_IDENTITY_PATCH_FIELDS = [
+  'object_code',
+  'external_object_code',
   'name',
   'object_type',
   'logo_file_url',
@@ -2165,6 +2169,61 @@ async function handleGetCustomerOverview(base44: LooseRecord, body: LooseRecord)
   };
 }
 
+async function handleSearchCustomerObjects(base44: LooseRecord, body: LooseRecord) {
+  const page = requireInteger(body.page ?? 1, 'page', 1);
+  const pageSize = Math.min(100, requireInteger(body.page_size ?? 25, 'page_size', 1));
+  const customerId = asString(body.customer_id);
+  const search = asString(body.search).slice(0, 120);
+  const status = asString(body.status);
+  if (status && !Object.prototype.hasOwnProperty.call(OBJECT_STATUS_TRANSITIONS, status)) {
+    throw new ApiError(400, 'Ongeldige objectstatus');
+  }
+  if (customerId) await requireRecord(base44, 'Customer', customerId, 'Klant');
+
+  const query: LooseRecord = {};
+  if (customerId) query.customer_id = customerId;
+  if (status) query.status = status;
+  if (search) {
+    const literalRegex = escapeRegex(search);
+    const normalizedRegex = escapeRegex(normalizedCodeSearchValue(search));
+    let canonicalInternalRegex = normalizedRegex;
+    try {
+      canonicalInternalRegex = escapeRegex(canonicalObjectCode(search, true) as string);
+    } catch {
+      // De zoekterm kan ook een naam of adres zijn en hoeft dan geen geldige
+      // interne objectcode te vormen.
+    }
+    query.$or = [
+      { object_code: { $regex: literalRegex, $options: 'i' } },
+      { object_code_normalized: { $regex: canonicalInternalRegex, $options: 'i' } },
+      { external_object_code: { $regex: literalRegex, $options: 'i' } },
+      { external_object_code_normalized: { $regex: normalizedRegex, $options: 'i' } },
+      { name: { $regex: literalRegex, $options: 'i' } },
+      { address: { $regex: literalRegex, $options: 'i' } },
+    ];
+  }
+
+  const skip = (page - 1) * pageSize;
+  const records = await getEntity(base44, 'SurveillanceObject').filter(
+    query,
+    '+name',
+    pageSize + 1,
+    skip,
+  );
+  const hasMore = records.length > pageSize;
+  return {
+    items: records.slice(0, pageSize).map((object: LooseRecord) => ({
+      ...safeObjectMutationSummary(object, []),
+      updated_date: object.updated_date || null,
+      created_date: object.created_date || null,
+    })),
+    page,
+    page_size: pageSize,
+    has_more: hasMore,
+    next_page: hasMore ? page + 1 : null,
+  };
+}
+
 async function handleCreateCustomer(base44: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string) {
   if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe klant verwacht expected_version 0');
   const data = (body.customer || body.data || {}) as LooseRecord;
@@ -2437,36 +2496,62 @@ async function handleSetCustomerStatus(base44: LooseRecord, user: LooseRecord, b
   return { customer: updated, resource_type: 'Customer', resource_id: updated.id };
 }
 
-async function handleDeleteEmptyCustomer(base44: LooseRecord, body: LooseRecord, expectedVersion: number) {
-  const customer = await requireRecord(base44, 'Customer', requireString(body, 'customer_id'), 'Klant');
-  if (versionOf(customer) !== expectedVersion) throw new ApiError(409, 'Klant is intussen gewijzigd');
-  if (customer.status !== 'concept') throw new ApiError(409, 'Alleen een leeg concept kan definitief worden verwijderd');
-  const relationEntities = [
-    'CustomerAccount',
-    'CustomerAddress',
-    'CustomerContact',
-    'SurveillanceObject',
-    'CustomerQuote',
-    'CustomerContract',
-    'CustomerRequest',
-    'SalesInvoice',
-    'CustomerPortalPublication',
-  ];
-  const relationCounts: LooseRecord = {};
-  for (const entityName of relationEntities) {
-    const records = await getEntity(base44, entityName).filter({ customer_id: customer.id }, '-created_date', 1, 0, ['id']);
-    if (records.length) relationCounts[entityName] = records.length;
+async function handleDeleteEmptyCustomer(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  target: string,
+) {
+  const customerId = requireString(body, 'customer_id');
+  const initialCustomer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+  if (versionOf(initialCustomer) !== expectedVersion) throw new ApiError(409, 'Klant is intussen gewijzigd');
+  if (initialCustomer.status !== 'concept') throw new ApiError(409, 'Alleen een leeg concept kan definitief worden verwijderd');
+
+  // De globale objectcodelock voorkomt dat de coördinerende klant precies
+  // tijdens een objectcodewrite verdwijnt.
+  const codeReservation = await reserveGlobalObjectCodeMutation(base44, user, idempotencyKey, target);
+  try {
+    const customer = await requireRecord(base44, 'Customer', customerId, 'Klant');
+    const ownLockIncrement = codeReservation.coordinator_id === customer.id ? 1 : 0;
+    if (versionOf(customer) !== expectedVersion + ownLockIncrement) {
+      throw new ApiError(409, 'Klant is intussen gewijzigd');
+    }
+    if (customer.status !== 'concept') throw new ApiError(409, 'Alleen een leeg concept kan definitief worden verwijderd');
+    const relationEntities = [
+      'CustomerAccount',
+      'CustomerAddress',
+      'CustomerContact',
+      'SurveillanceObject',
+      'CustomerQuote',
+      'CustomerContract',
+      'CustomerRequest',
+      'SalesInvoice',
+      'CustomerPortalPublication',
+    ];
+    const relationCounts: LooseRecord = {};
+    for (const entityName of relationEntities) {
+      const records = await getEntity(base44, entityName).filter({ customer_id: customer.id }, '-created_date', 1, 0, ['id']);
+      if (records.length) relationCounts[entityName] = records.length;
+    }
+    if (Object.keys(relationCounts).length) {
+      throw new ApiError(409, 'Conceptklant heeft relaties en kan alleen worden gearchiveerd', { relations: relationCounts });
+    }
+    await getEntity(base44, 'Customer').delete(customer.id);
+    return {
+      deleted: true,
+      customer_id: customer.id,
+      resource_type: 'Customer',
+      resource_id: customer.id,
+    };
+  } finally {
+    try {
+      await releaseGlobalObjectCodeMutation(base44, codeReservation);
+    } catch (error) {
+      console.error('[customerPlatformApi] object code mutation lock release failed during customer deletion', customerId, error);
+    }
   }
-  if (Object.keys(relationCounts).length) {
-    throw new ApiError(409, 'Conceptklant heeft relaties en kan alleen worden gearchiveerd', { relations: relationCounts });
-  }
-  await getEntity(base44, 'Customer').delete(customer.id);
-  return {
-    deleted: true,
-    customer_id: customer.id,
-    resource_type: 'Customer',
-    resource_id: customer.id,
-  };
 }
 
 function objectCoordinate(value: unknown, minimum: number, maximum: number, field: string) {
@@ -2513,6 +2598,25 @@ const OBJECT_TYPE_LOG_LABELS: Record<string, string> = {
 function objectIdentityChanges(before: LooseRecord, after: LooseRecord, changedFields: string[]) {
   const fields = new Set(changedFields);
   const changes: LooseRecord[] = [];
+  if (fields.has('object_code') && asString(before.object_code) !== asString(after.object_code)) {
+    changes.push({
+      field: 'object_code',
+      label: 'Objectcode',
+      before: asString(before.object_code) || null,
+      after: asString(after.object_code) || null,
+    });
+  }
+  if (
+    fields.has('external_object_code') &&
+    asString(before.external_object_code) !== asString(after.external_object_code)
+  ) {
+    changes.push({
+      field: 'external_object_code',
+      label: 'Externe objectcode',
+      before: asString(before.external_object_code) || null,
+      after: asString(after.external_object_code) || null,
+    });
+  }
   if (fields.has('name') && asString(before.name) !== asString(after.name)) {
     changes.push({ field: 'name', label: 'Objectnaam', before: asString(before.name) || null, after: asString(after.name) || null });
   }
@@ -2553,8 +2657,11 @@ function safeObjectMutationSummary(object: LooseRecord, changedFields: string[])
     id: object.id,
     customer_id: object.customer_id,
     object_code: object.object_code || null,
+    external_object_code: object.external_object_code || null,
     name: object.name,
     address: object.address,
+    city: object.city || null,
+    region: object.region || null,
     object_type: object.object_type || null,
     logo_file_url: object.logo_file_url || null,
     logo_file_id: object.logo_file_id || null,
@@ -2571,7 +2678,9 @@ function safeObjectMutationSummary(object: LooseRecord, changedFields: string[])
     has_object_map: typeof object.has_object_map === 'boolean'
       ? object.has_object_map
       : Boolean(object.object_map_url || object.object_map_file_url),
-    changed_fields: [...new Set(effectiveChangedFields)].sort(),
+    changed_fields: [...new Set(effectiveChangedFields)]
+      .filter(field => !field.endsWith('_normalized'))
+      .sort(),
   };
 }
 
@@ -2856,6 +2965,8 @@ async function handleListObjectWarningAddresses(base44: LooseRecord, body: Loose
 }
 
 const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
+  object_code: 'Objectcode',
+  external_object_code: 'Externe objectcode',
   name: 'Objectnaam',
   address: 'Adres',
   street_name: 'Straat',
@@ -2887,6 +2998,8 @@ const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
 };
 
 const LOGBOOK_VALUE_FIELDS = new Set([
+  'object_code',
+  'external_object_code',
   'name',
   'address',
   'object_type',
@@ -3487,6 +3600,21 @@ function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
   const patch = pick(data, OBJECT_IDENTITY_PATCH_FIELDS);
   if (!Object.keys(patch).length) throw new ApiError(400, 'Geen objectgegevens opgegeven');
 
+  if (Object.prototype.hasOwnProperty.call(patch, 'object_code')) {
+    patch.object_code = canonicalObjectCode(patch.object_code, true);
+    patch.object_code_normalized = normalizedObjectCode(patch.object_code);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'external_object_code')) {
+    patch.external_object_code = objectCodeDisplayValue(
+      patch.external_object_code,
+      'Externe objectcode',
+      120,
+      false,
+    );
+    patch.external_object_code_normalized = patch.external_object_code
+      ? normalizedExternalObjectCode(patch.external_object_code)
+      : null;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'name')) {
     patch.name = objectText(patch.name, 'Objectnaam', 160, false);
   }
@@ -3655,9 +3783,43 @@ function objectOperationsPatch(data: LooseRecord, object: LooseRecord) {
   return patch;
 }
 
-function normalizedObjectCode(value: unknown) {
-  const code = asString(value).toUpperCase().replace(/\s+/g, '-');
-  if (!code) return '';
+function objectCodeDisplayValue(
+  value: unknown,
+  label: string,
+  maximumLength: number,
+  required: boolean,
+) {
+  if (value === null || value === undefined || value === '') {
+    if (required) throw new ApiError(400, `${label} is verplicht`);
+    return null;
+  }
+  if (typeof value !== 'string') throw new ApiError(400, `${label} moet tekst zijn`);
+  const code = value.normalize('NFKC').trim();
+  if (!code) {
+    if (required) throw new ApiError(400, `${label} is verplicht`);
+    return null;
+  }
+  if (code.length > maximumLength) {
+    throw new ApiError(400, `${label} mag maximaal ${maximumLength} tekens bevatten`);
+  }
+  if (/[\u0000-\u001f\u007f]/.test(code)) {
+    throw new ApiError(400, `${label} bevat ongeldige besturingstekens`);
+  }
+  return code;
+}
+
+function normalizedCodeSearchValue(value: unknown) {
+  return asString(value)
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleUpperCase('nl-NL');
+}
+
+function canonicalObjectCode(value: unknown, required: boolean) {
+  const display = objectCodeDisplayValue(value, 'Objectcode', 50, required);
+  if (!display) return null;
+  const code = display.toUpperCase().replace(/\s+/g, '-');
   if (code.length > 50) throw new ApiError(400, 'Objectcode mag maximaal 50 tekens bevatten');
   if (!/^[A-Z0-9][A-Z0-9._/-]*$/.test(code)) {
     throw new ApiError(400, 'Objectcode bevat ongeldige tekens');
@@ -3665,11 +3827,120 @@ function normalizedObjectCode(value: unknown) {
   return code;
 }
 
-async function objectCodeExists(base44: LooseRecord, code: string) {
+function normalizedObjectCode(value: unknown) {
+  return canonicalObjectCode(value, true) as string;
+}
+
+function normalizedExternalObjectCode(value: unknown) {
+  const normalized = normalizedCodeSearchValue(value);
+  if (normalized.length > 120) throw new ApiError(400, 'Externe objectcode mag maximaal 120 tekens bevatten');
+  return normalized;
+}
+
+async function objectCodeExists(base44: LooseRecord, code: string, excludedObjectId = '') {
+  const normalized = normalizedObjectCode(code);
+  const display = canonicalObjectCode(code, true) as string;
+  const legacyDisplayPattern = `^${display
+    .split('-')
+    .map(part => escapeRegex(part))
+    .join('(?:-|\\s+)')}$`;
   const matches = await getEntity(base44, 'SurveillanceObject').filter({
-    object_code: { $regex: `^${escapeRegex(code)}$`, $options: 'i' },
-  }, '-created_date', 2);
-  return matches[0] || null;
+    $or: [
+      { object_code_normalized: normalized },
+      { object_code: { $regex: legacyDisplayPattern, $options: 'i' } },
+    ],
+  }, '+created_date', 100);
+  const exactMatch = matches.find((object: LooseRecord) =>
+    object.id !== excludedObjectId && (() => {
+      try {
+        return normalizedObjectCode(object.object_code) === normalized;
+      } catch {
+        return normalizedCodeSearchValue(object.object_code) === normalized;
+      }
+    })()) || null;
+  if (exactMatch) return exactMatch;
+
+  // Records van voor object_code_normalized kunnen NFKC-equivalent zijn zonder
+  // door een Mongo-regex gevonden te worden (bijv. full-width tekens). Scan die
+  // legacyset paginagewijs voordat een nieuwe code wordt toegelaten.
+  const pageSize = 5_000;
+  for (let skip = 0; ; skip += pageSize) {
+    const legacyPage = await getEntity(base44, 'SurveillanceObject').list(
+      '+created_date',
+      pageSize,
+      skip,
+      ['id', 'object_code', 'object_code_normalized'],
+    );
+    const legacyMatch = legacyPage.find((object: LooseRecord) => {
+      if (object.id === excludedObjectId || object.object_code_normalized) return false;
+      try {
+        return normalizedObjectCode(object.object_code) === normalized;
+      } catch {
+        return false;
+      }
+    });
+    if (legacyMatch) return legacyMatch;
+    if (legacyPage.length < pageSize) return null;
+  }
+}
+
+async function rollbackRejectedObjectCodeMutation(
+  base44: LooseRecord,
+  updatedObject: LooseRecord,
+  previousObject: LooseRecord,
+  rejectedCode: string,
+  idempotencyKey: string,
+) {
+  let previousCode: string;
+  try {
+    previousCode = canonicalObjectCode(previousObject.object_code, true) as string;
+  } catch {
+    previousCode = await generatedObjectCode(base44, {
+      id: previousObject.customer_id,
+      customer_number: previousObject.customer_id,
+    });
+  }
+  const keyHash = await sha256(idempotencyKey);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const current = attempt === 0
+      ? updatedObject
+      : await requireRecord(base44, 'SurveillanceObject', updatedObject.id, 'Object');
+    if (normalizedObjectCode(current.object_code) !== normalizedObjectCode(rejectedCode)) return current;
+
+    const hashes = Array.isArray(current.customer_platform_mutation_key_hashes)
+      ? current.customer_platform_mutation_key_hashes.filter((value: unknown) => typeof value === 'string')
+      : [];
+    const remainingHashes = hashes.filter((hash: string) => hash !== keyHash);
+    const currentRecoveries = current.customer_platform_mutation_recoveries;
+    const recoveries = currentRecoveries && typeof currentRecoveries === 'object' && !Array.isArray(currentRecoveries)
+      ? currentRecoveries
+      : {};
+    const remainingRecoveries = Object.fromEntries(
+      Object.entries(recoveries).filter(([hash]) => hash !== keyHash),
+    );
+    const rollbackPatch: LooseRecord = {
+      object_code: previousCode,
+      object_code_normalized: normalizedObjectCode(previousCode),
+      customer_platform_mutation_key_hashes: remainingHashes,
+      customer_platform_mutation_recoveries: remainingRecoveries,
+    };
+    if (current.customer_platform_last_mutation_key_hash === keyHash) {
+      const lastHash = remainingHashes.at(-1) || null;
+      rollbackPatch.customer_platform_last_mutation_key_hash = lastHash;
+      rollbackPatch.customer_platform_last_mutation_recovery = lastHash
+        ? remainingRecoveries[lastHash] || null
+        : null;
+    }
+    try {
+      return await casUpdate(base44, 'SurveillanceObject', current, versionOf(current), rollbackPatch);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
+  throw new ApiError(500, 'Dubbele objectcode kon niet veilig worden teruggedraaid', {
+    object_id: updatedObject.id,
+    object_code: rejectedCode,
+  });
 }
 
 async function generatedObjectCode(base44: LooseRecord, customer: LooseRecord) {
@@ -3758,8 +4029,83 @@ async function existingCustomerObjectCreation(
 }
 
 function reservationIsCurrent(reservation: LooseRecord) {
+  if (!reservation || typeof reservation !== 'object' || Array.isArray(reservation)) return false;
   const expiresAt = Date.parse(asString(reservation.expires_at));
   return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+async function reserveGlobalObjectCodeMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  idempotencyKey: string,
+  target: string,
+) {
+  const ownerToken = crypto.randomUUID();
+  const keyHash = await sha256(idempotencyKey);
+  const reservedAt = nowIso();
+  const lock = {
+    owner_token: ownerToken,
+    key_hash: keyHash,
+    actor_id: user.id,
+    mutation_target: target,
+    reserved_at: reservedAt,
+    expires_at: new Date(Date.parse(reservedAt) + OBJECT_CODE_MUTATION_LOCK_TTL_MS).toISOString(),
+  };
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const coordinators = await getEntity(base44, 'Customer').list(
+      '+created_date',
+      1,
+      0,
+      ['id', 'version', 'created_date', 'object_code_mutation_lock'],
+    );
+    const coordinator = coordinators[0];
+    if (!coordinator) throw new ApiError(503, 'Objectcodecoördinator is niet beschikbaar');
+    const current = coordinator.object_code_mutation_lock;
+    if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
+      const sameRequest = current.key_hash === keyHash
+        && current.actor_id === user.id
+        && current.mutation_target === target;
+      throw new ApiError(409, sameRequest
+        ? 'Deze objectcodewijziging is nog in verwerking; probeer opnieuw'
+        : 'Een andere objectcodewijziging is nog in verwerking; probeer opnieuw', {
+        retryable: true,
+        reservation_expires_at: current.expires_at || null,
+      });
+    }
+    try {
+      const updated = await casUpdate(base44, 'Customer', coordinator, versionOf(coordinator), {
+        object_code_mutation_lock: lock,
+      });
+      if (updated.object_code_mutation_lock?.owner_token === ownerToken) {
+        return { coordinator_id: coordinator.id, owner_token: ownerToken };
+      }
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 7) throw error;
+    }
+  }
+  throw new ApiError(409, 'Objectcodewijziging kon niet veilig worden gereserveerd; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
+async function releaseGlobalObjectCodeMutation(
+  base44: LooseRecord,
+  reservation: LooseRecord | null,
+) {
+  if (!reservation) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const coordinator = await getRecord(base44, 'Customer', reservation.coordinator_id);
+    if (!coordinator || coordinator.object_code_mutation_lock?.owner_token !== reservation.owner_token) return;
+    try {
+      await casUpdate(base44, 'Customer', coordinator, versionOf(coordinator), {
+        object_code_mutation_lock: null,
+      });
+      return;
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
 }
 
 async function reserveCustomerObjectCreation(
@@ -3902,7 +4248,7 @@ async function handleCreateCustomerObject(
   if (!address) throw new ApiError(400, 'Objectadres is verplicht');
   if (!OBJECT_TYPES.has(objectType)) throw new ApiError(400, 'Kies een geldig objecttype');
 
-  let objectCode = normalizedObjectCode(data.object_code);
+  let objectCode = canonicalObjectCode(data.object_code, false);
   if (objectCode) {
     const duplicateCode = await objectCodeExists(base44, objectCode);
     if (duplicateCode) {
@@ -3911,6 +4257,16 @@ async function handleCreateCustomerObject(
   } else {
     objectCode = await generatedObjectCode(base44, customer);
   }
+  const objectCodeNormalized = normalizedObjectCode(objectCode);
+  const externalObjectCode = objectCodeDisplayValue(
+    data.external_object_code,
+    'Externe objectcode',
+    120,
+    false,
+  );
+  const externalObjectCodeNormalized = externalObjectCode
+    ? normalizedExternalObjectCode(externalObjectCode)
+    : null;
 
   const customerObjects = await getEntity(base44, 'SurveillanceObject').filter({ customer_id: customerId }, '-updated_date', 1000);
   const normalizedName = normalizeName(name);
@@ -3948,6 +4304,7 @@ async function handleCreateCustomerObject(
     requestFingerprint,
     target,
   );
+  let objectCodeReservation: LooseRecord | null = null;
   try {
     const reservedCustomer = await requireRecord(base44, 'Customer', customerId, 'Klant');
     if (reservedCustomer.object_creation_reservation?.owner_token !== reservationOwner) {
@@ -3964,6 +4321,12 @@ async function handleCreateCustomerObject(
     );
     if (racedCreation) return racedCreation;
 
+    objectCodeReservation = await reserveGlobalObjectCodeMutation(
+      base44,
+      user,
+      idempotencyKey,
+      target,
+    );
     const duplicateCode = await objectCodeExists(base44, objectCode);
     if (duplicateCode) {
       throw new ApiError(409, 'Objectcode is al in gebruik', { duplicate_object_id: duplicateCode.id });
@@ -3972,6 +4335,9 @@ async function handleCreateCustomerObject(
     const object = await getEntity(base44, 'SurveillanceObject').create({
       customer_id: customerId,
       object_code: objectCode,
+      object_code_normalized: objectCodeNormalized,
+      external_object_code: externalObjectCode,
+      external_object_code_normalized: externalObjectCodeNormalized,
       creation_idempotency_key: idempotencyKey,
       creation_request_fingerprint: requestFingerprint,
       creation_actor_user_id: user.id,
@@ -4015,6 +4381,24 @@ async function handleCreateCustomerObject(
       mobile_map_priority: 0,
       version: 1,
     });
+    const racedCode = await objectCodeExists(base44, objectCode, object.id);
+    if (racedCode) {
+      try {
+        await getEntity(base44, 'SurveillanceObject').delete(object.id);
+      } catch (error) {
+        console.error('[customerPlatformApi] duplicate object code rollback failed', object.id, error);
+        throw new ApiError(500, 'Dubbele objectcode kon niet veilig worden teruggedraaid', {
+          object_id: object.id,
+          duplicate_object_id: racedCode.id,
+          object_code: objectCode,
+        });
+      }
+      throw new ApiError(409, 'Objectcode is gelijktijdig door een ander object vastgelegd', {
+        duplicate_object_id: racedCode.id,
+        object_code: objectCode,
+        retryable: false,
+      });
+    }
     await markCustomerFirstObject(base44, reservedCustomer);
     return {
       object: customerObjectResponseRecord(object),
@@ -4024,6 +4408,11 @@ async function handleCreateCustomerObject(
       category: 'operations',
     };
   } finally {
+    try {
+      await releaseGlobalObjectCodeMutation(base44, objectCodeReservation);
+    } catch (error) {
+      console.error('[customerPlatformApi] object code mutation lock release failed', customerId, error);
+    }
     try {
       await releaseCustomerObjectCreation(base44, customerId, reservationOwner);
     } catch (error) {
@@ -4053,29 +4442,61 @@ async function handleUpdateCustomerObjectIdentity(
   const patch = Object.fromEntries(Object.entries(normalizedPatch).filter(([field, value]) =>
     JSON.stringify(canonicalMutationValue(object[field])) !== JSON.stringify(canonicalMutationValue(value))));
   if (!Object.keys(patch).length) throw new ApiError(400, 'Er zijn geen gewijzigde objectgegevens om op te slaan');
-  const projected = { ...object, ...patch, version: expectedVersion + 1 };
-  const changes = objectIdentityChanges(object, projected, Object.keys(patch));
-  const prepared = await customerObjectPatchWithRecovery({
-    object,
-    patch,
-    expectedVersion,
-    user,
-    action: 'update_customer_object_identity',
-    idempotencyKey,
-    requestFingerprint,
-    target,
-    extraResult: {
+  const changesObjectCode = Object.prototype.hasOwnProperty.call(patch, 'object_code');
+  const objectCodeReservation = changesObjectCode
+    ? await reserveGlobalObjectCodeMutation(base44, user, idempotencyKey, target)
+    : null;
+  try {
+    if (changesObjectCode) {
+      const duplicateCode = await objectCodeExists(base44, patch.object_code, object.id);
+      if (duplicateCode) {
+        throw new ApiError(409, 'Objectcode is al in gebruik', {
+          duplicate_object_id: duplicateCode.id,
+          object_code: patch.object_code,
+        });
+      }
+    }
+    const projected = { ...object, ...patch, version: expectedVersion + 1 };
+    const changes = objectIdentityChanges(object, projected, Object.keys(patch));
+    const prepared = await customerObjectPatchWithRecovery({
+      object,
+      patch,
+      expectedVersion,
+      user,
+      action: 'update_customer_object_identity',
+      idempotencyKey,
+      requestFingerprint,
+      target,
+      extraResult: {
+        changes,
+        summary: 'Objectgegevens gewijzigd',
+        outcome: 'success',
+      },
+    });
+    const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+    if (changesObjectCode) {
+      const racedCode = await objectCodeExists(base44, updated.object_code, updated.id);
+      if (racedCode) {
+        await rollbackRejectedObjectCodeMutation(base44, updated, object, updated.object_code, idempotencyKey);
+        throw new ApiError(409, 'Objectcode is buiten de applicatie gelijktijdig door een ander object vastgelegd', {
+          duplicate_object_id: racedCode.id,
+          object_code: updated.object_code,
+          retryable: false,
+        });
+      }
+    }
+    return customerObjectMutationResult(updated, prepared.changedFields, {
       changes,
       summary: 'Objectgegevens gewijzigd',
       outcome: 'success',
-    },
-  });
-  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
-  return customerObjectMutationResult(updated, prepared.changedFields, {
-    changes,
-    summary: 'Objectgegevens gewijzigd',
-    outcome: 'success',
-  });
+    });
+  } finally {
+    try {
+      await releaseGlobalObjectCodeMutation(base44, objectCodeReservation);
+    } catch (error) {
+      console.error('[customerPlatformApi] object code mutation lock release failed', object.id, error);
+    }
+  }
 }
 
 async function handleUpdateCustomerObjectOperations(
@@ -6641,7 +7062,7 @@ async function executeMutation(
     case 'set_customer_status':
       return handleSetCustomerStatus(base44, user, body, expectedVersion);
     case 'delete_empty_customer':
-      return handleDeleteEmptyCustomer(base44, body, expectedVersion);
+      return handleDeleteEmptyCustomer(base44, user, body, expectedVersion, idempotencyKey, target);
     case 'create_customer_object':
       return handleCreateCustomerObject(
         base44,
@@ -6838,6 +7259,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
 
     if (READ_ACTIONS.has(action)) {
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
+      if (action === 'search_customer_objects') return json(await handleSearchCustomerObjects(base44, body));
       if (action === 'list_object_warning_addresses') return json(await handleListObjectWarningAddresses(base44, body));
       if (action === 'list_object_logbook') return json(await handleListObjectLogbook(base44, body));
       if (action === 'list_commercial') return json(await listRecords(base44, body, ['quote', 'contract', 'rate']));

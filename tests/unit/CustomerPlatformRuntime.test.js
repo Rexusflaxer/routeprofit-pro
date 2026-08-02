@@ -12,6 +12,7 @@ vi.mock("@/api/base44Client", () => ({
 }));
 
 import {
+  invokeCustomerPlatformRead,
   invokeCustomerPlatformMutation,
 } from "@/components/customers/customerDossierUtils";
 
@@ -76,5 +77,12 @@ describe("customerPlatformApi runtimecontract", () => {
       ok: true,
       contact: { id: "contact-1" },
     });
+  });
+
+  it("gebruikt voor afgeschermde zoekacties hetzelfde fout- en responsecontract", async () => {
+    invoke.mockResolvedValue({ data: { data: { items: [{ id: "object-1" }], has_more: false } } });
+
+    await expect(invokeCustomerPlatformRead({ action: "search_customer_objects", search: "extern 42" }))
+      .resolves.toEqual({ items: [{ id: "object-1" }], has_more: false });
   });
 });

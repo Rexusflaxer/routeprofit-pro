@@ -16,6 +16,8 @@ const OBJECT_TYPES = new Set([
 ]);
 
 const IDENTITY_FIELDS = new Set([
+  "object_code",
+  "external_object_code",
   "name",
   "object_type",
   "address",
@@ -100,6 +102,21 @@ function coordinate(value, minimum, maximum, label) {
 
 function identityData(form) {
   const data = pickedForm(form, IDENTITY_FIELDS, "Vul objectgegevens in.");
+  if (Object.hasOwn(data, "object_code")) {
+    data.object_code = requiredText(data.object_code, "Objectcode")
+      .toUpperCase()
+      .replace(/\s+/g, "-");
+    if (data.object_code.length > 50) throw new Error("Objectcode mag maximaal 50 tekens bevatten.");
+    if (!/^[A-Z0-9][A-Z0-9._/-]*$/.test(data.object_code)) {
+      throw new Error("Gebruik voor de objectcode alleen letters, cijfers, punten, schuine strepen, liggende streepjes of koppeltekens.");
+    }
+  }
+  if (Object.hasOwn(data, "external_object_code")) {
+    data.external_object_code = String(data.external_object_code ?? "").trim() || null;
+    if (data.external_object_code?.length > 120) {
+      throw new Error("Externe objectcode mag maximaal 120 tekens bevatten.");
+    }
+  }
   if (Object.hasOwn(data, "name")) {
     data.name = requiredText(data.name, "Objectnaam");
     if (data.name.length > 160) throw new Error("Objectnaam mag maximaal 160 tekens bevatten.");

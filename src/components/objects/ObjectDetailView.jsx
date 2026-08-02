@@ -34,6 +34,8 @@ function customerName(customer) {
 
 function identityForm(object) {
   return {
+    object_code: object?.object_code || "",
+    external_object_code: object?.external_object_code || "",
     name: object?.name || "",
     object_type: object?.object_type || "",
     address: object?.address || "",
@@ -149,6 +151,11 @@ export default function ObjectDetailView({ object, onBack }) {
       setEditing(false);
       setProfileError(null);
       toast({ title: "Objectgegevens opgeslagen" });
+    },
+    onError: async () => {
+      // Een gelijktijdig codeconflict kan server-side veilig zijn teruggedraaid en
+      // daarbij de CAS-versie verhogen. Haal daarom altijd de actuele versie op.
+      await invalidateObject();
     },
   });
 

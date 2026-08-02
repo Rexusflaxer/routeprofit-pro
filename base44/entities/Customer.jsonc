@@ -148,6 +148,14 @@
       "additionalProperties": true,
       "description": "Kortdurende, atomair via de klantversie geclaimde reservering die dubbele gelijktijdige objectaanmaak voorkomt."
     },
+    "object_code_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurende globale CAS-lock op de oudste klant waarmee interne objectcodes over alle klanten worden geserialiseerd."
+    },
     "creation_idempotency_key": {
       "type": [
         "string",

@@ -60,6 +60,7 @@ export function objectMatchesSearch(object = {}, query = "") {
   if (!term) return true;
   return [
     object.object_code,
+    object.external_object_code,
     object.name,
     object.address,
     object.city,
