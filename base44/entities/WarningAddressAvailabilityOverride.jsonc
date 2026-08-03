@@ -23,12 +23,48 @@
       "description": "Specifieke kalenderdatums waarop de weekplanning wordt overschreven"
     },
     "availability_status": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "available",
         "emergency_only",
-        "unavailable"
-      ]
+        "unavailable",
+        null
+      ],
+      "description": "Legacy dagstatus voor bestaande uitzonderingen"
+    },
+    "availability_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^(?:([01]\\d|2[0-3]):(?:00|30)|24:00)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "available",
+              "emergency_only"
+            ]
+          }
+        },
+        "required": [
+          "start_time",
+          "end_time",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Datumgebonden bereikbaarheidsblokken per half uur"
     },
     "reason": {
       "type": [
@@ -41,8 +77,7 @@
     "warning_address_id",
     "customer_id",
     "object_id",
-    "dates",
-    "availability_status"
+    "dates"
   ],
   "rls": {
     "create": {

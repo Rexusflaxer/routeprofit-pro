@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { availableIntervalsByDay, scheduleIntervalsByKind } from "./warningAvailabilityTimeline";
-import { overrideForDate } from "./warningAvailabilityOverrides";
+import { overrideForDate, overrideIntervalsByKind } from "./warningAvailabilityOverrides";
 
 const STATUS_STYLES = {
   available: "bg-emerald-500",
@@ -23,7 +23,9 @@ export default function WarningAddressCurrentStatus({ record }) {
   const override = overrideForDate(record, now);
 
   if (override) {
-    status = override.availability_status === "emergency_only" ? "emergency" : override.availability_status;
+    const intervals = overrideIntervalsByKind(override);
+    if (intervals.available.some(containsNow)) status = "available";
+    else if (intervals.emergency.some(containsNow)) status = "emergency";
   } else if (record?.availability_mode === "schedule") {
     const schedule = scheduleIntervalsByKind(record);
     if (schedule.available[dayIndex].some(containsNow)) status = "available";
