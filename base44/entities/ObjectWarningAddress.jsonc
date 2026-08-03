@@ -58,9 +58,60 @@
       "type": "string",
       "enum": [
         "always",
-        "not_call_periods"
+        "not_call_periods",
+        "schedule"
       ],
-      "default": "always"
+      "default": "schedule"
+    },
+    "availability_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat",
+                "sun"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": true
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^(?:([01]\\d|2[0-3]):(?:00|30)|24:00)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "available",
+              "emergency_only"
+            ]
+          }
+        },
+        "required": [
+          "days",
+          "start_time",
+          "end_time",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "default": [],
+      "description": "Ingekleurde bereikbaarheidsblokken per halve uur; ontbrekende tijd is niet bereikbaar"
     },
     "not_call_periods": {
       "type": "array",
@@ -101,7 +152,7 @@
         "additionalProperties": false
       },
       "default": [],
-      "description": "Genormaliseerde niet-bellenperiodes; eindtijd mag op de volgende dag liggen"
+      "description": "Legacy niet-bellenperiodes"
     },
     "status": {
       "type": "string",
@@ -136,20 +187,31 @@
       ]
     },
     "customer_platform_last_mutation_key_hash": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Hash van de laatste gecontroleerde update voor crashherstel"
     },
     "customer_platform_last_mutation_recovery": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": true
     },
     "customer_platform_mutation_key_hashes": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
     "customer_platform_mutation_recoveries": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": true
     },
     "version": {

@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40'; import { normalizeWarningAvailabilityPeriods } from './warningAddressAvailability.ts';
 
 type LooseRecord = Record<string, any>;
 
@@ -314,7 +314,7 @@ const WARNING_RELATIONSHIP_TYPES = new Set([
   'emergency_service',
   'other',
 ]);
-const WARNING_AVAILABILITY_MODES = new Set(['always', 'not_call_periods']);
+const WARNING_AVAILABILITY_MODES = new Set(['always', 'not_call_periods', 'schedule']);
 const WARNING_STATUSES = new Set(['active', 'inactive']);
 const WARNING_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const WARNING_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -2811,7 +2811,7 @@ function warningRelationshipDisplay(type: unknown, customLabel: unknown) {
 }
 
 function normalizeWarningNotCallPeriods(value: unknown, availabilityMode: string) {
-  if (availabilityMode === 'always') return [];
+  if (availabilityMode !== 'not_call_periods') return [];
   if (!Array.isArray(value)) throw new ApiError(400, 'not_call_periods moet een lijst zijn');
   if (!value.length) throw new ApiError(400, 'Voeg minimaal één niet-bellenperiode toe');
   if (value.length > 21) throw new ApiError(400, 'Maximaal 21 niet-bellenperiodes toegestaan');
@@ -2903,7 +2903,7 @@ function safeObjectWarningAddress(
     relationship_type: warningAddress.relationship_type,
     relationship_label: warningAddress.relationship_label || null,
     call_order: Number(warningAddress.call_order),
-    availability_mode: warningAddress.availability_mode || 'always',
+    availability_mode: warningAddress.availability_mode || 'always', availability_periods: Array.isArray(warningAddress.availability_periods) ? warningAddress.availability_periods : [],
     not_call_periods: Array.isArray(warningAddress.not_call_periods) ? warningAddress.not_call_periods : [],
     status: warningAddress.status || 'active',
     version: versionOf(warningAddress),
@@ -3251,7 +3251,7 @@ const WARNING_MUTABLE_FIELDS = [
   'relationship_type',
   'relationship_label',
   'call_order',
-  'availability_mode',
+  'availability_mode', 'availability_periods',
   'not_call_periods',
   'status',
 ];
@@ -3341,12 +3341,7 @@ async function normalizedWarningAddressData(
   if (!WARNING_AVAILABILITY_MODES.has(availabilityMode)) {
     throw new ApiError(400, 'Kies een geldige bereikbaarheid');
   }
-  const notCallPeriods = normalizeWarningNotCallPeriods(
-    Object.prototype.hasOwnProperty.call(data, 'not_call_periods')
-      ? data.not_call_periods
-      : current?.not_call_periods || [],
-    availabilityMode,
-  );
+  const notCallPeriods = normalizeWarningNotCallPeriods(Object.prototype.hasOwnProperty.call(data, 'not_call_periods') ? data.not_call_periods : current?.not_call_periods || [], availabilityMode), availabilityPeriods = normalizeWarningAvailabilityPeriods(Object.prototype.hasOwnProperty.call(data, 'availability_periods') ? data.availability_periods : current?.availability_periods || [], availabilityMode);
   const status = asString(
     Object.prototype.hasOwnProperty.call(data, 'status') ? data.status : current?.status || 'active',
   );
@@ -3381,7 +3376,7 @@ async function normalizedWarningAddressData(
       relationship_type: relationshipType,
       relationship_label: relationshipLabel,
       call_order: callOrder,
-      availability_mode: availabilityMode,
+      availability_mode: availabilityMode, availability_periods: availabilityPeriods,
       not_call_periods: notCallPeriods,
       status,
     },
@@ -3399,7 +3394,7 @@ const WARNING_DAY_LOG_LABELS: Record<string, string> = {
 };
 
 function warningAvailabilityDisplay(warningAddress: LooseRecord) {
-  if (warningAddress.availability_mode !== 'not_call_periods') return 'Altijd bereikbaar';
+  if (warningAddress.availability_mode === 'schedule') return 'Weekrooster ingesteld'; else if (warningAddress.availability_mode !== 'not_call_periods') return 'Altijd bereikbaar';
   const periods = Array.isArray(warningAddress.not_call_periods) ? warningAddress.not_call_periods : [];
   return periods.map((period: LooseRecord) => {
     const days = Array.isArray(period.days)

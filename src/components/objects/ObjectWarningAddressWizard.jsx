@@ -14,19 +14,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  AVAILABILITY_OPTIONS,
   WARNING_RELATIONSHIP_OPTIONS,
-  WEEKDAY_OPTIONS,
   warningRelationshipLabel,
 } from "./objectWarningAddressConfig";
 import WarningAvailabilitySchedule from "./WarningAvailabilitySchedule";
+import { recordToAvailabilityPeriods } from "./warningAvailabilityGrid";
 
 const STEPS = [
   { key: "contact", label: "Contact" },
   { key: "relationship", label: "Relatie" },
   { key: "phone", label: "Telefoon" },
-  { key: "availability", label: "Wanneer bellen" },
-  { key: "schedule", label: "Dagen & tijden" },
+  { key: "availability", label: "Bereikbaarheid" },
 ];
 
 function WizardSteps({ stepIndex, steps }) {
@@ -106,12 +104,6 @@ function ChoiceCard({ selected, onClick, title, description = "" }) {
 }
 
 function initialForm(initialValue, nextCallOrder) {
-  const storedPeriods = Array.isArray(initialValue?.not_call_periods) ? initialValue.not_call_periods : [];
-  const periods = WEEKDAY_OPTIONS.flatMap(day => {
-    const stored = storedPeriods.filter(period => Array.isArray(period.days) && period.days.includes(day.key));
-    if (storedPeriods.length) return stored.map(period => ({ days: [day.key], start_time: period.start_time, end_time: period.end_time }));
-    return [{ days: [day.key], start_time: "22:00", end_time: "07:00" }];
-  });
   return {
     contact_mode: initialValue ? "existing" : "new",
     contact_id: initialValue?.contact_id || "",
@@ -121,8 +113,9 @@ function initialForm(initialValue, nextCallOrder) {
     relationship_type: initialValue?.relationship_type || "",
     relationship_label: initialValue?.relationship_label || "",
     call_order: initialValue?.call_order || nextCallOrder || 1,
-    availability_mode: initialValue?.availability_mode || "always",
-    not_call_periods: periods,
+    availability_mode: "schedule",
+    availability_periods: recordToAvailabilityPeriods(initialValue),
+    not_call_periods: [],
   };
 }
 
@@ -176,9 +169,8 @@ export default function ObjectWarningAddressWizard({
   const hasValidSecondaryPhone = !form.secondary_phone.trim() || isCallablePhone(form.secondary_phone);
   const hasValidSelectedSecondary = !form.secondary_contact_point_id
     || availablePhones.some(point => point.id === form.secondary_contact_point_id);
-  const hasAvailability = form.availability_mode === "always"
-    || (form.not_call_periods.length > 0 && form.not_call_periods.every(period => period.days.length === 1 && period.start_time && period.end_time && period.start_time !== period.end_time));
-  const steps = form.availability_mode === "not_call_periods" ? STEPS : STEPS.slice(0, 4);
+  const hasAvailability = Array.isArray(form.availability_periods);
+  const steps = STEPS;
   const canContinue = [
     editing
       ? Boolean(form.contact_id)
@@ -187,7 +179,6 @@ export default function ObjectWarningAddressWizard({
         : Boolean(form.first_name.trim() && form.last_name.trim()),
     Boolean(relationshipLabel),
     hasPrimaryPhone && hasValidSecondaryPhone && hasValidSelectedSecondary && hasValidEmail,
-    AVAILABILITY_OPTIONS.some(option => option.key === form.availability_mode),
     hasAvailability,
   ][stepIndex];
   const finalStep = stepIndex === steps.length - 1;
@@ -208,23 +199,6 @@ export default function ObjectWarningAddressWizard({
     set("relationship_type", type);
     if (type !== "other") set("relationship_label", WARNING_RELATIONSHIP_OPTIONS.find(option => option.key === type)?.label || "");
   };
-  const toggleDay = day => setForm(current => {
-    const exists = current.not_call_periods.some(period => period.days.includes(day));
-    const periods = exists
-      ? current.not_call_periods.filter(period => !period.days.includes(day))
-      : [...current.not_call_periods, { days: [day], start_time: "22:00", end_time: "07:00" }];
-    return { ...current, not_call_periods: WEEKDAY_OPTIONS.flatMap(option => periods.filter(period => period.days.includes(option.key))) };
-  });
-  const addDayPeriod = day => setForm(current => ({
-    ...current,
-    not_call_periods: [...current.not_call_periods, { days: [day], start_time: "22:00", end_time: "07:00" }].sort((a, b) => WEEKDAY_OPTIONS.findIndex(option => option.key === a.days[0]) - WEEKDAY_OPTIONS.findIndex(option => option.key === b.days[0])),
-  }));
-  const removePeriod = index => setForm(current => ({ ...current, not_call_periods: current.not_call_periods.filter((_, itemIndex) => itemIndex !== index) }));
-  const setDayTime = (index, field, value) => setForm(current => ({
-    ...current,
-    not_call_periods: current.not_call_periods.map((period, itemIndex) => itemIndex === index ? { ...period, [field]: value } : period),
-  }));
-
   const continueWizard = () => {
     if (!canContinue || saving) return;
     if (!finalStep) {
@@ -235,7 +209,9 @@ export default function ObjectWarningAddressWizard({
       ...form,
       relationship_label: relationshipLabel,
       call_order: Number(form.call_order),
-      not_call_periods: form.availability_mode === "not_call_periods" ? form.not_call_periods : [],
+      availability_mode: "schedule",
+      availability_periods: form.availability_periods,
+      not_call_periods: [],
     });
   };
 
@@ -356,19 +332,8 @@ export default function ObjectWarningAddressWizard({
 
             {stepIndex === 3 && (
               <>
-                <StepHeading icon={Clock3} title="Wanneer mag deze contactpersoon worden gebeld?" description="Kies of deze persoon altijd gebeld mag worden of dat er niet-bellenperioden gelden." />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {AVAILABILITY_OPTIONS.map(option => <ChoiceCard key={option.key} selected={form.availability_mode === option.key} onClick={() => set("availability_mode", option.key)} title={option.label} description={option.description} />)}
-                </div>
-              </>
-            )}
-
-            {stepIndex === 4 && (
-              <>
-                <StepHeading icon={Clock3} title="Op welke dagen en tijden mag niet worden gebeld?" description="Vink de betreffende dagen aan en stel voor iedere dag een eigen tijdsblok in." />
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <WarningAvailabilitySchedule periods={form.not_call_periods} onToggleDay={toggleDay} onAddPeriod={addDayPeriod} onRemovePeriod={removePeriod} onChangeTime={setDayTime} />
-                </div>
+                <StepHeading icon={Clock3} title="Wanneer is deze contactpersoon bereikbaar?" description="Teken normale bereikbaarheid en momenten waarop alleen bij noodgevallen gebeld mag worden. Niet-ingekleurde tijden betekenen niet bereikbaar." />
+                <WarningAvailabilitySchedule periods={form.availability_periods} onChange={periods => set("availability_periods", periods)} />
                 <div className="rounded-md border border-border bg-card px-3 py-2.5 text-sm">
                   <span className="font-medium">{selectedContact?.display_name || [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(" ")}</span>
                   <span className="text-muted-foreground"> · {warningRelationshipLabel({ relationship_type: form.relationship_type, relationship_label: relationshipLabel })}</span>

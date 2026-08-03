@@ -52,6 +52,11 @@ export const AVAILABILITY_OPTIONS = [
     label: "Niet-bellenperiode",
     description: "Leg vast op welke dagen en tijden niet gebeld mag worden.",
   },
+  {
+    key: "schedule",
+    label: "Weekrooster",
+    description: "Teken bereikbaarheid en momenten voor alleen noodgevallen.",
+  },
 ];
 
 export const WEEKDAY_OPTIONS = [
@@ -75,6 +80,7 @@ export function warningRelationshipLabel(record) {
 }
 
 export function warningAvailabilityLabel(record) {
+  if (record?.availability_mode === "schedule") return "Weekrooster";
   return record?.availability_mode === "not_call_periods" ? "Aangepast" : "24 uur bereikbaar";
 }
 

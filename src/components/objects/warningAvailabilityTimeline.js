@@ -16,6 +16,9 @@ function mergeIntervals(intervals) {
 }
 
 export function availableIntervalsByDay(record) {
+  if (record?.availability_mode === "schedule") {
+    return scheduleIntervalsByKind(record).available;
+  }
   if (record?.availability_mode !== "not_call_periods") {
     return WEEKDAY_OPTIONS.map(() => [{ start: 0, end: DAY_MINUTES }]);
   }
@@ -42,4 +45,19 @@ export function availableIntervalsByDay(record) {
     if (cursor < DAY_MINUTES) available.push({ start: cursor, end: DAY_MINUTES });
     return available;
   });
+}
+
+export function scheduleIntervalsByKind(record) {
+  const result = { available: WEEKDAY_OPTIONS.map(() => []), emergency: WEEKDAY_OPTIONS.map(() => []) };
+  for (const period of record?.availability_periods || []) {
+    const target = period.kind === "emergency_only" ? result.emergency : result.available;
+    const start = toMinutes(period.start_time), end = period.end_time === "24:00" ? DAY_MINUTES : toMinutes(period.end_time);
+    for (const day of period.days || []) {
+      const index = WEEKDAY_OPTIONS.findIndex(option => option.key === day);
+      if (index >= 0 && end > start) target[index].push({ start, end });
+    }
+  }
+  result.available = result.available.map(mergeIntervals);
+  result.emergency = result.emergency.map(mergeIntervals);
+  return result;
 }
