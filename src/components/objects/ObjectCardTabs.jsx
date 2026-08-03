@@ -197,6 +197,14 @@ function ObjectTabNavigation({ activeTab, onTabChange }) {
   );
 }
 
+function warningAddressFormChanged(record, form) {
+  const fields = ["primary_contact_point_id", "relationship_type", "relationship_label", "availability_mode"];
+  if (fields.some(field => String(record?.[field] || "") !== String(form?.[field] || ""))) return true;
+  if (String(record?.secondary_contact_point_id || "") !== String(form?.secondary_contact_point_id || "")) return true;
+  if (Number(record?.call_order) !== Number(form?.call_order)) return true;
+  return JSON.stringify(record?.availability_periods || []) !== JSON.stringify(form?.availability_periods || []);
+}
+
 export default function ObjectCardTabs({
   object,
   activeTab,
@@ -288,19 +296,21 @@ export default function ObjectCardTabs({
     },
   });
   const updateMutation = useMutation({
-    mutationFn: form => updateObjectWarningAddress({
-      customerId: object.customer_id,
-      objectId: object.id,
-      warningAddressId: selectedWarning.id,
-      expectedVersion: selectedWarning.version,
-      form,
-      idempotencyKey: updateKeyRef.current?.key || updateObjectWarningAddressKey(),
-    }),
-    onSuccess: async () => {
-      await invalidate();
+    mutationFn: form => warningAddressFormChanged(selectedWarning, form)
+      ? updateObjectWarningAddress({
+          customerId: object.customer_id,
+          objectId: object.id,
+          warningAddressId: selectedWarning.id,
+          expectedVersion: selectedWarning.version,
+          form,
+          idempotencyKey: updateKeyRef.current?.key || updateObjectWarningAddressKey(),
+        })
+      : Promise.resolve({ unchanged: true }),
+    onSuccess: async result => {
+      if (!result?.unchanged) await invalidate();
       updateKeyRef.current = null;
       onCloseView();
-      toast({ title: "Waarschuwingsadres bijgewerkt" });
+      toast({ title: "Waarschuwingsadres opgeslagen" });
     },
   });
   const reorderMutation = useMutation({

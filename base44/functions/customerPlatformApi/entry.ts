@@ -3508,7 +3508,7 @@ async function handleObjectWarningAddress(
   if (warningAddress.customer_id !== customer.id || warningAddress.object_id !== object.id) throw new ApiError(409, 'Waarschuwingsadres hoort niet bij dit object');
   const before = await safeWarningAddressByRecord(base44, warningAddress);
   const normalized = await normalizedWarningAddressData(base44, customer.id, object.id, data, warningAddress);
-  if (!Object.entries(normalized.patch).some(([field, value]) => JSON.stringify(canonicalMutationValue(warningAddress[field])) !== JSON.stringify(canonicalMutationValue(value)))) throw new ApiError(400, 'Er zijn geen gewijzigde gegevens om op te slaan');
+  if (!Object.entries(normalized.patch).some(([field, value]) => JSON.stringify(canonicalMutationValue(warningAddress[field])) !== JSON.stringify(canonicalMutationValue(value)))) return { ...warningAddressMutationResult(before, before), unchanged: true, summary: 'Waarschuwingsadres opgeslagen' };
   const projected = { ...warningAddress, ...normalized.patch, version: expectedVersion + 1 };
   const references = await warningAddressReferenceData(base44, customer.id);
   const recoveryResult = warningAddressMutationResult(safeObjectWarningAddress(projected, references.contactById.get(projected.contact_id) || null, references.points), before);
