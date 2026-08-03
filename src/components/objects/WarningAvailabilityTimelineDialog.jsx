@@ -75,7 +75,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           <div ref={scrollRef} className="h-[336px] touch-pan-y snap-y snap-mandatory overflow-y-auto overscroll-contain" onScroll={handleScroll}>
             {dates.map((date, dateIndex) => {
               const dayIndex = dateIndex % 7;
-              return <div key={date.toISOString()} className={`flex snap-start snap-always ${isToday(date) ? "bg-primary/10" : ""}`}>
+              return <div key={date.toISOString()} className="flex snap-start snap-always">
                 <span className={`flex h-12 w-14 shrink-0 flex-col justify-center pr-2 leading-tight ${isToday(date) ? "text-primary" : ""}`}><strong className="text-xs">{WEEKDAY_OPTIONS[dayIndex].shortLabel}</strong><span className={isToday(date) ? "text-[10px] font-semibold text-primary" : "text-[10px] text-muted-foreground"}>{formatDate(date)}</span></span>
                 <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, date, dayIndex)} onMouseLeave={() => setHover(null)}>
                   {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
