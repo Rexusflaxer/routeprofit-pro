@@ -30,9 +30,9 @@ export default function WarningAvailabilityGrid({ schedule, onPaint, painting })
     const active = intervalAt(schedule[dayIndex], slot);
     setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), day: WEEKDAY_OPTIONS[dayIndex].label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
   };
-  return <div className="overflow-auto bg-background">
+  return <div className="overflow-auto">
     <div className="min-w-[900px] select-none">
-      <div className="sticky top-0 z-20 flex h-9 bg-background">
+      <div className="sticky top-0 z-20 flex h-9">
         <span className="w-10 shrink-0" />
         <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
       </div>
