@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
 import { periodsToSchedule, scheduleToPeriods } from "./warningAvailabilityGrid";
 
@@ -12,6 +12,8 @@ export default function WarningAvailabilitySchedule({ periods, onChange }) {
   const [tool, setTool] = useState("available");
   const [painting, setPainting] = useState(false);
   const schedule = useMemo(() => periodsToSchedule(periods), [periods]);
+  const scheduleRef = useRef(schedule);
+  useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
   useEffect(() => {
     const stop = () => setPainting(false);
     window.addEventListener("pointerup", stop);
@@ -19,8 +21,9 @@ export default function WarningAvailabilitySchedule({ periods, onChange }) {
   }, []);
   const paint = (dayIndex, slot, start) => {
     if (start) setPainting(true);
-    const next = schedule.map(day => [...day]);
+    const next = scheduleRef.current.map(day => [...day]);
     next[dayIndex][slot] = tool;
+    scheduleRef.current = next;
     onChange(scheduleToPeriods(next));
   };
   return <fieldset className="space-y-3">
