@@ -3,13 +3,11 @@ import {
   invokeCustomerPlatformMutation,
 } from "@/components/customers/customerDossierUtils";
 import {
-  AVAILABILITY_OPTIONS,
   WARNING_RELATIONSHIP_OPTIONS,
   WEEKDAY_OPTIONS,
 } from "./objectWarningAddressConfig";
 
 const RELATIONSHIP_TYPES = new Set(WARNING_RELATIONSHIP_OPTIONS.map(option => option.key));
-const AVAILABILITY_MODES = new Set(AVAILABILITY_OPTIONS.map(option => option.key));
 const WEEKDAYS = new Set(WEEKDAY_OPTIONS.map(option => option.key));
 
 function cleanText(value) {
@@ -52,31 +50,15 @@ function validOrder(value) {
 }
 
 function normalizedAvailability(form) {
-  const availabilityMode = cleanText(form?.availability_mode) || "schedule";
-  if (!AVAILABILITY_MODES.has(availabilityMode)) throw new Error("Kies een geldige bereikbaarheid.");
-  if (availabilityMode === "schedule") {
-    const source = Array.isArray(form?.availability_periods) ? form.availability_periods : [];
-    const periods = source.map(period => {
-      const days = [...new Set((Array.isArray(period?.days) ? period.days : []).map(cleanText).filter(day => WEEKDAYS.has(day)))];
-      const startTime = cleanText(period?.start_time), endTime = cleanText(period?.end_time), kind = cleanText(period?.kind);
-      if (days.length !== 1 || !["available", "emergency_only"].includes(kind)) throw new Error("Het weekrooster bevat een ongeldig blok.");
-      if (!/^([01]\d|2[0-3]):(?:00|30)$/.test(startTime) || !/^(?:([01]\d|2[0-3]):(?:00|30)|24:00)$/.test(endTime) || startTime >= endTime) throw new Error("Roosterblokken moeten op stappen van 30 minuten liggen.");
-      return { days, start_time: startTime, end_time: endTime, kind };
-    });
-    return { availability_mode: "schedule", availability_periods: periods, not_call_periods: [] };
-  }
-  if (availabilityMode === "always") return { availability_mode: "always", availability_periods: [], not_call_periods: [] };
-  const source = Array.isArray(form?.not_call_periods) ? form.not_call_periods : [];
-  if (!source.length) throw new Error("Kies minimaal één dag voor de niet-bellenperiode.");
+  const source = Array.isArray(form?.availability_periods) ? form.availability_periods : [];
   const periods = source.map(period => {
     const days = [...new Set((Array.isArray(period?.days) ? period.days : []).map(cleanText).filter(day => WEEKDAYS.has(day)))];
-    const startTime = cleanText(period?.start_time), endTime = cleanText(period?.end_time);
-    if (!days.length) throw new Error("Kies een dag voor elke niet-bellenperiode.");
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)) throw new Error("Vul per dag een geldige begin- en eindtijd in.");
-    if (startTime === endTime) throw new Error("Begin- en eindtijd mogen niet gelijk zijn.");
-    return { days, start_time: startTime, end_time: endTime };
+    const startTime = cleanText(period?.start_time), endTime = cleanText(period?.end_time), kind = cleanText(period?.kind);
+    if (days.length !== 1 || !["available", "emergency_only"].includes(kind)) throw new Error("Het weekrooster bevat een ongeldig blok.");
+    if (!/^([01]\d|2[0-3]):(?:00|30)$/.test(startTime) || !/^(?:([01]\d|2[0-3]):(?:00|30)|24:00)$/.test(endTime) || startTime >= endTime) throw new Error("Roosterblokken moeten op stappen van 30 minuten liggen.");
+    return { days, start_time: startTime, end_time: endTime, kind };
   });
-  return { availability_mode: availabilityMode, availability_periods: [], not_call_periods: periods };
+  return { availability_mode: "schedule", availability_periods: periods, not_call_periods: [] };
 }
 
 function assignmentData(form) {

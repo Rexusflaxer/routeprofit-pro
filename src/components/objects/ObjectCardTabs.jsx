@@ -313,6 +313,11 @@ export default function ObjectCardTabs({
       toast({ title: "Waarschuwingsadres opgeslagen" });
     },
   });
+  useEffect(() => {
+    createMutation.reset();
+    updateMutation.reset();
+  }, [selectedRow, view]);
+
   const reorderMutation = useMutation({
     mutationFn: orderedRows => reorderObjectWarningAddresses({
       customerId: object.customer_id,
