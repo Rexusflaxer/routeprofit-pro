@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import { availableIntervalsByDay, scheduleIntervalsByKind } from "./warningAvailabilityTimeline";
 import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
+import { overrideForDate } from "./warningAvailabilityOverrides";
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);
 const TIME_LABELS = Array.from({ length: 13 }, (_, index) => index * 2);
@@ -51,13 +52,13 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
     if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 672) setWeekCount(count => count + 12);
   };
   const schedule = record?.availability_mode === "schedule" ? scheduleIntervalsByKind(record) : { available: availableIntervalsByDay(record), emergency: WEEKDAY_OPTIONS.map(() => []) };
-  const handleTimelineMove = (event, date, dayIndex) => {
+  const handleTimelineMove = (event, date, availableIntervals, emergencyIntervals, reason) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const minute = Math.min(1410, Math.max(0, Math.floor((((event.clientX - bounds.left) / bounds.width) * 1440) / 30) * 30));
-    const available = schedule.available[dayIndex].find(interval => minute >= interval.start && minute < interval.end);
-    const emergency = schedule.emergency[dayIndex].find(interval => minute >= interval.start && minute < interval.end);
+    const available = availableIntervals.find(interval => minute >= interval.start && minute < interval.end);
+    const emergency = emergencyIntervals.find(interval => minute >= interval.start && minute < interval.end);
     const interval = available || emergency;
-    setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), day: formatDate(date), minute, interval, kind: available ? "available" : emergency ? "emergency" : null });
+    setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), day: formatDate(date), minute, interval, kind: available ? "available" : emergency ? "emergency" : null, reason });
   };
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-6xl">
@@ -75,12 +76,16 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           <div ref={scrollRef} className="h-[336px] touch-pan-y snap-y snap-mandatory overflow-y-auto overscroll-contain" onScroll={handleScroll}>
             {dates.map((date, dateIndex) => {
               const dayIndex = dateIndex % 7;
+              const override = overrideForDate(record, date);
+              const fullDay = [{ start: 0, end: 1440 }];
+              const availableIntervals = override ? (override.availability_status === "available" ? fullDay : []) : schedule.available[dayIndex];
+              const emergencyIntervals = override ? (override.availability_status === "emergency_only" ? fullDay : []) : schedule.emergency[dayIndex];
               return <div key={date.toISOString()} className="flex snap-start snap-always">
                 <span className={`flex h-12 w-14 shrink-0 flex-col justify-center pr-2 leading-tight ${isToday(date) ? "text-primary" : ""}`}><strong className="text-xs">{WEEKDAY_OPTIONS[dayIndex].shortLabel}</strong><span className={isToday(date) ? "text-[10px] font-semibold text-primary" : "text-[10px] text-muted-foreground"}>{formatDate(date)}</span></span>
-                <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, date, dayIndex)} onMouseLeave={() => setHover(null)}>
+                <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, date, availableIntervals, emergencyIntervals, override?.reason)} onMouseLeave={() => setHover(null)}>
                   {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
-                  {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
-                  {schedule.emergency[dayIndex].map((interval, index) => <div key={`emergency-${index}`} className="absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
+                  {availableIntervals.map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
+                  {emergencyIntervals.map((interval, index) => <div key={`emergency-${index}`} className="absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
                 </div>
               </div>;
             })}
