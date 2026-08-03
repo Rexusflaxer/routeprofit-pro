@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
@@ -23,10 +24,16 @@ const addDays = (date, days) => {
 };
 const formatDate = date => new Intl.DateTimeFormat("nl-NL", { day: "2-digit", month: "short" }).format(date);
 const formatWeekRange = dates => `${formatDate(dates[0])} – ${formatDate(dates[6])}`;
+const WEEK_VARIANTS = {
+  enter: direction => ({ opacity: 0, y: direction * 24 }),
+  center: { opacity: 1, y: 0 },
+  exit: direction => ({ opacity: 0, y: direction * -24 }),
+};
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange }) {
   const [hover, setHover] = useState(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [direction, setDirection] = useState(1);
   const weekStart = addDays(mondayOf(new Date()), weekOffset * 7);
   const weekDates = WEEKDAY_OPTIONS.map((_, dayIndex) => addDays(weekStart, dayIndex));
   useEffect(() => { if (open) setWeekOffset(0); }, [open, record?.id]);
@@ -46,24 +53,30 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
         <DialogDescription>De standaard bereikbaarheid wordt herhaald voor iedere toekomstige week.</DialogDescription>
       </DialogHeader>
       <div className="overflow-auto px-4 pb-5">
-        <div className="sticky left-0 top-0 z-30 flex items-center justify-between bg-background py-3">
-          <Button type="button" variant="outline" size="icon" disabled={weekOffset === 0} onClick={() => setWeekOffset(offset => Math.max(0, offset - 1))} aria-label="Vorige week"><ChevronLeft className="h-4 w-4" /></Button>
+        <div className="sticky left-0 top-0 z-30 flex flex-col items-center gap-1 bg-background py-3">
+          <Button type="button" variant="outline" size="icon" disabled={weekOffset === 0} onClick={() => { setDirection(-1); setHover(null); setWeekOffset(offset => Math.max(0, offset - 1)); }} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
           <span className="text-sm font-semibold">{formatWeekRange(weekDates)}</span>
-          <Button type="button" variant="outline" size="icon" onClick={() => setWeekOffset(offset => offset + 1)} aria-label="Volgende week"><ChevronRight className="h-4 w-4" /></Button>
+          <Button type="button" variant="outline" size="icon" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
         </div>
         <div className="min-w-[900px]">
           <div className="sticky top-0 z-20 flex h-9 bg-background">
             <span className="w-14 shrink-0" />
             <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           </div>
-          {weekDates.map((date, dayIndex) => <div key={date.toISOString()} className="flex">
-            <span className="flex h-12 w-14 shrink-0 items-center pr-2 text-xs font-semibold">{formatDate(date)}</span>
-            <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, dayIndex)} onMouseLeave={() => setHover(null)}>
-              {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
-              {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
-              {schedule.emergency[dayIndex].map((interval, index) => <div key={`emergency-${index}`} className="absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
-            </div>
-          </div>)}
+          <div className="overflow-hidden">
+            <AnimatePresence initial={false} mode="wait" custom={direction}>
+              <motion.div key={weekOffset} custom={direction} variants={WEEK_VARIANTS} initial="enter" animate="center" exit="exit" transition={{ duration: 0.22, ease: "easeOut" }}>
+                {weekDates.map((date, dayIndex) => <div key={date.toISOString()} className="flex">
+                  <span className="flex h-12 w-14 shrink-0 items-center pr-2 text-xs font-semibold">{formatDate(date)}</span>
+                  <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, dayIndex)} onMouseLeave={() => setHover(null)}>
+                    {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
+                    {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
+                    {schedule.emergency[dayIndex].map((interval, index) => <div key={`emergency-${index}`} className="absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
+                  </div>
+                </div>)}
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </div>
         <div className="sticky bottom-0 flex flex-wrap items-center gap-4 bg-background py-3 text-xs text-muted-foreground"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" /> Bereikbaar</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-chart-4/60 bg-chart-4/45" /> Alleen noodgevallen</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-border bg-card" /> Niet bereikbaar</span></div>
       </div>
