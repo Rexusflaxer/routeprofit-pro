@@ -17,7 +17,7 @@ export default function WarningTimelineRow({ date, dayIndex, now, available, eme
       {available.map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={style(interval)} />)}
       {emergency.map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={style(interval)} />)}
       {override && <button type="button" disabled={editing} onClick={onOpenOverride} aria-label="Aangepaste tijden beheren" className="absolute inset-0 z-20 border border-dashed border-primary/60 bg-primary/5 disabled:pointer-events-none" />}
-      {today && <div className="pointer-events-none absolute inset-y-0 z-40 w-0.5 -translate-x-1/2 bg-primary shadow-[0_0_0_1px_hsl(var(--background))]" style={{ left: `${nowPosition}%` }} aria-label="Huidige tijd" />}
+      {today && <div className="pointer-events-none absolute inset-y-0 z-40 w-px -translate-x-1/2 bg-primary" style={{ left: `${nowPosition}%` }} aria-label="Huidige tijd" />}
       {editing && <div className="absolute inset-0 z-30 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: 48 }, (_, slot) => <button key={slot} type="button" aria-label={`${WEEKDAY_OPTIONS[dayIndex].label} tijdvak aanpassen`} className="h-full touch-none bg-transparent" onPointerDown={event => { event.preventDefault(); onPaint(slot, true); }} onPointerEnter={() => { if (painting) onPaint(slot, false); }} />)}</div>}
     </div>
   </div>;
