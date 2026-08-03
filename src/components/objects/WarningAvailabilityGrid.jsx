@@ -33,11 +33,11 @@ export default function WarningAvailabilityGrid({ schedule, onPaint, painting })
   return <div className="overflow-auto bg-background">
     <div className="min-w-[900px] select-none">
       <div className="sticky top-0 z-20 flex h-9 bg-background">
-        <span className="w-20 shrink-0" />
+        <span className="w-10 shrink-0" />
         <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
       </div>
       {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="flex">
-        <span className="flex h-12 w-20 shrink-0 items-center pr-3 text-xs font-semibold">{day.label}</span>
+        <span className="flex h-12 w-10 shrink-0 items-center pr-2 text-xs font-semibold">{day.label.slice(0, 2)}</span>
         <div className="relative h-12 flex-1 border-b border-r border-border" onPointerLeave={() => setHover(null)}>
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {intervalsFor(schedule[dayIndex], "available").map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
