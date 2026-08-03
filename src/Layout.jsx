@@ -13,6 +13,7 @@ import { ThemeProvider, useTheme } from "next-themes";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
+import GlobalSearchOverlay from "@/components/search/GlobalSearchOverlay";
 
 const LOGO_DARK = "/loq-logo-dark.png";
 const LOGO_LIGHT = "/loq-logo-light.png";
@@ -180,23 +181,22 @@ function UserProfileFooter({ onNavigate, collapsed = false }) {
   );
 }
 
-function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
+function ContextNavigation({ currentPageName, onNavigate, onSearchOpen, collapsed = false }) {
   return (
     <div className="flex h-full flex-col">
-      <div className={`border-b border-sidebar-border py-3 ${collapsed ? "px-2" : "px-3"}`}>
-        <Link to={createPageUrl("Dashboard")} onClick={onNavigate} className={`inline-flex items-center ${collapsed ? "w-full justify-center" : ""}`}>
-          {collapsed ? (
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#1f7aff] text-white text-[13px] font-bold">L</div>
-          ) : (
-            <LOQLogo className="h-7 w-auto max-w-[104px]" />
-          )}
-        </Link>
-        {!collapsed && (
-          <div className="mt-3 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-background/70 px-2 text-muted-foreground">
-            <Search className="h-3.5 w-3.5" />
-            <span className="text-[12px]">Search</span>
-          </div>
-        )}
+      <div className={`border-b border-sidebar-border py-3 ${collapsed ? "px-1.5" : "px-3"}`}>
+        <div className="flex items-center gap-2">
+          <Link to={createPageUrl("Dashboard")} onClick={onNavigate} className="inline-flex items-center">
+            {collapsed ? (
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1f7aff] text-white text-[12px] font-bold">L</div>
+            ) : (
+              <LOQLogo className="h-7 w-auto max-w-[104px]" />
+            )}
+          </Link>
+          <button type="button" onClick={onSearchOpen} aria-label="Globaal zoeken" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground">
+            <Search className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className={`flex-1 overflow-y-auto py-3 ${collapsed ? "px-1.5" : "px-3"}`}>
@@ -249,6 +249,7 @@ function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
 
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1280);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
@@ -300,13 +301,14 @@ function AppShell({ children, currentPageName }) {
       onMouseLeave={handleMouseLeaveApp}
     >
       <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
-        <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
+        <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} onSearchOpen={() => setSearchOpen(true)} />
       </aside>
 
       <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border bg-[hsl(var(--topbar))] lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             <LOQLogo className="h-5 w-auto max-w-[74px]" />
+            <button type="button" onClick={() => setSearchOpen(true)} aria-label="Globaal zoeken" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Search className="h-4 w-4" /></button>
           </div>
           <Button
             variant="ghost"
@@ -320,7 +322,7 @@ function AppShell({ children, currentPageName }) {
         {mobileOpen && (
           <div className="border-t border-border bg-sidebar">
             <div className="max-h-[calc(100vh-3rem)] overflow-y-auto">
-              <ContextNavigation currentPageName={currentPageName} onNavigate={() => setMobileOpen(false)} />
+              <ContextNavigation currentPageName={currentPageName} onNavigate={() => setMobileOpen(false)} onSearchOpen={() => { setMobileOpen(false); setSearchOpen(true); }} />
             </div>
           </div>
         )}
@@ -335,6 +337,8 @@ function AppShell({ children, currentPageName }) {
       <div className="pointer-events-none fixed bottom-3 left-3 right-3 z-50 lg:hidden">
         <ViewportSizeWarning className="mx-auto max-w-sm" />
       </div>
+
+      <GlobalSearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }
