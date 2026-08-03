@@ -1,15 +1,13 @@
 import React, { useState } from "react";
-import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import { availableIntervalsByDay, scheduleIntervalsByKind } from "./warningAvailabilityTimeline";
+import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);
 const TIME_LABELS = Array.from({ length: 13 }, (_, index) => index * 2);
 const DAY_HEIGHT = 384;
 const TIMELINE_PADDING = 16;
-
-const formatMinutes = minutes => minutes === 1440 ? "24:00" : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange }) {
   const [hover, setHover] = useState(null);
@@ -44,7 +42,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
         </div>
         <div className="sticky bottom-0 flex flex-wrap items-center gap-4 bg-background py-3 text-xs text-muted-foreground"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" /> Bereikbaar</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-chart-4/60 bg-chart-4/45" /> Alleen noodgevallen</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-border bg-card" /> Niet bereikbaar</span></div>
       </div>
-      {hover && createPortal(<div className="pointer-events-none fixed z-[100] min-w-32 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-lg" style={{ left: hover.x, top: hover.y }}><div className="font-medium">{hover.day} · {formatMinutes(hover.minute)}</div>{hover.interval && <div className="mt-1 flex items-center gap-1.5 text-muted-foreground"><span className={`h-2.5 w-2.5 shrink-0 rounded-sm border ${hover.kind === "available" ? "border-primary/40 bg-primary/25" : "border-chart-4/60 bg-chart-4/45"}`} /><span>{formatMinutes(hover.interval.start)} – {formatMinutes(hover.interval.end)}</span></div>}</div>, document.body)}
+      <WarningAvailabilityHoverTooltip hover={hover} />
     </DialogContent>
   </Dialog>;
 }

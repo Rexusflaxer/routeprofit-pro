@@ -3,7 +3,7 @@ import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
 import { periodsToSchedule, scheduleToPeriods } from "./warningAvailabilityGrid";
 
 const TOOLS = [
-  { key: "available", label: "Bereikbaar", color: "border-primary/50 bg-primary/35" },
+  { key: "available", label: "Bereikbaar", color: "border-primary/40 bg-primary/25" },
   { key: "emergency_only", label: "Alleen noodgevallen", color: "border-chart-4/60 bg-chart-4/45" },
   { key: null, label: "Niet bereikbaar", color: "border-border bg-card" },
 ];
