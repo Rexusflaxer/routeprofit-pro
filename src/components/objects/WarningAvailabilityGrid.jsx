@@ -43,7 +43,7 @@ export default function WarningAvailabilityGrid({ schedule, onPaint, painting, t
       </div>
       {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="flex">
         <span className="flex h-12 w-10 shrink-0 items-center pr-2 text-xs font-semibold">{day.label.slice(0, 2)}</span>
-        <div className="relative h-12 flex-1 border-b border-r border-border" onPointerLeave={() => setHover(null)}>
+        <div className={`relative h-12 flex-1 border-b border-r border-border ${dayIndex === 0 ? "border-t" : ""}`} onPointerLeave={() => setHover(null)}>
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {intervalsFor(schedule[dayIndex], "available").map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
           {intervalsFor(schedule[dayIndex], "emergency_only").map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
