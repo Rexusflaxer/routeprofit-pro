@@ -6,6 +6,11 @@ import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
 const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);
 const TIME_LABELS = Array.from({ length: 13 }, (_, index) => index * 2);
 const labelPosition = index => index === 0 ? "" : index === 12 ? "-translate-x-full" : "-translate-x-1/2";
+const previewStyle = tool => tool === "available"
+  ? "border-primary/70 bg-primary/40"
+  : tool === "emergency_only"
+    ? "border-chart-4/80 bg-chart-4/60"
+    : "border-foreground/50 bg-background/80";
 
 const intervalsFor = (slots, kind) => slots.flatMap((value, start) => {
   if (value !== kind || slots[start - 1] === kind) return [];
@@ -24,11 +29,11 @@ const intervalAt = (slots, slot) => {
   return { kind, interval: { start: start * SLOT_MINUTES, end: end * SLOT_MINUTES } };
 };
 
-export default function WarningAvailabilityGrid({ schedule, onPaint, painting }) {
+export default function WarningAvailabilityGrid({ schedule, onPaint, painting, tool }) {
   const [hover, setHover] = useState(null);
   const showHover = (event, dayIndex, slot) => {
     const active = intervalAt(schedule[dayIndex], slot);
-    setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), day: WEEKDAY_OPTIONS[dayIndex].label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
+    setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), dayIndex, slot, day: WEEKDAY_OPTIONS[dayIndex].label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
   };
   return <div className="overflow-auto">
     <div className="min-w-[900px] select-none">
@@ -42,6 +47,7 @@ export default function WarningAvailabilityGrid({ schedule, onPaint, painting })
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {intervalsFor(schedule[dayIndex], "available").map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
           {intervalsFor(schedule[dayIndex], "emergency_only").map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
+          {hover?.dayIndex === dayIndex && <div className={`pointer-events-none absolute inset-y-1 z-[5] rounded-sm border ${previewStyle(tool)}`} style={{ left: `${(hover.slot / SLOT_COUNT) * 100}%`, width: `${100 / SLOT_COUNT}%` }} />}
           <div className="absolute inset-0 z-10 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: SLOT_COUNT }, (_, slot) => <button key={slot} type="button" aria-label={`${day.label} ${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`} className="h-full touch-none bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onPointerDown={event => { event.preventDefault(); showHover(event, dayIndex, slot); onPaint(dayIndex, slot, true); }} onPointerEnter={event => { showHover(event, dayIndex, slot); if (painting) onPaint(dayIndex, slot, false); }} onPointerMove={event => showHover(event, dayIndex, slot)} />)}</div>
         </div>
       </div>)}

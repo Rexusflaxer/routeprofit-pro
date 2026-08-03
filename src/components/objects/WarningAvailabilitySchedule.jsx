@@ -26,7 +26,7 @@ export default function WarningAvailabilitySchedule({ periods, onChange }) {
   return <fieldset className="space-y-3">
     <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Weekrooster *</legend>
     <div className="flex flex-wrap gap-2">{TOOLS.map(option => <button key={option.label} type="button" onClick={() => setTool(option.key)} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium ${tool === option.key ? "border-foreground bg-muted" : "border-border bg-card"}`}><span className={`h-3 w-3 rounded-sm border ${option.color}`} />{option.label}</button>)}</div>
-    <WarningAvailabilityGrid schedule={schedule} onPaint={paint} painting={painting} />
+    <WarningAvailabilityGrid schedule={schedule} onPaint={paint} painting={painting} tool={tool} />
     <p className="text-xs text-muted-foreground">Sleep over blokken van 30 minuten. Lege blokken betekenen dat de contactpersoon niet bereikbaar is.</p>
   </fieldset>;
 }
