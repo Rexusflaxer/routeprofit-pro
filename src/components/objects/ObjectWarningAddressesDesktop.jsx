@@ -2,6 +2,7 @@ import React from "react";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { GripVertical } from "lucide-react";
 import ObjectWarningAddressActions from "./ObjectWarningAddressActions";
+import WarningAddressCurrentStatus from "./WarningAddressCurrentStatus";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { warningAvailabilityLabel, warningRelationshipLabel } from "./objectWarningAddressConfig";
 
@@ -11,7 +12,7 @@ export default function ObjectWarningAddressesDesktop({ rows, onEdit, onDelete, 
       <DragDropContext onDragEnd={onDragEnd}>
         <Table><TableHeader><TableRow className="bg-muted/25 hover:bg-muted/25">
           <TableHead className="w-16 text-xs font-semibold text-muted-foreground">Volgorde</TableHead>
-          {[["contact", "Contactpersoon"], ["relationship", "Relatie"], ["phone", "Telefoon"], ["availability", "Bereikbaarheid"]].map(([key, label]) => <TableHead key={key} className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{label}</TableHead>)}
+          {[["contact", "Contactpersoon"], ["relationship", "Relatie"], ["phone", "Telefoon"], ["availability", "Bereikbaarheid"], ["status", "Actuele status"]].map(([key, label]) => <TableHead key={key} className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{label}</TableHead>)}
           <TableHead className="w-10" />
         </TableRow></TableHeader>
         <Droppable droppableId="warning-addresses-desktop" direction="vertical">
@@ -23,6 +24,7 @@ export default function ObjectWarningAddressesDesktop({ rows, onEdit, onDelete, 
                 <TableCell>{warningRelationshipLabel(row)}</TableCell>
                 <TableCell><a href={`tel:${row.primary_phone}`} onClick={event => event.stopPropagation()} className="font-medium hover:underline">{row.primary_phone || "—"}</a>{row.secondary_phone && <p className="mt-0.5 text-xs text-muted-foreground">Alt. {row.secondary_phone}</p>}</TableCell>
                 <TableCell className="text-sm">{warningAvailabilityLabel(row)}</TableCell>
+                <TableCell><WarningAddressCurrentStatus record={row} /></TableCell>
                 <TableCell><ObjectWarningAddressActions row={row} onEdit={onEdit} onDelete={onDelete} deleting={deletingId === row.id} disabled={actionsDisabled} /></TableCell>
               </TableRow>}
             </Draggable>)}

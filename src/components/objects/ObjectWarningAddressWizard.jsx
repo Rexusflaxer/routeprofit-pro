@@ -156,7 +156,6 @@ export default function ObjectWarningAddressWizard({
     [contactOptions, form.contact_id, initialValue],
   );
   const availablePhones = phonePoints(selectedContact);
-  const hasValidEmail = !form.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
   const relationshipLabel = form.relationship_type === "other"
     ? customRelationship.trim()
     : WARNING_RELATIONSHIP_OPTIONS.find(option => option.key === form.relationship_type)?.label || "";
@@ -178,7 +177,7 @@ export default function ObjectWarningAddressWizard({
         ? Boolean(form.contact_id)
         : Boolean(form.first_name.trim() && form.last_name.trim()),
     Boolean(relationshipLabel),
-    hasPrimaryPhone && hasValidSecondaryPhone && hasValidSelectedSecondary && hasValidEmail,
+    hasPrimaryPhone && hasValidSecondaryPhone && hasValidSelectedSecondary,
     hasAvailability,
   ][stepIndex];
   const finalStep = stepIndex === steps.length - 1;
@@ -324,7 +323,6 @@ export default function ObjectWarningAddressWizard({
                       <Input id={`${fieldId}-primary-phone`} type="tel" value={form.primary_phone} onChange={event => setForm(current => ({ ...current, primary_phone: event.target.value, ...(current.contact_mode === "existing" ? { primary_contact_point_id: "" } : {}) }))} className={!hasPrimaryPhone && form.primary_phone.trim() ? "border-destructive" : ""} aria-invalid={!hasPrimaryPhone && Boolean(form.primary_phone.trim())} autoComplete="tel" autoFocus />
                     </Field>
                     {form.contact_mode === "new" && <Field label="Alternatief telefoonnummer" htmlFor={`${fieldId}-secondary-phone`} hint={!hasValidSecondaryPhone ? "Vul een geldig telefoonnummer met 7 tot 15 cijfers in." : null}><Input id={`${fieldId}-secondary-phone`} type="tel" value={form.secondary_phone} onChange={event => set("secondary_phone", event.target.value)} className={!hasValidSecondaryPhone ? "border-destructive" : ""} aria-invalid={!hasValidSecondaryPhone} /></Field>}
-                    {form.contact_mode === "new" && <Field label="E-mailadres" htmlFor={`${fieldId}-email`} hint={!hasValidEmail ? "Vul een geldig e-mailadres in." : "Optioneel; wordt als afzonderlijk contactkanaal opgeslagen."}><Input id={`${fieldId}-email`} type="email" value={form.email} onChange={event => set("email", event.target.value)} className={!hasValidEmail ? "border-destructive" : ""} autoComplete="email" /></Field>}
                   </div>
                 )}
               </>
