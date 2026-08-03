@@ -1,0 +1,25 @@
+{
+  "name": "ObjectKeySet",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "set_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "display_label": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "set_number",
+    "display_label"
+  ]
+}

@@ -2,21 +2,33 @@
   "name": "ObjectKey",
   "type": "object",
   "properties": {
-    "customer_id": {
+    "key_type": {
       "type": "string",
-      "description": "Klant waartoe de fysieke sleutel behoort"
+      "enum": [
+        "key",
+        "tag",
+        "remote",
+        "access_card"
+      ]
     },
-    "object_id": {
+    "brand": {
       "type": "string",
-      "description": "Object waarvoor de fysieke sleutel is geregistreerd"
+      "description": "Merk of fabrikant van het toegangsmiddel"
     },
     "key_number": {
       "type": "string",
-      "description": "Uniek herkenningsnummer van de sleutel binnen het object"
+      "description": "Applicatiebreed uniek sleutelnummer"
     },
-    "description": {
+    "key_number_normalized": {
       "type": "string",
-      "description": "Korte herkenbare omschrijving van de sleutel"
+      "description": "Technische hoofdletterongevoelige normalisatie voor uniekheidscontrole"
+    },
+    "serial_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Serie-, pas-, tag- of fabrikantnummer op het toegangsmiddel"
     },
     "status": {
       "type": "string",
@@ -29,10 +41,10 @@
     }
   },
   "required": [
-    "customer_id",
-    "object_id",
+    "key_type",
+    "brand",
     "key_number",
-    "description",
+    "key_number_normalized",
     "status"
   ]
 }

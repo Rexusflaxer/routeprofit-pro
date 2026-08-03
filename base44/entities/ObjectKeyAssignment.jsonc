@@ -1,0 +1,24 @@
+{
+  "name": "ObjectKeyAssignment",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "key_id": {
+      "type": "string"
+    },
+    "key_set_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "key_id",
+    "key_set_id"
+  ]
+}

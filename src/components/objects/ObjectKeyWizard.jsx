@@ -1,26 +1,26 @@
-import React, { useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, ArrowRight, KeyRound, Loader2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { OBJECT_KEY_STATUS_OPTIONS } from "./objectKeyConfig";
+import { WizardSteps } from "./ObjectWizardUi";
+import ObjectExistingKeyStep from "./ObjectExistingKeyStep";
+import ObjectKeyBrandStep from "./ObjectKeyBrandStep";
+import ObjectKeyDetailsStep from "./ObjectKeyDetailsStep";
+import ObjectKeySetChoice from "./ObjectKeySetChoice";
+import ObjectKeySourceStep from "./ObjectKeySourceStep";
+import ObjectKeyTypeStep from "./ObjectKeyTypeStep";
 
-const initialForm = key => ({ key_number: key?.key_number || "", description: key?.description || "", status: key?.status || "in_storage" });
+const blank = key => ({ mode: key ? "edit" : "", key_id: key?.id || "", assignment_id: key?.assignment_id || "", key_type: key?.key_type || "", brand: key?.brand || "", key_number: key?.key_number || "", serial_number: key?.serial_number || "", status: key?.status || "in_storage", key_set_id: key?.key_set_id || "", create_new_set: false });
 
-export default function ObjectKeyWizard({ currentKey, onCancel, onSave, saving, error }) {
-  const [step, setStep] = useState(1);
-  const [form, setForm] = useState(() => initialForm(currentKey));
-  useEffect(() => { setStep(1); setForm(initialForm(currentKey)); }, [currentKey]);
-  const setField = (field, value) => setForm(current => ({ ...current, [field]: value }));
-  return (
-    <section className="border-b border-border bg-muted/10 p-4">
-      <div className="mx-auto max-w-xl rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="mb-5 flex items-start gap-3"><div className="rounded-md bg-primary/10 p-2 text-primary"><KeyRound className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{currentKey ? "Sleutel wijzigen" : "Sleutel toevoegen"}</h2><p className="text-xs text-muted-foreground">Stap {step} van 2 · {step === 1 ? "Identificatie" : "Status"}</p></div></div>
-        {step === 1 ? <div className="space-y-4"><div className="space-y-2"><Label htmlFor="key-number">Sleutelnummer</Label><Input id="key-number" autoFocus value={form.key_number} onChange={event => setField("key_number", event.target.value)} placeholder="Bijv. S-001" maxLength={60} /></div><div className="space-y-2"><Label htmlFor="key-description">Omschrijving</Label><Input id="key-description" value={form.description} onChange={event => setField("description", event.target.value)} placeholder="Bijv. Hoofdingang" maxLength={160} /></div></div> : <div className="space-y-2"><Label>Status</Label><Select value={form.status} onValueChange={value => setField("status", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{OBJECT_KEY_STATUS_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>}
-        {error && <div className="mt-4 flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"><AlertCircle className="h-4 w-4 shrink-0" />{error.message || "De sleutel kon niet worden opgeslagen."}</div>}
-        <div className="mt-5 flex justify-between"><Button type="button" variant="outline" onClick={step === 1 ? onCancel : () => setStep(1)} disabled={saving}>{step === 2 && <ArrowLeft className="h-4 w-4" />}{step === 1 ? "Annuleren" : "Vorige"}</Button>{step === 1 ? <Button type="button" onClick={() => setStep(2)} disabled={!form.key_number.trim() || !form.description.trim()}>Volgende <ArrowRight className="h-4 w-4" /></Button> : <Button type="button" onClick={() => onSave({ key_number: form.key_number.trim(), description: form.description.trim(), status: form.status })} disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />} Opslaan</Button>}</div>
-      </div>
-    </section>
-  );
+export default function ObjectKeyWizard({ currentKey, sets, availableKeys, knownBrands, onCancel, onSave, saving, error }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [form, setForm] = useState(() => blank(currentKey));
+  const steps = useMemo(() => currentKey ? [{ key: "type", label: "Type" }, { key: "brand", label: "Merk" }, { key: "details", label: "Kenmerken" }] : form.mode === "existing" ? [{ key: "source", label: "Keuze" }, { key: "existing", label: "Sleutel" }, ...(sets.length ? [{ key: "set", label: "Sleutelset" }] : [])] : [{ key: "source", label: "Keuze" }, { key: "type", label: "Type" }, { key: "brand", label: "Merk" }, { key: "details", label: "Kenmerken" }], [currentKey, form.mode, sets.length]);
+  const step = steps[stepIndex]?.key;
+  const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
+  const chooseSet = (keySetId, createNew) => setForm(current => ({ ...current, key_set_id: keySetId, create_new_set: createNew }));
+  const canContinue = step === "source" ? Boolean(form.mode) : step === "type" ? Boolean(form.key_type) : step === "brand" ? Boolean(form.brand.trim()) : step === "existing" ? Boolean(form.key_id) : step === "set" ? Boolean(form.key_set_id || form.create_new_set || !sets.length) : Boolean(form.key_number.trim() && (form.key_set_id || form.create_new_set || !sets.length));
+  const finalStep = stepIndex === steps.length - 1;
+  const submit = () => { if (!canContinue || saving) return; if (!finalStep) setStepIndex(index => index + 1); else onSave(form); };
+  return <section className="border-b border-primary/30 bg-muted/20 p-4 sm:p-5"><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">{currentKey ? "Sleutel wijzigen" : "Nieuwe sleutel"}</p><WizardSteps stepIndex={stepIndex} steps={steps} label="Voortgang sleutelwizard" /><form onSubmit={event => { event.preventDefault(); submit(); }}><AnimatePresence mode="wait" initial={false}><motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} className="space-y-5">{step === "source" && <ObjectKeySourceStep mode={form.mode} onChange={mode => setForm({ ...blank(null), mode })} />}{step === "type" && <ObjectKeyTypeStep value={form.key_type} onChange={value => { set("key_type", value); set("brand", ""); }} />}{step === "brand" && <ObjectKeyBrandStep keyType={form.key_type} value={form.brand} knownBrands={knownBrands} onChange={value => set("brand", value)} />}{step === "details" && <ObjectKeyDetailsStep form={form} sets={sets} onChange={set} onSet={chooseSet} />}{step === "existing" && <ObjectExistingKeyStep keys={availableKeys} value={form.key_id} onChange={value => set("key_id", value)} />}{step === "set" && <ObjectKeySetChoice sets={sets} setId={form.key_set_id} createNew={form.create_new_set} onSelect={chooseSet} />}</motion.div></AnimatePresence>{error && <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error.message || "De sleutel kon niet worden opgeslagen."}</div>}<div className="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-between">{stepIndex === 0 ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Annuleren</Button> : <Button type="button" variant="outline" onClick={() => setStepIndex(index => index - 1)} disabled={saving}><ArrowLeft className="h-4 w-4" /> Terug</Button>}<Button type="submit" disabled={!canContinue || saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : finalStep ? <Check className="h-4 w-4" /> : null}{saving ? "Opslaan..." : finalStep ? (currentKey ? "Wijzigingen opslaan" : "Sleutel toevoegen") : <>Volgende <ArrowRight className="h-4 w-4" /></>}</Button></div></form></section>;
 }
