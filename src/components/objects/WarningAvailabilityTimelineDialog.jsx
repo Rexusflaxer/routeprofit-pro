@@ -77,11 +77,11 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
             </span>
             <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           </div>
-          <div ref={scrollRef} className="h-[336px] touch-pan-y overflow-y-auto overscroll-contain" onScroll={handleScroll}>
+          <div ref={scrollRef} className="h-[336px] touch-pan-y snap-y snap-mandatory overflow-y-auto overscroll-contain" onScroll={handleScroll}>
             {dates.map((date, dateIndex) => {
               const dayIndex = dateIndex % 7;
-              return <div key={date.toISOString()} className="flex">
-                <span className="flex h-12 w-14 shrink-0 items-center pr-2 text-xs font-semibold">{formatDate(date)}</span>
+              return <div key={date.toISOString()} className="flex snap-start snap-always">
+                <span className="flex h-12 w-14 shrink-0 flex-col justify-center pr-2 leading-tight"><strong className="text-xs">{WEEKDAY_OPTIONS[dayIndex].shortLabel}</strong><span className="text-[10px] text-muted-foreground">{formatDate(date)}</span></span>
                 <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, date, dayIndex)} onMouseLeave={() => setHover(null)}>
                   {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
                   {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
