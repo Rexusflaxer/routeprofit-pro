@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import { availableIntervalsByDay, scheduleIntervalsByKind } from "./warningAvailabilityTimeline";
 import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
@@ -22,21 +22,18 @@ const addDays = (date, days) => {
   return next;
 };
 const formatDate = date => new Intl.DateTimeFormat("nl-NL", { day: "2-digit", month: "short" }).format(date);
-const formatWeekRange = dates => `${formatDate(dates[0])} – ${formatDate(dates[6])}`;
+const isToday = date => date.toDateString() === new Date().toDateString();
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange }) {
   const [hover, setHover] = useState(null);
   const [weekCount, setWeekCount] = useState(12);
-  const [visibleWeek, setVisibleWeek] = useState(0);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const scrollRef = useRef(null);
   const firstWeekStart = mondayOf(new Date());
   const dates = Array.from({ length: weekCount * 7 }, (_, dayIndex) => addDays(firstWeekStart, dayIndex));
-  const displayedWeekDates = WEEKDAY_OPTIONS.map((_, dayIndex) => addDays(firstWeekStart, visibleWeek * 7 + dayIndex));
   useEffect(() => {
     if (!open) return;
     setWeekCount(12);
-    setVisibleWeek(0);
     setCanScrollUp(false);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
   }, [open, record?.id]);
@@ -51,7 +48,6 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
   const handleScroll = event => {
     const viewport = event.currentTarget;
     setCanScrollUp(viewport.scrollTop > 1);
-    setVisibleWeek(Math.floor(viewport.scrollTop / 336));
     if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 672) setWeekCount(count => count + 12);
   };
   const schedule = record?.availability_mode === "schedule" ? scheduleIntervalsByKind(record) : { available: availableIntervalsByDay(record), emergency: WEEKDAY_OPTIONS.map(() => []) };
@@ -67,7 +63,6 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
     <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-6xl">
       <DialogHeader className="border-b border-border px-6 py-4">
         <DialogTitle>Bereikbaarheid van {record?.display_name || "waarschuwingsadres"}</DialogTitle>
-        <DialogDescription>{formatWeekRange(displayedWeekDates)} · De standaard bereikbaarheid wordt herhaald voor iedere toekomstige week.</DialogDescription>
       </DialogHeader>
       <div className="overflow-auto px-4 pb-5">
         <div className="min-w-[900px]">
@@ -80,8 +75,8 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           <div ref={scrollRef} className="h-[336px] touch-pan-y snap-y snap-mandatory overflow-y-auto overscroll-contain" onScroll={handleScroll}>
             {dates.map((date, dateIndex) => {
               const dayIndex = dateIndex % 7;
-              return <div key={date.toISOString()} className="flex snap-start snap-always">
-                <span className="flex h-12 w-14 shrink-0 flex-col justify-center pr-2 leading-tight"><strong className="text-xs">{WEEKDAY_OPTIONS[dayIndex].shortLabel}</strong><span className="text-[10px] text-muted-foreground">{formatDate(date)}</span></span>
+              return <div key={date.toISOString()} className={`flex snap-start snap-always ${isToday(date) ? "bg-primary/10" : ""}`}>
+                <span className={`flex h-12 w-14 shrink-0 flex-col justify-center pr-2 leading-tight ${isToday(date) ? "text-primary" : ""}`}><strong className="text-xs">{WEEKDAY_OPTIONS[dayIndex].shortLabel}</strong><span className={isToday(date) ? "text-[10px] font-semibold text-primary" : "text-[10px] text-muted-foreground"}>{formatDate(date)}</span></span>
                 <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, date, dayIndex)} onMouseLeave={() => setHover(null)}>
                   {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
                   {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
