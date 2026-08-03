@@ -14,12 +14,19 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
     queryFn: () => base44.entities.WarningAddressAvailabilityOverride.filter({ object_id: objectId }, "-created_date"),
     enabled: Boolean(objectId),
   });
+  const usersQuery = useQuery({
+    queryKey: ["warning-availability-users"],
+    queryFn: () => base44.entities.User.list(),
+    enabled: Boolean(objectId),
+    staleTime: 300_000,
+  });
 
   useEffect(() => setOrderedRows(rows), [rows]);
 
+  const userNames = new Map((usersQuery.data || []).map(user => [user.id, user.full_name || user.email]));
   const enrichedRows = orderedRows.map(row => ({
     ...row,
-    specific_availability_overrides: (overrideQuery.data || []).filter(item => item.warning_address_id === row.id),
+    specific_availability_overrides: (overrideQuery.data || []).filter(item => item.warning_address_id === row.id).map(item => ({ ...item, created_by_name: userNames.get(item.created_by_id) })),
   }));
   const availabilityRecord = enrichedRows.find(row => row.id === availabilityId) || null;
   const handleDragEnd = result => {
