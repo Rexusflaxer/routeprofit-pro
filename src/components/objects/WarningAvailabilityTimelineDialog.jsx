@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -34,9 +34,21 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
   const [hover, setHover] = useState(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [direction, setDirection] = useState(1);
+  const navigationLocked = useRef(false);
+  const navigationTimer = useRef(null);
   const weekStart = addDays(mondayOf(new Date()), weekOffset * 7);
   const weekDates = WEEKDAY_OPTIONS.map((_, dayIndex) => addDays(weekStart, dayIndex));
   useEffect(() => { if (open) setWeekOffset(0); }, [open, record?.id]);
+  useEffect(() => () => clearTimeout(navigationTimer.current), []);
+  const changeWeek = step => {
+    if (navigationLocked.current || (step < 0 && weekOffset === 0)) return;
+    navigationLocked.current = true;
+    setDirection(step);
+    setHover(null);
+    setWeekOffset(offset => Math.max(0, offset + step));
+    clearTimeout(navigationTimer.current);
+    navigationTimer.current = setTimeout(() => { navigationLocked.current = false; }, 420);
+  };
   const schedule = record?.availability_mode === "schedule" ? scheduleIntervalsByKind(record) : { available: availableIntervalsByDay(record), emergency: WEEKDAY_OPTIONS.map(() => []) };
   const handleTimelineMove = (event, dayIndex) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -56,11 +68,11 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
         <div className="min-w-[900px]">
           <div className="sticky top-0 z-20 flex h-9 bg-background">
             <span className="flex w-14 shrink-0 items-center justify-center">
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={weekOffset === 0} onClick={() => { setDirection(-1); setHover(null); setWeekOffset(offset => Math.max(0, offset - 1)); }} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={weekOffset === 0} onClick={() => changeWeek(-1)} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
             </span>
             <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           </div>
-          <div className="relative h-[336px] overflow-hidden">
+          <div className="relative h-[336px] overflow-hidden" onWheel={event => { if (Math.abs(event.deltaY) < 10) return; event.preventDefault(); changeWeek(event.deltaY > 0 ? 1 : -1); }}>
             <AnimatePresence initial={false} custom={direction}>
               <motion.div className="absolute inset-0" key={weekOffset} custom={direction} variants={WEEK_VARIANTS} initial="enter" animate="center" exit="exit" transition={{ duration: 0.38, ease: [0.4, 0, 0.2, 1] }}>
                 {weekDates.map((date, dayIndex) => <div key={date.toISOString()} className="flex">
@@ -76,7 +88,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           </div>
           <div className="flex h-9">
             <span className="flex w-14 shrink-0 items-center justify-center">
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => changeWeek(1)} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
             </span>
           </div>
         </div>
