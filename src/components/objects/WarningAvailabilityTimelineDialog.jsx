@@ -25,9 +25,9 @@ const addDays = (date, days) => {
 const formatDate = date => new Intl.DateTimeFormat("nl-NL", { day: "2-digit", month: "short" }).format(date);
 const formatWeekRange = dates => `${formatDate(dates[0])} – ${formatDate(dates[6])}`;
 const WEEK_VARIANTS = {
-  enter: direction => ({ opacity: 0, y: direction * 24 }),
-  center: { opacity: 1, y: 0 },
-  exit: direction => ({ opacity: 0, y: direction * -24 }),
+  enter: direction => ({ y: direction * 336 }),
+  center: { y: 0 },
+  exit: direction => ({ y: direction * -336 }),
 };
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange }) {
@@ -50,22 +50,20 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
     <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-6xl">
       <DialogHeader className="border-b border-border px-6 py-4">
         <DialogTitle>Bereikbaarheid van {record?.display_name || "waarschuwingsadres"}</DialogTitle>
-        <DialogDescription>De standaard bereikbaarheid wordt herhaald voor iedere toekomstige week.</DialogDescription>
+        <DialogDescription>{formatWeekRange(weekDates)} · De standaard bereikbaarheid wordt herhaald voor iedere toekomstige week.</DialogDescription>
       </DialogHeader>
       <div className="overflow-auto px-4 pb-5">
-        <div className="sticky left-0 top-0 z-30 flex flex-col items-center gap-1 bg-background py-3">
-          <Button type="button" variant="outline" size="icon" disabled={weekOffset === 0} onClick={() => { setDirection(-1); setHover(null); setWeekOffset(offset => Math.max(0, offset - 1)); }} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
-          <span className="text-sm font-semibold">{formatWeekRange(weekDates)}</span>
-          <Button type="button" variant="outline" size="icon" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
-        </div>
         <div className="min-w-[900px]">
           <div className="sticky top-0 z-20 flex h-9 bg-background">
-            <span className="w-14 shrink-0" />
+            <span className="flex w-14 shrink-0 items-center justify-center">
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={weekOffset === 0} onClick={() => { setDirection(-1); setHover(null); setWeekOffset(offset => Math.max(0, offset - 1)); }} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
+            </span>
             <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           </div>
-          <div className="overflow-hidden">
-            <AnimatePresence initial={false} mode="wait" custom={direction}>
-              <motion.div key={weekOffset} custom={direction} variants={WEEK_VARIANTS} initial="enter" animate="center" exit="exit" transition={{ duration: 0.22, ease: "easeOut" }}>
+          <div className="relative h-[336px] overflow-hidden">
+            <AnimatePresence initial={false} custom={direction}>
+              <motion.div className="absolute inset-0" key={weekOffset} custom={direction} variants={WEEK_VARIANTS} initial="enter" animate="center" exit="exit" transition={{ duration: 0.38, ease: [0.4, 0, 0.2, 1] }}>
                 {weekDates.map((date, dayIndex) => <div key={date.toISOString()} className="flex">
                   <span className="flex h-12 w-14 shrink-0 items-center pr-2 text-xs font-semibold">{formatDate(date)}</span>
                   <div className="relative h-12 flex-1 border-b border-r border-border" onMouseMove={event => handleTimelineMove(event, dayIndex)} onMouseLeave={() => setHover(null)}>
