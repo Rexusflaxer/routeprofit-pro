@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.41';
 
-const text = value => String(value || '').trim();
+const text = (value: unknown) => String(value || '').trim();
 const normalizeNumber = value => text(value).normalize('NFKC').toLocaleUpperCase('nl-NL');
 
 export default async function(req) {
@@ -19,7 +19,7 @@ export default async function(req) {
       const [sets, assignments, keys] = await Promise.all([
         db.ObjectKeySet.filter({ object_id: objectId }, 'set_number', 500),
         db.ObjectKeyAssignment.filter({ object_id: objectId }, '-created_date', 500),
-        db.ObjectKey.filter({}, 'key_number', 500),
+        db.ObjectKey.filter({}, 'serial_number', 500),
       ]);
       const keyById = new Map(keys.map(key => [key.id, key]));
       const linkedIds = new Set(assignments.map(item => item.key_id));
@@ -44,8 +44,13 @@ export default async function(req) {
         return selected;
       }
       if (!sets.length || body.create_new_set === true) {
+        const keyNumber = text(body.set_key_number);
+        const normalized = normalizeNumber(keyNumber);
+        if (!keyNumber) throw new Error('Vul het sleutelnummer van de nieuwe sleutelset in.');
+        const duplicate = await db.ObjectKeySet.filter({ key_number_normalized: normalized }, '-created_date', 1);
+        if (duplicate.length) throw new Error('Dit sleutelnummer bestaat al. Gebruik een uniek sleutelnummer voor de sleutelset.');
         const nextNumber = sets.reduce((max, set) => Math.max(max, Number(set.set_number || 0)), 0) + 1;
-        return await db.ObjectKeySet.create({ customer_id: customerId, object_id: objectId, set_number: nextNumber, display_label: `Sleutelset ${nextNumber}` });
+        return await db.ObjectKeySet.create({ customer_id: customerId, object_id: objectId, set_number: nextNumber, display_label: `Sleutelset ${nextNumber}`, key_number: keyNumber, key_number_normalized: normalized });
       }
       throw new Error('Kies een sleutelset.');
     };
@@ -53,13 +58,9 @@ export default async function(req) {
     if (!objectId || !customerId) return Response.json({ error: 'Klant- en objectgegevens ontbreken.' }, { status: 400 });
 
     if (action === 'create') {
-      const keyNumber = text(body.key_number);
-      const normalized = normalizeNumber(keyNumber);
-      if (!keyNumber || !text(body.key_type) || !text(body.brand)) return Response.json({ error: 'Vul type, merk en sleutelnummer in.' }, { status: 400 });
-      const duplicate = await db.ObjectKey.filter({ key_number_normalized: normalized }, '-created_date', 1);
-      if (duplicate.length) return Response.json({ error: 'Dit sleutelnummer bestaat al. Gebruik een uniek sleutelnummer.' }, { status: 409 });
+      if (!text(body.key_type) || !text(body.brand)) return Response.json({ error: 'Vul type en merk in.' }, { status: 400 });
       const set = await resolveSet();
-      const key = await db.ObjectKey.create({ key_type: text(body.key_type), brand: text(body.brand), key_number: keyNumber, key_number_normalized: normalized, serial_number: text(body.serial_number) || null, status: text(body.status) || 'in_storage' });
+      const key = await db.ObjectKey.create({ key_type: text(body.key_type), brand: text(body.brand), serial_number: text(body.serial_number) || null, status: text(body.status) || 'in_storage' });
       try {
         await db.ObjectKeyAssignment.create({ customer_id: customerId, object_id: objectId, key_id: key.id, key_set_id: set.id });
       } catch (error) {
@@ -82,11 +83,8 @@ export default async function(req) {
 
     if (action === 'update') {
       const keyId = text(body.key_id);
-      const normalized = normalizeNumber(body.key_number);
-      const duplicate = await db.ObjectKey.filter({ key_number_normalized: normalized }, '-created_date', 10);
-      if (duplicate.some(key => key.id !== keyId)) return Response.json({ error: 'Dit sleutelnummer bestaat al. Gebruik een uniek sleutelnummer.' }, { status: 409 });
       const set = await resolveSet();
-      const key = await db.ObjectKey.update(keyId, { key_type: text(body.key_type), brand: text(body.brand), key_number: text(body.key_number), key_number_normalized: normalized, serial_number: text(body.serial_number) || null, status: text(body.status) || 'in_storage' });
+      const key = await db.ObjectKey.update(keyId, { key_type: text(body.key_type), brand: text(body.brand), serial_number: text(body.serial_number) || null, status: text(body.status) || 'in_storage' });
       await db.ObjectKeyAssignment.update(text(body.assignment_id), { key_set_id: set.id });
       return Response.json({ key, key_set: set });
     }

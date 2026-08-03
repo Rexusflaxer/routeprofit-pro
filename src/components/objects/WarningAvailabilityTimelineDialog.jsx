@@ -21,6 +21,7 @@ const formatDate = date => new Intl.DateTimeFormat("nl-NL", { day: "2-digit", mo
 
 export default function WarningAvailabilityTimelineDialog({ record, open, onOpenChange, onOverridesChanged }) {
   const [hover, setHover] = useState(null);
+  const [now, setNow] = useState(() => new Date());
   const [weekCount, setWeekCount] = useState(12);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -73,6 +74,12 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
     window.addEventListener("pointerup", stop);
     return () => window.removeEventListener("pointerup", stop);
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [open]);
 
   const intervalsFor = date => {
     const key = localDateKey(date);
@@ -132,7 +139,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
               const dayIndex = (date.getDay() + 6) % 7;
               const override = overrideForDate(record, date);
               const intervals = intervalsFor(date);
-              return <WarningTimelineRow key={date.toISOString()} date={date} dayIndex={dayIndex} available={intervals.available} emergency={intervals.emergency} override={override || Boolean(drafts[localDateKey(date)])} editing={editing} painting={painting} onPaint={(slot, start) => paint(date, slot, start)} onHover={event => showHover(event, date, intervals, override)} onHoverEnd={() => setHover(null)} onOpenOverride={event => setSelection({ date, override, x: event.clientX, y: event.clientY })} />;
+              return <WarningTimelineRow key={date.toISOString()} date={date} dayIndex={dayIndex} now={now} available={intervals.available} emergency={intervals.emergency} override={override || Boolean(drafts[localDateKey(date)])} editing={editing} painting={painting} onPaint={(slot, start) => paint(date, slot, start)} onHover={event => showHover(event, date, intervals, override)} onHoverEnd={() => setHover(null)} onOpenOverride={event => setSelection({ date, override, x: event.clientX, y: event.clientY })} />;
             })}
           </div>
           <div className="flex h-9"><span className="flex w-14 shrink-0 items-center justify-center"><Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => jumpWeek(1)} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button></span></div>
