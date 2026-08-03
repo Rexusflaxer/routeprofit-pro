@@ -23,6 +23,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import ObjectWarningAddressWizard from "./ObjectWarningAddressWizard";
 import ObjectWarningAddressesTable from "./ObjectWarningAddressesTable";
+import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
 import {
   OBJECT_CARD_TABS,
@@ -359,6 +360,15 @@ export default function ObjectCardTabs({
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
           {activeTab === "keys" ? (
             <ObjectKeysTab
+              object={object}
+              view={view}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
+              onOpenCreate={onOpenCreate}
+              onCloseView={onCloseView}
+            />
+          ) : activeTab === "installations" ? (
+            <ObjectInstallationsTab
               object={object}
               view={view}
               searchTerm={searchTerm}
