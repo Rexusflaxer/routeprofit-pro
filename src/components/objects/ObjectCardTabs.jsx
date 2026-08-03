@@ -361,11 +361,9 @@ export default function ObjectCardTabs({
             <ObjectKeysTab
               object={object}
               view={view}
-              selectedRow={selectedRow}
               searchTerm={searchTerm}
               onSearchChange={onSearchChange}
               onOpenCreate={onOpenCreate}
-              onOpenEdit={onOpenEdit}
               onCloseView={onCloseView}
             />
           ) : activeTab === "warning-addresses" ? (
