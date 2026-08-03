@@ -61,7 +61,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
   };
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-6xl">
-      <DialogHeader className="border-b border-border px-6 py-4">
+      <DialogHeader className="px-6 py-4">
         <DialogTitle>Bereikbaarheid van {record?.display_name || "waarschuwingsadres"}</DialogTitle>
       </DialogHeader>
       <div className="overflow-auto px-4 pb-5">
