@@ -7,7 +7,7 @@ import WarningAvailabilityTimelineDialog from "./WarningAvailabilityTimelineDial
 
 export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled }) {
   const [orderedRows, setOrderedRows] = useState(rows);
-  const [availabilityId, setAvailabilityId] = useState(null);
+  const [selectedAvailabilityRecord, setSelectedAvailabilityRecord] = useState(null);
   const objectId = rows[0]?.object_id;
   const overrideQuery = useQuery({
     queryKey: ["warning-availability-overrides", objectId],
@@ -28,7 +28,9 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
     ...row,
     specific_availability_overrides: (overrideQuery.data || []).filter(item => item.warning_address_id === row.id).map(item => ({ ...item, created_by_name: userNames.get(item.created_by_id) })),
   }));
-  const availabilityRecord = enrichedRows.find(row => row.id === availabilityId) || null;
+  const availabilityRecord = selectedAvailabilityRecord
+    ? enrichedRows.find(row => row.id === selectedAvailabilityRecord.id) || selectedAvailabilityRecord
+    : null;
   const handleDragEnd = result => {
     if (!result.destination || result.source.index === result.destination.index || reorderDisabled) return;
     const next = [...orderedRows];
@@ -37,13 +39,13 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
     setOrderedRows(next);
     onReorder(next).catch(() => setOrderedRows(rows));
   };
-  const handleRowClick = row => setAvailabilityId(row.id);
+  const handleRowClick = row => setSelectedAvailabilityRecord(row);
 
   if (!orderedRows.length) return null;
   const shared = { rows: enrichedRows, onEdit, onDelete, editingId, deletingId, onDragEnd: handleDragEnd, reorderDisabled, actionsDisabled, onRowClick: handleRowClick };
   return <>
     <ObjectWarningAddressesDesktop {...shared} />
     <ObjectWarningAddressesMobile {...shared} />
-    <WarningAvailabilityTimelineDialog record={availabilityRecord} open={Boolean(availabilityRecord)} onOpenChange={open => { if (!open) setAvailabilityId(null); }} onOverridesChanged={() => overrideQuery.refetch()} />
+    <WarningAvailabilityTimelineDialog record={availabilityRecord} open={Boolean(availabilityRecord)} onOpenChange={open => { if (!open) setSelectedAvailabilityRecord(null); }} onOverridesChanged={() => overrideQuery.refetch()} />
   </>;
 }
