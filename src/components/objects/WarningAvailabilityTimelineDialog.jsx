@@ -23,7 +23,7 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
         <div className="flex min-w-[760px]">
           <div className="relative w-12 shrink-0" style={{ height: DAY_HEIGHT + (TIMELINE_PADDING * 2) }}>{TIME_LABELS.map((hour, index) => <span key={hour} className="absolute right-2 -translate-y-1/2 text-[10px] text-muted-foreground" style={{ top: TIMELINE_PADDING + ((index / 12) * DAY_HEIGHT) }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           <div className="my-4 grid flex-1 grid-cols-7" style={{ height: DAY_HEIGHT }}>
-            {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="relative border-b border-l border-border">
+            {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="relative border-b border-border">
               {HOURS.map(hour => <div key={hour} className="h-8 border-t border-border/70"><div className="h-4 border-b border-border/30" /></div>)}
               {schedule.available[dayIndex].map((interval, index) => <div key={`available-${index}`} className="absolute inset-x-1 rounded-sm border border-primary/40 bg-primary/25" style={{ top: `${(interval.start / 1440) * 100}%`, height: `${((interval.end - interval.start) / 1440) * 100}%` }} title="Bereikbaar" />)}
               {schedule.emergency[dayIndex].map((interval, index) => <div key={`emergency-${index}`} className="absolute inset-x-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ top: `${(interval.start / 1440) * 100}%`, height: `${((interval.end - interval.start) / 1440) * 100}%` }} title="Alleen bij noodgevallen" />)}
