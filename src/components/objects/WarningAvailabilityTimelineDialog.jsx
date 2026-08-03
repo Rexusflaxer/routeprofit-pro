@@ -57,7 +57,6 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
           <div className="sticky top-0 z-20 flex h-9 bg-background">
             <span className="flex w-14 shrink-0 items-center justify-center">
               <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={weekOffset === 0} onClick={() => { setDirection(-1); setHover(null); setWeekOffset(offset => Math.max(0, offset - 1)); }} aria-label="Vorige week"><ChevronUp className="h-4 w-4" /></Button>
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
             </span>
             <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
           </div>
@@ -74,6 +73,11 @@ export default function WarningAvailabilityTimelineDialog({ record, open, onOpen
                 </div>)}
               </motion.div>
             </AnimatePresence>
+          </div>
+          <div className="flex h-9">
+            <span className="flex w-14 shrink-0 items-center justify-center">
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setDirection(1); setHover(null); setWeekOffset(offset => offset + 1); }} aria-label="Volgende week"><ChevronDown className="h-4 w-4" /></Button>
+            </span>
           </div>
         </div>
         <div className="sticky bottom-0 flex flex-wrap items-center gap-4 bg-background py-3 text-xs text-muted-foreground"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" /> Bereikbaar</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-chart-4/60 bg-chart-4/45" /> Alleen noodgevallen</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-border bg-card" /> Niet bereikbaar</span></div>
