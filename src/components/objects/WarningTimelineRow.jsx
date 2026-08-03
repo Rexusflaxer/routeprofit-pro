@@ -7,7 +7,7 @@ const formatDate = date => new Intl.DateTimeFormat("nl-NL", { day: "2-digit", mo
 const isToday = date => date.toDateString() === new Date().toDateString();
 
 export default function WarningTimelineRow({ date, dayIndex, now, available, emergency, override, editing, painting, onPaint, onHover, onHoverEnd, onOpenOverride }) {
-  const today = today;
+  const today = isToday(date);
   const currentMinute = now.getHours() * 60 + now.getMinutes();
   const nowPosition = (currentMinute / 1440) * 100;
   return <div className="flex snap-start snap-always">
