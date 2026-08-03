@@ -1,0 +1,38 @@
+{
+  "name": "ObjectKey",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "description": "Klant waartoe de fysieke sleutel behoort"
+    },
+    "object_id": {
+      "type": "string",
+      "description": "Object waarvoor de fysieke sleutel is geregistreerd"
+    },
+    "key_number": {
+      "type": "string",
+      "description": "Uniek herkenningsnummer van de sleutel binnen het object"
+    },
+    "description": {
+      "type": "string",
+      "description": "Korte herkenbare omschrijving van de sleutel"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "in_storage",
+        "missing",
+        "out_of_service"
+      ],
+      "default": "in_storage"
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "key_number",
+    "description",
+    "status"
+  ]
+}

@@ -23,6 +23,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import ObjectWarningAddressWizard from "./ObjectWarningAddressWizard";
 import ObjectWarningAddressesTable from "./ObjectWarningAddressesTable";
+import ObjectKeysTab from "./ObjectKeysTab";
 import {
   OBJECT_CARD_TABS,
   formatObjectLogValue,
@@ -356,7 +357,18 @@ export default function ObjectCardTabs({
       <div className="lg:flex lg:min-h-[620px]">
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
-          {activeTab === "warning-addresses" ? (
+          {activeTab === "keys" ? (
+            <ObjectKeysTab
+              object={object}
+              view={view}
+              selectedRow={selectedRow}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
+              onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
+              onCloseView={onCloseView}
+            />
+          ) : activeTab === "warning-addresses" ? (
             <div className="flex min-h-[620px] flex-col bg-card">
               {!warningQuery.isError && (view === "new" || selectedWarning) && (
                 <ObjectWarningAddressWizard
