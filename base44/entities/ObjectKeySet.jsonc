@@ -10,16 +10,27 @@
     },
     "set_number": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "Automatisch volgnummer van de sleutelset binnen het object"
     },
     "display_label": {
       "type": "string"
+    },
+    "key_number": {
+      "type": "string",
+      "description": "Applicatiebreed uniek sleutelnummer van deze sleutelset"
+    },
+    "key_number_normalized": {
+      "type": "string",
+      "description": "Technische hoofdletterongevoelige normalisatie voor uniekheidscontrole"
     }
   },
   "required": [
     "customer_id",
     "object_id",
     "set_number",
-    "display_label"
+    "display_label",
+    "key_number",
+    "key_number_normalized"
   ]
 }
