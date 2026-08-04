@@ -29,8 +29,9 @@ const intervalAt = (slots, slot) => {
   return { kind, interval: { start: start * SLOT_MINUTES, end: end * SLOT_MINUTES } };
 };
 
-export default function WarningAvailabilityGrid({ schedule, onPaint, painting, tool }) {
+export default function WarningAvailabilityGrid({ schedule, onPaint, painting, tool, activeDayIndex = null }) {
   const [hover, setHover] = useState(null);
+  const dayDisabled = dayIndex => Number.isInteger(activeDayIndex) && dayIndex !== activeDayIndex;
   const showHover = (event, dayIndex, slot) => {
     const active = intervalAt(schedule[dayIndex], slot);
     setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), dayIndex, slot, day: WEEKDAY_OPTIONS[dayIndex].label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
@@ -41,14 +42,14 @@ export default function WarningAvailabilityGrid({ schedule, onPaint, painting, t
         <span className="w-10 shrink-0" />
         <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
       </div>
-      {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className="flex">
+      {WEEKDAY_OPTIONS.map((day, dayIndex) => <div key={day.key} className={`flex ${dayDisabled(dayIndex) ? "opacity-30" : ""}`}>
         <span className="flex h-12 w-10 shrink-0 items-center pr-2 text-xs font-semibold">{day.label.slice(0, 2)}</span>
         <div className={`relative h-12 flex-1 border-b border-r border-border ${dayIndex === 0 ? "border-t" : ""}`} onPointerLeave={() => setHover(null)}>
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {intervalsFor(schedule[dayIndex], "available").map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
           {intervalsFor(schedule[dayIndex], "emergency_only").map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
           {hover?.dayIndex === dayIndex && schedule[dayIndex][hover.slot] !== tool && <div className={`pointer-events-none absolute inset-y-1 z-[5] rounded-sm border ${previewStyle(tool)}`} style={{ left: `${(hover.slot / SLOT_COUNT) * 100}%`, width: `${100 / SLOT_COUNT}%` }} />}
-          <div className="absolute inset-0 z-10 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: SLOT_COUNT }, (_, slot) => <button key={slot} type="button" aria-label={`${day.label} ${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`} className="h-full touch-none bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" onPointerDown={event => { event.preventDefault(); showHover(event, dayIndex, slot); onPaint(dayIndex, slot, true); }} onPointerEnter={event => { showHover(event, dayIndex, slot); if (painting) onPaint(dayIndex, slot, false); }} onPointerMove={event => showHover(event, dayIndex, slot)} />)}</div>
+          <div className="absolute inset-0 z-10 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: SLOT_COUNT }, (_, slot) => <button key={slot} type="button" disabled={dayDisabled(dayIndex)} aria-label={`${day.label} ${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`} className="h-full touch-none bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed" onPointerDown={event => { event.preventDefault(); if (dayDisabled(dayIndex)) return; showHover(event, dayIndex, slot); onPaint(dayIndex, slot, true); }} onPointerEnter={event => { if (dayDisabled(dayIndex)) return; showHover(event, dayIndex, slot); if (painting) onPaint(dayIndex, slot, false); }} onPointerMove={event => !dayDisabled(dayIndex) && showHover(event, dayIndex, slot)} />)}</div>
         </div>
       </div>)}
     </div>
