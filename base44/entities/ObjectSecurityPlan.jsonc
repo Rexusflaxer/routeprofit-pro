@@ -11,14 +11,13 @@
     "category": {
       "type": "string",
       "enum": [
-        "fire_closing_round"
-      ]
-    },
-    "plan_type": {
-      "type": "string",
-      "enum": [
-        "full",
-        "custom"
+        "object_security",
+        "fire_closing_round",
+        "external_closing_round",
+        "external_control_round",
+        "opening_round",
+        "mobile_control_round",
+        "reception"
       ]
     },
     "title": {
@@ -33,9 +32,29 @@
       ],
       "maxLength": 2000
     },
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "full",
+        "partial",
+        "not_applicable"
+      ],
+      "default": "not_applicable"
+    },
     "duration_minutes": {
-      "type": "number",
+      "type": [
+        "number",
+        "null"
+      ],
       "minimum": 1
+    },
+    "instructions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "default": []
     },
     "status": {
       "type": "string",
@@ -44,15 +63,18 @@
         "archived"
       ],
       "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
     }
   },
   "required": [
     "customer_id",
     "object_id",
     "category",
-    "plan_type",
     "title",
-    "duration_minutes",
+    "scope_type",
     "status"
   ]
 }
