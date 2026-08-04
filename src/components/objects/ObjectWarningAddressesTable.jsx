@@ -1,32 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
 import ObjectWarningAddressesDesktop from "./ObjectWarningAddressesDesktop";
 import ObjectWarningAddressesMobile from "./ObjectWarningAddressesMobile";
 import WarningAvailabilityTimelineDialog from "./WarningAvailabilityTimelineDialog";
 
-export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled }) {
+export default function ObjectWarningAddressesTable({ rows, overrides = [], onEdit, onDelete, editingId, deletingId, onReorder, reorderDisabled, actionsDisabled, onOverridesChanged }) {
   const [orderedRows, setOrderedRows] = useState(rows);
   const [selectedAvailabilityRecord, setSelectedAvailabilityRecord] = useState(null);
-  const objectId = rows[0]?.object_id;
-  const overrideQuery = useQuery({
-    queryKey: ["warning-availability-overrides", objectId],
-    queryFn: () => base44.entities.WarningAddressAvailabilityOverride.filter({ object_id: objectId }, "-created_date"),
-    enabled: Boolean(objectId),
-  });
-  const usersQuery = useQuery({
-    queryKey: ["warning-availability-users"],
-    queryFn: () => base44.entities.User.list(),
-    enabled: Boolean(objectId),
-    staleTime: 300_000,
-  });
-
   useEffect(() => setOrderedRows(rows), [rows]);
 
-  const userNames = new Map((usersQuery.data || []).map(user => [user.id, user.full_name || user.email]));
   const enrichedRows = orderedRows.map(row => ({
     ...row,
-    specific_availability_overrides: (overrideQuery.data || []).filter(item => item.warning_address_id === row.id).map(item => ({ ...item, created_by_name: userNames.get(item.created_by_id) })),
+    specific_availability_overrides: overrides.filter(item => item.warning_address_id === row.id),
   }));
   const availabilityRecord = selectedAvailabilityRecord
     ? enrichedRows.find(row => row.id === selectedAvailabilityRecord.id) || selectedAvailabilityRecord
@@ -46,6 +30,6 @@ export default function ObjectWarningAddressesTable({ rows, onEdit, onDelete, ed
   return <>
     <ObjectWarningAddressesDesktop {...shared} />
     <ObjectWarningAddressesMobile {...shared} />
-    <WarningAvailabilityTimelineDialog record={availabilityRecord} open={Boolean(availabilityRecord)} onOpenChange={open => { if (!open) setSelectedAvailabilityRecord(null); }} onOverridesChanged={() => overrideQuery.refetch()} />
+    <WarningAvailabilityTimelineDialog record={availabilityRecord} open={Boolean(availabilityRecord)} readOnly={actionsDisabled} onOpenChange={open => { if (!open) setSelectedAvailabilityRecord(null); }} onOverridesChanged={onOverridesChanged} />
   </>;
 }

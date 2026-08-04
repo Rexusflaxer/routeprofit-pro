@@ -71,6 +71,65 @@
         "string",
         "null"
       ]
+    },
+    "record_status": {
+      "type": "string",
+      "enum": ["active", "deleted"],
+      "default": "active",
+      "description": "Append-only projectiestatus; deleted is een datumgebonden tombstone"
+    },
+    "supersedes_override_id": {
+      "type": ["string", "null"]
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_by_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Fingerprint van het oorspronkelijke API-verzoek voor forensische idempotencycontrole"
+    },
+    "creation_payload_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Stabiele fingerprint van datum, inhoud, status en voorganger voor veilig partial-create herstel"
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Backofficegebruiker aan wie dit immutable override-record is gebonden"
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke mutatiedoelbinding voor veilig partial-create herstel"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
     }
   },
   "required": [
@@ -80,25 +139,9 @@
     "dates"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "read": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
   }
 }

@@ -9,7 +9,7 @@ export default function ObjectKeyDeleteDialog({ target, open, onOpenChange, onCo
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Sleutel verwijderen?</AlertDialogTitle>
-          <AlertDialogDescription>Weet u zeker dat u {label} uit sleutelset {target.set.key_number} wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</AlertDialogDescription>
+          <AlertDialogDescription>Weet u zeker dat u {label} uit sleutelset {target.set.key_number} wilt verwijderen? De registratie en het objectlogboek blijven voor controle bewaard.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={deleting}>Annuleren</AlertDialogCancel>

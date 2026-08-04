@@ -52,7 +52,7 @@
     "call_order": {
       "type": "integer",
       "minimum": 1,
-      "description": "Expliciete belvolgorde binnen het object"
+      "description": "Invoer- en legacyspiegel; de unieke canonieke belvolgorde staat op SurveillanceObject.warning_address_order_ids"
     },
     "availability_mode": {
       "type": "string",
@@ -158,9 +158,35 @@
       "type": "string",
       "enum": [
         "active",
-        "inactive"
+        "inactive",
+        "archived"
       ],
       "default": "active"
+    },
+    "availability_override_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "availability_override_heads": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Server-side datum-naar-recordprojectie die alleen volledig afgeronde immutable overrides activeert"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "creation_idempotency_key": {
       "type": [
@@ -231,21 +257,9 @@
     "status"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "read": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
+    "create": false,
+    "read": false,
+    "update": false,
     "delete": false
   }
 }

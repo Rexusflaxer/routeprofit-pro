@@ -119,7 +119,7 @@ describe("ObjectCardTabs", () => {
     expect(within(table).queryByRole("button", { name: /logboek/i })).not.toBeInTheDocument();
     expect(within(table).queryByText(/archief/i)).not.toBeInTheDocument();
 
-    fireEvent.click(within(table).getByText("Sanne de Vries"));
+    fireEvent.click(within(table).getByRole("button", { name: "Sanne de Vries bewerken" }));
     expect(onOpenEdit).toHaveBeenCalledWith("warning-1");
     fireEvent.click(screen.getByRole("button", { name: "Waarschuwingsadres toevoegen" }));
     expect(onOpenCreate).toHaveBeenCalledTimes(1);

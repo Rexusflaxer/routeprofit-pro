@@ -22,7 +22,7 @@ export default function ObjectWarningAddressActions({ row, onEdit, onDelete, del
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Waarschuwingsadres verwijderen?</AlertDialogTitle>
-            <AlertDialogDescription>Weet je zeker dat je {row.display_name || "dit waarschuwingsadres"} wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</AlertDialogDescription>
+            <AlertDialogDescription>Weet je zeker dat je {row.display_name || "dit waarschuwingsadres"} uit de actieve belvolgorde wilt verwijderen? De wijzigingshistorie blijft in het objectlogboek bewaard.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annuleren</AlertDialogCancel>

@@ -16,6 +16,10 @@ export default function WarningAddressCurrentStatus({ record }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  if (record?.status !== "active") {
+    return <span className="inline-flex items-center gap-2 whitespace-nowrap text-sm"><span className={`h-2 w-2 rounded-full ${STATUS_STYLES.unavailable}`} />Inactief</span>;
+  }
+
   const dayIndex = (now.getDay() + 6) % 7;
   const minute = now.getHours() * 60 + now.getMinutes();
   const containsNow = interval => minute >= interval.start && minute < interval.end;

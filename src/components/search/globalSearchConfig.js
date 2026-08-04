@@ -21,7 +21,5 @@ export const SEARCH_SOURCES = [
   { entity: "CustomerContract", category: "Contracten", title: r => r.title || r.contract_number, subtitle: r => r.contract_number || r.status, href: () => "/Commercial" },
   { entity: "CustomerQuote", category: "Offertes", title: r => r.title || r.quote_number, subtitle: r => r.quote_number || r.status, href: () => "/Commercial" },
   { entity: "SalesInvoice", category: "Facturen", title: r => r.invoice_number || "Factuur", subtitle: r => r.status, href: () => "/Billing" },
-  { entity: "ObjectInstallation", category: "Installaties", title: r => r.name, subtitle: r => r.custom_type || r.installation_type, href: r => objectHref(r, "installations") },
-  { entity: "ObjectKeySet", category: "Sleutels", title: r => r.display_label || r.key_number, subtitle: r => r.key_number, href: r => objectHref(r, "keys") },
   { entity: "ManagedFile", category: "Documenten", title: r => r.display_name || r.display_filename || r.original_filename, subtitle: r => r.document_label || r.category, href: r => r.object_id ? objectHref(r, "documents") : "/Companies" },
 ];

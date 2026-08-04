@@ -12,14 +12,20 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
+import {
+  ChoiceCard,
+  Field,
+  StepHeading,
+  WizardPanel,
+  WizardSteps,
+} from "./ObjectWizardUi";
 import {
   WARNING_RELATIONSHIP_OPTIONS,
   warningRelationshipLabel,
 } from "./objectWarningAddressConfig";
 import WarningAvailabilitySchedule from "./WarningAvailabilitySchedule";
-import { recordToAvailabilityPeriods } from "./warningAvailabilityGrid";
+import { recordToAvailabilityPeriods } from "./warningAvailabilityScheduleModel";
 
 const STEPS = [
   { key: "contact", label: "Contact" },
@@ -27,82 +33,6 @@ const STEPS = [
   { key: "phone", label: "Telefoon" },
   { key: "availability", label: "Bereikbaarheid" },
 ];
-
-function WizardSteps({ stepIndex, steps }) {
-  return (
-    <ol className="mb-5 flex items-center gap-1" aria-label="Voortgang waarschuwingsadres">
-      {steps.map((step, index) => {
-        const active = index === stepIndex;
-        const completed = index < stepIndex;
-        return (
-          <React.Fragment key={step.key}>
-            <li
-              className={`flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${
-                active
-                  ? "bg-primary text-primary-foreground"
-                  : completed
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                    : "text-muted-foreground"
-              }`}
-              aria-current={active ? "step" : undefined}
-            >
-              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${active ? "bg-primary-foreground text-primary" : completed ? "text-emerald-700" : "border border-muted-foreground/30"}`}>
-                {completed ? <Check className="h-3 w-3" /> : index + 1}
-              </span>
-              <span className={active ? "block" : "hidden sm:block"}>{step.label}</span>
-            </li>
-            {index < steps.length - 1 && <li aria-hidden="true" className={`h-px min-w-3 flex-1 ${completed ? "bg-emerald-200 dark:bg-emerald-900" : "bg-border"}`} />}
-          </React.Fragment>
-        );
-      })}
-    </ol>
-  );
-}
-
-function StepHeading({ icon: Icon, title, description }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-card">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </span>
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">{description}</p>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, htmlFor, required = false, hint = null, children }) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}{required ? " *" : ""}
-      </Label>
-      {children}
-      {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-function ChoiceCard({ selected, onClick, title, description = "" }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={`flex min-h-[72px] w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${selected ? "border-primary bg-primary/10" : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"}`}
-    >
-      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${selected ? "border-primary bg-primary" : "border-muted-foreground/30"}`}>
-        {selected && <Check className="h-3 w-3 text-primary-foreground" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">{title}</span>
-        {description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{description}</span>}
-      </span>
-    </button>
-  );
-}
 
 function initialForm(initialValue, nextCallOrder) {
   return {
@@ -169,7 +99,7 @@ export default function ObjectWarningAddressWizard({
   const hasValidSecondaryPhone = !form.secondary_phone.trim() || isCallablePhone(form.secondary_phone);
   const hasValidSelectedSecondary = !form.secondary_contact_point_id
     || availablePhones.some(point => point.id === form.secondary_contact_point_id);
-  const hasAvailability = Array.isArray(form.availability_periods);
+  const hasAvailability = Array.isArray(form.availability_periods) && form.availability_periods.length > 0;
   const steps = STEPS;
   const canContinue = [
     editing
@@ -216,12 +146,13 @@ export default function ObjectWarningAddressWizard({
   };
 
   return (
-    <motion.section {...wizardRevealMotion} className="overflow-hidden border-b border-primary/30 bg-muted/20 p-4 sm:p-5" aria-labelledby={`${fieldId}-title`}>
+    <WizardPanel labelledBy={`${fieldId}-title`}>
+      <motion.div {...wizardRevealMotion}>
       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">
         {editing ? "Waarschuwingsadres wijzigen" : "Nieuw waarschuwingsadres"}
       </p>
       <h2 id={`${fieldId}-title`} className="sr-only">{editing ? "Waarschuwingsadres wijzigen" : "Waarschuwingsadres toevoegen"}</h2>
-      <WizardSteps stepIndex={stepIndex} steps={steps} />
+      <WizardSteps stepIndex={stepIndex} steps={steps} label="Voortgang waarschuwingsadres" />
 
       <form onSubmit={event => { event.preventDefault(); continueWizard(); }} noValidate>
         <AnimatePresence mode="wait" initial={false}>
@@ -241,7 +172,7 @@ export default function ObjectWarningAddressWizard({
                   description="Koppel een bestaand klantcontact of maak een nieuw contact aan. Contactgegevens blijven centraal beheerd bij de klant."
                 />
                 {editing ? (
-                  <div className="max-w-xl rounded-md border border-border bg-card px-4 py-3">
+                  <div className="max-w-xl rounded-xl border border-border/70 bg-card/45 px-4 py-3 shadow-sm backdrop-blur-xl">
                     <p className="text-sm font-medium text-foreground">{selectedContact?.display_name || initialValue?.display_name || "Contactpersoon"}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">De gekoppelde persoon wijzig je vanuit de klanttab Contacten.</p>
                   </div>
@@ -281,7 +212,7 @@ export default function ObjectWarningAddressWizard({
               <>
                 <StepHeading icon={ShieldAlert} title="Wat is de relatie tot het object?" description="Deze rol helpt de centralist direct begrijpen waarom deze persoon wordt gebeld." />
                 {form.relationship_type === "other" ? (
-                  <div className="max-w-xl space-y-4 rounded-lg border border-primary/30 bg-card p-4">
+                  <div className="max-w-xl space-y-4 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
                     <Field label="Andere relatie" htmlFor={`${fieldId}-custom-relationship`} required>
                       <Input id={`${fieldId}-custom-relationship`} value={customRelationship} onChange={event => setCustomRelationship(event.target.value)} placeholder="Bijv. Technische achterwacht" autoFocus />
                     </Field>
@@ -333,7 +264,7 @@ export default function ObjectWarningAddressWizard({
               <>
                 <StepHeading icon={Clock3} title="Wanneer is deze contactpersoon bereikbaar?" description="Teken normale bereikbaarheid en momenten waarop alleen bij noodgevallen gebeld mag worden. Niet-ingekleurde tijden betekenen niet bereikbaar." />
                 <WarningAvailabilitySchedule periods={form.availability_periods} onChange={periods => set("availability_periods", periods)} />
-                <div className="rounded-md border border-border bg-card px-3 py-2.5 text-sm">
+                <div className="rounded-xl border border-border/70 bg-card/45 px-3.5 py-3 text-sm shadow-sm backdrop-blur-xl">
                   <span className="font-medium">{selectedContact?.display_name || [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(" ")}</span>
                   <span className="text-muted-foreground"> · {warningRelationshipLabel({ relationship_type: form.relationship_type, relationship_label: relationshipLabel })}</span>
                 </div>
@@ -343,13 +274,13 @@ export default function ObjectWarningAddressWizard({
         </AnimatePresence>
 
         {error && (
-          <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+          <div className="mt-5 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive backdrop-blur-xl" role="alert">
             <p>{error.message || "Het waarschuwingsadres kon niet worden opgeslagen."}</p>
             {error.requestId && <p className="mt-1 text-xs opacity-80">Referentie: {error.requestId}</p>}
           </div>
         )}
 
-        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
           {stepIndex === 0 ? (
             <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Annuleren</Button>
           ) : (
@@ -361,6 +292,7 @@ export default function ObjectWarningAddressWizard({
           </Button>
         </div>
       </form>
-    </motion.section>
+      </motion.div>
+    </WizardPanel>
   );
 }

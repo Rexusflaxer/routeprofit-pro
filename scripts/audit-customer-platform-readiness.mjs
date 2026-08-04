@@ -18,6 +18,12 @@ const REQUIRED_ENTITIES = [
   "CustomerRequest",
   "CustomerEvent",
   "ObjectWarningAddress",
+  "WarningAddressAvailabilityOverride",
+  "ObjectKey",
+  "ObjectKeyAssignment",
+  "ObjectKeySet",
+  "ObjectInstallation",
+  "ObjectInstallationCredential",
   "CustomerQuote",
   "CustomerQuoteLine",
   "CustomerContract",
@@ -137,14 +143,23 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 97, "De verwachte 97 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 103, "De verwachte 103 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
+const serviceOnlyObjectEntities = new Set([
+  "ObjectWarningAddress.jsonc",
+  "WarningAddressAvailabilityOverride.jsonc",
+  "ObjectKey.jsonc",
+  "ObjectKeyAssignment.jsonc",
+  "ObjectKeySet.jsonc",
+  "ObjectInstallation.jsonc",
+  "ObjectInstallationCredential.jsonc",
+]);
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
   for (const permission of ["create", "read", "update", "delete"]) {
     const immutableEvent = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission);
-    const retainedWarningAddress = file === "ObjectWarningAddress.jsonc" && permission === "delete";
-    const expectedRule = immutableEvent || retainedWarningAddress
+    const serviceOnlyObjectEntity = serviceOnlyObjectEntities.has(file);
+    const expectedRule = immutableEvent || serviceOnlyObjectEntity
       ? false
       : adminOnlyRule;
     assert.deepEqual(
@@ -252,6 +267,62 @@ for (const field of [
 ]) {
   property("ObjectWarningAddress", field);
 }
+property("ObjectWarningAddress", "availability_override_heads");
+for (const field of ["record_status", "supersedes_override_id", "creation_idempotency_key", "version"]) {
+  property("WarningAddressAvailabilityOverride", field);
+}
+for (const entity of ["ObjectKey", "ObjectKeyAssignment", "ObjectKeySet", "ObjectInstallation"]) {
+  assert.equal(schema(entity).rls?.delete, false, `${entity} mag niet hard worden verwijderd`);
+  property(entity, "version");
+}
+for (const field of [
+  "active_credential_id",
+  "credential_types",
+  "creation_request_fingerprint",
+  "customer_platform_last_mutation_key_hash",
+  "customer_platform_last_mutation_recovery",
+]) {
+  property("ObjectInstallation", field);
+}
+for (const field of [
+  "warning_address_mutation_lock",
+  "warning_address_mutation_lock_version",
+  "warning_address_order_ids",
+  "warning_address_order_version",
+  "warning_address_mutation_recoveries",
+  "object_key_mutation_lock",
+  "object_key_mutation_lock_version",
+  "installation_mutation_lock",
+  "installation_mutation_lock_version",
+]) {
+  property("SurveillanceObject", field);
+}
+for (const entity of [
+  "ObjectWarningAddress",
+  "WarningAddressAvailabilityOverride",
+  "ObjectKey",
+  "ObjectKeyAssignment",
+  "ObjectKeySet",
+  "ObjectInstallation",
+  "ObjectInstallationCredential",
+]) {
+  for (const permission of ["create", "read", "update", "delete"]) {
+    assert.equal(schema(entity).rls?.[permission], false, `${entity}.${permission} moet uitsluitend via de service-role workflow lopen`);
+  }
+}
+for (const field of [
+  "customer_id",
+  "object_id",
+  "installation_id",
+  "credential_type",
+  "encrypted_value",
+  "encryption_iv",
+  "encryption_algorithm",
+  "encryption_key_id",
+  "status",
+]) {
+  property("ObjectInstallationCredential", field);
+}
 for (const entity of ["CustomerQuote", "CustomerContract"]) {
   property(entity, "signature_lock_key");
   property(entity, "signature_lock_started_at");
@@ -274,6 +345,18 @@ assert.match(managedFiles, /UploadPrivateFile/, "Klant- en commerciële bestande
 const customersPage = read("src/pages/Customers.jsx");
 const customerDetailPage = read("src/pages/CustomerDetail.jsx");
 const customerDossierUtils = read("src/components/customers/customerDossierUtils.js");
+const objectModuleFrontend = [
+  "ObjectWarningAddressesTable.jsx",
+  "WarningAvailabilityTimelineDialog.jsx",
+  "ObjectKeysTab.jsx",
+  "useObjectKeys.js",
+  "ObjectInstallationsTab.jsx",
+].map(file => read(`src/components/objects/${file}`)).join("\n");
+assert.doesNotMatch(
+  objectModuleFrontend,
+  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential)/,
+  "Objectmodules mogen beveiligde entiteiten niet rechtstreeks lezen of muteren",
+);
 assert.match(
   customerDossierUtils,
   /functions\.invoke\(["']customerPlatformApi["']/,
@@ -344,6 +427,17 @@ for (const action of [
   "list_object_warning_addresses",
   "create_object_warning_address",
   "update_object_warning_address",
+  "delete_object_warning_address",
+  "upsert_warning_availability_overrides",
+  "delete_warning_availability_override",
+  "list_object_keys",
+  "create_object_key",
+  "update_object_key",
+  "archive_object_key",
+  "list_object_installations",
+  "create_object_installation",
+  "update_object_installation",
+  "archive_object_installation",
   "list_object_logbook",
   "list_commercial",
   "list_billing",
@@ -374,6 +468,15 @@ assert.match(
   customerPlatformApi,
   /LOGBOOK_VALUE_FIELDS/,
   "Logboekwaarden moeten via een expliciete allowlist worden gesanitiseerd",
+);
+assert.match(customerPlatformApi, /key === 'credentials'/, "Installatiecodes moeten vóór de mutatiefingerprint worden geredigeerd");
+assert.match(customerPlatformApi, /HKDF/, "Installatiecodes moeten een cryptografisch gescheiden encryptiedomein gebruiken");
+assert.match(customerPlatformApi, /active_credential_id/, "Installatiecodes moeten via één actieve immutable credentialbundel worden geselecteerd");
+assert.match(customerPlatformApi, /record_status:\s*'deleted'/, "Bereikbaarheidsverwijdering moet een append-only tombstone schrijven");
+assert.doesNotMatch(
+  customerPlatformApi,
+  /getEntity\(base44, 'WarningAddressAvailabilityOverride'\)\.delete/,
+  "Bereikbaarheidsuitzonderingen mogen niet hard worden verwijderd",
 );
 assert.doesNotMatch(
   customerPlatformApi,

@@ -1,23 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
 import { useToast } from "@/components/ui/use-toast";
-
-const invoke = payload => base44.functions.invoke("objectKeyApi", payload).then(response => response.data);
+import { archiveObjectKey, listObjectKeys, saveObjectKey } from "./objectKeyWorkflow";
 
 export default function useObjectKeys(object) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const queryKey = ["object-card", object.id, "keys"];
-  const context = { object_id: object.id, customer_id: object.customer_id };
-  const query = useQuery({ queryKey, queryFn: () => invoke({ action: "list", ...context }), retry: 1 });
+  const context = { objectId: object.id, customerId: object.customer_id };
+  const query = useQuery({ queryKey, queryFn: () => listObjectKeys(context), retry: 1 });
   const refresh = () => queryClient.invalidateQueries({ queryKey });
   const save = useMutation({
-    mutationFn: ({ current, form }) => invoke({ action: current ? "update" : form.mode === "existing" ? "link" : "create", ...context, ...form }),
-    onSuccess: async (_, variables) => { await refresh(); toast({ title: variables.current ? "Sleutel opgeslagen" : variables.form.mode === "existing" ? "Sleutel gekoppeld" : "Sleutel toegevoegd" }); },
+    mutationFn: variables => saveObjectKey({ ...context, ...variables }),
+    onSuccess: async (_, variables) => { await refresh(); toast({ title: variables.current ? "Sleutel opgeslagen" : "Sleutel toegevoegd" }); },
+    onError: async error => {
+      if (error.status === 409) await refresh();
+      toast({ title: "Opslaan mislukt", description: error.message, variant: "destructive" });
+    },
   });
   const remove = useMutation({
-    mutationFn: key => invoke({ action: "unlink", ...context, assignment_id: key.assignment_id, key_id: key.id }),
+    mutationFn: variables => archiveObjectKey({ ...context, ...variables }),
     onSuccess: async () => { await refresh(); toast({ title: "Sleutel verwijderd" }); },
+    onError: async error => {
+      if (error.status === 409) await refresh();
+      toast({ title: "Verwijderen mislukt", description: error.message, variant: "destructive" });
+    },
   });
   return { query, save, remove };
 }

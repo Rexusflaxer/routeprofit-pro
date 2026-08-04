@@ -14,6 +14,7 @@ import {
   createObjectWarningAddress,
   listObjectLogbook,
   listObjectWarningAddresses,
+  reorderObjectWarningAddresses,
   updateObjectWarningAddress,
   updateObjectWarningAddressKey,
 } from "@/components/objects/objectWarningAddressWorkflow";
@@ -206,6 +207,29 @@ describe("objectWarningAddressWorkflow", () => {
       search: "Sanne",
       page: 2,
       page_size: 50,
+    });
+  });
+
+  it("stuurt bij herschikken zowel rijversies als de canonieke volgordeversie mee", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ordered_ids: ["warning-2", "warning-1"] });
+    await reorderObjectWarningAddresses({
+      customerId: "customer-1",
+      objectId: "object-1",
+      orderedRows: [{ id: "warning-2", version: 4 }, { id: "warning-1", version: 2 }],
+      expectedOrderVersion: 7,
+      idempotencyKey: "reorder-key",
+      invoke,
+    });
+
+    expect(invoke).toHaveBeenCalledWith({
+      action: "reorder_object_warning_addresses",
+      idempotency_key: "reorder-key",
+      expected_version: 0,
+      customer_id: "customer-1",
+      object_id: "object-1",
+      ordered_ids: ["warning-2", "warning-1"],
+      expected_versions: { "warning-2": 4, "warning-1": 2 },
+      expected_order_version: 7,
     });
   });
 

@@ -2,6 +2,10 @@
   "name": "ObjectKey",
   "type": "object",
   "properties": {
+    "owner_customer_id": {
+      "type": "string",
+      "description": "Klantgrens waarbinnen deze fysieke sleutel veilig mag worden gebruikt"
+    },
     "key_type": {
       "type": "string",
       "enum": [
@@ -30,11 +34,56 @@
         "out_of_service"
       ],
       "default": "in_storage"
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_key_set_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Onveranderlijke sleutelsetkeuze van het oorspronkelijke create-verzoek."
+    },
+    "customer_platform_last_mutation_key_hash": { "type": ["string", "null"] },
+    "customer_platform_last_mutation_recovery": { "type": ["object", "null"], "additionalProperties": true },
+    "customer_platform_mutation_key_hashes": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "customer_platform_mutation_recoveries": { "type": ["object", "null"], "additionalProperties": true },
+    "version": {
+      "type": "number",
+      "default": 1
     }
   },
   "required": [
     "key_type",
     "brand",
     "status"
-  ]
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
 }

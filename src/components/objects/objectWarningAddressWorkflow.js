@@ -3,11 +3,13 @@ import {
   invokeCustomerPlatformMutation,
 } from "@/components/customers/customerDossierUtils";
 import {
+  AVAILABILITY_OPTIONS,
   WARNING_RELATIONSHIP_OPTIONS,
   WEEKDAY_OPTIONS,
 } from "./objectWarningAddressConfig";
 
 const RELATIONSHIP_TYPES = new Set(WARNING_RELATIONSHIP_OPTIONS.map(option => option.key));
+const AVAILABILITY_MODES = new Set(AVAILABILITY_OPTIONS.map(option => option.key));
 const WEEKDAYS = new Set(WEEKDAY_OPTIONS.map(option => option.key));
 
 function cleanText(value) {
@@ -50,7 +52,37 @@ function validOrder(value) {
 }
 
 function normalizedAvailability(form) {
+  const availabilityMode = cleanText(form?.availability_mode) || "schedule";
+  if (!AVAILABILITY_MODES.has(availabilityMode)) {
+    throw new Error("Kies een geldige bereikbaarheid.");
+  }
+  if (availabilityMode === "always") {
+    return { availability_mode: "always", not_call_periods: [] };
+  }
+  if (availabilityMode === "not_call_periods") {
+    const source = Array.isArray(form?.not_call_periods) ? form.not_call_periods[0] : null;
+    const days = [...new Set(
+      (Array.isArray(source?.days) ? source.days : [])
+        .map(cleanText)
+        .filter(day => WEEKDAYS.has(day)),
+    )];
+    const startTime = cleanText(source?.start_time);
+    const endTime = cleanText(source?.end_time);
+    if (!days.length) throw new Error("Kies minimaal één dag voor de niet-bellenperiode.");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime)) {
+      throw new Error("Vul een geldige begin- en eindtijd in.");
+    }
+    if (startTime === endTime) {
+      throw new Error("Begin- en eindtijd van de niet-bellenperiode mogen niet gelijk zijn.");
+    }
+    return {
+      availability_mode: "not_call_periods",
+      not_call_periods: [{ days, start_time: startTime, end_time: endTime }],
+    };
+  }
+
   const source = Array.isArray(form?.availability_periods) ? form.availability_periods : [];
+  if (!source.length) throw new Error("Teken minimaal één bereikbaarheidsblok in het weekrooster.");
   const periods = source.map(period => {
     const days = [...new Set((Array.isArray(period?.days) ? period.days : []).map(cleanText).filter(day => WEEKDAYS.has(day)))];
     const startTime = cleanText(period?.start_time), endTime = cleanText(period?.end_time), kind = cleanText(period?.kind);
@@ -96,6 +128,14 @@ export function deleteObjectWarningAddressKey() {
 
 export function reorderObjectWarningAddressesKey() {
   return createCustomerMutationKey("reorder_object_warning_addresses");
+}
+
+export function upsertWarningAvailabilityOverridesKey() {
+  return createCustomerMutationKey("upsert_warning_availability_overrides");
+}
+
+export function deleteWarningAvailabilityOverrideKey() {
+  return createCustomerMutationKey("delete_warning_availability_override");
 }
 
 export async function listObjectWarningAddresses({ customerId, objectId, invoke = undefined } = {}) {
@@ -280,6 +320,10 @@ export async function deleteObjectWarningAddress(input = {}) {
 export async function reorderObjectWarningAddresses(input = {}) {
   const rows = Array.isArray(input.orderedRows) ? input.orderedRows : [];
   if (!rows.length) throw new Error("Er zijn geen waarschuwingsadressen om te sorteren.");
+  const expectedOrderVersion = Number(input.expectedOrderVersion);
+  if (!Number.isInteger(expectedOrderVersion) || expectedOrderVersion < 0) {
+    throw new Error("De actuele belvolgorde ontbreekt. Vernieuw de pagina en probeer opnieuw.");
+  }
   return mutationInvoke(input)({
     action: "reorder_object_warning_addresses",
     idempotency_key: requiredText(input.idempotencyKey, "Mutatiesleutel"),
@@ -288,6 +332,7 @@ export async function reorderObjectWarningAddresses(input = {}) {
     object_id: requiredText(input.objectId, "Object-ID"),
     ordered_ids: rows.map(row => row.id),
     expected_versions: Object.fromEntries(rows.map(row => [row.id, Number(row.version)])),
+    expected_order_version: expectedOrderVersion,
   });
 }
 
@@ -332,5 +377,44 @@ export async function updateObjectWarningAddress(input = {}) {
       secondary_contact_point_id: cleanText(form.secondary_contact_point_id) || null,
       ...assignmentData(form),
     },
+  });
+}
+
+export async function upsertWarningAvailabilityOverrides(input = {}) {
+  const record = input.record || {};
+  const drafts = input.drafts && typeof input.drafts === "object" ? input.drafts : {};
+  const items = Object.entries(drafts).map(([date, slots]) => ({
+    date,
+    availability_periods: input.slotsToPeriods(slots),
+  }));
+  if (!items.length) throw new Error("Er zijn geen aangepaste datums om op te slaan.");
+  return mutationInvoke(input)({
+    action: "upsert_warning_availability_overrides",
+    idempotency_key: requiredText(input.idempotencyKey, "Mutatiesleutel"),
+    expected_version: Number(record.version),
+    customer_id: requiredText(record.customer_id, "Klant-ID"),
+    object_id: requiredText(record.object_id, "Object-ID"),
+    warning_address_id: requiredText(record.id, "Waarschuwingsadres-ID"),
+    expected_versions: Object.fromEntries((record.specific_availability_overrides || []).map(item => [item.id, Number(item.version)])),
+    data: {
+      items,
+      reason: cleanText(input.reason) || null,
+    },
+  });
+}
+
+export async function deleteWarningAvailabilityOverride(input = {}) {
+  const record = input.record || {};
+  const override = input.override || {};
+  return mutationInvoke(input)({
+    action: "delete_warning_availability_override",
+    idempotency_key: requiredText(input.idempotencyKey, "Mutatiesleutel"),
+    expected_version: Number(record.version),
+    customer_id: requiredText(record.customer_id, "Klant-ID"),
+    object_id: requiredText(record.object_id, "Object-ID"),
+    warning_address_id: requiredText(record.id, "Waarschuwingsadres-ID"),
+    override_id: requiredText(override.id, "Uitzondering-ID"),
+    override_expected_version: Number(override.version),
+    date: requiredText(input.date, "Datum"),
   });
 }

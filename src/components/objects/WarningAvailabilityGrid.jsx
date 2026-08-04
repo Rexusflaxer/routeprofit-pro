@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
-import { SLOT_COUNT, SLOT_MINUTES } from "./warningAvailabilityGrid";
+import { SLOT_COUNT, SLOT_MINUTES } from "./warningAvailabilityScheduleModel";
 import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);

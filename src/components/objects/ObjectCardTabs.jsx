@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
-  ChevronRight,
   Clock3,
   ContactRound,
   Plus,
@@ -29,7 +28,6 @@ import {
   OBJECT_CARD_TABS,
   formatObjectLogValue,
   warningAvailabilityLabel,
-  warningRelationshipLabel,
 } from "./objectWarningAddressConfig";
 import {
   createObjectWarningAddress,
@@ -61,14 +59,14 @@ function LoadingState({ label }) {
   return (
     <div className="space-y-3 p-4" aria-live="polite">
       <p className="text-xs text-muted-foreground">{label}</p>
-      {[1, 2, 3, 4].map(value => <div key={value} className="h-12 animate-pulse rounded-md border border-border bg-muted/25" />)}
+      {[1, 2, 3, 4].map(value => <div key={value} className="h-12 animate-pulse rounded-xl border border-border/70 bg-card/35 backdrop-blur-xl" />)}
     </div>
   );
 }
 
 function ErrorState({ error, onRetry, title = "De gegevens konden niet worden geladen." }) {
   return (
-    <div className="m-4 rounded-md border border-destructive/30 bg-destructive/10 p-4">
+    <div className="m-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 backdrop-blur-xl">
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
@@ -89,7 +87,7 @@ function ErrorState({ error, onRetry, title = "De gegevens konden niet worden ge
 function EmptyTable({ icon: Icon, title, description, action = null }) {
   return (
     <div className="flex min-h-[360px] flex-col items-center justify-center px-5 py-10 text-center">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted/30">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-card/45 shadow-sm backdrop-blur-xl">
         <Icon className="h-4 w-4 text-muted-foreground" />
       </div>
       <p className="text-sm font-medium text-foreground">{title}</p>
@@ -186,10 +184,10 @@ function ObjectTabNavigation({ activeTab, onTabChange }) {
   };
   return (
     <>
-      <div className="flex overflow-x-auto border-b border-border bg-muted/15 lg:hidden" role="tablist" aria-label="Objectkaart" aria-orientation="horizontal">
+      <div className="flex overflow-x-auto border-b border-border/70 bg-card/25 backdrop-blur-xl lg:hidden" role="tablist" aria-label="Objectkaart" aria-orientation="horizontal">
         {OBJECT_CARD_TABS.map((tab, index) => <button key={tab.key} id={`object-tab-horizontal-${tab.key}`} type="button" role="tab" aria-selected={activeTab === tab.key} tabIndex={activeTab === tab.key ? 0 : -1} onKeyDown={event => moveFocus(event, index, "horizontal")} onClick={() => onTabChange(tab.key)} className={`shrink-0 border-b-2 px-4 py-3 text-xs font-medium ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{tab.label}</button>)}
       </div>
-      <aside className="hidden w-56 shrink-0 border-r border-border bg-muted/15 py-2 lg:block">
+      <aside className="hidden w-56 shrink-0 border-r border-border/70 bg-card/25 py-2 backdrop-blur-xl lg:block">
         <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Objectkaart</p>
         <div role="tablist" aria-label="Objectkaart" aria-orientation="vertical">
           {OBJECT_CARD_TABS.map((tab, index) => <button key={tab.key} id={`object-tab-vertical-${tab.key}`} type="button" role="tab" aria-selected={activeTab === tab.key} tabIndex={activeTab === tab.key ? 0 : -1} onKeyDown={event => moveFocus(event, index, "vertical")} onClick={() => onTabChange(tab.key)} className={`flex w-full items-center px-4 py-2 text-left text-[13px] font-medium transition-colors ${activeTab === tab.key ? "border-r-2 border-primary bg-primary/5 text-primary" : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"}`}><span className="flex-1">{tab.label}</span></button>)}
@@ -296,6 +294,7 @@ export default function ObjectCardTabs({
       onCloseView();
       toast({ title: "Waarschuwingsadres toegevoegd" });
     },
+    onError: async error => { if (error.status === 409) await invalidate(); },
   });
   const updateMutation = useMutation({
     mutationFn: form => warningAddressFormChanged(selectedWarning, form)
@@ -314,6 +313,7 @@ export default function ObjectCardTabs({
       onCloseView();
       toast({ title: "Waarschuwingsadres opgeslagen" });
     },
+    onError: async error => { if (error.status === 409) await invalidate(); },
   });
   useEffect(() => {
     createMutation.reset();
@@ -325,12 +325,14 @@ export default function ObjectCardTabs({
       customerId: object.customer_id,
       objectId: object.id,
       orderedRows,
+      expectedOrderVersion: Number(warningData.order_version || 0),
       idempotencyKey: reorderObjectWarningAddressesKey(),
     }),
     onSuccess: async () => {
       await invalidate();
       toast({ title: "Belvolgorde bijgewerkt" });
     },
+    onError: async error => { if (error.status === 409) await invalidate(); },
   });
   const deleteMutation = useMutation({
     mutationFn: row => deleteObjectWarningAddress({
@@ -345,7 +347,10 @@ export default function ObjectCardTabs({
       onCloseView();
       toast({ title: "Waarschuwingsadres verwijderd" });
     },
-    onError: error => toast({ title: "Verwijderen mislukt", description: error.message, variant: "destructive" }),
+    onError: async error => {
+      if (error.status === 409) await invalidate();
+      toast({ title: "Verwijderen mislukt", description: error.message, variant: "destructive" });
+    },
   });
 
   const archived = object.status === "archived";
@@ -354,7 +359,7 @@ export default function ObjectCardTabs({
   const logbookHasNext = page * LOGBOOK_PAGE_SIZE < logbookTotal;
 
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div className="mt-4 overflow-hidden rounded-xl border border-border/70 bg-card/45 shadow-sm backdrop-blur-xl">
       <div className="lg:flex lg:min-h-[620px]">
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
@@ -362,23 +367,27 @@ export default function ObjectCardTabs({
             <ObjectKeysTab
               object={object}
               view={view}
+              selectedRow={selectedRow}
               searchTerm={searchTerm}
               onSearchChange={onSearchChange}
               onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
               onCloseView={onCloseView}
             />
           ) : activeTab === "installations" ? (
             <ObjectInstallationsTab
               object={object}
               view={view}
+              selectedRow={selectedRow}
               searchTerm={searchTerm}
               onSearchChange={onSearchChange}
               onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
               onCloseView={onCloseView}
             />
           ) : activeTab === "warning-addresses" ? (
-            <div className="flex min-h-[620px] flex-col bg-card">
-              {!warningQuery.isError && (view === "new" || selectedWarning) && (
+            <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
+              {!archived && !warningQuery.isError && (view === "new" || selectedWarning) && (
                 <ObjectWarningAddressWizard
                   key={view === "new" ? "new-warning-address" : `edit-${selectedWarning.id}-${selectedWarning.version}`}
                   mode={view === "new" ? "create" : "edit"}
@@ -391,7 +400,7 @@ export default function ObjectCardTabs({
                   error={view === "new" ? createMutation.error : updateMutation.error}
                 />
               )}
-              <div className="flex flex-col gap-3 border-b border-border bg-muted/10 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-col gap-3 border-b border-border/70 bg-card/25 px-4 py-3 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">Waarschuwingsadressen</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">{filteredWarnings.length} van {warnings.length} contact{warnings.length === 1 ? "" : "en"} in de belvolgorde</p>
@@ -402,12 +411,12 @@ export default function ObjectCardTabs({
                 </div>
               </div>
               <div className="min-h-0 flex-1">
-                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <ObjectWarningAddressesTable rows={filteredWarnings} editingId={selectedWarning?.id} deletingId={deleteMutation.variables?.id} onEdit={row => !archived && onOpenEdit(row.id)} onDelete={row => deleteMutation.mutate(row)} onReorder={orderedRows => reorderMutation.mutateAsync(orderedRows)} reorderDisabled={archived || Boolean(searchTerm.trim()) || reorderMutation.isPending || deleteMutation.isPending} actionsDisabled={archived || deleteMutation.isPending} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
+                {warningQuery.isLoading ? <LoadingState label="Waarschuwingsadressen laden..." /> : warningQuery.isError ? <ErrorState title="De waarschuwingsadressen konden niet worden geladen." error={warningQuery.error} onRetry={() => warningQuery.refetch()} /> : filteredWarnings.length ? <ObjectWarningAddressesTable rows={filteredWarnings} overrides={warningData.availability_overrides || []} editingId={selectedWarning?.id} deletingId={deleteMutation.variables?.id} onEdit={row => !archived && onOpenEdit(row.id)} onDelete={row => deleteMutation.mutate(row)} onReorder={orderedRows => reorderMutation.mutateAsync(orderedRows)} onOverridesChanged={invalidate} reorderDisabled={archived || Boolean(searchTerm.trim()) || reorderMutation.isPending || deleteMutation.isPending} actionsDisabled={archived || deleteMutation.isPending} /> : <EmptyTable icon={searchTerm ? Search : ContactRound} title={searchTerm ? "Geen waarschuwingsadressen gevonden" : "Nog geen waarschuwingsadressen"} description={searchTerm ? "Pas de zoekopdracht aan." : "Voeg de eerste contactpersoon toe die bij een alarm of calamiteit mag worden gebeld."} action={!searchTerm && !archived && view !== "new" ? <Button size="sm" onClick={onOpenCreate}><Plus className="h-4 w-4" /> Waarschuwingsadres toevoegen</Button> : null} />}
               </div>
             </div>
           ) : (
-            <div className="flex min-h-[620px] flex-col bg-card">
-              <div className="flex flex-col gap-3 border-b border-border bg-muted/10 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
+              <div className="flex flex-col gap-3 border-b border-border/70 bg-card/25 px-4 py-3 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">Logboek</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">Alle vastgelegde handelingen en wijzigingen binnen deze objectkaart</p>

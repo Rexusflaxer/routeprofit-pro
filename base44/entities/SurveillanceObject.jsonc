@@ -60,6 +60,97 @@
       ],
       "description": "Canonieke klant/object-create target voor gebonden partial-create recovery"
     },
+    "object_key_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurend objectgebonden slot dat sleutelmutaties atomair serialiseert."
+    },
+    "object_key_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor het sleutelmutatieslot; wijzigt de dossier-versie niet."
+    },
+    "warning_address_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurend objectgebonden slot dat waarschuwingsadresmutaties atomair serialiseert."
+    },
+    "warning_address_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor het waarschuwingsadresslot; wijzigt de dossier-versie niet."
+    },
+    "warning_address_order_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Canonieke, objectbrede belvolgorde van niet-gearchiveerde waarschuwingsadressen."
+    },
+    "warning_address_order_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor de canonieke belvolgorde."
+    },
+    "warning_address_order_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "warning_address_last_mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van de laatste atomisch afgeronde waarschuwingsadres-volgordemutatie"
+    },
+    "warning_address_last_mutation_recovery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "warning_address_mutation_key_hashes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "warning_address_mutation_recoveries": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "installation_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurend objectgebonden slot dat installatiemutaties atomair serialiseert."
+    },
+    "installation_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor het installatiemutatieslot; wijzigt de dossier-versie niet."
+    },
     "customer_platform_last_mutation_key_hash": {
       "type": [
         "string",

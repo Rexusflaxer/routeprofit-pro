@@ -1,22 +1,21 @@
 import React from "react";
+import { Archive, LockKeyhole } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { INSTALLATION_STATUS, installationTypeLabel } from "./objectInstallationConfig";
+import { installationStatus, installationTypeLabel } from "./objectInstallationConfig";
 
-export default function ObjectInstallationTable({ installations }) {
-  return <div className="overflow-x-auto"><Table>
-    <TableHeader><TableRow className="bg-muted/25 hover:bg-muted/25">
-      <TableHead>Installatie</TableHead><TableHead>Type</TableHead><TableHead>Merk / model</TableHead><TableHead>Locatie</TableHead><TableHead>Status</TableHead>
-    </TableRow></TableHeader>
-    <TableBody>{installations.map(installation => {
-      const status = INSTALLATION_STATUS[installation.status] || INSTALLATION_STATUS.inactive;
-      return <TableRow key={installation.id}>
-        <TableCell className="font-medium">{installation.name}</TableCell>
-        <TableCell>{installationTypeLabel(installation)}</TableCell>
-        <TableCell>{[installation.brand, installation.model].filter(Boolean).join(" · ") || "—"}</TableCell>
-        <TableCell>{installation.location || "—"}</TableCell>
-        <TableCell><Badge variant="outline" className={`text-[11px] ${status.className}`}>{status.label}</Badge></TableCell>
-      </TableRow>;
-    })}</TableBody>
-  </Table></div>;
+const formatDate = value => value ? new Intl.DateTimeFormat("nl-NL", { dateStyle: "short" }).format(new Date(`${value}T12:00:00`)) : "—";
+const maintenanceLabel = installation => {
+  if (!installation.next_maintenance_on) return "Niet gepland";
+  return installation.next_maintenance_on < new Date().toISOString().slice(0, 10)
+    ? `Verlopen · ${formatDate(installation.next_maintenance_on)}`
+    : formatDate(installation.next_maintenance_on);
+};
+
+export default function ObjectInstallationTable({ installations, onEdit, onArchive, disabled }) {
+  return <>
+    <div className="hidden overflow-x-auto md:block"><Table><TableHeader><TableRow className="bg-card/25 hover:bg-card/25"><TableHead>Installatie</TableHead><TableHead>Type</TableHead><TableHead>Merk / model</TableHead><TableHead>Doormelding</TableHead><TableHead>Volgend onderhoud</TableHead><TableHead>Status</TableHead><TableHead className="w-12" /></TableRow></TableHeader><TableBody>{installations.map(installation => { const status = installationStatus(installation); return <TableRow key={installation.id} tabIndex={0} onClick={() => onEdit(installation)} onKeyDown={event => { if (event.target !== event.currentTarget) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onEdit(installation); } }} className="group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"><TableCell><p className="font-medium">{installation.name}</p><p className="mt-0.5 text-xs text-muted-foreground">{installation.control_panel_location || "Locatie niet ingesteld"}</p></TableCell><TableCell>{installationTypeLabel(installation)}</TableCell><TableCell>{[installation.brand, installation.model].filter(Boolean).join(" · ") || "—"}</TableCell><TableCell><p>{installation.monitoring_connected ? installation.monitoring_provider_name || "Doorgemeld" : "Niet doorgemeld"}</p>{installation.has_credentials && <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><LockKeyhole className="h-3 w-3" /> {installation.credential_types.length} beveiligde code{installation.credential_types.length === 1 ? "" : "s"}</p>}</TableCell><TableCell className={installation.next_maintenance_on && installation.next_maintenance_on < new Date().toISOString().slice(0, 10) ? "text-amber-700 dark:text-amber-300" : ""}>{maintenanceLabel(installation)}</TableCell><TableCell><Badge variant="outline" className={`text-[11px] ${status.className}`}>{status.label}</Badge></TableCell><TableCell><Button type="button" variant="ghost" size="icon" disabled={disabled} aria-label={`${installation.name} archiveren`} className="h-8 w-8 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100" onClick={event => { event.stopPropagation(); onArchive(installation); }} onKeyDown={event => event.stopPropagation()}><Archive className="h-4 w-4 text-destructive" /></Button></TableCell></TableRow>; })}</TableBody></Table></div>
+    <div className="divide-y divide-border/70 md:hidden">{installations.map(installation => { const status = installationStatus(installation); return <article key={installation.id} className="bg-card/25 px-4 py-3"><button type="button" onClick={() => onEdit(installation)} className="w-full text-left"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{installation.name}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{installationTypeLabel(installation)} · {[installation.brand, installation.model].filter(Boolean).join(" ") || "Merk niet ingesteld"}</p></div><Badge variant="outline" className={`shrink-0 text-[11px] ${status.className}`}>{status.label}</Badge></div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{installation.monitoring_connected ? installation.monitoring_provider_name || "Doorgemeld" : "Niet doorgemeld"}</span><span>Onderhoud: {maintenanceLabel(installation)}</span>{installation.has_credentials && <span className="flex items-center gap-1"><LockKeyhole className="h-3 w-3" /> Codes ingesteld</span>}</div></button><button type="button" disabled={disabled} onClick={() => onArchive(installation)} className="mt-2 text-xs font-medium text-destructive disabled:opacity-50">Archiveren</button></article>; })}</div>
+  </>;
 }
