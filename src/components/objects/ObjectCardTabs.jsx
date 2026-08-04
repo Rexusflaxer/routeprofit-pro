@@ -25,6 +25,7 @@ import ObjectWarningAddressesTable from "./ObjectWarningAddressesTable";
 import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
 import ObjectRelationshipsTab from "./ObjectRelationshipsTab";
+import ObjectSecurityPlanTab from "./ObjectSecurityPlanTab";
 import ObjectTasksTab from "./ObjectTasksTab";
 import {
   OBJECT_CARD_TABS,
@@ -365,7 +366,9 @@ export default function ObjectCardTabs({
       <div className="lg:flex lg:min-h-[620px]">
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
-          {activeTab === "tasks" ? (
+          {activeTab === "security-plan" ? (
+            <ObjectSecurityPlanTab />
+          ) : activeTab === "tasks" ? (
             <ObjectTasksTab
               object={object}
               view={view}
