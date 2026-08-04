@@ -108,6 +108,8 @@ export default function ObjectWarningAddressWizard({
     hasAvailability,
   ][stepIndex];
   const finalStep = stepIndex === steps.length - 1;
+  const choiceOnlyStep = (!editing && stepIndex === 0 && form.contact_mode === "existing")
+    || (stepIndex === 1 && form.relationship_type !== "other");
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const chooseContact = contactId => {
@@ -120,10 +122,14 @@ export default function ObjectWarningAddressWizard({
       secondary_contact_point_id: "",
       primary_phone: "",
     }));
+    setStepIndex(1);
   };
   const chooseRelationship = type => {
     set("relationship_type", type);
-    if (type !== "other") set("relationship_label", WARNING_RELATIONSHIP_OPTIONS.find(option => option.key === type)?.label || "");
+    if (type !== "other") {
+      set("relationship_label", WARNING_RELATIONSHIP_OPTIONS.find(option => option.key === type)?.label || "");
+      setStepIndex(2);
+    }
   };
   const continueWizard = () => {
     if (!canContinue || saving) return;
@@ -281,10 +287,10 @@ export default function ObjectWarningAddressWizard({
           ) : (
             <Button type="button" variant="outline" onClick={() => setStepIndex(current => Math.max(0, current - 1))} disabled={saving}><ArrowLeft className="h-4 w-4" /> Terug</Button>
           )}
-          <Button type="submit" disabled={!canContinue || saving}>
+          {!choiceOnlyStep && <Button type="submit" disabled={!canContinue || saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : finalStep ? <Check className="h-4 w-4" /> : null}
             {saving ? "Opslaan..." : finalStep ? (editing ? "Wijzigingen opslaan" : "Waarschuwingsadres toevoegen") : <>Volgende <ArrowRight className="h-4 w-4" /></>}
-          </Button>
+          </Button>}
         </div>
       </form>
       </motion.div>

@@ -20,6 +20,7 @@ const blank = key => ({
 
 export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCancel, onSave, saving, error }) {
   const [stepIndex, setStepIndex] = useState(0);
+  const [customBrandEntry, setCustomBrandEntry] = useState(false);
   const [form, setForm] = useState(() => blank(currentKey));
   const steps = useMemo(() => [
     { key: "type", label: "Type" },
@@ -40,6 +41,7 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
       ? Boolean(form.brand.trim())
       : Boolean(setChoiceValid);
   const finalStep = stepIndex === steps.length - 1;
+  const choiceOnlyStep = step === "type" || (step === "brand" && !customBrandEntry);
   const submit = () => {
     if (!canContinue || saving) return;
     if (!finalStep) setStepIndex(index => index + 1);
@@ -64,8 +66,8 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
               transition={{ duration: 0.16 }}
               className="space-y-5"
             >
-              {step === "type" && <ObjectKeyTypeStep value={form.key_type} onChange={value => { set("key_type", value); set("brand", ""); }} />}
-              {step === "brand" && <ObjectKeyBrandStep keyType={form.key_type} value={form.brand} knownBrands={knownBrands} onChange={value => set("brand", value)} />}
+              {step === "type" && <ObjectKeyTypeStep value={form.key_type} onChange={value => { set("key_type", value); set("brand", ""); setCustomBrandEntry(false); setStepIndex(1); }} />}
+              {step === "brand" && <ObjectKeyBrandStep keyType={form.key_type} value={form.brand} knownBrands={knownBrands} onChange={value => set("brand", value)} onSelect={value => { set("brand", value); setStepIndex(2); }} onCustomModeChange={setCustomBrandEntry} />}
               {step === "details" && <ObjectKeyDetailsStep form={form} sets={sets} onChange={set} onSet={chooseSet} readOnlySet={Boolean(currentKey)} />}
             </motion.div>
           </AnimatePresence>
@@ -74,10 +76,10 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
             {stepIndex === 0
               ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Annuleren</Button>
               : <Button type="button" variant="outline" onClick={() => setStepIndex(index => index - 1)} disabled={saving}><ArrowLeft className="h-4 w-4" /> Terug</Button>}
-            <Button type="submit" disabled={!canContinue || saving}>
+            {!choiceOnlyStep && <Button type="submit" disabled={!canContinue || saving}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : finalStep ? <Check className="h-4 w-4" /> : null}
               {saving ? "Opslaan..." : finalStep ? (currentKey ? "Wijzigingen opslaan" : "Sleutel toevoegen") : <>Volgende <ArrowRight className="h-4 w-4" /></>}
-            </Button>
+            </Button>}
           </div>
         </form>
       </motion.div>
