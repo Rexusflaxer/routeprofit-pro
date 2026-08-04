@@ -8,7 +8,6 @@ import {
   ClipboardCheck,
   Eye,
   EyeOff,
-  Factory,
   Loader2,
   LockKeyhole,
   RadioTower,
@@ -102,12 +101,13 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     && (!form.next_maintenance_on || !form.last_tested_on || form.next_maintenance_on >= form.last_tested_on);
   const canContinue = [
     Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
-    Boolean(form.name.trim()),
+    Boolean(form.brand.trim()),
     !form.monitoring_connected || Boolean(form.monitoring_provider_name.trim()),
     datesValid,
   ][stepIndex];
   const finalStep = stepIndex === STEPS.length - 1;
-  const choiceOnlyStep = stepIndex === 0 && form.installation_type !== "other";
+  const choiceOnlyStep = (stepIndex === 0 && form.installation_type !== "other")
+    || (stepIndex === 1 && !customBrand);
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const setCredential = (key, value) => setForm(current => ({
     ...current,
@@ -131,11 +131,25 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     setCustomBrand(false);
     if (value !== "other") setStepIndex(1);
   };
+  const chooseBrand = value => {
+    setForm(current => ({
+      ...current,
+      brand: value,
+      name: installation ? current.name : `${installationTypeLabel(current)} ${value}`.trim(),
+    }));
+    setStepIndex(2);
+  };
+  const setCustomBrandValue = value => setForm(current => ({
+    ...current,
+    brand: value,
+    name: installation ? current.name : `${installationTypeLabel(current)} ${value}`.trim(),
+  }));
   const submit = () => {
     if (!canContinue || saving) return;
     if (!finalStep) { setStepIndex(index => index + 1); return; }
     onSave({
       ...form,
+      name: form.name.trim() || `${installationTypeLabel(form)} ${form.brand}`.trim(),
       custom_type: form.installation_type === "other" ? form.custom_type.trim() : null,
       credentials: Object.fromEntries(Object.entries(form.credentials).map(([key, value]) => [key, String(value || "").trim()]).filter(([, value]) => value)),
       credentials_to_revoke: [...new Set(form.credentials_to_revoke)],
@@ -158,18 +172,9 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
               </>}
 
               {stepIndex === 1 && <>
-                <StepHeading icon={Factory} title="Hoe herkennen we deze installatie?" description="Gebruik de naam en paneellocatie die een centralist of surveillant tijdens een melding direct begrijpt." />
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Installatienaam" htmlFor="installation-name" required><Input id="installation-name" value={form.name} onChange={event => set("name", event.target.value)} placeholder="Bijv. Hoofdcentrale begane grond" autoFocus /></Field>
-                  <Field label="Locatie centrale of paneel" htmlFor="installation-location"><Input id="installation-location" value={form.control_panel_location} onChange={event => set("control_panel_location", event.target.value)} placeholder="Bijv. Receptie, kast links van entree" /></Field>
-                </div>
-                {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand"><Input id="installation-custom-brand" value={form.brand} onChange={event => set("brand", event.target.value)} autoFocus /></Field><Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
-                  : <div className="grid grid-cols-1 gap-2">{knownBrands.map(brand => <ChoiceCard key={brand} selected={form.brand === brand} onClick={() => set("brand", brand)} title={brand} />)}<ChoiceCard selected={false} onClick={() => { setCustomBrand(true); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." /></div>}
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field label="Model" htmlFor="installation-model"><Input id="installation-model" value={form.model} onChange={event => set("model", event.target.value)} /></Field>
-                  <Field label="Serienummer" htmlFor="installation-serial"><Input id="installation-serial" value={form.serial_number} onChange={event => set("serial_number", event.target.value)} /></Field>
-                  <Field label="Externe referentie" htmlFor="installation-reference" hint="Bijv. referentie van installateur of overgenomen beveiligingsbedrijf."><Input id="installation-reference" value={form.external_reference} onChange={event => set("external_reference", event.target.value)} /></Field>
-                </div>
+                <StepHeading title="Van welk merk is de installatie?" />
+                {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand"><Input id="installation-custom-brand" value={form.brand} onChange={event => setCustomBrandValue(event.target.value)} autoFocus /></Field><Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
+                  : <div className="grid grid-cols-1 gap-2">{knownBrands.map(brand => <ChoiceCard key={brand} selected={form.brand === brand} onClick={() => chooseBrand(brand)} title={brand} />)}<ChoiceCard selected={false} onClick={() => { setCustomBrand(true); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." /></div>}
               </>}
 
               {stepIndex === 2 && <>

@@ -9,7 +9,7 @@ export const INSTALLATION_TYPES = [
 ];
 
 export const INSTALLATION_BRANDS = {
-  alarm_system: ["Aritech", "Bosch", "Honeywell", "Jablotron", "RISCO", "Siemens", "Texecom", "Vanderbilt"],
+  alarm_system: ["Ajax", "Alphatronics UNii", "Aritech ATS", "Bosch", "Honeywell Galaxy", "Jablotron", "RISCO", "Satel", "Siemens", "Texecom", "Vanderbilt"],
   fire_alarm_system: ["Bosch", "Esser", "Hertek", "Honeywell", "Notifier", "Siemens", "Sterling", "Viking"],
   evacuation_alarm: ["Bosch", "Esser", "Hertek", "Honeywell", "Notifier", "Siemens"],
   access_control: ["2N", "ASSA ABLOY", "HID", "Nedap", "Paxton", "SALTO", "Suprema"],
