@@ -127,8 +127,6 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   const knownBrands = installationBrandOptions(form.installation_type);
   const selectedBrand = findInstallationBrandOption(form.installation_type, form.brand);
   const visibleBrands = filterInstallationBrandOptions(form.installation_type, brandSearch);
-  const currentBrands = visibleBrands.filter(option => option.status !== "legacy");
-  const legacyBrands = visibleBrands.filter(option => option.status === "legacy");
   const [customBrand, setCustomBrand] = useState(Boolean(installation?.brand && !findInstallationBrandOption(installation.installation_type, installation.brand)));
   const customBrandMatch = customBrand ? selectedBrand : null;
   const credentialFields = INSTALLATION_CREDENTIAL_FIELDS[form.installation_type] || [];
@@ -234,8 +232,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
                   : <div className="space-y-4">
                     {knownBrands.length > 8 && <div className="relative max-w-xl"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={brandSearch} onChange={event => setBrandSearch(event.target.value)} aria-label="Zoek merk of productlijn" placeholder="Zoek merk of productlijn" className="bg-card/60 pl-9 backdrop-blur-xl" /></div>}
                     <p className="sr-only" aria-live="polite">{visibleBrands.length} {visibleBrands.length === 1 ? "merk gevonden" : "merken gevonden"}</p>
-                    {currentBrands.length > 0 && <section aria-labelledby="current-installation-brands"><p id="current-installation-brands" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actuele en ondersteunde merken</p><InstallationBrandChoices options={currentBrands} selectedBrand={selectedBrand} onSelect={chooseBrand} /></section>}
-                    {legacyBrands.length > 0 && <section aria-labelledby="legacy-installation-brands"><p id="legacy-installation-brands" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Oudere of overgenomen merken</p><InstallationBrandChoices options={legacyBrands} selectedBrand={selectedBrand} onSelect={chooseBrand} /></section>}
+                    {visibleBrands.length > 0 && <section aria-labelledby="current-installation-brands"><p id="current-installation-brands" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actuele en ondersteunde merken</p><InstallationBrandChoices options={visibleBrands} selectedBrand={selectedBrand} onSelect={chooseBrand} /></section>}
                     {visibleBrands.length === 0 && brandSearch.trim() && <div className="rounded-xl border border-dashed border-border bg-card/35 px-4 py-5 text-sm text-muted-foreground">Geen bekend merk of productlijn gevonden voor “{brandSearch.trim()}”. Je kunt het merk hieronder zelf invullen.</div>}
                     <ChoiceCard selected={customBrand} onClick={() => { setCustomBrand(true); setBrandSearch(""); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." />
                   </div>}

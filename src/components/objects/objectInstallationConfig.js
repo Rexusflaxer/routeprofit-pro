@@ -65,8 +65,6 @@ export const ALARM_SYSTEM_BRAND_OPTIONS = [
   alarmBrand({ value: "Texecom", slug: "texecom", productFamilies: ["Premier Elite", "Capture"] }),
   alarmBrand({ value: "UNii", slug: "unii", productFamilies: ["UNii 32", "UNii 128", "UNii 512"], aliases: ["Alphatronics UNii", "UNii Security"], logoBackground: "dark" }),
   alarmBrand({ value: "Visonic", slug: "visonic", productFamilies: ["PowerMaster", "PowerMax"] }),
-  alarmBrand({ value: "Alphatronics", slug: "alphatronics", productFamilies: ["AlphaVision"], aliases: ["AlphaVision"], status: "legacy", note: "Voor oudere AlphaVision-installaties; UNii wordt als zelfstandig merk geregistreerd." }),
-  alarmBrand({ value: "Vanderbilt", slug: "vanderbilt", productFamilies: ["SPC"], status: "legacy", note: "Historische merknaam; de actuele SPC-productlijn valt onder acre Security." }),
 ];
 
 const simpleBrandOptions = values => values.map(value => ({ value, label: value, aliases: [], productFamilies: [], status: "current", logoSrc: null, logoBackground: "light", note: "" }));
