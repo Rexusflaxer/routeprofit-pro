@@ -4,11 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  Clock3,
-  ContactRound,
   Loader2,
-  Phone,
-  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -167,25 +163,24 @@ export default function ObjectWarningAddressWizard({
             {stepIndex === 0 && (
               <>
                 <StepHeading
-                  icon={ContactRound}
                   title="Wie moet bij een melding worden gewaarschuwd?"
                   description="Koppel een bestaand klantcontact of maak een nieuw contact aan. Contactgegevens blijven centraal beheerd bij de klant."
                 />
                 {editing ? (
-                  <div className="max-w-xl rounded-xl border border-border/70 bg-card/45 px-4 py-3 shadow-sm backdrop-blur-xl">
+                  <div className="max-w-xl rounded-lg border border-border bg-card px-4 py-3">
                     <p className="text-sm font-medium text-foreground">{selectedContact?.display_name || initialValue?.display_name || "Contactpersoon"}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">De gekoppelde persoon wijzig je vanuit de klanttab Contacten.</p>
                   </div>
                 ) : (
                   <>
                     {contactOptions.length > 0 && (
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-2">
                         <ChoiceCard selected={form.contact_mode === "new"} onClick={() => set("contact_mode", "new")} title="Nieuw contact" description="Maak een nieuwe contactpersoon aan voor deze klant." />
                         <ChoiceCard selected={form.contact_mode === "existing"} onClick={() => set("contact_mode", "existing")} title="Bestaand contact" description="Gebruik een contactpersoon die al bij de klant staat." />
                       </div>
                     )}
                     {form.contact_mode === "existing" && contactOptions.length > 0 ? (
-                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-2">
                         {contactOptions.map(contact => (
                           <ChoiceCard
                             key={contact.id}
@@ -210,16 +205,16 @@ export default function ObjectWarningAddressWizard({
 
             {stepIndex === 1 && (
               <>
-                <StepHeading icon={ShieldAlert} title="Wat is de relatie tot het object?" description="Deze rol helpt de centralist direct begrijpen waarom deze persoon wordt gebeld." />
+                <StepHeading title="Wat is de relatie tot het object?" description="Deze rol helpt de centralist direct begrijpen waarom deze persoon wordt gebeld." />
                 {form.relationship_type === "other" ? (
-                  <div className="max-w-xl space-y-4 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
+                  <div className="max-w-xl space-y-4 rounded-lg border border-primary bg-card p-4">
                     <Field label="Andere relatie" htmlFor={`${fieldId}-custom-relationship`} required>
                       <Input id={`${fieldId}-custom-relationship`} value={customRelationship} onChange={event => setCustomRelationship(event.target.value)} placeholder="Bijv. Technische achterwacht" autoFocus />
                     </Field>
                     <Button type="button" variant="outline" size="sm" onClick={() => { set("relationship_type", ""); setCustomRelationship(""); }}><ArrowLeft className="h-3.5 w-3.5" /> Terug naar rollen</Button>
                   </div>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2">
                     {WARNING_RELATIONSHIP_OPTIONS.map(option => (
                       <ChoiceCard key={option.key} selected={form.relationship_type === option.key} onClick={() => chooseRelationship(option.key)} title={option.label} description={option.description} />
                     ))}
@@ -230,19 +225,19 @@ export default function ObjectWarningAddressWizard({
 
             {stepIndex === 2 && (
               <>
-                <StepHeading icon={Phone} title="Op welke nummers is deze persoon bereikbaar?" description="Het primaire nummer wordt als eerste gebruikt. Een alternatief nummer is optioneel." />
+                <StepHeading title="Op welke nummers is deze persoon bereikbaar?" description="Het primaire nummer wordt als eerste gebruikt. Een alternatief nummer is optioneel." />
                 {form.contact_mode === "existing" && availablePhones.length > 0 ? (
                   <div className="space-y-4">
                     <fieldset className="space-y-2">
                       <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Primair telefoonnummer *</legend>
-                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-2">
                         {availablePhones.map(point => <ChoiceCard key={point.id} selected={form.primary_contact_point_id === point.id} onClick={() => { set("primary_contact_point_id", point.id); if (form.secondary_contact_point_id === point.id) set("secondary_contact_point_id", ""); }} title={point.value} description={point.label || (point.point_type === "mobile" ? "Mobiel" : "Telefoon")} />)}
                       </div>
                     </fieldset>
                     {availablePhones.filter(point => point.id !== form.primary_contact_point_id).length > 0 && (
                       <fieldset className="space-y-2">
                         <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Alternatief nummer</legend>
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-2">
                           <ChoiceCard selected={!form.secondary_contact_point_id} onClick={() => set("secondary_contact_point_id", "")} title="Geen alternatief nummer" />
                           {availablePhones.filter(point => point.id !== form.primary_contact_point_id).map(point => <ChoiceCard key={point.id} selected={form.secondary_contact_point_id === point.id} onClick={() => set("secondary_contact_point_id", point.id)} title={point.value} description={point.label || "Telefoon"} />)}
                         </div>
@@ -262,9 +257,9 @@ export default function ObjectWarningAddressWizard({
 
             {stepIndex === 3 && (
               <>
-                <StepHeading icon={Clock3} title="Wanneer is deze contactpersoon bereikbaar?" description="Teken normale bereikbaarheid en momenten waarop alleen bij noodgevallen gebeld mag worden. Niet-ingekleurde tijden betekenen niet bereikbaar." />
+                <StepHeading title="Wanneer is deze contactpersoon bereikbaar?" description="Teken normale bereikbaarheid en momenten waarop alleen bij noodgevallen gebeld mag worden. Niet-ingekleurde tijden betekenen niet bereikbaar." />
                 <WarningAvailabilitySchedule periods={form.availability_periods} onChange={periods => set("availability_periods", periods)} />
-                <div className="rounded-xl border border-border/70 bg-card/45 px-3.5 py-3 text-sm shadow-sm backdrop-blur-xl">
+                <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
                   <span className="font-medium">{selectedContact?.display_name || [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(" ")}</span>
                   <span className="text-muted-foreground"> · {warningRelationshipLabel({ relationship_type: form.relationship_type, relationship_label: relationshipLabel })}</span>
                 </div>

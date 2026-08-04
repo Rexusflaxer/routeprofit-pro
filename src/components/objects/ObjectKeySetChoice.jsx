@@ -1,5 +1,4 @@
 import React from "react";
-import { Layers3 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ChoiceCard, Field, StepHeading } from "./ObjectWizardUi";
 
@@ -16,14 +15,13 @@ export default function ObjectKeySetChoice({
   return (
     <div className="space-y-3">
       {heading && <StepHeading
-        icon={Layers3}
         title={sets.length ? "Aan welke sleutelset wilt u deze toevoegen?" : "Nieuwe sleutelset"}
         description={sets.length
           ? "Kies een bestaande set of maak voor dit object een nieuwe herkenbare sleutelset."
           : "Dit object heeft nog geen sleutelset. De eerste set wordt automatisch aangemaakt."}
       />}
       {sets.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2">
           {sets.map(set => <ChoiceCard
             key={set.id}
             selected={!createNew && setId === set.id}

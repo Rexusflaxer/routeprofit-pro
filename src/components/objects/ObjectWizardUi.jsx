@@ -1,5 +1,5 @@
 import React from "react";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
@@ -14,8 +14,8 @@ export function WizardSteps({ stepIndex, steps, label }) {
             <li
               aria-current={active ? "step" : undefined}
               className={cn(
-                "flex min-w-0 items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium transition-colors",
-                active && "bg-primary text-primary-foreground shadow-[0_5px_14px_hsl(var(--primary)/0.2)]",
+                "flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium transition-colors",
+                active && "bg-primary text-primary-foreground",
                 complete && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
                 !active && !complete && "text-muted-foreground",
               )}
@@ -43,8 +43,8 @@ export function WizardSteps({ stepIndex, steps, label }) {
   );
 }
 
-export function StepHeading({ icon: Icon, title, description }) {
-  return <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/55 shadow-sm backdrop-blur-xl"><Icon className="h-4 w-4 text-muted-foreground" /></span><div><h3 className="text-sm font-semibold text-foreground">{title}</h3><p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">{description}</p></div></div>;
+export function StepHeading({ title, description }) {
+  return <div><h3 className="text-sm font-medium text-foreground">{title}</h3>{description && <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground">{description}</p>}</div>;
 }
 
 export function Field({ label, htmlFor, required = false, hint = null, children }) {
@@ -59,23 +59,18 @@ export function ChoiceCard({ selected, onClick, title, description = "", icon: I
       aria-pressed={selected}
       disabled={disabled}
       className={cn(
-        "group flex min-h-[76px] w-full items-start gap-3 rounded-xl border px-3.5 py-3 text-left shadow-sm backdrop-blur-xl transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50",
+        "flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50",
         selected
-          ? "border-primary/60 bg-primary/10 shadow-[0_8px_24px_hsl(var(--primary)/0.11)]"
-          : "border-border/70 bg-card/45 hover:border-primary/40 hover:bg-card/70 hover:shadow-md",
+          ? "border-primary bg-accent"
+          : "border-border bg-card hover:border-primary hover:bg-accent",
         className,
       )}
     >
-      <span className={cn(
-        "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors",
-        selected ? "border-primary bg-primary text-primary-foreground" : "border-border/80 bg-background/45 text-muted-foreground group-hover:border-primary/40",
-      )}>
-        {selected ? <Check className="h-3.5 w-3.5" /> : Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-      </span>
       <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">{title}</span>
-        {description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{description}</span>}
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        {description && <span className="ml-2 text-xs text-muted-foreground">{description}</span>}
       </span>
+      {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
     </button>
   );
 }
@@ -85,7 +80,7 @@ export function WizardPanel({ children, title = undefined, labelledBy = undefine
     <section
       aria-label={title}
       aria-labelledby={labelledBy}
-      className={cn("overflow-hidden border-b border-border/70 bg-card/35 p-4 backdrop-blur-xl sm:p-5", className)}
+      className={cn("overflow-hidden border-b border-primary/30 bg-muted/20 p-5", className)}
     >
       {children}
     </section>
