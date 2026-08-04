@@ -296,15 +296,15 @@ function AppShell({ children, currentPageName }) {
 
   return (
     <div
-      className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} bg-background text-foreground antialiased`}
+      className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} bg-background/55 text-foreground antialiased backdrop-blur-[2px]`}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeaveApp}
     >
-      <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
+      <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border/70 bg-sidebar/75 shadow-[12px_0_40px_hsl(var(--foreground)/0.04)] backdrop-blur-2xl transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} onSearchOpen={() => setSearchOpen(true)} />
       </aside>
 
-      <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border bg-[hsl(var(--topbar))] lg:hidden">
+      <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border/70 bg-background/70 shadow-sm backdrop-blur-2xl lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <LOQLogo className="h-5 w-auto max-w-[74px]" />
@@ -320,7 +320,7 @@ function AppShell({ children, currentPageName }) {
           </Button>
         </div>
         {mobileOpen && (
-          <div className="border-t border-border bg-sidebar">
+          <div className="border-t border-border/70 bg-sidebar/80 backdrop-blur-2xl">
             <div className="max-h-[calc(100vh-3rem)] overflow-y-auto">
               <ContextNavigation currentPageName={currentPageName} onNavigate={() => setMobileOpen(false)} onSearchOpen={() => { setMobileOpen(false); setSearchOpen(true); }} />
             </div>
