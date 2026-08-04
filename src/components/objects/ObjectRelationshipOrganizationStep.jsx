@@ -1,0 +1,11 @@
+import React from "react";
+import { Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ChoiceCard, Field, StepHeading } from "./ObjectWizardUi";
+import ObjectRelationshipLogo from "./ObjectRelationshipLogo";
+
+export default function ObjectRelationshipOrganizationStep({ options, selectedId, search, onSearch, onSelect, custom, onCustom, customName, onCustomName, customWebsite, onCustomWebsite }) {
+  if (custom) return <><StepHeading title="Nieuwe instantie toevoegen" description="Deze instantie wordt bewaard en is daarna ook bij andere objecten beschikbaar." /><div className="max-w-xl space-y-4"><Field label="Naam instantie" htmlFor="relationship-organization-name" required><Input id="relationship-organization-name" value={customName} onChange={event => onCustomName(event.target.value)} autoFocus /></Field><Field label="Website" htmlFor="relationship-organization-website"><Input id="relationship-organization-website" value={customWebsite} onChange={event => onCustomWebsite(event.target.value)} placeholder="https://" /></Field><Button type="button" variant="outline" size="sm" onClick={() => onCustom(false)}>Terug naar instanties</Button></div></>;
+  return <><StepHeading title="Welke instantie is aan het object gekoppeld?" /><div className="relative max-w-xl"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={event => onSearch(event.target.value)} placeholder="Zoek instantie..." className="bg-card/60 pl-9" /></div><div className="grid grid-cols-1 gap-2 md:grid-cols-2">{options.map(option => <ChoiceCard key={option.id} selected={selectedId === option.id} onClick={() => onSelect(option)} title={option.name} description={option.certification || (option.source === "user_added" ? "Zelf toegevoegd" : "Landelijke catalogus")} leading={<ObjectRelationshipLogo organization={option} />} />)}</div>{!options.length && <p className="text-sm text-muted-foreground">Geen instantie gevonden.</p>}<ChoiceCard selected={false} onClick={() => onCustom(true)} title="Andere instantie" description="Voeg een organisatie toe aan de gedeelde lijst." /></>;
+}

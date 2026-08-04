@@ -1,0 +1,102 @@
+{
+  "name": "ThirdPartyOrganization",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "normalized_name": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "relation_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "pac",
+          "video_monitoring_center",
+          "security_installer",
+          "fire_safety_installer",
+          "camera_installer",
+          "access_control_installer",
+          "maintenance_provider",
+          "key_management",
+          "guarding_company",
+          "other"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "website": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logo_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "certification": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "verified_catalog",
+        "starter_catalog",
+        "user_added"
+      ],
+      "default": "user_added"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "name",
+    "normalized_name",
+    "relation_types",
+    "source",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

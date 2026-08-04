@@ -1,0 +1,120 @@
+{
+  "name": "ObjectRelationship",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "organization_id": {
+      "type": "string"
+    },
+    "relation_type": {
+      "type": "string",
+      "enum": [
+        "pac",
+        "video_monitoring_center",
+        "security_installer",
+        "fire_safety_installer",
+        "camera_installer",
+        "access_control_installer",
+        "maintenance_provider",
+        "key_management",
+        "guarding_company",
+        "other"
+      ]
+    },
+    "custom_relation_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reference_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "phone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "organization_id",
+    "relation_type",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

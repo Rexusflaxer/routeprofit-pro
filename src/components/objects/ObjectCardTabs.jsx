@@ -24,6 +24,7 @@ import ObjectWarningAddressWizard from "./ObjectWarningAddressWizard";
 import ObjectWarningAddressesTable from "./ObjectWarningAddressesTable";
 import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
+import ObjectRelationshipsTab from "./ObjectRelationshipsTab";
 import {
   OBJECT_CARD_TABS,
   formatObjectLogValue,
@@ -363,7 +364,18 @@ export default function ObjectCardTabs({
       <div className="lg:flex lg:min-h-[620px]">
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
-          {activeTab === "keys" ? (
+          {activeTab === "relationships" ? (
+            <ObjectRelationshipsTab
+              object={object}
+              view={view}
+              selectedRow={selectedRow}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
+              onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
+              onCloseView={onCloseView}
+            />
+          ) : activeTab === "keys" ? (
             <ObjectKeysTab
               object={object}
               view={view}

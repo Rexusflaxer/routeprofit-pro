@@ -1,0 +1,22 @@
+import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
+import { WizardPanel, WizardSteps } from "./ObjectWizardUi";
+import ObjectRelationshipTypeStep from "./ObjectRelationshipTypeStep";
+import ObjectRelationshipOrganizationStep from "./ObjectRelationshipOrganizationStep";
+import ObjectRelationshipDetailsStep from "./ObjectRelationshipDetailsStep";
+
+const STEPS = [{ key: "type", label: "Soort" }, { key: "organization", label: "Instantie" }, { key: "details", label: "Gegevens" }];
+const initial = value => ({ relation_type: value?.relation_type || "", custom_relation_label: value?.custom_relation_label || "", organization_id: value?.organization_id || "", organization_name: "", organization_website: "", reference_number: value?.reference_number || "", phone: value?.phone || "", email: value?.email || "", notes: value?.notes || "" });
+
+export default function ObjectRelationshipWizard({ relationship, organizations, onCancel, onSave, saving, error }) {
+  const [step, setStep] = useState(0), [form, setForm] = useState(() => initial(relationship)), [search, setSearch] = useState(""), [custom, setCustom] = useState(false);
+  const options = useMemo(() => organizations.filter(item => item.relation_types?.includes(form.relation_type) && (!search.trim() || item.name.toLowerCase().includes(search.trim().toLowerCase()))), [form.relation_type, organizations, search]);
+  const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
+  const chooseType = value => { setForm(current => ({ ...current, relation_type: value, custom_relation_label: value === "other" ? current.custom_relation_label : "", organization_id: current.relation_type === value ? current.organization_id : "" })); if (value !== "other") setStep(1); };
+  const canContinue = [Boolean(form.relation_type && (form.relation_type !== "other" || form.custom_relation_label.trim())), Boolean(custom ? form.organization_name.trim() : form.organization_id), true][step];
+  const submit = () => { if (!canContinue || saving) return; if (step < 2) return setStep(step + 1); onSave(form); };
+  return <WizardPanel labelledBy="relationship-wizard-title"><motion.div {...wizardRevealMotion}><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">{relationship ? "Relatie wijzigen" : "Nieuwe relatie"}</p><h2 id="relationship-wizard-title" className="sr-only">Relatie toevoegen</h2><WizardSteps stepIndex={step} steps={STEPS} label="Voortgang relatie toevoegen" /><form onSubmit={event => { event.preventDefault(); submit(); }}><AnimatePresence mode="wait"><motion.div key={STEPS[step].key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-5">{step === 0 && <ObjectRelationshipTypeStep value={form.relation_type} customLabel={form.custom_relation_label} onCustomLabelChange={value => set("custom_relation_label", value)} onSelect={chooseType} />}{step === 1 && <ObjectRelationshipOrganizationStep options={options} selectedId={form.organization_id} search={search} onSearch={setSearch} onSelect={organization => { set("organization_id", organization.id); setStep(2); }} custom={custom} onCustom={value => { setCustom(value); if (value) set("organization_id", ""); }} customName={form.organization_name} onCustomName={value => set("organization_name", value)} customWebsite={form.organization_website} onCustomWebsite={value => set("organization_website", value)} />}{step === 2 && <ObjectRelationshipDetailsStep form={form} onChange={set} />}</motion.div></AnimatePresence>{error && <p className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error.message}</p>}<div className="mt-5 flex justify-between border-t border-border/70 pt-4">{step ? <Button type="button" variant="outline" onClick={() => setStep(step - 1)}><ArrowLeft /> Terug</Button> : <Button type="button" variant="outline" onClick={onCancel}>Annuleren</Button>}{!((step === 0 && form.relation_type !== "other") || (step === 1 && !custom)) && <Button type="submit" disabled={!canContinue || saving}>{saving ? <Loader2 className="animate-spin" /> : step === 2 ? <Check /> : null}{saving ? "Opslaan..." : step === 2 ? "Relatie opslaan" : <>Volgende <ArrowRight /></>}</Button>}</div></form></motion.div></WizardPanel>;
+}
