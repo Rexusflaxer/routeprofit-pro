@@ -16,9 +16,9 @@ export default function ObjectKeySetChoice({
     <div className="space-y-3">
       {heading && <StepHeading
         title={sets.length ? "Aan welke sleutelset wilt u deze toevoegen?" : "Nieuwe sleutelset"}
-        description={sets.length
-          ? "Kies een bestaande set of maak voor dit object een nieuwe herkenbare sleutelset."
-          : "Dit object heeft nog geen sleutelset. De eerste set wordt automatisch aangemaakt."}
+        description={!sets.length
+          ? "Dit object heeft nog geen sleutelset. De eerste set wordt automatisch aangemaakt."
+          : undefined}
       />}
       {sets.length > 0 && (
         <div className="grid grid-cols-1 gap-2">
