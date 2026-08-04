@@ -107,6 +107,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     datesValid,
   ][stepIndex];
   const finalStep = stepIndex === STEPS.length - 1;
+  const choiceOnlyStep = stepIndex === 0 && form.installation_type !== "other";
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const setCredential = (key, value) => setForm(current => ({
     ...current,
@@ -128,6 +129,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   const chooseType = value => {
     setForm(current => ({ ...current, installation_type: value, custom_type: value === "other" ? current.custom_type : "", brand: "", credentials: {}, credentials_to_revoke: [] }));
     setCustomBrand(false);
+    if (value !== "other") setStepIndex(1);
   };
   const submit = () => {
     if (!canContinue || saving) return;
@@ -151,7 +153,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
             <motion.div key={STEPS[stepIndex].key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} className="space-y-5">
               {stepIndex === 0 && <>
                 <StepHeading icon={BellRing} title="Welke installatie staat op dit object?" description="Kies het functionele systeem. Technische zones en uitgebreide onderhoudshistorie kunnen later per installatie worden aangevuld." />
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{INSTALLATION_TYPES.map(option => <ChoiceCard key={option.value} selected={form.installation_type === option.value} onClick={() => chooseType(option.value)} title={option.label} description={option.description} />)}</div>
+                <div className="grid grid-cols-1 gap-2">{INSTALLATION_TYPES.map(option => <ChoiceCard key={option.value} selected={form.installation_type === option.value} onClick={() => chooseType(option.value)} title={option.label} description={option.description} />)}</div>
                 {form.installation_type === "other" && <div className="max-w-xl"><Field label="Omschrijving installatietype" htmlFor="installation-custom-type" required><Input id="installation-custom-type" value={form.custom_type} onChange={event => set("custom_type", event.target.value)} autoFocus placeholder="Bijv. mistgeneratorbesturing" /></Field></div>}
               </>}
 
@@ -162,7 +164,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
                   <Field label="Locatie centrale of paneel" htmlFor="installation-location"><Input id="installation-location" value={form.control_panel_location} onChange={event => set("control_panel_location", event.target.value)} placeholder="Bijv. Receptie, kast links van entree" /></Field>
                 </div>
                 {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand"><Input id="installation-custom-brand" value={form.brand} onChange={event => set("brand", event.target.value)} autoFocus /></Field><Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
-                  : <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{knownBrands.map(brand => <ChoiceCard key={brand} selected={form.brand === brand} onClick={() => set("brand", brand)} title={brand} />)}<ChoiceCard selected={false} onClick={() => { setCustomBrand(true); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." /></div>}
+                  : <div className="grid grid-cols-1 gap-2">{knownBrands.map(brand => <ChoiceCard key={brand} selected={form.brand === brand} onClick={() => set("brand", brand)} title={brand} />)}<ChoiceCard selected={false} onClick={() => { setCustomBrand(true); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." /></div>}
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field label="Model" htmlFor="installation-model"><Input id="installation-model" value={form.model} onChange={event => set("model", event.target.value)} /></Field>
                   <Field label="Serienummer" htmlFor="installation-serial"><Input id="installation-serial" value={form.serial_number} onChange={event => set("serial_number", event.target.value)} /></Field>
@@ -172,7 +174,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
 
               {stepIndex === 2 && <>
                 <StepHeading icon={RadioTower} title="Is de installatie doorgemeld en hoe wordt deze bediend?" description="De aansluitreferentie is gewone objectmetadata. Bedieningscodes worden afzonderlijk versleuteld en verschijnen nooit in tabellen, zoekresultaten of het logboek." />
-                <div className="grid gap-2 sm:grid-cols-2"><ChoiceCard selected={!form.monitoring_connected} onClick={() => set("monitoring_connected", false)} title="Niet doorgemeld" description="Geen PAC, meldkamer of externe monitoring gekoppeld." /><ChoiceCard selected={form.monitoring_connected} onClick={() => set("monitoring_connected", true)} title="Wel doorgemeld" description="Leg provider en aansluitreferentie vast." /></div>
+                <div className="grid grid-cols-1 gap-2"><ChoiceCard selected={!form.monitoring_connected} onClick={() => set("monitoring_connected", false)} title="Niet doorgemeld" description="Geen PAC, meldkamer of externe monitoring gekoppeld." /><ChoiceCard selected={form.monitoring_connected} onClick={() => set("monitoring_connected", true)} title="Wel doorgemeld" description="Leg provider en aansluitreferentie vast." /></div>
                 {form.monitoring_connected && <div className="grid gap-4 md:grid-cols-2"><Field label="Meldkamer of provider" htmlFor="installation-provider" required><Input id="installation-provider" value={form.monitoring_provider_name} onChange={event => set("monitoring_provider_name", event.target.value)} placeholder="Bijv. PAC / alarmcentrale" autoFocus /></Field><Field label="Aansluitreferentie" htmlFor="installation-monitoring-reference"><Input id="installation-monitoring-reference" value={form.monitoring_connection_reference} onChange={event => set("monitoring_connection_reference", event.target.value)} placeholder="Geen schakel- of verificatiecode" /></Field></div>}
                 {credentialFields.length > 0 && <div className="space-y-4 rounded-xl border border-amber-300/70 bg-amber-50/60 p-4 shadow-sm backdrop-blur-xl dark:border-amber-900/70 dark:bg-amber-950/25"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" /><div><p className="text-sm font-semibold">Beveiligde bedieningscodes</p><p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Leg alleen codes vast die operationeel noodzakelijk zijn. Bestaande codes worden niet teruggelezen in deze wizard.</p></div></div><div className="grid gap-4 md:grid-cols-2">{credentialFields.map(definition => <CredentialField key={definition.key} definition={definition} value={form.credentials[definition.key]} onChange={value => setCredential(definition.key, value)} alreadySet={existingCredentialTypes.includes(definition.key)} revoked={revokedCredentialTypes.includes(definition.key)} onToggleRevoke={() => toggleCredentialRevocation(definition.key)} />)}</div></div>}
               </>}
@@ -188,7 +190,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
             </motion.div>
           </AnimatePresence>
           {error && <div className="mt-5 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert"><p>{error.message || "De installatie kon niet worden opgeslagen."}</p>{error.requestId && <p className="mt-1 text-xs opacity-80">Referentie: {error.requestId}</p>}</div>}
-          <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-between">{stepIndex === 0 ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Annuleren</Button> : <Button type="button" variant="outline" onClick={() => setStepIndex(index => index - 1)} disabled={saving}><ArrowLeft className="h-4 w-4" /> Terug</Button>}<Button type="submit" disabled={!canContinue || saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : finalStep ? <Check className="h-4 w-4" /> : null}{saving ? "Opslaan..." : finalStep ? (installation ? "Wijzigingen opslaan" : "Installatie toevoegen") : <>Volgende <ArrowRight className="h-4 w-4" /></>}</Button></div>
+          <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-between">{stepIndex === 0 ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>Annuleren</Button> : <Button type="button" variant="outline" onClick={() => setStepIndex(index => index - 1)} disabled={saving}><ArrowLeft className="h-4 w-4" /> Terug</Button>}{!choiceOnlyStep && <Button type="submit" disabled={!canContinue || saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : finalStep ? <Check className="h-4 w-4" /> : null}{saving ? "Opslaan..." : finalStep ? (installation ? "Wijzigingen opslaan" : "Installatie toevoegen") : <>Volgende <ArrowRight className="h-4 w-4" /></>}</Button>}</div>
         </form>
       </motion.div>
     </WizardPanel>
