@@ -12,10 +12,10 @@ const CATEGORIES = [
   { label: "Receptiedienst", description: "Receptie-, bezoekers- en toegangsgerelateerde beveiligingswerkzaamheden." },
 ];
 
-export default function ObjectSecurityPlanTab() {
+export default function ObjectSecurityPlanTab({ object }) {
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  if (selectedCategory) return <SecurityPlanCategoryTable title={selectedCategory} onBack={() => setSelectedCategory(null)} />;
+  if (selectedCategory) return <SecurityPlanCategoryTable object={object} title={selectedCategory} onBack={() => setSelectedCategory(null)} />;
 
   return (
     <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">

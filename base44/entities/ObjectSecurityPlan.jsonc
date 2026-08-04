@@ -1,0 +1,58 @@
+{
+  "name": "ObjectSecurityPlan",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "fire_closing_round"
+      ]
+    },
+    "plan_type": {
+      "type": "string",
+      "enum": [
+        "full",
+        "custom"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "duration_minutes": {
+      "type": "number",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "category",
+    "plan_type",
+    "title",
+    "duration_minutes",
+    "status"
+  ]
+}

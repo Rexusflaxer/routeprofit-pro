@@ -367,7 +367,7 @@ export default function ObjectCardTabs({
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
           {activeTab === "security-plan" ? (
-            <ObjectSecurityPlanTab />
+            <ObjectSecurityPlanTab object={object} />
           ) : activeTab === "tasks" ? (
             <ObjectTasksTab
               object={object}
