@@ -251,6 +251,7 @@ function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInitialQuery, setSearchInitialQuery] = useState("");
+  const [searchOpenedFromTyping, setSearchOpenedFromTyping] = useState(false);
   const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1280);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
@@ -296,6 +297,7 @@ function AppShell({ children, currentPageName }) {
   };
 
   const openGlobalSearch = (initialQuery = "") => {
+    setSearchOpenedFromTyping(false);
     setSearchInitialQuery(initialQuery);
     setSearchOpen(true);
   };
@@ -303,6 +305,7 @@ function AppShell({ children, currentPageName }) {
   const closeGlobalSearch = () => {
     setSearchOpen(false);
     setSearchInitialQuery("");
+    setSearchOpenedFromTyping(false);
   };
 
   useEffect(() => {
@@ -313,6 +316,7 @@ function AppShell({ children, currentPageName }) {
         target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
       );
       if (isTypingTarget) return;
+      setSearchOpenedFromTyping(true);
       setSearchInitialQuery(current => `${current}${event.key}`);
       setSearchOpen(true);
     };
@@ -365,7 +369,7 @@ function AppShell({ children, currentPageName }) {
         <ViewportSizeWarning className="mx-auto max-w-sm" />
       </div>
 
-      <GlobalSearchOverlay open={searchOpen} onClose={closeGlobalSearch} initialQuery={searchInitialQuery} />
+      <GlobalSearchOverlay open={searchOpen} onClose={closeGlobalSearch} initialQuery={searchInitialQuery} autoCloseWhenEmpty={searchOpenedFromTyping} />
     </div>
   );
 }
