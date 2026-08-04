@@ -1,0 +1,123 @@
+{
+  "name": "ObjectTaskDefinition",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "object_security",
+        "fire_closing_round",
+        "external_closing_round",
+        "external_control_round",
+        "opening_round",
+        "mobile_control_round",
+        "reception",
+        "closing_assistance",
+        "access_control",
+        "fire_watch",
+        "concierge",
+        "other"
+      ]
+    },
+    "custom_task_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "execution_mode": {
+      "type": "string",
+      "enum": [
+        "continuous",
+        "time_window"
+      ]
+    },
+    "start_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "end_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "duration_minutes": {
+      "type": "number",
+      "minimum": 1
+    },
+    "recurrence_type": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "date_range",
+        "one_time"
+      ]
+    },
+    "weekdays": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 7
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "specific_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "instructions": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "task_type",
+    "execution_mode",
+    "start_time",
+    "end_time",
+    "duration_minutes",
+    "recurrence_type",
+    "status"
+  ]
+}

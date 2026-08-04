@@ -1,0 +1,9 @@
+import React from "react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, StepHeading } from "./ObjectWizardUi";
+
+export default function ObjectTaskTimingStep({ form, onChange }) {
+  const continuous = form.execution_mode === "continuous";
+  return <><StepHeading title={continuous ? "Wanneer loopt deze taak?" : "Binnen welk tijdvenster mag deze taak worden uitgevoerd?"} description={continuous ? "De taak is aaneengesloten van start tot einde." : "Leg ook vast hoeveel minuten de uitvoering zelf duurt."} /><div className="grid max-w-2xl gap-4 sm:grid-cols-2"><Field label="Van" htmlFor="task-start" required><Input id="task-start" type="time" value={form.start_time} onChange={event => onChange("start_time", event.target.value)} /></Field><Field label="Tot" htmlFor="task-end" required><Input id="task-end" type="time" value={form.end_time} onChange={event => onChange("end_time", event.target.value)} /></Field>{!continuous && <Field label="Uitvoeringsduur in minuten" htmlFor="task-duration" required><Input id="task-duration" type="number" min="1" value={form.duration_minutes} onChange={event => onChange("duration_minutes", event.target.value)} /></Field>}<div className="sm:col-span-2"><Field label="Taakinstructie" htmlFor="task-instructions"><Textarea id="task-instructions" rows={3} maxLength={2000} value={form.instructions} onChange={event => onChange("instructions", event.target.value)} placeholder="Optionele korte omschrijving van wat er moet gebeuren" /></Field></div></div>{form.start_time && form.end_time && form.end_time <= form.start_time && <p className="text-xs text-primary">Deze taak loopt door tot de volgende dag.</p>}</>;
+}
