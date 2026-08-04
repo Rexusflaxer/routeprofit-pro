@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
+import { wizardRevealMotion, wizardStepMotion } from "@/components/ui-custom/wizardMotion";
 import {
   buildFunctionGroupsForWpbrLicenses,
   CAO_OPTIONS,
@@ -3529,10 +3530,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       <AnimatePresence initial={false}>
         {signedUploadWizard && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
+            {...wizardRevealMotion}
             className="overflow-hidden border-b border-primary/30 bg-muted/20 p-5"
           >
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Getekend contract registreren</p>
@@ -3554,13 +3552,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             </div>
 
             <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={signedUploadWizard.step}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-              >
+              <motion.div key={signedUploadWizard.step} {...wizardStepMotion}>
                 {signedUploadWizard.step === 1 ? (
                   <div className="space-y-4">
                     <div>
@@ -3649,11 +3641,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       <AnimatePresence initial={false}>
       {wizardOpen && (
         <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.2 }}
-          className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
+          {...wizardRevealMotion}
+          className="overflow-hidden rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5"
         >
           {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Contract bewerken</p>}
           <div className="flex items-center gap-1 mb-4">
@@ -3669,7 +3658,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           </div>
           <div className="relative">
             <AnimatePresence mode="wait">
-              <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
+              <motion.div key={wizardStep} {...wizardStepMotion}>
             {wizardStep === 1 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium text-foreground">Kies de documentbron</p>

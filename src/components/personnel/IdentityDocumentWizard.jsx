@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { buildAuditMetadata } from "@/lib/auditTrail";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -1290,11 +1291,8 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2 }}
-      className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
+      {...wizardRevealMotion}
+      className="scroll-mt-4 overflow-hidden border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
         {wizardTitle}

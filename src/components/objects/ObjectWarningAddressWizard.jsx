@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import {
   WARNING_RELATIONSHIP_OPTIONS,
   warningRelationshipLabel,
@@ -215,7 +216,7 @@ export default function ObjectWarningAddressWizard({
   };
 
   return (
-    <section className="border-b border-primary/30 bg-muted/20 p-4 sm:p-5" aria-labelledby={`${fieldId}-title`}>
+    <motion.section {...wizardRevealMotion} className="overflow-hidden border-b border-primary/30 bg-muted/20 p-4 sm:p-5" aria-labelledby={`${fieldId}-title`}>
       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">
         {editing ? "Waarschuwingsadres wijzigen" : "Nieuw waarschuwingsadres"}
       </p>
@@ -360,6 +361,6 @@ export default function ObjectWarningAddressWizard({
           </Button>
         </div>
       </form>
-    </section>
+    </motion.section>
   );
 }

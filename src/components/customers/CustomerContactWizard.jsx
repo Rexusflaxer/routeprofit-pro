@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 
 const STEPS = [
   { key: "name", label: "Naam" },
@@ -231,8 +232,9 @@ export function CustomerContactWizard({
   };
 
   return (
-    <section
-      className="border-b border-primary/30 bg-muted/20 p-4 sm:p-5"
+    <motion.section
+      {...wizardRevealMotion}
+      className="overflow-hidden border-b border-primary/30 bg-muted/20 p-4 sm:p-5"
       aria-labelledby="customer-contact-wizard-title"
     >
       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Nieuw contact</p>
@@ -528,7 +530,7 @@ export function CustomerContactWizard({
           </Button>
         </div>
       </form>
-    </section>
+    </motion.section>
   );
 }
 

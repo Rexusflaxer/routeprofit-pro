@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -25,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { wizardRevealMotion, wizardStepMotion } from "@/components/ui-custom/wizardMotion";
 import { parseAddressLabel } from "@/lib/addressFormatting";
 import {
   CONTACT_ROLE_LABELS,
@@ -679,14 +681,19 @@ export default function CustomerWizard({ onSave, onCancel, saving, error }) {
   };
 
   return (
-    <Card className="overflow-hidden border-border bg-card shadow-sm">
+    <motion.div {...wizardRevealMotion} className="overflow-hidden">
+      <Card className="overflow-hidden border-border bg-card shadow-sm">
       <CardContent className="p-5 sm:p-6">
         <ProgressIndicator currentStep={step} />
-        {step === "identity" && <IdentityStep form={form} setForm={setForm} duplicates={duplicates} />}
-        {step === "account" && <AccountStep form={form} setForm={setForm} companies={companies} personnel={personnel} />}
-        {step === "addresses" && <AddressesStep form={form} setForm={setForm} />}
-        {step === "contact" && <ContactStep form={form} setForm={setForm} />}
-        {step === "review" && <ReviewStep form={form} companies={companies} personnel={personnel} />}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={step} {...wizardStepMotion}>
+            {step === "identity" && <IdentityStep form={form} setForm={setForm} duplicates={duplicates} />}
+            {step === "account" && <AccountStep form={form} setForm={setForm} companies={companies} personnel={personnel} />}
+            {step === "addresses" && <AddressesStep form={form} setForm={setForm} />}
+            {step === "contact" && <ContactStep form={form} setForm={setForm} />}
+            {step === "review" && <ReviewStep form={form} companies={companies} personnel={personnel} />}
+          </motion.div>
+        </AnimatePresence>
         {error && (
           <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {error.message || "De klant kon niet worden aangemaakt."}
@@ -702,6 +709,7 @@ export default function CustomerWizard({ onSave, onCancel, saving, error }) {
           finalStep={step === "review"}
         />
       </CardContent>
-    </Card>
+      </Card>
+    </motion.div>
   );
 }

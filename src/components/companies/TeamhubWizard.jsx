@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronRight, ChevronLeft, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import TeamhubStep2Location from "./teamhub-wizard/Step2Location";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import TeamhubStep3Services from "./teamhub-wizard/Step3Services";
 import TeamhubStep4Regions from "./teamhub-wizard/Step4Regions";
 
@@ -65,7 +66,7 @@ export default function TeamhubWizard({
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <motion.div {...wizardRevealMotion} className="flex flex-col gap-6 overflow-hidden">
       {/* Progress bar */}
       <div className="flex gap-2">
         {STEPS.map((s, idx) => (
@@ -170,6 +171,6 @@ export default function TeamhubWizard({
           )}
         </Button>
       </div>
-    </div>
+    </motion.div>
   );
 }

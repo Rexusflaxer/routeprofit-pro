@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
 import { formatAddress } from "@/lib/addressFormatting";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import {
   findPotentialObjectDuplicates,
   OBJECT_TYPE_OPTIONS,
@@ -193,7 +194,7 @@ export default function CustomerObjectWizard({
   };
 
   return (
-    <section className="border-b border-primary/30 bg-muted/20 p-4 sm:p-5" aria-labelledby="customer-object-wizard-title">
+    <motion.section {...wizardRevealMotion} className="overflow-hidden border-b border-primary/30 bg-muted/20 p-4 sm:p-5" aria-labelledby="customer-object-wizard-title">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Nieuw object</p>
       <h2 id="customer-object-wizard-title" className="sr-only">Object toevoegen</h2>
       <WizardSteps stepIndex={stepIndex} />
@@ -347,6 +348,6 @@ export default function CustomerObjectWizard({
           </Button>
         </div>
       </form>
-    </section>
+    </motion.section>
   );
 }

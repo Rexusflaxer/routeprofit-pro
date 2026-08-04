@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata } from "@/lib/auditTrail";
+import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import {
   companyKorpschefNameMatches,
   companyKorpschefLabel,
@@ -805,11 +806,8 @@ export default function KorpschefDocumentWizard({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
-      className="border-b border-border bg-card px-5 py-4"
+      {...wizardRevealMotion}
+      className="overflow-hidden border-b border-border bg-card px-5 py-4"
     >
       <div className="mb-3 flex items-start justify-between gap-4">
         <div>
