@@ -8,16 +8,21 @@ const existingInstallation = {
   version: 4,
   installation_type: "alarm_system",
   name: "Hoofdcentrale",
+  brand: "Ajax",
   monitoring_connected: false,
   lifecycle_status: "active",
   operational_status: "operational",
   credential_types: ["switching_code"],
 };
 
+function getAlarmTypeButton() {
+  return screen.getAllByRole("button").find(button => button.textContent.startsWith("Alarminstallatie"));
+}
+
 async function openCredentialStep() {
-  fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
-  await screen.findByText("Hoe herkennen we deze installatie?");
-  fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
+  fireEvent.click(getAlarmTypeButton());
+  await screen.findByText("Van welk merk is de installatie?");
+  fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
   await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
 }
 
@@ -38,6 +43,7 @@ describe("ObjectInstallationWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Wijzigingen opslaan" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      brand: "Ajax",
       credentials: {},
       credentials_to_revoke: ["switching_code"],
     }));
@@ -56,5 +62,59 @@ describe("ObjectInstallationWizard", () => {
     await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
     fireEvent.click(screen.getByRole("button", { name: "Wijzigingen opslaan" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ credentials_to_revoke: [] }));
+  });
+
+  it("toont de officiële merknaam en selecteert een bestaande Ajax-alias", async () => {
+    render(<ObjectInstallationWizard installation={existingInstallation} onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+
+    const ajax = screen.getByRole("button", { name: /Ajax Systems/i });
+    expect(ajax).toHaveAttribute("aria-pressed", "true");
+    expect(ajax.querySelector("img")).toHaveAttribute("src", "/installation-brand-logos/alarm-system/ajax-systems.png");
+    expect(screen.queryByRole("button", { name: /^Ajax$/i })).not.toBeInTheDocument();
+  });
+
+  it("zoekt op productlijn en bewaart uitsluitend de canonieke merknaam", async () => {
+    const onSave = vi.fn();
+    render(<ObjectInstallationWizard onSave={onSave} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+    fireEvent.change(screen.getByLabelText("Zoek merk of productlijn"), { target: { value: "Galaxy" } });
+
+    expect(screen.getByRole("button", { name: /Honeywell/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ajax Systems/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Honeywell/i }));
+    await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
+    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
+    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
+    fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ brand: "Honeywell" }));
+  });
+
+  it("behoudt een onbekend bestaand merk als handmatige invoer", async () => {
+    render(<ObjectInstallationWizard installation={{ ...existingInstallation, brand: "Guardall" }} onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+
+    expect(screen.getByLabelText("Merk")).toHaveValue("Guardall");
+    expect(screen.getByRole("button", { name: "Volgende" })).toBeEnabled();
+  });
+
+  it("stuurt een handmatig ingevoerde bekende alias naar de officiële merkoptie", async () => {
+    render(<ObjectInstallationWizard onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+    fireEvent.click(screen.getByRole("button", { name: /Ander merk/i }));
+    fireEvent.change(screen.getByLabelText("Merk"), { target: { value: "Honeywell Galaxy" } });
+
+    expect(screen.getByText(/al bekend als Honeywell/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gebruik Honeywell/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Volgende" })).toBeDisabled();
   });
 });

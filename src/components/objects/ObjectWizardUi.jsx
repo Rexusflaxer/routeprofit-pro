@@ -43,7 +43,7 @@ export function WizardSteps({ stepIndex, steps, label }) {
   );
 }
 
-export function StepHeading({ title, description }) {
+export function StepHeading({ title, description, icon: _Icon = null }) {
   return <div><h3 className="text-sm font-medium text-foreground">{title}</h3>{description && <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground">{description}</p>}</div>;
 }
 
@@ -51,7 +51,7 @@ export function Field({ label, htmlFor, required = false, hint = null, children 
   return <div className="space-y-1.5"><Label htmlFor={htmlFor} className="text-xs font-semibold text-foreground">{label}{required && <span className="ml-1 text-destructive">*</span>}</Label>{children}{hint && <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}</div>;
 }
 
-export function ChoiceCard({ selected, onClick, title, description = "", icon: Icon = null, disabled = false, className = "" }) {
+export function ChoiceCard({ selected, onClick, title, description = "", icon: _Icon = null, leading = null, disabled = false, className = "" }) {
   return (
     <button
       type="button"
@@ -66,9 +66,12 @@ export function ChoiceCard({ selected, onClick, title, description = "", icon: I
         className,
       )}
     >
-      <span className="min-w-0">
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-        {description && <span className="ml-2 text-xs text-muted-foreground">{description}</span>}
+      <span className="flex min-w-0 flex-1 items-center gap-3">
+        {leading}
+        <span className="min-w-0">
+          <span className="text-sm font-semibold text-foreground">{title}</span>
+          {description && <> <span className="ml-2 text-xs text-muted-foreground">{description}</span></>}
+        </span>
       </span>
       {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
     </button>

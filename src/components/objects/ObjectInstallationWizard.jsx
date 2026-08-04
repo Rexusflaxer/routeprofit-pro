@@ -12,6 +12,7 @@ import {
   LockKeyhole,
   RadioTower,
   RotateCcw,
+  Search,
   ShieldX,
   Wrench,
 } from "lucide-react";
@@ -21,18 +22,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import { ChoiceCard, Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
 import {
-  INSTALLATION_BRANDS,
   INSTALLATION_CREDENTIAL_FIELDS,
   INSTALLATION_LIFECYCLE_OPTIONS,
   INSTALLATION_OPERATIONAL_OPTIONS,
   INSTALLATION_TYPES,
+  filterInstallationBrandOptions,
+  findInstallationBrandOption,
+  installationBrandOptions,
   installationCredentialLabel,
   installationTypeLabel,
 } from "./objectInstallationConfig";
 
 const STEPS = [
   { key: "type", label: "Soort" },
-  { key: "identity", label: "Identificatie" },
+  { key: "brand", label: "Merk" },
   { key: "operation", label: "Doormelding & codes" },
   { key: "management", label: "Beheer & controle" },
 ];
@@ -66,6 +69,41 @@ function Summary({ label, children }) {
   return <div className="rounded-xl border border-border/70 bg-card/45 px-3.5 py-3 shadow-sm backdrop-blur-xl"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><div className="mt-1 text-sm">{children}</div></div>;
 }
 
+function InstallationBrandLogo({ option }) {
+  const [failed, setFailed] = useState(false);
+  const initials = option.label.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+  const dark = option.logoBackground === "dark";
+
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-11 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border px-2 py-1.5 shadow-sm ${dark ? "border-slate-700 bg-slate-950" : "border-slate-200 bg-white"}`}
+    >
+      {option.logoSrc && !failed
+        ? <img src={option.logoSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-contain" />
+        : <span className={`text-xs font-bold tracking-wide ${dark ? "text-white" : "text-slate-700"}`}>{initials}</span>}
+    </span>
+  );
+}
+
+function InstallationBrandChoices({ options, selectedBrand, onSelect }) {
+  return (
+    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+      {options.map(option => (
+        <ChoiceCard
+          key={option.value}
+          selected={selectedBrand?.value === option.value}
+          onClick={() => onSelect(option)}
+          title={option.label}
+          description={option.note || option.productFamilies.slice(0, 3).join(" · ")}
+          leading={option.logoSrc ? <InstallationBrandLogo option={option} /> : null}
+          className="min-h-16"
+        />
+      ))}
+    </div>
+  );
+}
+
 function CredentialField({ definition, value, onChange, alreadySet, revoked, onToggleRevoke }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -85,8 +123,14 @@ function CredentialField({ definition, value, onChange, alreadySet, revoked, onT
 export default function ObjectInstallationWizard({ installation = null, onCancel, onSave, saving, error }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [form, setForm] = useState(() => initialForm(installation));
-  const knownBrands = INSTALLATION_BRANDS[form.installation_type] || [];
-  const [customBrand, setCustomBrand] = useState(Boolean(installation?.brand && !knownBrands.includes(installation.brand)));
+  const [brandSearch, setBrandSearch] = useState("");
+  const knownBrands = installationBrandOptions(form.installation_type);
+  const selectedBrand = findInstallationBrandOption(form.installation_type, form.brand);
+  const visibleBrands = filterInstallationBrandOptions(form.installation_type, brandSearch);
+  const currentBrands = visibleBrands.filter(option => option.status !== "legacy");
+  const legacyBrands = visibleBrands.filter(option => option.status === "legacy");
+  const [customBrand, setCustomBrand] = useState(Boolean(installation?.brand && !findInstallationBrandOption(installation.installation_type, installation.brand)));
+  const customBrandMatch = customBrand ? selectedBrand : null;
   const credentialFields = INSTALLATION_CREDENTIAL_FIELDS[form.installation_type] || [];
   const existingCredentialTypes = installation?.credential_types || [];
   const selectedCredentialTypes = Object.entries(form.credentials).filter(([, value]) => String(value || "").trim()).map(([key]) => key);
@@ -101,7 +145,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     && (!form.next_maintenance_on || !form.last_tested_on || form.next_maintenance_on >= form.last_tested_on);
   const canContinue = [
     Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
-    Boolean(form.brand.trim()),
+    Boolean(form.brand.trim() && !customBrandMatch),
     !form.monitoring_connected || Boolean(form.monitoring_provider_name.trim()),
     datesValid,
   ][stepIndex];
@@ -127,15 +171,28 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     };
   });
   const chooseType = value => {
-    setForm(current => ({ ...current, installation_type: value, custom_type: value === "other" ? current.custom_type : "", brand: "", credentials: {}, credentials_to_revoke: [] }));
-    setCustomBrand(false);
-    if (value !== "other") setStepIndex(1);
-  };
-  const chooseBrand = value => {
+    const typeChanged = form.installation_type !== value;
     setForm(current => ({
       ...current,
-      brand: value,
-      name: installation ? current.name : `${installationTypeLabel(current)} ${value}`.trim(),
+      installation_type: value,
+      custom_type: value === "other" ? current.custom_type : "",
+      brand: typeChanged ? "" : current.brand,
+      credentials: typeChanged ? {} : current.credentials,
+      credentials_to_revoke: typeChanged ? [] : current.credentials_to_revoke,
+    }));
+    setBrandSearch("");
+    setCustomBrand(typeChanged ? false : Boolean(form.brand && !findInstallationBrandOption(value, form.brand)));
+    if (value !== "other") setStepIndex(1);
+  };
+  const chooseBrand = option => {
+    const originalBrandOption = findInstallationBrandOption(installation?.installation_type, installation?.brand);
+    const preserveOriginalBrand = installation?.installation_type === form.installation_type
+      && originalBrandOption?.value === option.value;
+    const brand = preserveOriginalBrand ? installation.brand : option.value;
+    setForm(current => ({
+      ...current,
+      brand,
+      name: installation ? current.name : `${installationTypeLabel(current)} ${brand}`.trim(),
     }));
     setStepIndex(2);
   };
@@ -172,9 +229,16 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
               </>}
 
               {stepIndex === 1 && <>
-                <StepHeading title="Van welk merk is de installatie?" />
-                {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand"><Input id="installation-custom-brand" value={form.brand} onChange={event => setCustomBrandValue(event.target.value)} autoFocus /></Field><Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
-                  : <div className="grid grid-cols-1 gap-2">{knownBrands.map(brand => <ChoiceCard key={brand} selected={form.brand === brand} onClick={() => chooseBrand(brand)} title={brand} />)}<ChoiceCard selected={false} onClick={() => { setCustomBrand(true); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." /></div>}
+                <StepHeading title="Van welk merk is de installatie?" description="Kies het merk dat op de centrale staat. Zoeken kan ook op een productlijn, zoals Galaxy, ATS, SPC of AlphaVision." />
+                {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand" hint={customBrandMatch ? `Dit merk is al bekend als ${customBrandMatch.label}. Kies de officiële merkoptie om verder te gaan.` : null}><Input id="installation-custom-brand" value={form.brand} onChange={event => setCustomBrandValue(event.target.value)} autoFocus aria-invalid={Boolean(customBrandMatch)} /></Field>{customBrandMatch && <ChoiceCard selected={false} onClick={() => chooseBrand(customBrandMatch)} title={`Gebruik ${customBrandMatch.label}`} description={customBrandMatch.productFamilies.slice(0, 3).join(" · ")} leading={customBrandMatch.logoSrc ? <InstallationBrandLogo option={customBrandMatch} /> : null} />}<Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
+                  : <div className="space-y-4">
+                    {knownBrands.length > 8 && <div className="relative max-w-xl"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={brandSearch} onChange={event => setBrandSearch(event.target.value)} aria-label="Zoek merk of productlijn" placeholder="Zoek merk of productlijn" className="bg-card/60 pl-9 backdrop-blur-xl" /></div>}
+                    <p className="sr-only" aria-live="polite">{visibleBrands.length} {visibleBrands.length === 1 ? "merk gevonden" : "merken gevonden"}</p>
+                    {currentBrands.length > 0 && <section aria-labelledby="current-installation-brands"><p id="current-installation-brands" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actuele en ondersteunde merken</p><InstallationBrandChoices options={currentBrands} selectedBrand={selectedBrand} onSelect={chooseBrand} /></section>}
+                    {legacyBrands.length > 0 && <section aria-labelledby="legacy-installation-brands"><p id="legacy-installation-brands" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Oudere of overgenomen merken</p><InstallationBrandChoices options={legacyBrands} selectedBrand={selectedBrand} onSelect={chooseBrand} /></section>}
+                    {visibleBrands.length === 0 && brandSearch.trim() && <div className="rounded-xl border border-dashed border-border bg-card/35 px-4 py-5 text-sm text-muted-foreground">Geen bekend merk of productlijn gevonden voor “{brandSearch.trim()}”. Je kunt het merk hieronder zelf invullen.</div>}
+                    <ChoiceCard selected={customBrand} onClick={() => { setCustomBrand(true); setBrandSearch(""); set("brand", ""); }} title="Ander merk" description="Vul het merk handmatig in." />
+                  </div>}
               </>}
 
               {stepIndex === 2 && <>

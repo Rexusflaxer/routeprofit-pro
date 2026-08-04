@@ -1,0 +1,285 @@
+{
+  "generated_at": "2026-08-04",
+  "usage_note": "Local rasterized trademark assets for nominative identification in the internal installation wizard. No partnership or endorsement is implied. Preserve each mark's aspect ratio and colors, and confirm trademark-owner permission before any external publication.",
+  "brands": [
+    {
+      "slug": "abus",
+      "label": "ABUS",
+      "source_url": "https://commons.wikimedia.org/wiki/File:ABUS_Logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "948bccdd4245ea0494d6b12db3e2fc2a3035c19731a663e42f2bd7d91f37c22b",
+      "dark_tile": false,
+      "usage_note": "Derived from the official ABUS source cited on the Commons file page; identification only. Keep unaltered and use the owner-requested copyright attribution for external publication."
+    },
+    {
+      "slug": "acre-security",
+      "label": "acre Security",
+      "source_url": "https://cdn.prod.website-files.com/6875e52ec538de2dc0baf185/687726addf56ec2f2e5465cc_acre-security-logo.webp",
+      "retrieved_at": "2026-08-04",
+      "sha256": "738be8096de07fa029232dd2d262352004a81ae0d2341ce656087f058cedb9ee",
+      "dark_tile": false,
+      "usage_note": "Official website header asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "ajax-systems",
+      "label": "Ajax Systems",
+      "source_url": "https://ajax.systems/",
+      "retrieved_at": "2026-08-04",
+      "sha256": "120c203ada720520127f7b64f04221193d686646d106d47639af009fbe2ea8c2",
+      "dark_tile": false,
+      "usage_note": "Rasterized from the official inline Ajax header SVG without redrawing; identification only. Partner marketing assets and external use may require permission."
+    },
+    {
+      "slug": "alphatronics",
+      "label": "Alphatronics",
+      "source_url": "https://cdn.nextchapter-ecommerce.com/Public/alphatronics_nl/Images/logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "494ad5f5abf54a80cd36446238d23c393168d927b2bb4a5a28838106978871df",
+      "dark_tile": false,
+      "usage_note": "Official website header asset; legacy installed-base identification only. Current UNii installations should be stored under UNii."
+    },
+    {
+      "slug": "aritech",
+      "label": "Aritech",
+      "source_url": "https://aritech.com.au/wp-content/uploads/2023/11/aritech_commercial-sensors_logo-1.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "31ab45a529238d970e657e7bb8f26d3e6b5d3a6a16f5336d20fd7469de98557f",
+      "dark_tile": false,
+      "usage_note": "Official Aritech asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "bosch",
+      "label": "Bosch",
+      "source_url": "https://www.bosch-presse.de/pressportal/de/media/res/gfx/bosch-invented-for-life.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "f66187e2e540a52d68e603874df1e0b242d11cfc6d0e6e8a03de4ee6bda21d19",
+      "dark_tile": false,
+      "usage_note": "Official Bosch press asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "comelit",
+      "label": "Comelit",
+      "source_url": "https://comelitgroup.com/wp-content/themes/wsk-theme/media/images/logo/main-logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "071804dc508ac7d98cfcde53ec21075be7c071028d41646a314673d63ba2beca",
+      "dark_tile": true,
+      "usage_note": "Official website header asset; white wordmark requires a dark neutral tile. Identification only."
+    },
+    {
+      "slug": "dahua-technology",
+      "label": "Dahua Technology",
+      "source_url": "https://www.dahuasecurity.com/logo.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "119344444476e6cd222a7881682ca9c2f2625758a1e34db7084d1a73f8fc09ac",
+      "dark_tile": false,
+      "usage_note": "Official website logo; identification only. Dahua's trademark guideline requires authorization for external brand use."
+    },
+    {
+      "slug": "daitem",
+      "label": "Daitem",
+      "source_url": "https://daitem.com/",
+      "retrieved_at": "2026-08-04",
+      "sha256": "1ff823610e456ce3e5133b7a36110254dd66b801b53eda3fc0effaaa0cb42c7b",
+      "dark_tile": false,
+      "usage_note": "Rasterized from the official inline Daitem header SVG without redrawing; identification only."
+    },
+    {
+      "slug": "dsc",
+      "label": "DSC",
+      "source_url": "https://www.visonic.com/-/media/project/jci-global/johnson-controls/ce-region/switzerland-johnson-controls/our-brands/dsc-logo1.png?la=en&h=319&w=720&hash=DC9D826A9DEE65B750CC1ADD01A1A88D",
+      "retrieved_at": "2026-08-04",
+      "sha256": "f2077fd7e733e629944503c7579b667604d2ad44b760bb693eafd7aab3c1bc91",
+      "dark_tile": false,
+      "usage_note": "Official Johnson Controls brand asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "eaton",
+      "label": "Eaton",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Eaton_Corporation_logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "b09000fec28c573260e4a3dc71da93c1cc3d9ce4c522821d3e28c581b4798c0b",
+      "dark_tile": false,
+      "usage_note": "Derived from the official Eaton PDF cited on the Commons file page; trademark identification only. Trademark-owner permission may be required for external publication."
+    },
+    {
+      "slug": "eldes",
+      "label": "ELDES",
+      "source_url": "https://eldesalarms.com/wp-content/uploads/2023/10/Eldes-logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "4a2eda580f7859e23c95f923a835a5529ae83ad3e4b531114394ac6109e47200",
+      "dark_tile": false,
+      "usage_note": "Official ELDES asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "hikvision",
+      "label": "Hikvision",
+      "source_url": "https://content.hikvision.com/hs-fs/hubfs/Hikvision%20Logo-R-Jun-27-2024-10-24-47-4921-AM.png?width=4300&height=864&name=Hikvision%20Logo-R-Jun-27-2024-10-24-47-4921-AM.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "e67d5c401aacf8e345e4431a23e69ec6fb4b294af848218e6abf1cd945cba168",
+      "dark_tile": false,
+      "usage_note": "Official Hikvision-hosted asset; identification only. Follow Hikvision's partner brand guideline and obtain approval where required."
+    },
+    {
+      "slug": "honeywell",
+      "label": "Honeywell",
+      "source_url": "https://buildings.honeywell.com/content/dam/hbtbt/en/images/logos/hbt-honeywell-logo.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "4b5a901e58f298cf0bf6fc272cb78fb8b8fec73f79a137e92b82733fd1afb773",
+      "dark_tile": false,
+      "usage_note": "Official Honeywell Buildings asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "inim",
+      "label": "Inim",
+      "source_url": "https://www.inim.it/wp-content/uploads/2022/11/logo-inim.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "7d200a2f4a852834271ee9c61d52c902a8f264212ba2d2e1a21c7b9fb1dab990",
+      "dark_tile": false,
+      "usage_note": "Official Inim asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "jablotron",
+      "label": "JABLOTRON",
+      "source_url": "https://www.jablotron.com/svg/logo.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "d53d1c7521d5a9fd46465303cf89e8a37e9b84fc27844491d0a0ba80c290d0f1",
+      "dark_tile": false,
+      "usage_note": "Official JABLOTRON asset; keep unaltered and consult JABLOTRON marketing guidance before external publication."
+    },
+    {
+      "slug": "ksenia-security",
+      "label": "Ksenia Security",
+      "source_url": "https://www.kseniasecurity.com/img/logo-ksenia-payoff-negativo-150x61.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "40fb2c4de373d0243479a3658cacab294b64cda8c111b86eced5a980578a282b",
+      "dark_tile": true,
+      "usage_note": "Official negative logo asset; use on a dark neutral tile. Nominative product identification only."
+    },
+    {
+      "slug": "nox-systems",
+      "label": "NOX Systems",
+      "source_url": "https://noxsystems.com/wp-content/uploads/2025/02/250213_NoxLogo_Querformat_LogoColor.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "8a98766ce2551f5236537a8a0e506a2ffd98b2e7d603b2ae220c2861424c45be",
+      "dark_tile": false,
+      "usage_note": "Official NOX Systems asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "orisec",
+      "label": "Orisec",
+      "source_url": "https://www.orisec.co.uk/wp-content/uploads/2020/07/logo-hd.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "b07970aaa67879a7eb7ef2c6a98df1d741c4bfc495564efb740b6a3a1ece9fc7",
+      "dark_tile": false,
+      "usage_note": "Official Orisec asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "paradox",
+      "label": "Paradox",
+      "source_url": "https://www.paradox.com/web/wp-content/uploads/2025/05/Paradox-Logo-scaled.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "3a16c46667e7b2cbd8c243e931882197f7977db789e68fe962a15287e0b20feb",
+      "dark_tile": false,
+      "usage_note": "Official Paradox asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "pyronix",
+      "label": "Pyronix",
+      "source_url": "https://static.wixstatic.com/media/cf70bd_43fd87e977cf447f99b24bc3a999ff04~mv2.png/v1/fill/w_157,h_51,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/cf70bd_43fd87e977cf447f99b24bc3a999ff04~mv2.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "236016c7a459544f896eeb82fbc5309b9f0fba7ade7bc298079819b3d9aea77a",
+      "dark_tile": false,
+      "usage_note": "Exact asset embedded by the official Pyronix homepage; identification only. Pyronix website terms restrict unauthorized reproduction."
+    },
+    {
+      "slug": "radionix",
+      "label": "Radionix",
+      "source_url": "https://www.radionix.com/us/system/radionix.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "1390155f17d1c5ae59f6f2e1aea47201d81336c68b48f2c30028e2a91d93b8ae",
+      "dark_tile": true,
+      "usage_note": "Official Radionix asset; white wordmark requires a dark neutral tile. Identification only; external reproduction may require permission."
+    },
+    {
+      "slug": "risco",
+      "label": "RISCO",
+      "source_url": "https://riscogroup.com/wp-content/uploads/2023/12/logo-inverted.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "6a6ad9992ac0f76c655a0100abe55a65c7e91c40f8b4bb17c0108db994a432a9",
+      "dark_tile": true,
+      "usage_note": "Official inverted RISCO asset; use on a dark neutral tile. Nominative product identification only."
+    },
+    {
+      "slug": "satel",
+      "label": "SATEL",
+      "source_url": "https://www.satel.eu/img/logo.gif",
+      "retrieved_at": "2026-08-04",
+      "sha256": "d97f6b6bc0ddbfbd221e48872a180f99a953539445f93f3e45ae17d024e944af",
+      "dark_tile": false,
+      "usage_note": "Official SATEL website asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "siemens",
+      "label": "Siemens",
+      "source_url": "https://images.sw.cdn.siemens.com/logo/logo-petrol.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "702ebc2d7844057cc9befeeace26fb81cc25bc9a003c31ee99b8758367a92a72",
+      "dark_tile": false,
+      "usage_note": "Official Siemens CDN asset; nominative product identification only. Preserve the official color, proportions, and clear space."
+    },
+    {
+      "slug": "teletek-electronics",
+      "label": "Teletek Electronics",
+      "source_url": "https://teletek-electronics.com/wp-content/uploads/2025/05/tt-logo-blue.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "4f0184d0bf965285c7ef55a3940a9112ed9a7f9de40f91a0faf75bdba306c982",
+      "dark_tile": false,
+      "usage_note": "Official Teletek Electronics asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "telenot",
+      "label": "TELENOT",
+      "source_url": "https://www.telenot.com/_assets/f71f777352f3dcf2deeeefab1dfd79b2/Icons/telenot_logo_en.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "821b9e09c3fab2f265792b94aa17236eb11e205620f281360cee80c4c825d8ae",
+      "dark_tile": false,
+      "usage_note": "Official TELENOT asset; identification only. External image publication should include © TELENOT ELECTRONIC GMBH or © TELENOT."
+    },
+    {
+      "slug": "texecom",
+      "label": "Texecom",
+      "source_url": "https://texecom-live.s3.eu-west-2.amazonaws.com/wp-content/uploads/2022/10/27150648/Texecom-Logo-Black.svg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "0823b2b8728e65d7790301e54b292947c2491d97cf41c4b5da87510a11081868",
+      "dark_tile": false,
+      "usage_note": "Official Texecom asset; nominative product identification only and no affiliation implied."
+    },
+    {
+      "slug": "unii",
+      "label": "UNii",
+      "source_url": "https://unii-security.com/wp-content/uploads/2023/05/unii-wit-kleur-logo.png",
+      "retrieved_at": "2026-08-04",
+      "sha256": "f75b9a9939a5f0209d8dfb442ad0e7d2836fe8b9ec3ce3134661d95605f15df4",
+      "dark_tile": true,
+      "usage_note": "Official UNii asset; white wordmark requires a dark neutral tile. Store the current brand as UNii, with Alphatronics only as manufacturer or legacy search alias."
+    },
+    {
+      "slug": "vanderbilt",
+      "label": "Vanderbilt",
+      "source_url": "https://mb.cision.com/Public/10742/2063930/8e5bbe96c3a29760_org.jpg",
+      "retrieved_at": "2026-08-04",
+      "sha256": "3914d7aecdaad28fb00eddcb683a0a302c317bd3f4130bc13cb35f4335c42378",
+      "dark_tile": false,
+      "usage_note": "Official Vanderbilt Cision press asset with only its clean white matte removed; legacy installed-base identification only. Current SPC systems belong under acre Security."
+    },
+    {
+      "slug": "visonic",
+      "label": "Visonic",
+      "source_url": "https://www.visonic.com/-/media/project/jci-global/johnson-controls/ce-region/switzerland-john-controls/our-brands/visonic-logo1.png?la=en&h=320&w=720&hash=03C268233FAE49F89A77558E5B6EA981",
+      "retrieved_at": "2026-08-04",
+      "sha256": "8932c83345e4046645d999993c647b05cd6b1b75a73842cf3cb66dc3b665e899",
+      "dark_tile": false,
+      "usage_note": "Official Johnson Controls-hosted Visonic asset; nominative product identification only and no affiliation implied."
+    }
+  ]
+}
