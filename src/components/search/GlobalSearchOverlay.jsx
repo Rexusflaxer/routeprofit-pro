@@ -5,10 +5,10 @@ import { useNavigate } from "react-router-dom";
 import GlobalSearchResults from "./GlobalSearchResults";
 import useGlobalSearch from "./useGlobalSearch";
 
-export default function GlobalSearchOverlay({ open, onClose }) {
+export default function GlobalSearchOverlay({ open, onClose, initialQuery = "" }) {
   const [query, setQuery] = useState(""); const inputRef = useRef(null); const navigate = useNavigate();
   const search = useGlobalSearch(open, query);
-  useEffect(() => { if (!open) return; setQuery(""); requestAnimationFrame(() => inputRef.current?.focus()); }, [open]);
+  useEffect(() => { if (!open) return; setQuery(initialQuery); requestAnimationFrame(() => inputRef.current?.focus()); }, [initialQuery, open]);
   useEffect(() => { const close = event => event.key === "Escape" && onClose(); window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [onClose]);
   const select = href => { onClose(); navigate(href); };
   return <AnimatePresence>{open && <motion.div onClick={onClose} className="fixed inset-0 z-[100] overflow-hidden bg-background/35 px-4 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

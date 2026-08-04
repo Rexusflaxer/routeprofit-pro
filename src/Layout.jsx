@@ -250,6 +250,7 @@ function ContextNavigation({ currentPageName, onNavigate, onSearchOpen, collapse
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInitialQuery, setSearchInitialQuery] = useState("");
   const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1280);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
@@ -294,6 +295,32 @@ function AppShell({ children, currentPageName }) {
     }
   };
 
+  const openGlobalSearch = (initialQuery = "") => {
+    setSearchInitialQuery(initialQuery);
+    setSearchOpen(true);
+  };
+
+  const closeGlobalSearch = () => {
+    setSearchOpen(false);
+    setSearchInitialQuery("");
+  };
+
+  useEffect(() => {
+    const startSearchFromTyping = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1 || !event.key.trim()) return;
+      const target = event.target;
+      const isTypingTarget = target instanceof HTMLElement && (
+        target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+      );
+      if (isTypingTarget) return;
+      setSearchInitialQuery(current => `${current}${event.key}`);
+      setSearchOpen(true);
+    };
+
+    window.addEventListener("keydown", startSearchFromTyping);
+    return () => window.removeEventListener("keydown", startSearchFromTyping);
+  }, []);
+
   return (
     <div
       className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} bg-background/55 text-foreground antialiased backdrop-blur-[2px]`}
@@ -301,14 +328,14 @@ function AppShell({ children, currentPageName }) {
       onMouseLeave={handleMouseLeaveApp}
     >
       <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border/70 bg-sidebar/75 shadow-[12px_0_40px_hsl(var(--foreground)/0.04)] backdrop-blur-2xl transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
-        <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} onSearchOpen={() => setSearchOpen(true)} />
+        <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} onSearchOpen={() => openGlobalSearch()} />
       </aside>
 
       <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border/70 bg-background/70 shadow-sm backdrop-blur-2xl lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <LOQLogo className="h-5 w-auto max-w-[74px]" />
-            <button type="button" onClick={() => setSearchOpen(true)} aria-label="Globaal zoeken" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Search className="h-4 w-4" /></button>
+            <button type="button" onClick={() => openGlobalSearch()} aria-label="Globaal zoeken" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Search className="h-4 w-4" /></button>
           </div>
           <Button
             variant="ghost"
@@ -322,7 +349,7 @@ function AppShell({ children, currentPageName }) {
         {mobileOpen && (
           <div className="border-t border-border/70 bg-sidebar/80 backdrop-blur-2xl">
             <div className="max-h-[calc(100vh-3rem)] overflow-y-auto">
-              <ContextNavigation currentPageName={currentPageName} onNavigate={() => setMobileOpen(false)} onSearchOpen={() => { setMobileOpen(false); setSearchOpen(true); }} />
+              <ContextNavigation currentPageName={currentPageName} onNavigate={() => setMobileOpen(false)} onSearchOpen={() => { setMobileOpen(false); openGlobalSearch(); }} />
             </div>
           </div>
         )}
@@ -338,7 +365,7 @@ function AppShell({ children, currentPageName }) {
         <ViewportSizeWarning className="mx-auto max-w-sm" />
       </div>
 
-      <GlobalSearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <GlobalSearchOverlay open={searchOpen} onClose={closeGlobalSearch} initialQuery={searchInitialQuery} />
     </div>
   );
 }
