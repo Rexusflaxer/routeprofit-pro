@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import ObjectKeyBrandStep from "./ObjectKeyBrandStep";
 import ObjectKeyDetailsStep from "./ObjectKeyDetailsStep";
+import ObjectKeySetChoice from "./ObjectKeySetChoice";
 import ObjectKeyTypeStep from "./ObjectKeyTypeStep";
 import { WizardPanel, WizardSteps } from "./ObjectWizardUi";
 
@@ -26,7 +27,8 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
     { key: "type", label: "Type" },
     { key: "brand", label: "Merk" },
     { key: "details", label: "Kenmerken" },
-  ], []);
+    ...(!currentKey ? [{ key: "set", label: "Sleutelset" }] : []),
+  ], [currentKey]);
   const step = steps[stepIndex]?.key;
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const chooseSet = (keySetId, createNew) => setForm(current => ({
@@ -39,7 +41,9 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
     ? Boolean(form.key_type)
     : step === "brand"
       ? Boolean(form.brand.trim())
-      : Boolean(setChoiceValid);
+      : step === "set"
+        ? Boolean(setChoiceValid)
+        : true;
   const finalStep = stepIndex === steps.length - 1;
   const choiceOnlyStep = step === "type" || (step === "brand" && !customBrandEntry);
   const submit = () => {
@@ -68,7 +72,8 @@ export default function ObjectKeyWizard({ currentKey, sets, knownBrands, onCance
             >
               {step === "type" && <ObjectKeyTypeStep value={form.key_type} onChange={value => { set("key_type", value); set("brand", ""); setCustomBrandEntry(false); setStepIndex(1); }} />}
               {step === "brand" && <ObjectKeyBrandStep keyType={form.key_type} value={form.brand} knownBrands={knownBrands} onChange={value => set("brand", value)} onSelect={value => { set("brand", value); setStepIndex(2); }} onCustomModeChange={setCustomBrandEntry} />}
-              {step === "details" && <ObjectKeyDetailsStep form={form} sets={sets} onChange={set} onSet={chooseSet} readOnlySet={Boolean(currentKey)} />}
+              {step === "details" && <ObjectKeyDetailsStep form={form} sets={sets} onChange={set} readOnlySet={Boolean(currentKey)} />}
+              {step === "set" && <ObjectKeySetChoice sets={sets} setId={form.key_set_id} createNew={form.create_new_set} setKeyNumber={form.set_key_number} onSetKeyNumberChange={value => set("set_key_number", value)} onSelect={chooseSet} />}
             </motion.div>
           </AnimatePresence>
           {error && <div className="mt-5 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error.message || "De sleutel kon niet worden opgeslagen."}</div>}
