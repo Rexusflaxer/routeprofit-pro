@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invoke } = vi.hoisted(() => ({
+const { invoke, invokeLatest } = vi.hoisted(() => ({
   invoke: vi.fn(),
+  invokeLatest: vi.fn(),
 }));
 
 vi.mock("@/api/base44Client", () => ({
@@ -9,6 +10,10 @@ vi.mock("@/api/base44Client", () => ({
     entities: {},
     functions: { invoke },
   },
+  base44LatestFunctions: {
+    functions: { invoke: invokeLatest },
+  },
+  hasPinnedFunctionsVersion: true,
 }));
 
 import {
@@ -19,6 +24,7 @@ import {
 describe("customerPlatformApi runtimecontract", () => {
   beforeEach(() => {
     invoke.mockReset();
+    invokeLatest.mockReset();
   });
 
   it("geeft een Base44 gatewaymelding en status bruikbaar door aan de wizard", async () => {
@@ -84,5 +90,40 @@ describe("customerPlatformApi runtimecontract", () => {
 
     await expect(invokeCustomerPlatformRead({ action: "search_customer_objects", search: "extern 42" }))
       .resolves.toEqual({ items: [{ id: "object-1" }], has_more: false });
+  });
+
+  it("herstelt een objectmoduleactie uit een verouderde previewfunctieversie", async () => {
+    const payload = {
+      action: "create_object_module",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      idempotency_key: "module-key-1",
+      expected_version: 0,
+    };
+    invoke.mockRejectedValue(Object.assign(new Error("Request failed with status code 400"), {
+      response: { status: 400, data: { error: "Onbekende actie" } },
+    }));
+    invokeLatest.mockResolvedValue({ data: { data: { ok: true, module: { id: "module-1" } } } });
+
+    await expect(invokeCustomerPlatformMutation(payload)).resolves.toEqual({
+      ok: true,
+      module: { id: "module-1" },
+    });
+    expect(invoke).toHaveBeenCalledWith("customerPlatformApi", payload);
+    expect(invokeLatest).toHaveBeenCalledWith("customerPlatformApi", payload);
+  });
+
+  it("toont een gerichte publicatiemelding als ook de nieuwste snapshot de moduleactie niet kent", async () => {
+    const unknownAction = Object.assign(new Error("Request failed with status code 400"), {
+      response: { status: 400, data: { error: "Onbekende actie" } },
+    });
+    invoke.mockRejectedValue(unknownAction);
+    invokeLatest.mockRejectedValue(unknownAction);
+
+    await expect(invokeCustomerPlatformRead({ action: "list_object_modules" })).rejects.toMatchObject({
+      message: "De objectmodule-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.",
+      status: 400,
+      details: { code: "object_module_backend_outdated" },
+    });
   });
 });

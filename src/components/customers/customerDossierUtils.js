@@ -13,7 +13,20 @@ import {
   ReceiptText,
   ShieldCheck,
 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import {
+  base44,
+  base44LatestFunctions,
+  hasPinnedFunctionsVersion,
+} from "@/api/base44Client";
+
+const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
+  "list_object_modules",
+  "get_object_module",
+  "create_object_module",
+  "save_object_module_draft",
+  "publish_object_module",
+  "set_object_module_status",
+]);
 
 export const CUSTOMER_TABS = [
   { key: "overview", label: "Overzicht", icon: LayoutDashboard },
@@ -179,18 +192,48 @@ function customerPlatformError(error, action) {
   return normalized;
 }
 
+async function invokeCustomerPlatformWithClient(client, payload) {
+  const response = await client.functions.invoke("customerPlatformApi", payload);
+  const result = response?.data?.data || response?.data || {};
+  if (result?.error) {
+    throw customerPlatformError({ response: { data: result } }, payload?.action);
+  }
+  if (result?.ok === false) throw new Error(result.message || "De klantplatformactie is mislukt.");
+  return result;
+}
+
+function normalizedCustomerPlatformError(error, action) {
+  return error?.action || error?.requestId || error?.details
+    ? error
+    : customerPlatformError(error, action);
+}
+
+function shouldRetryLatestFunctions(error, payload) {
+  return hasPinnedFunctionsVersion === true
+    && base44LatestFunctions?.functions?.invoke
+    && OBJECT_MODULE_PLATFORM_ACTIONS.has(payload?.action)
+    && error?.status === 400
+    && /^Onbekende actie\.?$/i.test(String(error?.message || "").trim());
+}
+
 async function invokeCustomerPlatformRequest(payload) {
   try {
-    const response = await base44.functions.invoke("customerPlatformApi", payload);
-    const result = response?.data?.data || response?.data || {};
-    if (result?.error) {
-      throw customerPlatformError({ response: { data: result } }, payload?.action);
-    }
-    if (result?.ok === false) throw new Error(result.message || "De klantplatformactie is mislukt.");
-    return result;
+    return await invokeCustomerPlatformWithClient(base44, payload);
   } catch (error) {
-    if (error?.action || error?.requestId || error?.details) throw error;
-    throw customerPlatformError(error, payload?.action);
+    const normalized = normalizedCustomerPlatformError(error, payload?.action);
+    if (!shouldRetryLatestFunctions(normalized, payload)) throw normalized;
+    try {
+      // Mutaties reuse the exact same idempotency key. The pinned request was
+      // rejected before dispatch, so retrying the latest snapshot is safe.
+      return await invokeCustomerPlatformWithClient(base44LatestFunctions, payload);
+    } catch (latestError) {
+      const latest = normalizedCustomerPlatformError(latestError, payload?.action);
+      if (latest.status === 400 && /^Onbekende actie\.?$/i.test(String(latest.message || "").trim())) {
+        latest.message = "De objectmodule-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
+        latest.details = { ...(latest.details || {}), code: "object_module_backend_outdated" };
+      }
+      throw latest;
+    }
   }
 }
 

@@ -33,6 +33,7 @@ describe("objectModuleWorkflow", () => {
   it("leest uitsluitend binnen klant- en objectscope en normaliseert backendsamenvattingen", async () => {
     invokeRead
       .mockResolvedValueOnce({
+        api_contract_version: "2026-08-05.2",
         items: [{
           id: "module-1",
           module_type: "item_issuance",
@@ -65,6 +66,7 @@ describe("objectModuleWorkflow", () => {
       reference_list_count: 2,
       version: 4,
     });
+    expect(list.api_contract_version).toBe("2026-08-05.2");
     expect(invokeRead).toHaveBeenNthCalledWith(1, {
       action: "list_object_modules",
       customer_id: "customer-1",

@@ -1,6 +1,7 @@
 {
   "name": "ObjectOperationalModuleRevision",
   "type": "object",
+  "description": "Onveranderlijke concept-, publicatie- en historieconfiguratie voor objectmodule-API-contract 2026-08-05.2.",
   "properties": {
     "module_id": {
       "type": "string",
