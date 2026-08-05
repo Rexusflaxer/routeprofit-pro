@@ -86,6 +86,9 @@ const READ_ACTIONS = new Set([
   'list_object_keys',
   'list_object_installations',
   'list_object_relationships',
+  'list_object_security_plans',
+  'get_object_security_plan',
+  'list_object_sections',
   'list_commercial',
   'list_billing',
   'validate_contract_rates',
@@ -106,6 +109,9 @@ const MUTATION_ACTIONS = new Set([
   'create_object_key', 'update_object_key', 'archive_object_key',
   'create_object_installation', 'update_object_installation', 'archive_object_installation',
   'create_object_relationship', 'update_object_relationship', 'archive_object_relationship',
+  'create_object_security_plan', 'save_object_security_plan_draft',
+  'duplicate_object_security_plan', 'publish_object_security_plan', 'archive_object_security_plan',
+  'upsert_object_section', 'archive_object_section', 'migrate_legacy_object_security_plans',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -295,6 +301,8 @@ const WARNING_ADDRESS_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const OBJECT_INSTALLATION_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const OBJECT_RELATIONSHIP_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const THIRD_PARTY_ORGANIZATION_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const SECURITY_PLAN_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const SECURITY_PLAN_MIGRATION_LOCK_TTL_MS = 15 * 60 * 1000;
 const OBJECT_IDENTITY_PATCH_FIELDS = [
   'object_code',
   'external_object_code',
@@ -1001,6 +1009,9 @@ function mutationTarget(action: string, body: LooseRecord) {
     'reminder_id',
     'indexation_run_id',
     'task_execution_id',
+    'security_plan_id',
+    'revision_id',
+    'section_id',
   ];
   const identifiers = targetFields
     .map(field => [field, asString(body[field])] as const)
@@ -1417,6 +1428,14 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   create_object_relationship: 'Relatie toegevoegd',
   update_object_relationship: 'Relatie gewijzigd',
   archive_object_relationship: 'Relatie gearchiveerd',
+  create_object_security_plan: 'Beveiligingsplan toegevoegd',
+  save_object_security_plan_draft: 'Concept beveiligingsplan gewijzigd',
+  duplicate_object_security_plan: 'Beveiligingsplan gedupliceerd',
+  publish_object_security_plan: 'Beveiligingsplan gepubliceerd',
+  archive_object_security_plan: 'Beveiligingsplan gearchiveerd',
+  upsert_object_section: 'Objectsectie opgeslagen',
+  archive_object_section: 'Objectsectie gearchiveerd',
+  migrate_legacy_object_security_plans: 'Legacy beveiligingsplannen voorbereid voor controle',
   create_customer_contact: 'Contactpersoon toegevoegd',
   update_customer_contact: 'Contactpersoon gewijzigd',
   archive_customer_contact: 'Contactpersoon gearchiveerd',
@@ -1485,6 +1504,9 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.allocation ||
     result.reminder ||
     result.index_run ||
+    result.security_plan ||
+    result.revision ||
+    result.section ||
     {};
   return {
     company_id: candidate.company_id || result.company_id || body.company_id || null,
@@ -4313,6 +4335,17 @@ const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
   show_on_mobile_map: 'Mobiele kaart',
   mobile_map_priority: 'Kaartprioriteit',
   notes: 'Notitie',
+  variant_name: 'Planvariant',
+  task_type: 'Taaktype',
+  execution_mode: 'Uitvoeringsvorm',
+  duration_mode: 'Duurmodel',
+  duration_minutes: 'Geplande duur',
+  section_policy: 'Sectiebeleid',
+  instruction_step_count: 'Aantal instructiestappen',
+  route_point_count: 'Aantal routepunten',
+  publication_revision: 'Publicatierevisie',
+  section_code: 'Sectiecode',
+  section_name: 'Sectienaam',
 };
 
 const LOGBOOK_VALUE_FIELDS = new Set([
@@ -4357,6 +4390,17 @@ const LOGBOOK_VALUE_FIELDS = new Set([
   'relationship_phone_state',
   'relationship_email_state',
   'relationship_notes_state',
+  'variant_name',
+  'task_type',
+  'execution_mode',
+  'duration_mode',
+  'duration_minutes',
+  'section_policy',
+  'instruction_step_count',
+  'route_point_count',
+  'publication_revision',
+  'section_code',
+  'section_name',
 ]);
 
 function safeLogbookValue(value: unknown) {
@@ -4388,6 +4432,9 @@ function derivedLogbookChanges(event: LooseRecord) {
     event.resource_type === 'ObjectInstallation' ||
     event.resource_type === 'ObjectKey' ||
     event.resource_type === 'ObjectRelationship' ||
+    event.resource_type === 'ObjectSecurityPlan' ||
+    event.resource_type === 'ObjectSecurityPlanRevision' ||
+    event.resource_type === 'ObjectSection' ||
     (
       event.resource_type === 'SurveillanceObject' &&
       event.action === 'update_customer_object_identity'
@@ -10010,6 +10057,1861 @@ async function handleApplyIndexationRun(
   return { index_run: updated, created_rates: created, resource_type: 'PriceIndexRun', resource_id: run.id, category: 'commercial' };
 }
 
+const SECURITY_PLAN_TASK_TYPES = new Set([
+  'object_security',
+  'fire_closing_round',
+  'external_closing_round',
+  'external_control_round',
+  'opening_round',
+  'mobile_control_round',
+  'reception',
+  'closing_assistance',
+  'access_control',
+  'fire_watch',
+  'concierge',
+  'other',
+]);
+const SECURITY_PLAN_LEGACY_CATEGORIES = new Set([
+  'object_security',
+  'fire_closing_round',
+  'external_closing_round',
+  'external_control_round',
+  'opening_round',
+  'mobile_control_round',
+  'reception',
+]);
+const SECURITY_PLAN_EXECUTION_MODES = new Set(['round', 'continuous_post', 'on_request', 'other']);
+const SECURITY_PLAN_DURATION_MODES = new Set(['fixed', 'schedule_defined', 'none']);
+const SECURITY_PLAN_SECTION_POLICIES = new Set(['fixed', 'default_with_controlled_override', 'not_applicable']);
+const SECURITY_PLAN_ACTION_TYPES = new Set([
+  'instruction', 'inspect', 'open', 'close', 'arm', 'disarm', 'register', 'handover', 'checkpoint', 'other',
+]);
+const SECURITY_PLAN_MARKER_TYPES = new Set(['checkpoint', 'instruction', 'start', 'end', 'other']);
+const SECURITY_PLAN_RECOVERY_LIMIT = 8;
+const SECURITY_PLAN_FORBIDDEN_FIELD = /(?:^|_)(?:alarm_?code|switch(?:ing)?_?code|schakelcode|pincode|pin|password|wachtwoord|secret|token|credential|raw_?file_?url|file_?url|usdz)(?:$|_)/i;
+
+function assertNoSecurityPlanSecretFields(value: unknown, path = 'data', depth = 0) {
+  if (depth > 12) throw new ApiError(400, `${path} is te diep genest`);
+  if (
+    typeof value === 'string' &&
+    /\b(?:(?:alarm|schakel|reset|operator|service)\s*-?\s*code|pin(?:code)?|wachtwoord|password)\b\s*[:=]\s*\S+/i.test(value)
+  ) {
+    throw new ApiError(400, `Gevoelige code-inhoud in ${path} hoort bij de beveiligde installatiegegevens`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoSecurityPlanSecretFields(item, `${path}[${index}]`, depth + 1));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value as LooseRecord)) {
+    if (SECURITY_PLAN_FORBIDDEN_FIELD.test(key)) {
+      throw new ApiError(400, `Gevoelig veld ${path}.${key} hoort niet in een beveiligingsplan; koppel een installatie zonder de code op te nemen`);
+    }
+    assertNoSecurityPlanSecretFields(nested, `${path}.${key}`, depth + 1);
+  }
+}
+
+function legacySecurityPlanExecutionMode(taskType: string) {
+  if (['reception', 'object_security', 'access_control', 'fire_watch', 'concierge'].includes(taskType)) return 'continuous_post';
+  return 'round';
+}
+
+function securityPlanTaskType(record: LooseRecord) {
+  const taskType = asString(record.task_type || record.category);
+  return SECURITY_PLAN_TASK_TYPES.has(taskType) ? taskType : 'other';
+}
+
+function normalizedSecurityPlanIdentity(data: LooseRecord, current: LooseRecord | null = null) {
+  const taskType = asString(data.task_type ?? current?.task_type ?? current?.category);
+  if (!SECURITY_PLAN_TASK_TYPES.has(taskType)) throw new ApiError(400, 'Kies een geldig taaktype');
+  const customTaskType = taskType === 'other'
+    ? objectText(data.custom_task_type ?? current?.custom_task_type, 'Eigen taaktype', 120, false)
+    : null;
+  const variantName = objectText(
+    data.variant_name ?? data.title ?? current?.variant_name ?? current?.title,
+    'Variantnaam',
+    200,
+    false,
+  ) as string;
+  const executionMode = asString(data.execution_mode ?? current?.execution_mode) || legacySecurityPlanExecutionMode(taskType);
+  if (!SECURITY_PLAN_EXECUTION_MODES.has(executionMode)) throw new ApiError(400, 'Kies een geldige uitvoeringsvorm');
+  return { task_type: taskType, custom_task_type: customTaskType, variant_name: variantName, execution_mode: executionMode };
+}
+
+function securityPlanLegacyCategory(taskType: string) {
+  return SECURITY_PLAN_LEGACY_CATEGORIES.has(taskType) ? taskType : 'object_security';
+}
+
+function normalizedSecurityPlanId(value: unknown, label: string, generate = false) {
+  const id = asString(value) || (generate ? crypto.randomUUID() : '');
+  if (!id || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw new ApiError(400, `${label} bevat een ongeldig ID`);
+  return id;
+}
+
+function normalizedSecurityPlanIds(value: unknown, label: string, maximum = 250) {
+  if (value === undefined || value === null) return [] as string[];
+  if (!Array.isArray(value)) throw new ApiError(400, `${label} moet een lijst zijn`);
+  if (value.length > maximum) throw new ApiError(400, `${label} bevat te veel onderdelen`);
+  const ids = value.map(item => normalizedSecurityPlanId(item, label));
+  if (new Set(ids).size !== ids.length) throw new ApiError(400, `${label} bevat dubbele onderdelen`);
+  return ids;
+}
+
+function normalizedSecurityPlanInstructionBlocks(value: unknown) {
+  if (value === undefined || value === null) return [] as LooseRecord[];
+  if (!Array.isArray(value)) throw new ApiError(400, 'Instructieblokken moeten een lijst zijn');
+  if (value.length > 50) throw new ApiError(400, 'Een plan mag maximaal 50 instructieblokken bevatten');
+  const blockIds = new Set<string>();
+  const stepIds = new Set<string>();
+  let stepCount = 0;
+  return value.map((rawBlock, blockIndex) => {
+    if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock)) throw new ApiError(400, 'Een instructieblok is ongeldig');
+    const block = rawBlock as LooseRecord;
+    const id = normalizedSecurityPlanId(block.id, 'Instructieblok', true);
+    if (blockIds.has(id)) throw new ApiError(400, 'Instructieblokken bevatten een dubbel ID');
+    blockIds.add(id);
+    const rawSteps = block.steps ?? [];
+    if (!Array.isArray(rawSteps)) throw new ApiError(400, 'Stappen moeten een lijst zijn');
+    if (stepCount + rawSteps.length > 500) throw new ApiError(400, 'Een plan mag maximaal 500 instructiestappen bevatten');
+    const steps = rawSteps.map((rawStep, stepIndex) => {
+      if (!rawStep || typeof rawStep !== 'object' || Array.isArray(rawStep)) throw new ApiError(400, 'Een instructiestap is ongeldig');
+      const step = rawStep as LooseRecord;
+      const stepId = normalizedSecurityPlanId(step.id, 'Instructiestap', true);
+      if (stepIds.has(stepId)) throw new ApiError(400, 'Instructiestappen bevatten een dubbel ID');
+      stepIds.add(stepId);
+      const actionType = asString(step.action_type) || 'instruction';
+      if (!SECURITY_PLAN_ACTION_TYPES.has(actionType)) throw new ApiError(400, 'Een instructiestap heeft een onbekend actietype');
+      stepCount += 1;
+      return {
+        id: stepId,
+        sequence: stepIndex + 1,
+        title: objectText(step.title, 'Titel instructiestap', 200, false),
+        instruction: objectText(step.instruction, 'Instructie', 5000, false),
+        action_type: actionType,
+        section_id: asString(step.section_id) || null,
+        installation_id: asString(step.installation_id) || null,
+        floorplan_marker_id: asString(step.floorplan_marker_id) || null,
+        required: step.required !== false,
+      };
+    });
+    return {
+      id,
+      sequence: blockIndex + 1,
+      title: objectText(block.title, 'Titel instructieblok', 200, false),
+      description: objectText(block.description, 'Omschrijving instructieblok', 2000, true),
+      steps,
+    };
+  });
+}
+
+function normalizedPlanCoordinate(value: unknown, label: string) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 1) {
+    throw new ApiError(400, `${label} moet tussen 0 en 1 liggen`);
+  }
+  return Math.round(number * 1_000_000) / 1_000_000;
+}
+
+function normalizedPlanAnchor(value: unknown, label: string) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, `${label} is ongeldig`);
+  const anchor = value as LooseRecord;
+  return {
+    x: normalizedPlanCoordinate(anchor.x, `${label}.x`),
+    y: normalizedPlanCoordinate(anchor.y, `${label}.y`),
+    label: objectText(anchor.label, `${label}.label`, 120, true),
+  };
+}
+
+function normalizedSecurityPlanRoute(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Route-overlay is ongeldig');
+  const route = value as LooseRecord;
+  const rawPath = route.path ?? [];
+  const rawMarkers = route.markers ?? [];
+  if (!Array.isArray(rawPath) || rawPath.length > 5000) throw new ApiError(400, 'Routepad is ongeldig of te groot');
+  if (!Array.isArray(rawMarkers) || rawMarkers.length > 1000) throw new ApiError(400, 'Routemarkeringen zijn ongeldig of te groot');
+  const markerIds = new Set<string>();
+  return {
+    schema_version: 'loq-route-v1',
+    coordinate_space: 'normalized',
+    start_point: normalizedPlanAnchor(route.start_point, 'Startpunt'),
+    end_point: normalizedPlanAnchor(route.end_point, 'Eindpunt'),
+    path: rawPath.map((rawPoint, index) => {
+      if (!rawPoint || typeof rawPoint !== 'object' || Array.isArray(rawPoint)) throw new ApiError(400, 'Routepunt is ongeldig');
+      const point = rawPoint as LooseRecord;
+      return {
+        x: normalizedPlanCoordinate(point.x, 'Routepunt x'),
+        y: normalizedPlanCoordinate(point.y, 'Routepunt y'),
+        sequence: index + 1,
+      };
+    }),
+    markers: rawMarkers.map((rawMarker, index) => {
+      if (!rawMarker || typeof rawMarker !== 'object' || Array.isArray(rawMarker)) throw new ApiError(400, 'Routemarkering is ongeldig');
+      const marker = rawMarker as LooseRecord;
+      const id = normalizedSecurityPlanId(marker.id, 'Routemarkering', true);
+      if (markerIds.has(id)) throw new ApiError(400, 'Routemarkeringen bevatten een dubbel ID');
+      markerIds.add(id);
+      const markerType = asString(marker.marker_type) || 'instruction';
+      if (!SECURITY_PLAN_MARKER_TYPES.has(markerType)) throw new ApiError(400, 'Routemarkering heeft een onbekend type');
+      return {
+        id,
+        x: normalizedPlanCoordinate(marker.x, 'Routemarkering x'),
+        y: normalizedPlanCoordinate(marker.y, 'Routemarkering y'),
+        sequence: index + 1,
+        step_id: asString(marker.step_id) || null,
+        section_id: asString(marker.section_id) || null,
+        label: objectText(marker.label, 'Label routemarkering', 120, true),
+        marker_type: markerType,
+      };
+    }),
+  };
+}
+
+function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRecord | null = null) {
+  assertNoSecurityPlanSecretFields(data);
+  const source = { ...(current || {}), ...data };
+  const durationMode = asString(source.duration_mode) || 'none';
+  if (!SECURITY_PLAN_DURATION_MODES.has(durationMode)) throw new ApiError(400, 'Kies een geldig duurmodel');
+  let durationMinutes: number | null = null;
+  if (durationMode === 'fixed' && source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '') {
+    durationMinutes = requireInteger(source.duration_minutes, 'duration_minutes', 1);
+    if (durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
+  }
+  const sectionPolicy = asString(source.section_policy) || 'not_applicable';
+  if (!SECURITY_PLAN_SECTION_POLICIES.has(sectionPolicy)) throw new ApiError(400, 'Kies een geldig sectiebeleid');
+  const defaultSectionIds = sectionPolicy === 'not_applicable'
+    ? []
+    : normalizedSecurityPlanIds(source.default_section_ids, 'Standaardsecties');
+  let allowedSectionIds = sectionPolicy === 'not_applicable'
+    ? []
+    : normalizedSecurityPlanIds(source.allowed_section_ids, 'Toegestane secties');
+  if (sectionPolicy === 'fixed' && !allowedSectionIds.length) allowedSectionIds = [...defaultSectionIds];
+  const floorplanId = asString(source.floorplan_id) || null;
+  const floorplanRevision = source.floorplan_revision === null || source.floorplan_revision === undefined || source.floorplan_revision === ''
+    ? null
+    : requireInteger(source.floorplan_revision, 'floorplan_revision', 1);
+  if (Boolean(floorplanId) !== Boolean(floorplanRevision)) {
+    throw new ApiError(400, 'Plattegrond en plattegrondrevisie moeten samen worden gekozen');
+  }
+  return {
+    summary: objectText(source.summary ?? source.description, 'Samenvatting', 2000, true),
+    duration_mode: durationMode,
+    duration_minutes: durationMinutes,
+    section_policy: sectionPolicy,
+    default_section_ids: defaultSectionIds,
+    allowed_section_ids: allowedSectionIds,
+    instruction_blocks: normalizedSecurityPlanInstructionBlocks(source.instruction_blocks),
+    floorplan_id: floorplanId,
+    floorplan_revision: floorplanRevision,
+    route_overlay: normalizedSecurityPlanRoute(source.route_overlay),
+  };
+}
+
+function securityPlanInstructionStepCount(revision: LooseRecord | null | undefined) {
+  if (!Array.isArray(revision?.instruction_blocks)) return 0;
+  return revision.instruction_blocks.reduce((total: number, block: LooseRecord) =>
+    total + (Array.isArray(block?.steps) ? block.steps.length : 0), 0);
+}
+
+function securityPlanHasRoute(revision: LooseRecord | null | undefined) {
+  return Boolean(
+    revision?.route_overlay &&
+    (
+      (Array.isArray(revision.route_overlay.path) && revision.route_overlay.path.length >= 2) ||
+      (Array.isArray(revision.route_overlay.markers) && revision.route_overlay.markers.length > 0)
+    )
+  );
+}
+
+function securityPlanMigrationRequired(plan: LooseRecord) {
+  return !asString(plan.task_type) || (!asString(plan.draft_revision_id) && !asString(plan.current_published_revision_id));
+}
+
+function safeSecurityPlan(plan: LooseRecord) {
+  const taskType = securityPlanTaskType(plan);
+  return {
+    id: plan.id,
+    customer_id: plan.customer_id,
+    object_id: plan.object_id,
+    task_type: taskType,
+    custom_task_type: taskType === 'other' ? plan.custom_task_type || null : null,
+    variant_name: plan.variant_name || plan.title,
+    execution_mode: plan.execution_mode || legacySecurityPlanExecutionMode(taskType),
+    status: plan.status || 'draft',
+    current_published_revision_id: plan.current_published_revision_id || null,
+    draft_revision_id: plan.draft_revision_id || null,
+    latest_revision_number: Number(plan.latest_revision_number || 0),
+    published_at: plan.published_at || null,
+    archived_at: plan.archived_at || null,
+    version: versionOf(plan),
+    created_date: plan.created_date || null,
+    updated_date: plan.updated_date || null,
+    category: plan.category || securityPlanLegacyCategory(taskType),
+    title: plan.title || plan.variant_name,
+    scope_type: plan.scope_type || 'not_applicable',
+    duration_minutes: Number.isInteger(plan.duration_minutes) ? plan.duration_minutes : null,
+    migration_required: securityPlanMigrationRequired(plan),
+    migration_review_required: plan.migration_review_required === true,
+    has_draft: Boolean(plan.draft_revision_id) || securityPlanMigrationRequired(plan),
+    has_publication: Boolean(plan.current_published_revision_id),
+  };
+}
+
+function safeSecurityPlanRevisionSummary(revision: LooseRecord | null | undefined, readiness?: LooseRecord | null) {
+  if (!revision) return null;
+  const effectiveReadiness = readiness || revision.readiness_snapshot || null;
+  return {
+    id: revision.id,
+    security_plan_id: revision.security_plan_id,
+    revision_number: Number(revision.revision_number || 0),
+    revision_status: revision.status || 'draft',
+    status: revision.status || 'draft',
+    duration_mode: revision.duration_mode || 'none',
+    duration_minutes: Number.isInteger(revision.duration_minutes) ? revision.duration_minutes : null,
+    section_policy: revision.section_policy || 'not_applicable',
+    default_section_count: Array.isArray(revision.default_section_ids) ? revision.default_section_ids.length : 0,
+    allowed_section_count: Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids.length : 0,
+    instruction_block_count: Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks.length : 0,
+    instruction_step_count: securityPlanInstructionStepCount(revision),
+    floorplan_revision: Number.isInteger(revision.floorplan_revision) ? revision.floorplan_revision : null,
+    has_route: securityPlanHasRoute(revision),
+    readiness_status: effectiveReadiness?.readiness_status || (effectiveReadiness?.ready_to_publish ? 'ready' : 'attention'),
+    readiness_warning_count: Array.isArray(effectiveReadiness?.warnings) ? effectiveReadiness.warnings.length : 0,
+    content_checksum: revision.content_checksum || null,
+    published_at: revision.published_at || null,
+    version: versionOf(revision),
+    synthesized_from_legacy: revision.synthesized_from_legacy === true,
+    read_only: revision.read_only === true || revision.status !== 'draft',
+  };
+}
+
+function safeSecurityPlanRevision(revision: LooseRecord | null | undefined) {
+  if (!revision) return null;
+  return {
+    ...safeSecurityPlanRevisionSummary(revision),
+    customer_id: revision.customer_id,
+    object_id: revision.object_id,
+    summary: revision.summary || null,
+    default_section_ids: Array.isArray(revision.default_section_ids) ? revision.default_section_ids : [],
+    allowed_section_ids: Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids : [],
+    instruction_blocks: Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks : [],
+    floorplan_id: revision.floorplan_id || null,
+    route_overlay: revision.route_overlay || null,
+    readiness_snapshot: revision.readiness_snapshot || null,
+    published_by_user_id: revision.published_by_user_id || null,
+    superseded_at: revision.superseded_at || null,
+    superseded_by_revision_id: revision.superseded_by_revision_id || null,
+    source_revision_id: revision.source_revision_id || null,
+    migration_source: revision.migration_source || null,
+    migration_review_required: revision.migration_review_required === true,
+  };
+}
+
+function safeObjectSection(section: LooseRecord, includeGeometry = true) {
+  return {
+    id: section.id,
+    customer_id: section.customer_id,
+    object_id: section.object_id,
+    code: section.code,
+    code_normalized: section.code_normalized,
+    name: section.name,
+    description: section.description || null,
+    floorplan_id: section.floorplan_id || null,
+    floorplan_revision: Number.isInteger(section.floorplan_revision) ? section.floorplan_revision : null,
+    ...(includeGeometry ? { geometry: section.geometry || null } : {}),
+    status: section.status || 'active',
+    version: versionOf(section),
+    created_date: section.created_date || null,
+    updated_date: section.updated_date || null,
+  };
+}
+
+function safeFloorplan2dValue(value: unknown, depth = 0): unknown {
+  if (depth > 20) return null;
+  if (Array.isArray(value)) return value.slice(0, 10000).map(item => safeFloorplan2dValue(item, depth + 1));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as LooseRecord).flatMap(([key, nested]) =>
+    /(?:url|usdz|credential|secret|token|password|wachtwoord|pincode|alarm_code|switching_code)/i.test(key)
+      ? []
+      : [[key, safeFloorplan2dValue(nested, depth + 1)]]));
+}
+
+function safeSecurityPlanFloorplan(floorplan: LooseRecord) {
+  return {
+    id: floorplan.id,
+    revision: Number(floorplan.revision || 1),
+    title: floorplan.title || null,
+    status: floorplan.status || 'draft',
+    is_current: floorplan.is_current === true,
+    preview_2d_file_id: floorplan.preview_2d_file_id || null,
+    preview_2d_download_filename: floorplan.preview_2d_download_filename || null,
+    floorplan_2d_json: floorplan.floorplan_2d_json ? safeFloorplan2dValue(floorplan.floorplan_2d_json) : null,
+  };
+}
+
+function safeSecurityPlanInstallation(installation: LooseRecord) {
+  return {
+    id: installation.id,
+    name: installation.name,
+    installation_type: installation.installation_type,
+    brand: installation.brand || null,
+    model: installation.model || null,
+    control_device_name: installation.control_device_name || null,
+    operational_status: legacyInstallationOperationalStatus(installation),
+  };
+}
+
+function securityPlanIssue(code: string, message: string, details: LooseRecord = {}) {
+  return { code, message, ...details };
+}
+
+export function securityPlanStructuralReadiness(
+  plan: LooseRecord,
+  revision: LooseRecord,
+  sections: LooseRecord[] = [],
+  floorplans: LooseRecord[] = [],
+  installations: LooseRecord[] = [],
+) {
+  const blockingIssues: LooseRecord[] = [];
+  const warnings: LooseRecord[] = [];
+  const taskType = securityPlanTaskType(plan);
+  if (taskType === 'other' && !asString(plan.custom_task_type)) {
+    blockingIssues.push(securityPlanIssue('custom_task_type_missing', 'Vul het eigen taaktype in.'));
+  }
+  if (!asString(plan.variant_name || plan.title)) blockingIssues.push(securityPlanIssue('variant_name_missing', 'Vul een variantnaam in.'));
+  if (revision.duration_mode === 'fixed' && !Number.isInteger(revision.duration_minutes)) {
+    blockingIssues.push(securityPlanIssue('fixed_duration_missing', 'Vul voor dit duurmodel een vaste duur in.'));
+  }
+  if (securityPlanInstructionStepCount(revision) < 1) {
+    blockingIssues.push(securityPlanIssue('instructions_missing', 'Voeg minimaal één uitvoeringsstap toe.'));
+  }
+  const sectionById = new Map(sections.map(section => [section.id, section]));
+  const defaultIds = Array.isArray(revision.default_section_ids) ? revision.default_section_ids : [];
+  const allowedIds = Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids : [];
+  if (revision.section_policy === 'fixed' && !defaultIds.length) {
+    blockingIssues.push(securityPlanIssue('fixed_sections_missing', 'Kies minimaal één vaste sectie.'));
+  }
+  if (revision.section_policy === 'default_with_controlled_override') {
+    if (!defaultIds.length) blockingIssues.push(securityPlanIssue('default_sections_missing', 'Kies minimaal één standaardsectie.'));
+    if (!allowedIds.length) blockingIssues.push(securityPlanIssue('allowed_sections_missing', 'Kies minimaal één toegestane sectie.'));
+  }
+  const allSectionIds = [...new Set([...defaultIds, ...allowedIds])];
+  for (const sectionId of allSectionIds) {
+    const section = sectionById.get(sectionId);
+    if (!section || section.customer_id !== plan.customer_id || section.object_id !== plan.object_id || section.status !== 'active') {
+      blockingIssues.push(securityPlanIssue('section_unavailable', 'Een gekozen sectie is niet actief binnen dit object.', { section_id: sectionId }));
+    }
+  }
+  const allowedSet = new Set(allowedIds);
+  if (revision.section_policy === 'default_with_controlled_override' && defaultIds.some((id: string) => !allowedSet.has(id))) {
+    blockingIssues.push(securityPlanIssue('default_section_not_allowed', 'Iedere standaardsectie moet ook toegestaan zijn.'));
+  }
+  const installationById = new Map(installations.map(installation => [installation.id, installation]));
+  const stepIds = new Set<string>();
+  for (const block of Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks : []) {
+    for (const step of Array.isArray(block.steps) ? block.steps : []) {
+      stepIds.add(step.id);
+      if (step.section_id) {
+        const stepSection = sectionById.get(step.section_id);
+        if (!stepSection || stepSection.customer_id !== plan.customer_id || stepSection.object_id !== plan.object_id || stepSection.status !== 'active') {
+          blockingIssues.push(securityPlanIssue('step_section_unavailable', 'Een instructiestap verwijst naar een ongeldige sectie.', { step_id: step.id }));
+        }
+      }
+      if (step.installation_id) {
+        const installation = installationById.get(step.installation_id);
+        if (
+          !installation || installation.customer_id !== plan.customer_id || installation.object_id !== plan.object_id ||
+          legacyInstallationLifecycle(installation) !== 'active'
+        ) {
+          blockingIssues.push(securityPlanIssue('step_installation_unavailable', 'Een instructiestap verwijst naar een niet-actieve installatie.', { step_id: step.id }));
+        }
+      }
+    }
+  }
+  const floorplan = revision.floorplan_id
+    ? floorplans.find(item => item.id === revision.floorplan_id)
+    : null;
+  if (revision.floorplan_id && (!floorplan || floorplan.object_id !== plan.object_id)) {
+    blockingIssues.push(securityPlanIssue('floorplan_unavailable', 'De gekozen plattegrond hoort niet bij dit object.'));
+  } else if (floorplan && Number(floorplan.revision || 1) !== Number(revision.floorplan_revision)) {
+    blockingIssues.push(securityPlanIssue('floorplan_revision_mismatch', 'De route is niet aan de gekozen plattegrondrevisie gekoppeld.'));
+  } else if (floorplan && floorplan.status !== 'published') {
+    blockingIssues.push(securityPlanIssue('floorplan_not_published', 'Publiceer de gekozen plattegrond voordat dit plan wordt gepubliceerd.'));
+  }
+  if (securityPlanHasRoute(revision) && !revision.floorplan_id) {
+    blockingIssues.push(securityPlanIssue('route_floorplan_missing', 'Een ingetekende route moet aan een plattegrondrevisie zijn gekoppeld.'));
+  }
+  for (const marker of Array.isArray(revision.route_overlay?.markers) ? revision.route_overlay.markers : []) {
+    if (marker.step_id && !stepIds.has(marker.step_id)) {
+      blockingIssues.push(securityPlanIssue('route_step_unavailable', 'Een routemarkering verwijst naar een onbekende instructiestap.', { marker_id: marker.id }));
+    }
+    if (marker.section_id) {
+      const markerSection = sectionById.get(marker.section_id);
+      if (!markerSection || markerSection.customer_id !== plan.customer_id || markerSection.object_id !== plan.object_id || markerSection.status !== 'active') {
+        blockingIssues.push(securityPlanIssue('route_section_unavailable', 'Een routemarkering verwijst naar een onbekende sectie.', { marker_id: marker.id }));
+      }
+    }
+  }
+  if (['round', 'on_request'].includes(plan.execution_mode || legacySecurityPlanExecutionMode(taskType)) && !securityPlanHasRoute(revision)) {
+    warnings.push(securityPlanIssue('route_missing', 'Er is nog geen looproute ingetekend. Publiceren blijft mogelijk.'));
+  }
+  const readinessStatus = blockingIssues.length ? 'blocked' : warnings.length ? 'attention' : 'ready';
+  return {
+    ready_to_publish: blockingIssues.length === 0,
+    readiness_status: readinessStatus,
+    blocking_issues: blockingIssues,
+    warnings,
+  };
+}
+
+async function securityPlanReferenceData(base44: LooseRecord, customerId: string, objectId: string) {
+  const [sections, floorplans, installations] = await Promise.all([
+    getEntity(base44, 'ObjectSection').filter({ customer_id: customerId, object_id: objectId }, '+name', 2000),
+    getEntity(base44, 'ObjectFloorPlan').filter({ object_id: objectId }, '-revision', 500),
+    getEntity(base44, 'ObjectInstallation').filter({ customer_id: customerId, object_id: objectId }, '+name', 1000),
+  ]);
+  return { sections, floorplans, installations };
+}
+
+async function requireSecurityPlan(base44: LooseRecord, body: LooseRecord, mutable = false) {
+  const scope = mutable
+    ? await requireCustomerObjectForMutation(base44, body)
+    : await requireCustomerObjectScope(base44, body);
+  const plan = await requireRecord(base44, 'ObjectSecurityPlan', requireString(body, 'security_plan_id'), 'Beveiligingsplan');
+  if (plan.customer_id !== scope.customer.id || plan.object_id !== scope.object.id) {
+    throw new ApiError(409, 'Beveiligingsplan hoort niet bij dit object');
+  }
+  if (mutable && plan.status === 'archived') throw new ApiError(409, 'Een gearchiveerd beveiligingsplan kan niet worden gewijzigd');
+  return { ...scope, plan };
+}
+
+function synthesizedLegacySecurityPlanRevision(plan: LooseRecord) {
+  const legacyInstructions = Array.isArray(plan.instructions) ? plan.instructions.map(asString).filter(Boolean) : [];
+  const instructions = legacyInstructions.length ? legacyInstructions : (asString(plan.description) ? [asString(plan.description)] : []);
+  return {
+    id: `legacy-${plan.id}`,
+    security_plan_id: plan.id,
+    customer_id: plan.customer_id,
+    object_id: plan.object_id,
+    revision_number: 1,
+    status: 'draft',
+    summary: plan.description || null,
+    duration_mode: Number.isInteger(plan.duration_minutes) ? 'fixed' : 'none',
+    duration_minutes: Number.isInteger(plan.duration_minutes) ? plan.duration_minutes : null,
+    section_policy: 'not_applicable',
+    default_section_ids: [],
+    allowed_section_ids: [],
+    instruction_blocks: instructions.length ? [{
+      id: 'legacy-instructions',
+      sequence: 1,
+      title: 'Bestaande instructies',
+      description: null,
+      steps: instructions.map((instruction: string, index: number) => ({
+        id: `legacy-step-${index + 1}`,
+        sequence: index + 1,
+        title: `Stap ${index + 1}`,
+        instruction,
+        action_type: 'instruction',
+        section_id: null,
+        installation_id: null,
+        floorplan_marker_id: null,
+        required: true,
+      })),
+    }] : [],
+    floorplan_id: null,
+    floorplan_revision: null,
+    route_overlay: null,
+    readiness_snapshot: null,
+    content_checksum: null,
+    version: 1,
+    synthesized_from_legacy: true,
+    read_only: true,
+    migration_source: 'legacy_object_security_plan',
+    migration_review_required: true,
+  };
+}
+
+async function handleListObjectSecurityPlans(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const page = requireInteger(body.page ?? 1, 'page', 1);
+  const pageSize = Math.min(100, requireInteger(body.page_size ?? 25, 'page_size', 1));
+  const status = asString(body.status);
+  if (status && !['draft', 'published', 'active', 'archived'].includes(status)) throw new ApiError(400, 'Ongeldige planstatus');
+  const taskType = asString(body.task_type);
+  if (taskType && !SECURITY_PLAN_TASK_TYPES.has(taskType)) throw new ApiError(400, 'Ongeldig taaktypefilter');
+  const search = normalizeName(asString(body.search).slice(0, 120));
+  const plans = await getEntity(base44, 'ObjectSecurityPlan').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+  }, '-updated_date', 2000);
+  const planIds = plans.map((plan: LooseRecord) => plan.id);
+  const currentRevisionIds = [...new Set(plans.flatMap((plan: LooseRecord) =>
+    [asString(plan.draft_revision_id), asString(plan.current_published_revision_id)].filter(Boolean)))];
+  const [revisions, references] = await Promise.all([
+    currentRevisionIds.length
+      ? getEntity(base44, 'ObjectSecurityPlanRevision').filter({ id: { $in: currentRevisionIds } }, '-revision_number', 5000)
+      : Promise.resolve([]),
+    securityPlanReferenceData(base44, customer.id, object.id),
+  ]);
+  const scopedRevisions = revisions.filter((revision: LooseRecord) =>
+    revision.customer_id === customer.id && revision.object_id === object.id && planIds.includes(revision.security_plan_id));
+  const revisionById = new Map(scopedRevisions.map((revision: LooseRecord) => [revision.id, revision]));
+  const rows = plans.flatMap((plan: LooseRecord) => {
+    const safePlan = safeSecurityPlan(plan);
+    if (!status && safePlan.status === 'archived') return [];
+    if (status === 'draft' && (safePlan.status === 'archived' || !safePlan.has_draft)) return [];
+    if (status === 'published' && (safePlan.status === 'archived' || !safePlan.has_publication)) return [];
+    if (status && !['draft', 'published'].includes(status) && safePlan.status !== status) return [];
+    if (taskType && safePlan.task_type !== taskType) return [];
+    const searchable = normalizeName(`${safePlan.variant_name} ${safePlan.task_type} ${safePlan.custom_task_type || ''}`);
+    if (search && !searchable.includes(search)) return [];
+    let revision = revisionById.get(plan.draft_revision_id) || revisionById.get(plan.current_published_revision_id) || null;
+    if (!revision && safePlan.migration_required) revision = synthesizedLegacySecurityPlanRevision(plan);
+    const readiness = revision
+      ? securityPlanStructuralReadiness(safePlan, revision, references.sections, references.floorplans, references.installations)
+      : { ready_to_publish: false, readiness_status: 'blocked', blocking_issues: [securityPlanIssue('draft_missing', 'Conceptrevisie ontbreekt.')], warnings: [] };
+    return [{ ...safePlan, current_revision_summary: safeSecurityPlanRevisionSummary(revision, readiness), readiness }];
+  });
+  const total = rows.length;
+  const skip = (page - 1) * pageSize;
+  return {
+    items: rows.slice(skip, skip + pageSize),
+    total,
+    page,
+    page_size: pageSize,
+    has_more: skip + pageSize < total,
+  };
+}
+
+async function handleGetObjectSecurityPlan(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object, plan } = await requireSecurityPlan(base44, body);
+  const [revisions, references] = await Promise.all([
+    getEntity(base44, 'ObjectSecurityPlanRevision').filter({ security_plan_id: plan.id }, '-revision_number', 500),
+    securityPlanReferenceData(base44, customer.id, object.id),
+  ]);
+  const scopedRevisions = revisions.filter((revision: LooseRecord) =>
+    revision.customer_id === customer.id && revision.object_id === object.id && revision.security_plan_id === plan.id);
+  const revisionById = new Map(scopedRevisions.map((revision: LooseRecord) => [revision.id, revision]));
+  const migrationRequired = securityPlanMigrationRequired(plan);
+  const draft = revisionById.get(plan.draft_revision_id) || (migrationRequired ? synthesizedLegacySecurityPlanRevision(plan) : null);
+  const published = revisionById.get(plan.current_published_revision_id) || null;
+  const current = draft || published;
+  const safePlan = safeSecurityPlan(plan);
+  const readiness = current
+    ? securityPlanStructuralReadiness(safePlan, current, references.sections, references.floorplans, references.installations)
+    : { ready_to_publish: false, readiness_status: 'blocked', blocking_issues: [securityPlanIssue('draft_missing', 'Conceptrevisie ontbreekt.')], warnings: [] };
+  if (migrationRequired) {
+    readiness.ready_to_publish = false;
+    readiness.readiness_status = 'blocked';
+    readiness.blocking_issues = [
+      securityPlanIssue('migration_required', 'Migreer dit bestaande plan voordat het kan worden gewijzigd of gepubliceerd.'),
+      ...readiness.blocking_issues,
+    ];
+  }
+  return {
+    plan: safePlan,
+    draft_revision: safeSecurityPlanRevision(draft),
+    published_revision: safeSecurityPlanRevision(published),
+    current_revision: safeSecurityPlanRevision(current),
+    revision_history: scopedRevisions.map((revision: LooseRecord) => safeSecurityPlanRevisionSummary(revision)),
+    sections: references.sections.map((section: LooseRecord) => safeObjectSection(section)),
+    floorplans: references.floorplans.map(safeSecurityPlanFloorplan),
+    installations: references.installations
+      .filter((installation: LooseRecord) => legacyInstallationLifecycle(installation) === 'active')
+      .map(safeSecurityPlanInstallation),
+    readiness,
+    migration_required: migrationRequired,
+  };
+}
+
+async function handleListObjectSections(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const status = asString(body.status);
+  if (status && !['active', 'archived'].includes(status)) throw new ApiError(400, 'Ongeldige sectiestatus');
+  const query: LooseRecord = { customer_id: customer.id, object_id: object.id };
+  if (status) query.status = status;
+  const sections = await getEntity(base44, 'ObjectSection').filter(query, '+name', 2000);
+  const items = sections.filter((section: LooseRecord) => status || section.status !== 'archived').map((section: LooseRecord) => safeObjectSection(section));
+  return { items, total: items.length };
+}
+
+function securityPlanMutationSummary(plan: LooseRecord) {
+  return pick(safeSecurityPlan(plan), [
+    'id', 'customer_id', 'object_id', 'task_type', 'custom_task_type', 'variant_name', 'execution_mode', 'status',
+    'current_published_revision_id', 'draft_revision_id', 'latest_revision_number', 'published_at', 'archived_at',
+    'version', 'migration_required', 'migration_review_required',
+    'has_draft', 'has_publication',
+  ]);
+}
+
+function securityPlanChanges(
+  beforePlan: LooseRecord | null,
+  afterPlan: LooseRecord,
+  beforeRevision: LooseRecord | null,
+  afterRevision: LooseRecord | null,
+  publicationRevision?: number | null,
+) {
+  const candidates = [
+    ['variant_name', 'Planvariant', beforePlan?.variant_name || beforePlan?.title || null, afterPlan.variant_name || afterPlan.title || null],
+    ['task_type', 'Taaktype', beforePlan ? securityPlanTaskType(beforePlan) : null, securityPlanTaskType(afterPlan)],
+    ['execution_mode', 'Uitvoeringsvorm', beforePlan?.execution_mode || null, afterPlan.execution_mode || null],
+    ['status', 'Status', beforePlan?.status || null, afterPlan.status || null],
+    ['duration_mode', 'Duurmodel', beforeRevision?.duration_mode || null, afterRevision?.duration_mode || null],
+    ['duration_minutes', 'Geplande duur', beforeRevision?.duration_minutes || null, afterRevision?.duration_minutes || null],
+    ['section_policy', 'Sectiebeleid', beforeRevision?.section_policy || null, afterRevision?.section_policy || null],
+    ['instruction_step_count', 'Aantal instructiestappen', securityPlanInstructionStepCount(beforeRevision), securityPlanInstructionStepCount(afterRevision)],
+    ['route_point_count', 'Aantal routepunten', Array.isArray(beforeRevision?.route_overlay?.path) ? beforeRevision.route_overlay.path.length : 0, Array.isArray(afterRevision?.route_overlay?.path) ? afterRevision.route_overlay.path.length : 0],
+    ['publication_revision', 'Publicatierevisie', null, publicationRevision || null],
+  ];
+  return candidates.flatMap(([field, label, before, after]) =>
+    before === after || (field === 'publication_revision' && !after)
+      ? []
+      : [{ field, label, before, after }]);
+}
+
+function sectionChanges(before: LooseRecord | null, after: LooseRecord) {
+  const candidates = [
+    ['section_code', 'Sectiecode', before?.code || null, after.code || null],
+    ['section_name', 'Sectienaam', before?.name || null, after.name || null],
+    ['status', 'Status', before?.status || null, after.status || null],
+  ];
+  return candidates.flatMap(([field, label, oldValue, newValue]) =>
+    oldValue === newValue ? [] : [{ field, label, before: oldValue, after: newValue }]);
+}
+
+async function entityMutationRecoveryPatch(
+  record: LooseRecord,
+  action: string,
+  user: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+  result: LooseRecord,
+) {
+  const keyHash = await sha256(idempotencyKey);
+  const existingHashes = Array.isArray(record.customer_platform_mutation_key_hashes)
+    ? record.customer_platform_mutation_key_hashes.map(asString).filter(Boolean)
+    : [];
+  const existingRecoveries = record.customer_platform_mutation_recoveries &&
+    typeof record.customer_platform_mutation_recoveries === 'object' &&
+    !Array.isArray(record.customer_platform_mutation_recoveries)
+    ? record.customer_platform_mutation_recoveries as LooseRecord
+    : {};
+  const boundedHashes = [...new Set([...existingHashes.filter((hash: string) => hash !== keyHash), keyHash])]
+    .slice(-SECURITY_PLAN_RECOVERY_LIMIT);
+  const recovery = {
+    action,
+    actor_id: user.id,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    result,
+    recorded_at: nowIso(),
+  };
+  return {
+    customer_platform_last_mutation_key_hash: keyHash,
+    customer_platform_last_mutation_recovery: recovery,
+    customer_platform_mutation_key_hashes: boundedHashes,
+    customer_platform_mutation_recoveries: Object.fromEntries(
+      boundedHashes.flatMap(hash => {
+        const value = hash === keyHash ? recovery : existingRecoveries[hash];
+        return value ? [[hash, value]] : [];
+      }),
+    ),
+  };
+}
+
+async function securityPlanMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const planActions = new Set([
+    'save_object_security_plan_draft', 'publish_object_security_plan', 'archive_object_security_plan',
+  ]);
+  const sectionAction = action === 'archive_object_section' || (action === 'upsert_object_section' && asString(body.section_id));
+  const entityName = planActions.has(action) ? 'ObjectSecurityPlan' : sectionAction ? 'ObjectSection' : null;
+  if (!entityName) return null;
+  const keyHash = await sha256(idempotencyKey);
+  const records = await getEntity(base44, entityName).filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (records.length > 1) throw new ApiError(409, 'Beveiligingsplanmutatie is niet eenduidig; handmatige reconciliatie vereist');
+  if (!records.length) return null;
+  const record = records[0];
+  const recoveries = record.customer_platform_mutation_recoveries;
+  const recovery = recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries)
+    ? recoveries[keyHash]
+    : record.customer_platform_last_mutation_key_hash === keyHash
+      ? record.customer_platform_last_mutation_recovery
+      : null;
+  const expectedId = entityName === 'ObjectSecurityPlan'
+    ? requireString(body, 'security_plan_id')
+    : requireString(body, 'section_id');
+  if (
+    record.id !== expectedId || record.customer_id !== requireString(body, 'customer_id') ||
+    record.object_id !== requireString(body, 'object_id') || !recovery || recovery.action !== action ||
+    recovery.actor_id !== user.id || recovery.request_fingerprint !== requestFingerprint ||
+    recovery.mutation_target !== target || !recovery.result
+  ) rejectIdempotencyReuse();
+  await requireCustomerObjectScope(base44, body);
+  return recovery.result as LooseRecord;
+}
+
+async function assertSecurityPlanRevisionReferences(
+  plan: LooseRecord,
+  revision: LooseRecord,
+  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[] },
+) {
+  const readiness = securityPlanStructuralReadiness(
+    plan,
+    revision,
+    references.sections,
+    references.floorplans,
+    references.installations,
+  );
+  const invalidReferenceCodes = new Set([
+    'section_unavailable', 'step_section_unavailable', 'step_installation_unavailable',
+    'floorplan_unavailable', 'floorplan_revision_mismatch', 'route_floorplan_missing',
+    'route_step_unavailable', 'route_section_unavailable',
+  ]);
+  const invalidReferences = readiness.blocking_issues.filter((issue: LooseRecord) => invalidReferenceCodes.has(issue.code));
+  if (invalidReferences.length) {
+    throw new ApiError(409, 'Het plan bevat verwijzingen die niet actief binnen dit object beschikbaar zijn', {
+      issues: invalidReferences,
+    });
+  }
+  return readiness;
+}
+
+function legacyPlanMirrors(identity: LooseRecord, revision: LooseRecord) {
+  const instructionTexts = (Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks : [])
+    .flatMap((block: LooseRecord) => Array.isArray(block.steps) ? block.steps : [])
+    .map((step: LooseRecord) => asString(step.instruction))
+    .filter(Boolean)
+    .map((instruction: string) => instruction.slice(0, 2000))
+    .slice(0, 200);
+  return {
+    category: securityPlanLegacyCategory(identity.task_type),
+    title: identity.variant_name,
+    description: revision.summary || null,
+    scope_type: revision.section_policy === 'not_applicable' ? 'not_applicable' : 'partial',
+    duration_minutes: revision.duration_mode === 'fixed' ? revision.duration_minutes : null,
+    instructions: instructionTexts,
+  };
+}
+
+function revisionContentPatch(revision: LooseRecord) {
+  return pick(revision, [
+    'summary', 'duration_mode', 'duration_minutes', 'section_policy', 'default_section_ids', 'allowed_section_ids',
+    'instruction_blocks', 'floorplan_id', 'floorplan_revision', 'route_overlay', 'readiness_snapshot', 'content_checksum',
+    'mutation_idempotency_key', 'mutation_request_fingerprint', 'mutation_actor_user_id', 'mutation_target',
+    'migration_review_required',
+  ]);
+}
+
+async function securityPlanContentChecksum(plan: LooseRecord, revision: LooseRecord) {
+  return sha256(JSON.stringify(canonicalMutationValue({
+    schema_version: 'loq-security-plan-v2',
+    plan: pick(plan, ['customer_id', 'object_id', 'task_type', 'custom_task_type', 'variant_name', 'execution_mode']),
+    revision: pick(revision, [
+      'revision_number', 'summary', 'duration_mode', 'duration_minutes', 'section_policy', 'default_section_ids',
+      'allowed_section_ids', 'instruction_blocks', 'floorplan_id', 'floorplan_revision', 'route_overlay',
+    ]),
+  })));
+}
+
+function validateCreationReplay(record: LooseRecord, user: LooseRecord, requestFingerprint: string, target: string) {
+  if (
+    record.creation_actor_user_id !== user.id || record.creation_request_fingerprint !== requestFingerprint ||
+    record.creation_mutation_target !== target
+  ) rejectIdempotencyReuse();
+}
+
+function securityPlanMutationResult(
+  plan: LooseRecord,
+  revision: LooseRecord | null,
+  readiness: LooseRecord | null,
+  changes: LooseRecord[],
+  extra: LooseRecord = {},
+) {
+  return {
+    security_plan: securityPlanMutationSummary(plan),
+    revision: safeSecurityPlanRevisionSummary(revision, readiness),
+    readiness,
+    changes,
+    customer_id: plan.customer_id,
+    object_id: plan.object_id,
+    ...extra,
+    resource_type: extra.resource_type || 'ObjectSecurityPlan',
+    resource_id: extra.resource_id || plan.id,
+    category: extra.category || 'operations',
+  };
+}
+
+function securityPlanMutationLockVersion(object: LooseRecord) {
+  const value = Number(object.security_plan_mutation_lock_version);
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function securityPlanMutationLockVersionQuery(object: LooseRecord) {
+  const value = object.security_plan_mutation_lock_version;
+  return Number.isInteger(value) && value >= 0
+    ? { security_plan_mutation_lock_version: value }
+    : { $or: [
+      { security_plan_mutation_lock_version: null },
+      { security_plan_mutation_lock_version: { $exists: false } },
+    ] };
+}
+
+async function reserveSecurityPlanMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  objectId: string,
+  action: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const ownerToken = crypto.randomUUID();
+  const keyHash = await sha256(idempotencyKey);
+  const reservedAt = nowIso();
+  const lockTtlMs = action === 'migrate_legacy_object_security_plans'
+    ? SECURITY_PLAN_MIGRATION_LOCK_TTL_MS
+    : SECURITY_PLAN_MUTATION_LOCK_TTL_MS;
+  const lock = {
+    owner_token: ownerToken,
+    key_hash: keyHash,
+    actor_id: user.id,
+    action,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    reserved_at: reservedAt,
+    expires_at: new Date(Date.parse(reservedAt) + lockTtlMs).toISOString(),
+  };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const object = await requireRecord(base44, 'SurveillanceObject', objectId, 'Object');
+    const current = object.security_plan_mutation_lock;
+    if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
+      const sameRequest = current.key_hash === keyHash && current.actor_id === user.id && current.action === action &&
+        current.request_fingerprint === requestFingerprint && current.mutation_target === target;
+      throw new ApiError(409, sameRequest
+        ? 'Deze beveiligingsplanmutatie is nog in verwerking; probeer opnieuw'
+        : 'Een andere beveiligingsplanmutatie op dit object is nog in verwerking; probeer opnieuw', {
+        retryable: true,
+        reservation_expires_at: current.expires_at || null,
+      });
+    }
+    const currentVersion = securityPlanMutationLockVersion(object);
+    const hasPersistedVersion = Number.isInteger(object.security_plan_mutation_lock_version) &&
+      object.security_plan_mutation_lock_version >= 0;
+    const update = hasPersistedVersion
+      ? { $set: { security_plan_mutation_lock: lock }, $inc: { security_plan_mutation_lock_version: 1 } }
+      : { $set: { security_plan_mutation_lock: lock, security_plan_mutation_lock_version: 1 } };
+    const result = await getEntity(base44, 'SurveillanceObject').updateMany(
+      { id: object.id, ...securityPlanMutationLockVersionQuery(object) },
+      update,
+    );
+    if (result?.success && result.updated === 1) {
+      return { object_id: object.id, owner_token: ownerToken, lock_version: currentVersion + 1 };
+    }
+  }
+  throw new ApiError(409, 'Beveiligingsplanmutatie kon niet veilig worden gereserveerd; probeer opnieuw', { retryable: true });
+}
+
+async function releaseSecurityPlanMutation(base44: LooseRecord, reservation: LooseRecord | null) {
+  if (!reservation) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const object = await getRecord(base44, 'SurveillanceObject', reservation.object_id);
+    if (!object || object.security_plan_mutation_lock?.owner_token !== reservation.owner_token) return;
+    const currentVersion = securityPlanMutationLockVersion(object);
+    if (currentVersion !== reservation.lock_version) return;
+    const result = await getEntity(base44, 'SurveillanceObject').updateMany(
+      { id: object.id, security_plan_mutation_lock_version: currentVersion },
+      { $set: { security_plan_mutation_lock: null }, $inc: { security_plan_mutation_lock_version: 1 } },
+    );
+    if (result?.success && result.updated === 1) return;
+  }
+  throw new ApiError(409, 'Beveiligingsplanslot kon niet veilig worden vrijgegeven; probeer opnieuw', { retryable: true });
+}
+
+async function persistNewSecurityPlan(
+  base44: LooseRecord,
+  user: LooseRecord,
+  scope: { customer: LooseRecord; object: LooseRecord },
+  identity: LooseRecord,
+  revisionData: LooseRecord,
+  action: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[] },
+  sourcePlanId: string | null = null,
+  sourceRevisionId: string | null = null,
+) {
+  const matches = await getEntity(base44, 'ObjectSecurityPlan').filter({ creation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (matches.length > 1) throw new ApiError(409, 'Plan-idempotency is niet eenduidig; handmatige reconciliatie vereist');
+  let plan: LooseRecord;
+  if (matches.length) {
+    plan = matches[0];
+    if (plan.customer_id !== scope.customer.id || plan.object_id !== scope.object.id) rejectIdempotencyReuse();
+    validateCreationReplay(plan, user, requestFingerprint, target);
+    const storedIdentity = normalizedSecurityPlanIdentity({}, plan);
+    if (JSON.stringify(canonicalMutationValue(storedIdentity)) !== JSON.stringify(canonicalMutationValue(identity))) rejectIdempotencyReuse();
+  } else {
+    plan = await getEntity(base44, 'ObjectSecurityPlan').create({
+      customer_id: scope.customer.id,
+      object_id: scope.object.id,
+      ...identity,
+      ...legacyPlanMirrors(identity, revisionData),
+      status: 'draft',
+      current_published_revision_id: null,
+      draft_revision_id: null,
+      latest_revision_number: 0,
+      published_at: null,
+      archived_at: null,
+      archived_by_user_id: null,
+      creation_idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint,
+      creation_actor_user_id: user.id,
+      creation_mutation_target: target,
+      source_plan_id: sourcePlanId,
+      migration_source: null,
+      migration_review_required: false,
+      version: 1,
+    });
+  }
+  let revision = plan.draft_revision_id
+    ? await getRecord(base44, 'ObjectSecurityPlanRevision', plan.draft_revision_id)
+    : null;
+  if (!revision) {
+    const revisionMatches = await getEntity(base44, 'ObjectSecurityPlanRevision').filter({
+      security_plan_id: plan.id,
+      mutation_idempotency_key: idempotencyKey,
+    }, '-created_date', 2);
+    if (revisionMatches.length > 1) throw new ApiError(409, 'Planrevisie-idempotency is niet eenduidig; handmatige reconciliatie vereist');
+    revision = revisionMatches[0] || await getEntity(base44, 'ObjectSecurityPlanRevision').create({
+      security_plan_id: plan.id,
+      customer_id: scope.customer.id,
+      object_id: scope.object.id,
+      revision_number: 1,
+      status: 'draft',
+      ...revisionData,
+      readiness_snapshot: null,
+      content_checksum: null,
+      published_at: null,
+      published_by_user_id: null,
+      superseded_at: null,
+      superseded_by_revision_id: null,
+      created_by_user_id: user.id,
+      mutation_idempotency_key: idempotencyKey,
+      mutation_request_fingerprint: requestFingerprint,
+      mutation_actor_user_id: user.id,
+      mutation_target: target,
+      source_revision_id: sourceRevisionId,
+      migration_source: null,
+      migration_review_required: false,
+      version: 1,
+    });
+  }
+  if (
+    revision.customer_id !== scope.customer.id || revision.object_id !== scope.object.id ||
+    revision.security_plan_id !== plan.id || revision.status !== 'draft'
+  ) throw new ApiError(409, 'Nieuwe planrevisie is niet eenduidig gekoppeld');
+  const projectedPlan = {
+    ...plan,
+    ...identity,
+    ...legacyPlanMirrors(identity, revision),
+    draft_revision_id: revision.id,
+    latest_revision_number: 1,
+    version: versionOf(plan) + (plan.draft_revision_id === revision.id ? 0 : 1),
+  };
+  const readiness = await assertSecurityPlanRevisionReferences(projectedPlan, revision, references);
+  const changes = securityPlanChanges(null, projectedPlan, null, revision);
+  if (plan.draft_revision_id === revision.id) {
+    return securityPlanMutationResult(plan, revision, readiness, changes, { replayed: true });
+  }
+  const recoveryResult = securityPlanMutationResult(projectedPlan, revision, readiness, changes);
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    plan, action, user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  const updatedPlan = await casUpdate(base44, 'ObjectSecurityPlan', plan, versionOf(plan), {
+    ...identity,
+    ...legacyPlanMirrors(identity, revision),
+    draft_revision_id: revision.id,
+    latest_revision_number: 1,
+    ...recoveryPatch,
+  });
+  return securityPlanMutationResult(updatedPlan, revision, readiness, changes);
+}
+
+async function handleCreateObjectSecurityPlan(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw beveiligingsplan verwacht expected_version 0');
+  const scope = await requireCustomerObjectForMutation(base44, body);
+  const data = requireObject(body);
+  const identity = normalizedSecurityPlanIdentity(data);
+  const revisionData = normalizedSecurityPlanRevisionData(data);
+  const references = await securityPlanReferenceData(base44, scope.customer.id, scope.object.id);
+  return persistNewSecurityPlan(
+    base44, user, scope, identity, revisionData, 'create_object_security_plan',
+    idempotencyKey, requestFingerprint, target, references,
+  );
+}
+
+async function handleSaveObjectSecurityPlanDraft(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, plan } = await requireSecurityPlan(base44, body, true);
+  if (versionOf(plan) !== expectedVersion) throw new ApiError(409, 'Beveiligingsplan is intussen gewijzigd');
+  if (securityPlanMigrationRequired(plan)) throw new ApiError(409, 'Migreer dit bestaande plan voordat het wordt gewijzigd');
+  const data = requireObject(body);
+  const identity = normalizedSecurityPlanIdentity(data, plan);
+  let draft = plan.draft_revision_id
+    ? await requireRecord(base44, 'ObjectSecurityPlanRevision', plan.draft_revision_id, 'Conceptrevisie')
+    : null;
+  if (draft && (
+    draft.security_plan_id !== plan.id || draft.customer_id !== customer.id || draft.object_id !== object.id ||
+    draft.status !== 'draft'
+  )) {
+    throw new ApiError(409, 'De gekoppelde conceptrevisie is ongeldig');
+  }
+  const existingMutationRevisions = await getEntity(base44, 'ObjectSecurityPlanRevision').filter({
+    security_plan_id: plan.id,
+    mutation_idempotency_key: idempotencyKey,
+  }, '-created_date', 2);
+  if (existingMutationRevisions.length > 1) throw new ApiError(409, 'Conceptmutatie is niet eenduidig; handmatige reconciliatie vereist');
+  const alreadySaved = existingMutationRevisions[0] || null;
+  if (alreadySaved && (
+    alreadySaved.mutation_request_fingerprint !== requestFingerprint || alreadySaved.mutation_actor_user_id !== user.id ||
+    alreadySaved.mutation_target !== target
+  )) rejectIdempotencyReuse();
+  const baseRevision = draft || (plan.current_published_revision_id
+    ? await requireRecord(base44, 'ObjectSecurityPlanRevision', plan.current_published_revision_id, 'Gepubliceerde revisie')
+    : null);
+  if (baseRevision && (
+    baseRevision.security_plan_id !== plan.id || baseRevision.customer_id !== customer.id || baseRevision.object_id !== object.id
+  )) throw new ApiError(409, 'Basisrevisie hoort niet bij dit beveiligingsplan');
+  const revisionData = normalizedSecurityPlanRevisionData(data, baseRevision);
+  const revisionNumber = draft
+    ? Number(draft.revision_number)
+    : Math.max(Number(plan.latest_revision_number || 0), Number(baseRevision?.revision_number || 0)) + 1;
+  const references = await securityPlanReferenceData(base44, customer.id, object.id);
+  const projectedPlan = { ...plan, ...identity };
+  const projectedRevision = {
+    ...(draft || {}),
+    security_plan_id: plan.id,
+    customer_id: customer.id,
+    object_id: object.id,
+    revision_number: revisionNumber,
+    status: 'draft',
+    ...revisionData,
+  };
+  const readiness = await assertSecurityPlanRevisionReferences(projectedPlan, projectedRevision, references);
+  const beforeRevision = draft ? { ...draft } : baseRevision;
+  let savedRevision: LooseRecord;
+  if (alreadySaved) {
+    savedRevision = alreadySaved;
+  } else if (draft) {
+    savedRevision = await casUpdate(base44, 'ObjectSecurityPlanRevision', draft, versionOf(draft), {
+      ...revisionData,
+      mutation_idempotency_key: idempotencyKey,
+      mutation_request_fingerprint: requestFingerprint,
+      mutation_actor_user_id: user.id,
+      mutation_target: target,
+      readiness_snapshot: null,
+      content_checksum: null,
+      migration_review_required: false,
+    });
+  } else {
+    savedRevision = await getEntity(base44, 'ObjectSecurityPlanRevision').create({
+      ...projectedRevision,
+      readiness_snapshot: null,
+      content_checksum: null,
+      published_at: null,
+      published_by_user_id: null,
+      superseded_at: null,
+      superseded_by_revision_id: null,
+      created_by_user_id: user.id,
+      mutation_idempotency_key: idempotencyKey,
+      mutation_request_fingerprint: requestFingerprint,
+      mutation_actor_user_id: user.id,
+      mutation_target: target,
+      source_revision_id: baseRevision?.id || null,
+      migration_source: null,
+      migration_review_required: false,
+      version: 1,
+    });
+  }
+  const afterPlan = {
+    ...projectedPlan,
+    ...legacyPlanMirrors(identity, savedRevision),
+    draft_revision_id: savedRevision.id,
+    latest_revision_number: Math.max(Number(plan.latest_revision_number || 0), revisionNumber),
+    version: expectedVersion + 1,
+    migration_review_required: false,
+  };
+  const changes = securityPlanChanges(plan, afterPlan, beforeRevision || null, savedRevision);
+  const recoveryResult = securityPlanMutationResult(afterPlan, savedRevision, readiness, changes);
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    plan, 'save_object_security_plan_draft', user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  try {
+    const updatedPlan = await casUpdate(base44, 'ObjectSecurityPlan', plan, expectedVersion, {
+      ...identity,
+      ...legacyPlanMirrors(identity, savedRevision),
+      draft_revision_id: savedRevision.id,
+      latest_revision_number: afterPlan.latest_revision_number,
+      migration_review_required: false,
+      ...recoveryPatch,
+    });
+    return securityPlanMutationResult(updatedPlan, savedRevision, readiness, changes);
+  } catch (error) {
+    if (draft && !alreadySaved) {
+      await casUpdateLatest(base44, 'ObjectSecurityPlanRevision', savedRevision.id, revisionContentPatch(draft)).catch(() => null);
+    }
+    throw error;
+  }
+}
+
+async function handleDuplicateObjectSecurityPlan(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, plan } = await requireSecurityPlan(base44, body, true);
+  if (versionOf(plan) !== expectedVersion) throw new ApiError(409, 'Bronplan is intussen gewijzigd');
+  if (securityPlanMigrationRequired(plan)) throw new ApiError(409, 'Migreer het bronplan voordat het wordt gedupliceerd');
+  const sourceRevisionId = plan.draft_revision_id || plan.current_published_revision_id;
+  const sourceRevision = await requireRecord(base44, 'ObjectSecurityPlanRevision', sourceRevisionId, 'Bronrevisie');
+  if (
+    sourceRevision.security_plan_id !== plan.id || sourceRevision.customer_id !== customer.id ||
+    sourceRevision.object_id !== object.id
+  ) throw new ApiError(409, 'Bronrevisie hoort niet bij dit beveiligingsplan');
+  const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data as LooseRecord : {};
+  const sourceIdentity = normalizedSecurityPlanIdentity({}, plan);
+  const variantName = objectText(data.variant_name || `${sourceIdentity.variant_name} (kopie)`, 'Variantnaam', 200, false);
+  const identity = { ...sourceIdentity, variant_name: variantName };
+  const revisionData = normalizedSecurityPlanRevisionData(sourceRevision);
+  const references = await securityPlanReferenceData(base44, customer.id, object.id);
+  return persistNewSecurityPlan(
+    base44, user, { customer, object }, identity, revisionData, 'duplicate_object_security_plan',
+    idempotencyKey, requestFingerprint, target, references, plan.id, sourceRevision.id,
+  );
+}
+
+async function handlePublishObjectSecurityPlan(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, plan } = await requireSecurityPlan(base44, body, true);
+  if (versionOf(plan) !== expectedVersion) throw new ApiError(409, 'Beveiligingsplan is intussen gewijzigd');
+  if (securityPlanMigrationRequired(plan)) throw new ApiError(409, 'Migreer dit bestaande plan voordat het wordt gepubliceerd');
+  const draft = await requireRecord(base44, 'ObjectSecurityPlanRevision', asString(plan.draft_revision_id), 'Conceptrevisie');
+  if (
+    draft.security_plan_id !== plan.id || draft.customer_id !== customer.id || draft.object_id !== object.id ||
+    !['draft', 'published'].includes(draft.status)
+  ) {
+    throw new ApiError(409, 'Conceptrevisie hoort niet bij dit beveiligingsplan');
+  }
+  const references = await securityPlanReferenceData(base44, customer.id, object.id);
+  const readiness = securityPlanStructuralReadiness(plan, draft, references.sections, references.floorplans, references.installations);
+  if (!readiness.ready_to_publish) {
+    throw new ApiError(409, 'Beveiligingsplan is nog niet gereed voor publicatie', { readiness });
+  }
+  const checksum = await securityPlanContentChecksum(plan, draft);
+  let publishedDraft = draft;
+  if (draft.status === 'published') {
+    if (
+      draft.publication_idempotency_key !== idempotencyKey || draft.publication_request_fingerprint !== requestFingerprint ||
+      draft.publication_actor_user_id !== user.id || draft.publication_mutation_target !== target ||
+      draft.content_checksum !== checksum
+    ) rejectIdempotencyReuse();
+  } else {
+    publishedDraft = await casUpdate(base44, 'ObjectSecurityPlanRevision', draft, versionOf(draft), {
+      status: 'published',
+      readiness_snapshot: readiness,
+      content_checksum: checksum,
+      published_at: nowIso(),
+      published_by_user_id: user.id,
+      publication_idempotency_key: idempotencyKey,
+      publication_request_fingerprint: requestFingerprint,
+      publication_actor_user_id: user.id,
+      publication_mutation_target: target,
+      migration_review_required: false,
+    });
+  }
+  let previousPublished: LooseRecord | null = null;
+  if (plan.current_published_revision_id && plan.current_published_revision_id !== publishedDraft.id) {
+    previousPublished = await requireRecord(base44, 'ObjectSecurityPlanRevision', plan.current_published_revision_id, 'Vorige publicatie');
+    if (
+      previousPublished.security_plan_id !== plan.id || previousPublished.customer_id !== customer.id ||
+      previousPublished.object_id !== object.id
+    ) throw new ApiError(409, 'Vorige publicatie hoort niet bij dit beveiligingsplan');
+    if (previousPublished.status === 'published') {
+      previousPublished = await casUpdate(base44, 'ObjectSecurityPlanRevision', previousPublished, versionOf(previousPublished), {
+        status: 'superseded',
+        superseded_at: nowIso(),
+        superseded_by_revision_id: publishedDraft.id,
+      });
+    } else if (previousPublished.status !== 'superseded' || previousPublished.superseded_by_revision_id !== publishedDraft.id) {
+      throw new ApiError(409, 'Vorige publicatie heeft een onverwachte status');
+    }
+  }
+  const projectedPlan = {
+    ...plan,
+    status: 'published',
+    current_published_revision_id: publishedDraft.id,
+    draft_revision_id: null,
+    published_at: publishedDraft.published_at,
+    version: expectedVersion + 1,
+    migration_review_required: false,
+  };
+  const changes = securityPlanChanges(plan, projectedPlan, draft, publishedDraft, publishedDraft.revision_number);
+  const recoveryResult = securityPlanMutationResult(projectedPlan, publishedDraft, readiness, changes, {
+    publication_checksum: checksum,
+    publication_revision: publishedDraft.revision_number,
+    resource_type: 'ObjectSecurityPlanRevision',
+    resource_id: publishedDraft.id,
+    category: 'publication',
+  });
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    plan, 'publish_object_security_plan', user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  try {
+    const updatedPlan = await casUpdate(base44, 'ObjectSecurityPlan', plan, expectedVersion, {
+      status: 'published',
+      current_published_revision_id: publishedDraft.id,
+      draft_revision_id: null,
+      published_at: publishedDraft.published_at,
+      migration_review_required: false,
+      ...legacyPlanMirrors(normalizedSecurityPlanIdentity({}, plan), publishedDraft),
+      ...recoveryPatch,
+    });
+    return securityPlanMutationResult(updatedPlan, publishedDraft, readiness, changes, {
+      publication_checksum: checksum,
+      publication_revision: publishedDraft.revision_number,
+      resource_type: 'ObjectSecurityPlanRevision',
+      resource_id: publishedDraft.id,
+      category: 'publication',
+    });
+  } catch (error) {
+    if (draft.status === 'draft') {
+      await casUpdateLatest(base44, 'ObjectSecurityPlanRevision', publishedDraft.id, {
+        status: 'draft',
+        readiness_snapshot: null,
+        content_checksum: null,
+        published_at: null,
+        published_by_user_id: null,
+        publication_idempotency_key: null,
+        publication_request_fingerprint: null,
+        publication_actor_user_id: null,
+        publication_mutation_target: null,
+        migration_review_required: draft.migration_review_required === true,
+      }).catch(() => null);
+    }
+    if (previousPublished?.status === 'superseded' && previousPublished.superseded_by_revision_id === publishedDraft.id) {
+      await casUpdateLatest(base44, 'ObjectSecurityPlanRevision', previousPublished.id, {
+        status: 'published',
+        superseded_at: null,
+        superseded_by_revision_id: null,
+      }).catch(() => null);
+    }
+    throw error;
+  }
+}
+
+async function handleArchiveObjectSecurityPlan(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { plan } = await requireSecurityPlan(base44, body, true);
+  if (versionOf(plan) !== expectedVersion) throw new ApiError(409, 'Beveiligingsplan is intussen gewijzigd');
+  const reason = objectText(body.reason, 'Reden', 500, true);
+  const projected = { ...plan, status: 'archived', archived_at: nowIso(), archived_by_user_id: user.id, version: expectedVersion + 1 };
+  const changes = securityPlanChanges(plan, projected, null, null);
+  const recoveryResult = securityPlanMutationResult(projected, null, null, changes, { reason });
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    plan, 'archive_object_security_plan', user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  const updated = await casUpdate(base44, 'ObjectSecurityPlan', plan, expectedVersion, {
+    status: 'archived',
+    archived_at: projected.archived_at,
+    archived_by_user_id: user.id,
+    ...recoveryPatch,
+  });
+  return securityPlanMutationResult(updated, null, null, changes, { reason });
+}
+
+function normalizedObjectSectionGeometry(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Sectiegeometrie is ongeldig');
+  const geometry = value as LooseRecord;
+  const points = geometry.points;
+  if (!Array.isArray(points) || points.length < 3 || points.length > 1000) {
+    throw new ApiError(400, 'Een sectievlak heeft 3 tot en met 1000 punten nodig');
+  }
+  return {
+    type: 'polygon',
+    coordinate_space: 'normalized',
+    points: points.map((rawPoint, index) => {
+      if (!rawPoint || typeof rawPoint !== 'object' || Array.isArray(rawPoint)) throw new ApiError(400, `Sectiepunt ${index + 1} is ongeldig`);
+      const point = rawPoint as LooseRecord;
+      return {
+        x: normalizedPlanCoordinate(point.x, `Sectiepunt ${index + 1}.x`),
+        y: normalizedPlanCoordinate(point.y, `Sectiepunt ${index + 1}.y`),
+      };
+    }),
+  };
+}
+
+function normalizedObjectSectionData(data: LooseRecord, current: LooseRecord | null = null) {
+  assertNoSecurityPlanSecretFields(data, 'data');
+  const source = { ...(current || {}), ...data };
+  const code = objectText(source.code, 'Sectiecode', 40, false) as string;
+  const codeNormalized = normalizeName(code).replace(/\s+/g, '');
+  if (!codeNormalized) throw new ApiError(400, 'Sectiecode bevat geen bruikbare tekens');
+  const floorplanId = asString(source.floorplan_id) || null;
+  const floorplanRevision = source.floorplan_revision === null || source.floorplan_revision === undefined || source.floorplan_revision === ''
+    ? null
+    : requireInteger(source.floorplan_revision, 'floorplan_revision', 1);
+  if (Boolean(floorplanId) !== Boolean(floorplanRevision)) {
+    throw new ApiError(400, 'Plattegrond en plattegrondrevisie moeten samen worden gekozen');
+  }
+  return {
+    code,
+    code_normalized: codeNormalized,
+    name: objectText(source.name, 'Sectienaam', 160, false),
+    description: objectText(source.description, 'Sectieomschrijving', 2000, true),
+    floorplan_id: floorplanId,
+    floorplan_revision: floorplanRevision,
+    geometry: normalizedObjectSectionGeometry(source.geometry),
+  };
+}
+
+function objectSectionMutationSummary(section: LooseRecord) {
+  return pick(safeObjectSection(section, false), [
+    'id', 'customer_id', 'object_id', 'code', 'code_normalized', 'name', 'floorplan_id', 'floorplan_revision',
+    'status', 'version',
+  ]);
+}
+
+function objectSectionMutationResult(section: LooseRecord, changes: LooseRecord[], extra: LooseRecord = {}) {
+  return {
+    section: objectSectionMutationSummary(section),
+    changes,
+    customer_id: section.customer_id,
+    object_id: section.object_id,
+    ...extra,
+    resource_type: 'ObjectSection',
+    resource_id: section.id,
+    category: 'operations',
+  };
+}
+
+async function assertObjectSectionFloorplan(
+  base44: LooseRecord,
+  objectId: string,
+  data: LooseRecord,
+) {
+  if (!data.floorplan_id) return;
+  const floorplan = await requireRecord(base44, 'ObjectFloorPlan', data.floorplan_id, 'Plattegrond');
+  if (floorplan.object_id !== objectId || Number(floorplan.revision || 1) !== Number(data.floorplan_revision)) {
+    throw new ApiError(409, 'Sectievlak hoort niet bij de gekozen objectplattegrondrevisie');
+  }
+}
+
+async function assertUniqueObjectSectionCode(
+  base44: LooseRecord,
+  objectId: string,
+  codeNormalized: string,
+  currentId: string | null,
+) {
+  const matches = await getEntity(base44, 'ObjectSection').filter({
+    object_id: objectId,
+    code_normalized: codeNormalized,
+  }, '-updated_date', 20);
+  if (matches.some((section: LooseRecord) => section.id !== currentId)) {
+    throw new ApiError(409, 'Deze sectiecode wordt al binnen het object gebruikt');
+  }
+}
+
+async function handleUpsertObjectSection(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  const data = requireObject(body);
+  const sectionId = asString(body.section_id);
+  if (!sectionId) {
+    if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe objectsectie verwacht expected_version 0');
+    const normalized = normalizedObjectSectionData(data);
+    const matches = await getEntity(base44, 'ObjectSection').filter({ creation_idempotency_key: idempotencyKey }, '-created_date', 2);
+    if (matches.length > 1) throw new ApiError(409, 'Sectie-idempotency is niet eenduidig; handmatige reconciliatie vereist');
+    if (matches.length) {
+      const replay = matches[0];
+      if (replay.customer_id !== customer.id || replay.object_id !== object.id) rejectIdempotencyReuse();
+      validateCreationReplay(replay, user, requestFingerprint, target);
+      return objectSectionMutationResult(replay, sectionChanges(null, replay), { replayed: true });
+    }
+    await Promise.all([
+      assertObjectSectionFloorplan(base44, object.id, normalized),
+      assertUniqueObjectSectionCode(base44, object.id, normalized.code_normalized, null),
+    ]);
+    const section = await getEntity(base44, 'ObjectSection').create({
+      customer_id: customer.id,
+      object_id: object.id,
+      ...normalized,
+      status: 'active',
+      archived_at: null,
+      archived_by_user_id: null,
+      creation_idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint,
+      creation_actor_user_id: user.id,
+      creation_mutation_target: target,
+      version: 1,
+    });
+    return objectSectionMutationResult(section, sectionChanges(null, section));
+  }
+  const section = await requireRecord(base44, 'ObjectSection', sectionId, 'Objectsectie');
+  if (section.customer_id !== customer.id || section.object_id !== object.id) throw new ApiError(409, 'Objectsectie hoort niet bij dit object');
+  if (section.status === 'archived') throw new ApiError(409, 'Een gearchiveerde objectsectie kan niet worden gewijzigd');
+  if (versionOf(section) !== expectedVersion) throw new ApiError(409, 'Objectsectie is intussen gewijzigd');
+  const normalized = normalizedObjectSectionData(data, section);
+  await Promise.all([
+    assertObjectSectionFloorplan(base44, object.id, normalized),
+    assertUniqueObjectSectionCode(base44, object.id, normalized.code_normalized, section.id),
+  ]);
+  const projected = { ...section, ...normalized, version: expectedVersion + 1 };
+  const changes = sectionChanges(section, projected);
+  const recoveryResult = objectSectionMutationResult(projected, changes);
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    section, 'upsert_object_section', user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  const updated = await casUpdate(base44, 'ObjectSection', section, expectedVersion, { ...normalized, ...recoveryPatch });
+  return objectSectionMutationResult(updated, changes);
+}
+
+function revisionReferencesSection(revision: LooseRecord, sectionId: string) {
+  if (Array.isArray(revision.default_section_ids) && revision.default_section_ids.includes(sectionId)) return true;
+  if (Array.isArray(revision.allowed_section_ids) && revision.allowed_section_ids.includes(sectionId)) return true;
+  for (const block of Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks : []) {
+    if ((Array.isArray(block.steps) ? block.steps : []).some((step: LooseRecord) => step.section_id === sectionId)) return true;
+  }
+  return (Array.isArray(revision.route_overlay?.markers) ? revision.route_overlay.markers : [])
+    .some((marker: LooseRecord) => marker.section_id === sectionId);
+}
+
+async function handleArchiveObjectSection(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  const section = await requireRecord(base44, 'ObjectSection', requireString(body, 'section_id'), 'Objectsectie');
+  if (section.customer_id !== customer.id || section.object_id !== object.id) throw new ApiError(409, 'Objectsectie hoort niet bij dit object');
+  if (section.status === 'archived') throw new ApiError(409, 'Objectsectie is al gearchiveerd');
+  if (versionOf(section) !== expectedVersion) throw new ApiError(409, 'Objectsectie is intussen gewijzigd');
+  const plans = await getEntity(base44, 'ObjectSecurityPlan').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+  }, '-updated_date', 2000);
+  const activePlans = plans.filter((plan: LooseRecord) => plan.status !== 'archived');
+  const revisionIds = [...new Set(activePlans.flatMap((plan: LooseRecord) =>
+    [asString(plan.draft_revision_id), asString(plan.current_published_revision_id)].filter(Boolean)))];
+  const revisions = revisionIds.length
+    ? await getEntity(base44, 'ObjectSecurityPlanRevision').filter({ id: { $in: revisionIds } }, '-revision_number', 5000)
+    : [];
+  const usedBy = revisions.filter((revision: LooseRecord) =>
+    revision.customer_id === customer.id && revision.object_id === object.id &&
+    activePlans.some((plan: LooseRecord) => plan.id === revision.security_plan_id) &&
+    revisionReferencesSection(revision, section.id));
+  if (usedBy.length) {
+    throw new ApiError(409, 'Objectsectie wordt nog gebruikt door een actueel concept of gepubliceerd beveiligingsplan', {
+      security_plan_ids: [...new Set(usedBy.map((revision: LooseRecord) => revision.security_plan_id))],
+    });
+  }
+  const projected = { ...section, status: 'archived', archived_at: nowIso(), archived_by_user_id: user.id, version: expectedVersion + 1 };
+  const changes = sectionChanges(section, projected);
+  const recoveryResult = objectSectionMutationResult(projected, changes);
+  const recoveryPatch = await entityMutationRecoveryPatch(
+    section, 'archive_object_section', user, idempotencyKey, requestFingerprint, target, recoveryResult,
+  );
+  const updated = await casUpdate(base44, 'ObjectSection', section, expectedVersion, {
+    status: 'archived',
+    archived_at: projected.archived_at,
+    archived_by_user_id: user.id,
+    ...recoveryPatch,
+  });
+  return objectSectionMutationResult(updated, changes);
+}
+
+function safeLegacySecurityPlanText(value: unknown) {
+  const text = asString(value);
+  if (!text) return null;
+  if (/(?:alarm|schakel|reset|operator|service|pin|wachtwoord|password)\s*-?\s*code\s*[:=]\s*\S+/i.test(text)) {
+    return '[Gevoelige legacy-informatie niet overgenomen; koppel de beveiligde installatiegegevens opnieuw.]';
+  }
+  return text.slice(0, 5000);
+}
+
+function legacySecurityPlanRevisionData(plan: LooseRecord) {
+  const instructions = (Array.isArray(plan.instructions) ? plan.instructions : [])
+    .map(safeLegacySecurityPlanText)
+    .filter(Boolean) as string[];
+  const description = safeLegacySecurityPlanText(plan.description);
+  if (!instructions.length && description) instructions.push(description);
+  return {
+    summary: description,
+    duration_mode: Number.isInteger(plan.duration_minutes) ? 'fixed' : 'none',
+    duration_minutes: Number.isInteger(plan.duration_minutes) ? plan.duration_minutes : null,
+    section_policy: 'not_applicable',
+    default_section_ids: [],
+    allowed_section_ids: [],
+    instruction_blocks: instructions.length ? [{
+      id: 'legacy-instructions',
+      sequence: 1,
+      title: 'Bestaande instructies',
+      description: null,
+      steps: instructions.map((instruction: string, index: number) => ({
+        id: `legacy-step-${index + 1}`,
+        sequence: index + 1,
+        title: `Stap ${index + 1}`,
+        instruction,
+        action_type: 'instruction',
+        section_id: null,
+        installation_id: null,
+        floorplan_marker_id: null,
+        required: true,
+      })),
+    }] : [],
+    floorplan_id: null,
+    floorplan_revision: null,
+    route_overlay: null,
+  };
+}
+
+async function handleMigrateLegacyObjectSecurityPlans(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Legacy planmigratie verwacht expected_version 0');
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  const dryRun = body.dry_run !== false;
+  const plans = await getEntity(base44, 'ObjectSecurityPlan').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+  }, '+created_date', 2000);
+  const items: LooseRecord[] = [];
+  let migratedCount = 0;
+  let reviewRequiredCount = 0;
+  let wouldMigrateCount = 0;
+  for (let plan of plans) {
+    if (!securityPlanMigrationRequired(plan)) {
+      const migratedByThisRequest = plan.migration_idempotency_key === `${idempotencyKey}:plan:${plan.id}`;
+      if (migratedByThisRequest) {
+        migratedCount += 1;
+        reviewRequiredCount += 1;
+      }
+      items.push({
+        security_plan_id: plan.id,
+        revision_id: plan.draft_revision_id || plan.current_published_revision_id || null,
+        status: migratedByThisRequest ? 'migrated_to_draft' : 'already_migrated',
+        review_required: plan.migration_review_required === true,
+        version: versionOf(plan),
+      });
+      continue;
+    }
+    if (asString(plan.task_type) && asString(plan.creation_idempotency_key)) {
+      reviewRequiredCount += 1;
+      items.push({
+        security_plan_id: plan.id,
+        revision_id: null,
+        status: 'partial_v2_create_requires_recovery',
+        review_required: true,
+      });
+      continue;
+    }
+    reviewRequiredCount += 1;
+    if (dryRun) {
+      wouldMigrateCount += 1;
+      items.push({ security_plan_id: plan.id, revision_id: null, status: 'would_migrate', review_required: true });
+      continue;
+    }
+    const taskType = securityPlanTaskType(plan);
+    const identity = {
+      task_type: taskType,
+      custom_task_type: taskType === 'other' ? asString(plan.custom_task_type) || 'Legacy taaktype' : null,
+      variant_name: asString(plan.variant_name || plan.title) || 'Bestaand beveiligingsplan',
+      execution_mode: asString(plan.execution_mode) || legacySecurityPlanExecutionMode(taskType),
+    };
+    const revisionData = legacySecurityPlanRevisionData(plan);
+    const existingRevisions = await getEntity(base44, 'ObjectSecurityPlanRevision').filter({
+      security_plan_id: plan.id,
+      migration_source: 'legacy_object_security_plan',
+    }, '-revision_number', 2);
+    if (existingRevisions.length > 1) throw new ApiError(409, `Legacy plan ${plan.id} heeft meerdere migratierevisies`);
+    if (existingRevisions[0] && (
+      existingRevisions[0].customer_id !== customer.id || existingRevisions[0].object_id !== object.id
+    )) throw new ApiError(409, `Legacy plan ${plan.id} heeft een migratierevisie buiten de objectscope`);
+    const revision = existingRevisions[0] || await getEntity(base44, 'ObjectSecurityPlanRevision').create({
+      security_plan_id: plan.id,
+      customer_id: customer.id,
+      object_id: object.id,
+      revision_number: 1,
+      status: 'draft',
+      ...revisionData,
+      readiness_snapshot: null,
+      content_checksum: null,
+      published_at: null,
+      published_by_user_id: null,
+      superseded_at: null,
+      superseded_by_revision_id: null,
+      created_by_user_id: user.id,
+      mutation_idempotency_key: `${idempotencyKey}:plan:${plan.id}`,
+      mutation_request_fingerprint: null,
+      mutation_actor_user_id: user.id,
+      mutation_target: `legacy-migration:${plan.id}`,
+      source_revision_id: null,
+      migration_source: 'legacy_object_security_plan',
+      migration_review_required: true,
+      version: 1,
+    });
+    plan = await casUpdate(base44, 'ObjectSecurityPlan', plan, versionOf(plan), {
+      ...identity,
+      ...legacyPlanMirrors(identity, revision),
+      status: plan.status === 'archived' ? 'archived' : 'draft',
+      current_published_revision_id: null,
+      draft_revision_id: revision.id,
+      latest_revision_number: 1,
+      migration_source: 'legacy_object_security_plan',
+      migration_review_required: true,
+      migration_idempotency_key: `${idempotencyKey}:plan:${plan.id}`,
+      migration_completed_at: nowIso(),
+    });
+    migratedCount += 1;
+    items.push({
+      security_plan_id: plan.id,
+      revision_id: revision.id,
+      status: 'migrated_to_draft',
+      plan_status: plan.status,
+      review_required: true,
+      version: versionOf(plan),
+    });
+  }
+  return {
+    dry_run: dryRun,
+    items,
+    migrated_count: migratedCount,
+    would_migrate_count: dryRun ? wouldMigrateCount : 0,
+    review_required_count: reviewRequiredCount,
+    customer_id: customer.id,
+    object_id: object.id,
+    resource_type: 'ObjectSecurityPlan',
+    resource_id: object.id,
+    category: 'system',
+  };
+}
+
+async function handleObjectSecurityPlanMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (action === 'migrate_legacy_object_security_plans' && body.dry_run !== false) {
+    return handleMigrateLegacyObjectSecurityPlans(base44, user, body, expectedVersion, idempotencyKey);
+  }
+  await requireCustomerObjectForMutation(base44, body);
+  const reservation = await reserveSecurityPlanMutation(
+    base44,
+    user,
+    requireString(body, 'object_id'),
+    action,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    switch (action) {
+      case 'create_object_security_plan':
+        return await handleCreateObjectSecurityPlan(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'save_object_security_plan_draft':
+        return await handleSaveObjectSecurityPlanDraft(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'duplicate_object_security_plan':
+        return await handleDuplicateObjectSecurityPlan(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'publish_object_security_plan':
+        return await handlePublishObjectSecurityPlan(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'archive_object_security_plan':
+        return await handleArchiveObjectSecurityPlan(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'upsert_object_section':
+        return await handleUpsertObjectSection(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'archive_object_section':
+        return await handleArchiveObjectSection(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      case 'migrate_legacy_object_security_plans':
+        return await handleMigrateLegacyObjectSecurityPlans(base44, user, body, expectedVersion, idempotencyKey);
+      default:
+        throw new ApiError(400, 'Onbekende beveiligingsplanmutatie');
+    }
+  } finally {
+    try {
+      await releaseSecurityPlanMutation(base44, reservation);
+    } catch (error) {
+      console.error('[customerPlatformApi] security plan mutation lock release failed', body.object_id, error);
+    }
+  }
+}
+
 async function createMigrationIssue(
   base44: LooseRecord,
   user: LooseRecord,
@@ -10460,6 +12362,17 @@ async function executeMutation(
     case 'update_object_relationship':
     case 'archive_object_relationship':
       return handleObjectRelationshipMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    case 'create_object_security_plan':
+    case 'save_object_security_plan_draft':
+    case 'duplicate_object_security_plan':
+    case 'publish_object_security_plan':
+    case 'archive_object_security_plan':
+    case 'upsert_object_section':
+    case 'archive_object_section':
+    case 'migrate_legacy_object_security_plans':
+      return handleObjectSecurityPlanMutation(
+        base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target,
+      );
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':
@@ -10600,6 +12513,9 @@ export async function handleCustomerPlatformRequest(req: Request) {
       if (action === 'list_object_keys') return json(await handleListObjectKeys(base44, body));
       if (action === 'list_object_installations') return json(await handleListObjectInstallations(base44, body));
       if (action === 'list_object_relationships') return json(await handleListObjectRelationships(base44, body));
+      if (action === 'list_object_security_plans') return json(await handleListObjectSecurityPlans(base44, body));
+      if (action === 'get_object_security_plan') return json(await handleGetObjectSecurityPlan(base44, body));
+      if (action === 'list_object_sections') return json(await handleListObjectSections(base44, body));
       if (action === 'list_commercial') return json(await listRecords(base44, body, ['quote', 'contract', 'rate']));
       if (action === 'list_billing') return json(await listRecords(base44, body, ['candidate', 'invoice', 'payment', 'reminder', 'run']));
       if (action === 'validate_contract_rates') {
@@ -10662,6 +12578,14 @@ export async function handleCustomerPlatformRequest(req: Request) {
       idempotencyKey,
       requestFingerprint,
       target,
+    ) || await securityPlanMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
     );
     if (recovered) {
       await recordMutationResult(
@@ -10686,7 +12610,11 @@ export async function handleCustomerPlatformRequest(req: Request) {
       requestFingerprint,
       target,
     );
-    if (!(action === 'migrate_legacy_customers' && result.dry_run)) {
+    const isReadOnlyDryRun = result.dry_run && [
+      'migrate_legacy_customers',
+      'migrate_legacy_object_security_plans',
+    ].includes(action);
+    if (!isReadOnlyDryRun) {
       await recordMutationResult(
         base44,
         user,

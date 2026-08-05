@@ -1,8 +1,0 @@
-import React from "react";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { ChoiceCard, Field, StepHeading } from "./ObjectWizardUi";
-
-export default function SecurityPlanDetailsStep({ form, category, onChange }) {
-  return <div className="space-y-4"><StepHeading title="Basisgegevens" description={`Maak een herkenbare planvariant binnen ${category.label}.`} /><Field label="Naam van het plan" htmlFor="security-plan-title" required><Input id="security-plan-title" value={form.title} onChange={event => onChange({ ...form, title: event.target.value })} placeholder="Bijvoorbeeld Werkdagen of Vrijdag volledig" /></Field><Field label="Omschrijving" htmlFor="security-plan-description" hint="Optioneel"><Textarea id="security-plan-description" value={form.description} onChange={event => onChange({ ...form, description: event.target.value })} placeholder="Waarvoor wordt deze variant gebruikt?" /></Field>{category.supportsScope && <Field label="Omvang" required><div className="space-y-2"><ChoiceCard selected={form.scope_type === "full"} onClick={() => onChange({ ...form, scope_type: "full" })} title="Volledige ronde" description="Het gehele object" /><ChoiceCard selected={form.scope_type === "partial"} onClick={() => onChange({ ...form, scope_type: "partial" })} title="Gedeeltelijke ronde" description="Een deel of meerdere gebieden" /></div></Field>}</div>;
-}

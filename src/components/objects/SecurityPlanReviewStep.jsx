@@ -1,7 +1,0 @@
-import React from "react";
-import { StepHeading } from "./ObjectWizardUi";
-
-export default function SecurityPlanReviewStep({ form, category }) {
-  const scope = form.scope_type === "full" ? "Volledig" : form.scope_type === "partial" ? "Gedeeltelijk" : "Niet van toepassing";
-  return <div className="space-y-4"><StepHeading title="Controleer het plan" description="Na opslaan kan dit plan later vanuit Taken worden gekozen." /><dl className="grid gap-3 rounded-lg border border-border bg-card p-4 text-xs sm:grid-cols-2"><div><dt className="text-muted-foreground">Categorie</dt><dd className="mt-1 font-medium text-foreground">{category.label}</dd></div><div><dt className="text-muted-foreground">Naam</dt><dd className="mt-1 font-medium text-foreground">{form.title}</dd></div>{category.supportsScope && <div><dt className="text-muted-foreground">Omvang</dt><dd className="mt-1 font-medium text-foreground">{scope}</dd></div>}{category.durationRequired && <div><dt className="text-muted-foreground">Verwachte duur</dt><dd className="mt-1 font-medium text-foreground">{form.duration_minutes} minuten</dd></div>}<div><dt className="text-muted-foreground">Instructies</dt><dd className="mt-1 font-medium text-foreground">{form.instructions.filter(item => item.trim()).length}</dd></div></dl></div>;
-}

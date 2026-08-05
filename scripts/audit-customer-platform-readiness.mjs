@@ -24,6 +24,9 @@ const REQUIRED_ENTITIES = [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectSecurityPlan",
+  "ObjectSecurityPlanRevision",
+  "ObjectSection",
   "CustomerQuote",
   "CustomerQuoteLine",
   "CustomerContract",
@@ -144,7 +147,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 107, "De verwachte 107 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 109, "De verwachte 109 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -155,6 +158,9 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectInstallation.jsonc",
   "ObjectInstallationCredential.jsonc",
   "ObjectRelationship.jsonc",
+  "ObjectSecurityPlan.jsonc",
+  "ObjectSecurityPlanRevision.jsonc",
+  "ObjectSection.jsonc",
   "ThirdPartyOrganization.jsonc",
 ]);
 for (const file of entitySchemaFiles) {
@@ -314,6 +320,8 @@ for (const field of [
   "installation_mutation_lock_version",
   "relationship_mutation_lock",
   "relationship_mutation_lock_version",
+  "security_plan_mutation_lock",
+  "security_plan_mutation_lock_version",
 ]) {
   property("SurveillanceObject", field);
 }
@@ -332,6 +340,9 @@ for (const entity of [
   "ObjectInstallation",
   "ObjectInstallationCredential",
   "ObjectRelationship",
+  "ObjectSecurityPlan",
+  "ObjectSecurityPlanRevision",
+  "ObjectSection",
   "ThirdPartyOrganization",
 ]) {
   for (const permission of ["create", "read", "update", "delete"]) {
@@ -380,11 +391,14 @@ const objectModuleFrontend = [
   "useObjectKeys.js",
   "ObjectInstallationsTab.jsx",
   "ObjectRelationshipsTab.jsx",
+  "ObjectSecurityPlanTab.jsx",
+  "SecurityPlanWorkspace.jsx",
+  "securityPlanWorkflow.js",
   "objectRelationshipWorkflow.js",
 ].map(file => read(`src/components/objects/${file}`)).join("\n");
 assert.doesNotMatch(
   objectModuleFrontend,
-  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectRelationship|ThirdPartyOrganization)/,
+  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectRelationship|ObjectSecurityPlan|ObjectSecurityPlanRevision|ObjectSection|ThirdPartyOrganization)/,
   "Objectmodules mogen beveiligde entiteiten niet rechtstreeks lezen of muteren",
 );
 assert.match(
@@ -472,6 +486,17 @@ for (const action of [
   "create_object_relationship",
   "update_object_relationship",
   "archive_object_relationship",
+  "list_object_security_plans",
+  "get_object_security_plan",
+  "list_object_sections",
+  "create_object_security_plan",
+  "save_object_security_plan_draft",
+  "duplicate_object_security_plan",
+  "publish_object_security_plan",
+  "archive_object_security_plan",
+  "upsert_object_section",
+  "archive_object_section",
+  "migrate_legacy_object_security_plans",
   "list_object_logbook",
   "list_commercial",
   "list_billing",

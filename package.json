@@ -20,6 +20,7 @@
     "verify:korpschef-pass": "node scripts/verify-korpschef-pass.mjs",
     "verify:korpschef-permission": "node scripts/verify-korpschef-permission.mjs",
     "verify:installation-brands": "node scripts/verify-installation-brand-assets.mjs",
+    "verify:security-plan": "node scripts/verify-object-security-plan-v2.mjs",
     "verify:customer-platform": "node scripts/verify-customer-platform.mjs",
     "audit:customer-platform": "node scripts/audit-customer-platform-readiness.mjs",
     "preview": "vite preview"

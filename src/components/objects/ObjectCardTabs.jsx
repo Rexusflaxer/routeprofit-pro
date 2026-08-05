@@ -369,7 +369,18 @@ export default function ObjectCardTabs({
         <ObjectTabNavigation activeTab={activeTab} onTabChange={onTabChange} />
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
           {activeTab === "security-plan" ? (
-            <ObjectSecurityPlanTab object={object} />
+            <ObjectSecurityPlanTab
+              object={object}
+              view={view}
+              selectedRow={selectedRow}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
+              page={page}
+              onPageChange={onPageChange}
+              onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
+              onCloseView={onCloseView}
+            />
           ) : activeTab === "floor-plan" ? (
             <ObjectFloorPlanPlaceholderTab />
           ) : activeTab === "tasks" ? (

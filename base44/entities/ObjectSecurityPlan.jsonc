@@ -8,6 +8,155 @@
     "object_id": {
       "type": "string"
     },
+    "task_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "object_security",
+        "fire_closing_round",
+        "external_closing_round",
+        "external_control_round",
+        "opening_round",
+        "mobile_control_round",
+        "reception",
+        "closing_assistance",
+        "access_control",
+        "fire_watch",
+        "concierge",
+        "other",
+        null
+      ],
+      "description": "Stabiel taaktype. Voor legacyrecords wordt category gebruikt als task_type ontbreekt."
+    },
+    "custom_task_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "variant_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200,
+      "description": "Naam van de uitvoerbare variant; legacyrecords gebruiken title."
+    },
+    "execution_mode": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "round",
+        "continuous_post",
+        "on_request",
+        "other",
+        null
+      ]
+    },
+    "current_published_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "draft_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "latest_revision_number": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 180
+    },
+    "creation_request_fingerprint": {
+      "type": ["string", "null"]
+    },
+    "creation_actor_user_id": {
+      "type": ["string", "null"]
+    },
+    "creation_mutation_target": {
+      "type": ["string", "null"]
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": ["string", "null"]
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "source_plan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "migration_source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "migration_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "migration_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 180
+    },
+    "migration_completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
     "category": {
       "type": "string",
       "enum": [
@@ -18,19 +167,22 @@
         "opening_round",
         "mobile_control_round",
         "reception"
-      ]
+      ],
+      "description": "Legacy mirror van task_type. Custom taaktypes gebruiken object_security als compatibiliteitswaarde."
     },
     "title": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 200
+      "maxLength": 200,
+      "description": "Legacy mirror van variant_name."
     },
     "description": {
       "type": [
         "string",
         "null"
       ],
-      "maxLength": 2000
+      "maxLength": 2000,
+      "description": "Legacy mirror van de actuele concept- of publicatiesamenvatting."
     },
     "scope_type": {
       "type": "string",
@@ -39,14 +191,16 @@
         "partial",
         "not_applicable"
       ],
-      "default": "not_applicable"
+      "default": "not_applicable",
+      "description": "Legacy mirror; secties worden in revisies beheerd."
     },
     "duration_minutes": {
       "type": [
         "number",
         "null"
       ],
-      "minimum": 1
+      "minimum": 1,
+      "description": "Legacy mirror van een vaste revisieduur."
     },
     "instructions": {
       "type": "array",
@@ -54,18 +208,23 @@
         "type": "string",
         "maxLength": 2000
       },
-      "default": []
+      "default": [],
+      "description": "Legacy mirror. Gestructureerde instructies staan in ObjectSecurityPlanRevision."
     },
     "status": {
       "type": "string",
       "enum": [
+        "draft",
+        "published",
         "active",
         "archived"
       ],
-      "default": "active"
+      "default": "draft",
+      "description": "active is alleen behouden voor compatibiliteit met legacyrecords."
     },
     "version": {
       "type": "number",
+      "minimum": 1,
       "default": 1
     }
   },
@@ -78,9 +237,9 @@
     "status"
   ],
   "rls": {
-    "create": { "user_condition": { "role": "admin" } },
-    "read": { "user_condition": { "role": "admin" } },
-    "update": { "user_condition": { "role": "admin" } },
-    "delete": { "user_condition": { "role": "admin" } }
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
   }
 }

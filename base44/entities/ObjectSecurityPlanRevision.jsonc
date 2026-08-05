@@ -1,0 +1,498 @@
+{
+  "name": "ObjectSecurityPlanRevision",
+  "type": "object",
+  "properties": {
+    "security_plan_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "revision_number": {
+      "type": "number",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "superseded"
+      ],
+      "default": "draft"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "duration_mode": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "schedule_defined",
+        "none"
+      ],
+      "default": "none"
+    },
+    "duration_minutes": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 10080
+    },
+    "section_policy": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "default_with_controlled_override",
+        "not_applicable"
+      ],
+      "default": "not_applicable"
+    },
+    "default_section_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "allowed_section_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "instruction_blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "sequence": {
+            "type": "number",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "sequence": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "instruction": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 5000
+                },
+                "action_type": {
+                  "type": "string",
+                  "enum": [
+                    "instruction",
+                    "inspect",
+                    "open",
+                    "close",
+                    "arm",
+                    "disarm",
+                    "register",
+                    "handover",
+                    "checkpoint",
+                    "other"
+                  ]
+                },
+                "section_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "installation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Verwijzing naar een installatie; bevat nooit een schakel- of alarmcode."
+                },
+                "floorplan_marker_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "required": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": [
+                "id",
+                "sequence",
+                "title",
+                "instruction",
+                "action_type",
+                "required"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "title",
+          "steps"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "floorplan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "floorplan_revision": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "route_overlay": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "enum": [
+            "loq-route-v1"
+          ]
+        },
+        "coordinate_space": {
+          "type": "string",
+          "enum": [
+            "normalized"
+          ]
+        },
+        "start_point": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "end_point": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "sequence": {
+                "type": "number",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "sequence"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "sequence": {
+                "type": "number",
+                "minimum": 1
+              },
+              "step_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "section_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 120
+              },
+              "marker_type": {
+                "type": "string",
+                "enum": [
+                  "checkpoint",
+                  "instruction",
+                  "start",
+                  "end",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "x",
+              "y",
+              "sequence",
+              "marker_type"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "schema_version",
+        "coordinate_space",
+        "path",
+        "markers"
+      ],
+      "additionalProperties": false
+    },
+    "readiness_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "content_checksum": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "published_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "superseded_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "superseded_by_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 180
+    },
+    "mutation_request_fingerprint": {
+      "type": ["string", "null"]
+    },
+    "mutation_actor_user_id": {
+      "type": ["string", "null"]
+    },
+    "mutation_target": {
+      "type": ["string", "null"]
+    },
+    "publication_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 180
+    },
+    "publication_request_fingerprint": {
+      "type": ["string", "null"]
+    },
+    "publication_actor_user_id": {
+      "type": ["string", "null"]
+    },
+    "publication_mutation_target": {
+      "type": ["string", "null"]
+    },
+    "source_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "migration_source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "migration_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "version": {
+      "type": "number",
+      "minimum": 1,
+      "default": 1
+    }
+  },
+  "required": [
+    "security_plan_id",
+    "customer_id",
+    "object_id",
+    "revision_number",
+    "status",
+    "duration_mode",
+    "section_policy",
+    "default_section_ids",
+    "allowed_section_ids",
+    "instruction_blocks",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}
