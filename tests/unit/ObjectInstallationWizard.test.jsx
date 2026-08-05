@@ -9,6 +9,10 @@ const existingInstallation = {
   installation_type: "alarm_system",
   name: "Hoofdcentrale",
   brand: "Ajax",
+  control_device_key: "keypad-touchscreen-jeweller",
+  control_device_name: "KeyPad TouchScreen Jeweller",
+  manual_key: "ajax:touchscreen-keypad:nl",
+  manual_version: "2026.08.1",
   monitoring_connected: false,
   lifecycle_status: "active",
   operational_status: "operational",
@@ -23,6 +27,8 @@ async function openCredentialStep() {
   fireEvent.click(getAlarmTypeButton());
   await screen.findByText("Van welk merk is de installatie?");
   fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
+  await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
+  fireEvent.click(screen.getByRole("button", { name: /KeyPad TouchScreen Jeweller/i }));
   await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
 }
 
@@ -43,7 +49,11 @@ describe("ObjectInstallationWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Wijzigingen opslaan" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      brand: "Ajax",
+      brand: "Ajax Systems",
+      control_device_key: "keypad-touchscreen-jeweller",
+      control_device_name: "KeyPad TouchScreen Jeweller",
+      manual_key: "ajax:touchscreen-keypad:nl",
+      manual_version: "2026.08.1",
       credentials: {},
       credentials_to_revoke: ["switching_code"],
     }));
@@ -93,6 +103,30 @@ describe("ObjectInstallationWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ brand: "Honeywell" }));
+  });
+
+  it("koppelt een nieuw Ajax-systeem aan het gekozen paneel en de vaste handleidingversie", async () => {
+    const onSave = vi.fn();
+    render(<ObjectInstallationWizard onSave={onSave} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+    fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
+    await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
+    fireEvent.click(screen.getByRole("button", { name: /Superior KeyPad Fibra/i }));
+    await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
+    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
+    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
+    expect(screen.getByText(/Handleiding: Superior KeyPad Fibra/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      brand: "Ajax Systems",
+      control_device_key: "superior-keypad-fibra",
+      control_device_name: "Superior KeyPad Fibra",
+      manual_key: "ajax:numeric-keypad:nl",
+      manual_version: "2026.08.1",
+    }));
   });
 
   it("behoudt een onbekend bestaand merk als handmatige invoer", async () => {

@@ -53,8 +53,7 @@ function inspectPng(buffer, label) {
 
   assert(header, `${label}: IHDR ontbreekt`);
   if (!header) return null;
-  assert(header.width >= 32 && header.height >= 16, `${label}: logo is te klein (${header.width}x${header.height})`);
-  assert(header.width <= 4096 && header.height <= 4096, `${label}: logo is onnodig groot (${header.width}x${header.height})`);
+  assert(header.width === 320 && header.height === 96, `${label}: verwacht 320x96, kreeg ${header.width}x${header.height}`);
   assert(header.bitDepth === 8, `${label}: verwacht 8-bit PNG, kreeg ${header.bitDepth}-bit`);
   assert(header.interlace === 0, `${label}: interlaced PNG kan niet volledig worden gecontroleerd`);
 
@@ -79,6 +78,7 @@ function inspectPng(buffer, label) {
   let cursor = 0;
   let transparentPixels = 0;
   let visiblePixels = 0;
+  let contrastingVisiblePixels = 0;
 
   for (let row = 0; row < header.height; row += 1) {
     const filter = inflated[cursor];
@@ -97,19 +97,30 @@ function inspectPng(buffer, label) {
     }
     const alphaOffset = header.colorType === 6 ? 3 : 1;
     for (let index = alphaOffset; index < rowLength; index += bytesPerPixel) {
-      if (current[index] < 255) transparentPixels += 1;
-      if (current[index] > 0) visiblePixels += 1;
+      const alpha = current[index];
+      if (alpha < 255) transparentPixels += 1;
+      if (alpha > 0) visiblePixels += 1;
+      const luminance = header.colorType === 6
+        ? (0.2126 * current[index - 3]) + (0.7152 * current[index - 2]) + (0.0722 * current[index - 1])
+        : current[index - 1];
+      if (alpha > 16 && luminance < 235) contrastingVisiblePixels += 1;
     }
     current.copy(previous);
   }
 
   assert(transparentPixels > 0, `${label}: geen daadwerkelijk transparante pixels gevonden`);
   assert(visiblePixels > 0, `${label}: logo bevat geen zichtbare pixels`);
+  assert(
+    contrastingVisiblePixels >= Math.max(16, Math.floor(visiblePixels * 0.02)),
+    `${label}: onvoldoende contrast op de gedeelde witte tegel`,
+  );
   return header;
 }
 
 assert(entries.length === ALARM_SYSTEM_BRAND_OPTIONS.length, `manifest bevat ${entries.length} merken; catalogus bevat ${ALARM_SYSTEM_BRAND_OPTIONS.length}`);
 assert(new Set(entries.map(entry => entry.slug)).size === entries.length, "manifest bevat dubbele slugs");
+assert(ALARM_SYSTEM_BRAND_OPTIONS.every(option => option.logoBackground !== "dark"), "alle merklogo's moeten op dezelfde witte tegel werken");
+assert(entries.every(entry => entry.dark_tile === false), "het manifest bevat nog een logo dat een donkere tegel vereist");
 
 for (const option of ALARM_SYSTEM_BRAND_OPTIONS) {
   const slug = option.logoSrc.split("/").pop().replace(/\.png$/, "");

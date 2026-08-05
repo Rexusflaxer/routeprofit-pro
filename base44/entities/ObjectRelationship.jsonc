@@ -83,6 +83,51 @@
         "null"
       ]
     },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "version": {
       "type": "number",
       "default": 1
@@ -96,25 +141,9 @@
     "status"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "read": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
   }
 }

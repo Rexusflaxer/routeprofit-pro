@@ -196,6 +196,12 @@ export default function ObjectDetailView({ object, onBack }) {
     next.set("row", id);
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
+  const openManual = useCallback(id => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", "manual");
+    next.set("row", id);
+    setSearchParams(next);
+  }, [searchParams, setSearchParams]);
   const closeView = useCallback(() => {
     const next = new URLSearchParams(searchParams);
     next.delete("view");
@@ -323,6 +329,7 @@ export default function ObjectDetailView({ object, onBack }) {
         selectedRow={selectedRow}
         onOpenCreate={openCreate}
         onOpenEdit={openEdit}
+        onOpenManual={openManual}
         onCloseView={closeView}
       />
     </PageTransition>

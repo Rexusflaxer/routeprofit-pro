@@ -74,6 +74,20 @@
       "default": 0,
       "description": "Onafhankelijke CAS-versie voor het sleutelmutatieslot; wijzigt de dossier-versie niet."
     },
+    "relationship_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurend objectgebonden slot dat relatiemutaties atomair serialiseert."
+    },
+    "relationship_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor het relatiemutatieslot; wijzigt de dossier-versie niet."
+    },
     "warning_address_mutation_lock": {
       "type": [
         "object",

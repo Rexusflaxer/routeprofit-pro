@@ -74,6 +74,7 @@ const CONSOLIDATED_FUNCTIONS = [
   "mobileRouteAction",
   "mobileRoutePackage",
   "mobileSync",
+  "objectRelationshipsApi",
   "searchAddress",
   "searchKvK",
   "sendCompanyEmail",
@@ -143,7 +144,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 103, "De verwachte 103 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 107, "De verwachte 107 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -153,6 +154,8 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectKeySet.jsonc",
   "ObjectInstallation.jsonc",
   "ObjectInstallationCredential.jsonc",
+  "ObjectRelationship.jsonc",
+  "ThirdPartyOrganization.jsonc",
 ]);
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
@@ -276,8 +279,23 @@ for (const entity of ["ObjectKey", "ObjectKeyAssignment", "ObjectKeySet", "Objec
   property(entity, "version");
 }
 for (const field of [
+  "creation_request_fingerprint",
+  "creation_actor_user_id",
+  "creation_mutation_target",
+  "customer_platform_last_mutation_key_hash",
+  "customer_platform_last_mutation_recovery",
+  "customer_platform_mutation_key_hashes",
+  "customer_platform_mutation_recoveries",
+]) {
+  property("ObjectRelationship", field);
+}
+for (const field of [
   "active_credential_id",
   "credential_types",
+  "control_device_key",
+  "control_device_name",
+  "manual_key",
+  "manual_version",
   "creation_request_fingerprint",
   "customer_platform_last_mutation_key_hash",
   "customer_platform_last_mutation_recovery",
@@ -294,8 +312,16 @@ for (const field of [
   "object_key_mutation_lock_version",
   "installation_mutation_lock",
   "installation_mutation_lock_version",
+  "relationship_mutation_lock",
+  "relationship_mutation_lock_version",
 ]) {
   property("SurveillanceObject", field);
+}
+for (const field of [
+  "third_party_organization_mutation_lock",
+  "third_party_organization_mutation_lock_version",
+]) {
+  property("Customer", field);
 }
 for (const entity of [
   "ObjectWarningAddress",
@@ -305,6 +331,8 @@ for (const entity of [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectRelationship",
+  "ThirdPartyOrganization",
 ]) {
   for (const permission of ["create", "read", "update", "delete"]) {
     assert.equal(schema(entity).rls?.[permission], false, `${entity}.${permission} moet uitsluitend via de service-role workflow lopen`);
@@ -351,10 +379,12 @@ const objectModuleFrontend = [
   "ObjectKeysTab.jsx",
   "useObjectKeys.js",
   "ObjectInstallationsTab.jsx",
+  "ObjectRelationshipsTab.jsx",
+  "objectRelationshipWorkflow.js",
 ].map(file => read(`src/components/objects/${file}`)).join("\n");
 assert.doesNotMatch(
   objectModuleFrontend,
-  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential)/,
+  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectRelationship|ThirdPartyOrganization)/,
   "Objectmodules mogen beveiligde entiteiten niet rechtstreeks lezen of muteren",
 );
 assert.match(
@@ -438,6 +468,10 @@ for (const action of [
   "create_object_installation",
   "update_object_installation",
   "archive_object_installation",
+  "list_object_relationships",
+  "create_object_relationship",
+  "update_object_relationship",
+  "archive_object_relationship",
   "list_object_logbook",
   "list_commercial",
   "list_billing",
@@ -504,6 +538,11 @@ for (const recoveryContract of [
   "customer_platform_mutation_recoveries",
   "warningAddressMutationMarkerReplay",
   "WARNING_ADDRESS_RECOVERY_LIMIT",
+  "reserveObjectRelationshipMutation",
+  "releaseObjectRelationshipMutation",
+  "reserveThirdPartyOrganizationMutation",
+  "releaseThirdPartyOrganizationMutation",
+  "ensureThirdPartyOrganizationRelationType",
 ]) {
   assert.ok(customerPlatformApi.includes(recoveryContract), `Object-idempotency mist ${recoveryContract}`);
 }

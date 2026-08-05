@@ -13,7 +13,7 @@ De installatiewizard gebruikt voor alarmsystemen een gecontroleerde catalogus va
 | Aritech ATS | Aritech | ATS en Advisor Advanced zijn productfamilies. |
 | Honeywell Galaxy | Honeywell | Galaxy Flex en Galaxy Dimension zijn productfamilies. |
 | Jablotron / Satel / Risco | JABLOTRON / SATEL / RISCO | Officiële schrijfwijze van de merken. |
-| Vanderbilt SPC | Vanderbilt (legacy) of acre Security | De fysieke legacybranding blijft Vanderbilt; nieuwe SPC-positionering valt onder acre Security. |
+| Vanderbilt SPC | acre Security | Nieuwe SPC-registraties vallen onder acre Security; een reeds opgeslagen fysieke legacywaarde blijft als handmatige bestaande invoer behouden. |
 | Bosch intrusion | Bosch (installed base) of Radionix | Bestaande Bosch-systemen blijven herkenbaar; Radionix is het nieuwe intrusionmerk van KEENFINITY. |
 
 Een bestaande opgeslagen alias wordt niet stil herschreven wanneer een gebruiker alleen onderhouds- of codegegevens wijzigt. Nieuwe keuzes slaan wel de canonieke waarde op. Een onbekend merk blijft via `Ander merk` mogelijk. Als handmatige invoer overeenkomt met een bekende alias, vraagt de wizard om de officiële merkoptie te kiezen.
@@ -21,7 +21,7 @@ Een bestaande opgeslagen alias wordt niet stil herschreven wanneer een gebruiker
 ## UX- en datarichtlijnen
 
 - Zoek op merk, productfamilie en historische alias; sla alleen de gekozen merkwaarde op.
-- Toon actuele/ondersteunde merken apart van oudere of overgenomen merken.
+- Toon één compacte catalogus met actuele keuzes; behoud onbekende of reeds opgeslagen legacywaarden alleen via de gecontroleerde handmatige invoer.
 - Houd logo's lokaal zodat de wizard niet afhankelijk is van externe tracking, hotlinks of beschikbaarheid.
 - Gebruik transparante PNG's in een neutrale vaste tegel, zonder het merk te hertekenen of partnerstatus te suggereren.
 - Behoud een tekstfallback als een asset onverwacht niet kan worden geladen.

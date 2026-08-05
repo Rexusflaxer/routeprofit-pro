@@ -11,10 +11,11 @@ describe("alarm installation brand catalogue", () => {
     const values = ALARM_SYSTEM_BRAND_OPTIONS.map(option => option.value);
     const logos = ALARM_SYSTEM_BRAND_OPTIONS.map(option => option.logoSrc);
 
-    expect(ALARM_SYSTEM_BRAND_OPTIONS.length).toBeGreaterThanOrEqual(30);
+    expect(ALARM_SYSTEM_BRAND_OPTIONS.length).toBeGreaterThanOrEqual(29);
     expect(new Set(values).size).toBe(values.length);
     expect(new Set(logos).size).toBe(logos.length);
     expect(logos.every(source => /^\/installation-brand-logos\/alarm-system\/[a-z0-9-]+\.png$/.test(source))).toBe(true);
+    expect(ALARM_SYSTEM_BRAND_OPTIONS.every(option => option.logoBackground === "light")).toBe(true);
     expect(INSTALLATION_BRANDS.alarm_system).toEqual(values);
   });
 
@@ -26,9 +27,11 @@ describe("alarm installation brand catalogue", () => {
     expect(values).toContain("Aritech");
     expect(values).toContain("Honeywell");
     expect(values).not.toContain("Ajax");
+    expect(values).not.toContain("Alphatronics");
     expect(values).not.toContain("Alphatronics UNii");
     expect(values).not.toContain("Aritech ATS");
     expect(values).not.toContain("Honeywell Galaxy");
+    expect(values).not.toContain("Vanderbilt");
   });
 
   it("recognises existing values through exact compatibility aliases", () => {
@@ -56,7 +59,7 @@ describe("alarm installation brand catalogue", () => {
   it("finds a brand by product family without changing the stored value", () => {
     expect(filterInstallationBrandOptions("alarm_system", "Galaxy").map(option => option.value)).toEqual(["Honeywell"]);
     expect(filterInstallationBrandOptions("alarm_system", "ATS").map(option => option.value)).toEqual(["Aritech"]);
-    expect(filterInstallationBrandOptions("alarm_system", "AlphaVision").map(option => option.value)).toEqual(["Alphatronics"]);
-    expect(filterInstallationBrandOptions("alarm_system", "SPC").map(option => option.value)).toEqual(["acre Security", "Vanderbilt"]);
+    expect(filterInstallationBrandOptions("alarm_system", "AlphaVision").map(option => option.value)).toEqual([]);
+    expect(filterInstallationBrandOptions("alarm_system", "SPC").map(option => option.value)).toEqual(["acre Security"]);
   });
 });

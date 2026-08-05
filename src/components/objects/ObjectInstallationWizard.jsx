@@ -32,10 +32,24 @@ import {
   installationCredentialLabel,
   installationTypeLabel,
 } from "./objectInstallationConfig";
+import {
+  AJAX_CONTROL_DEVICE_OPTIONS,
+  ajaxControlDevicePayload,
+  findAjaxControlDevice,
+  isAjaxAlarmInstallation,
+} from "./objectInstallationManuals";
 
-const STEPS = [
+const DEFAULT_STEPS = [
   { key: "type", label: "Soort" },
   { key: "brand", label: "Merk" },
+  { key: "operation", label: "Doormelding & codes" },
+  { key: "management", label: "Beheer & controle" },
+];
+
+const AJAX_STEPS = [
+  { key: "type", label: "Soort" },
+  { key: "brand", label: "Merk" },
+  { key: "control-device", label: "Bedienpaneel" },
   { key: "operation", label: "Doormelding & codes" },
   { key: "management", label: "Beheer & controle" },
 ];
@@ -47,6 +61,10 @@ function initialForm(value) {
     name: value?.name || "",
     brand: value?.brand || "",
     model: value?.model || "",
+    control_device_key: value?.control_device_key || "",
+    control_device_name: value?.control_device_name || "",
+    manual_key: value?.manual_key || "",
+    manual_version: value?.manual_version || "",
     serial_number: value?.serial_number || "",
     external_reference: value?.external_reference || "",
     control_panel_location: value?.control_panel_location || "",
@@ -72,16 +90,15 @@ function Summary({ label, children }) {
 function InstallationBrandLogo({ option }) {
   const [failed, setFailed] = useState(false);
   const initials = option.label.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
-  const dark = option.logoBackground === "dark";
 
   return (
     <span
       aria-hidden="true"
-      className={`flex h-11 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border px-2 py-1.5 shadow-sm ${dark ? "border-slate-700 bg-slate-950" : "border-slate-200 bg-white"}`}
+      className="flex h-11 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm"
     >
       {option.logoSrc && !failed
         ? <img src={option.logoSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-contain" />
-        : <span className={`text-xs font-bold tracking-wide ${dark ? "text-white" : "text-slate-700"}`}>{initials}</span>}
+        : <span className="text-xs font-bold tracking-wide text-slate-700">{initials}</span>}
     </span>
   );
 }
@@ -129,6 +146,10 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   const visibleBrands = filterInstallationBrandOptions(form.installation_type, brandSearch);
   const [customBrand, setCustomBrand] = useState(Boolean(installation?.brand && !findInstallationBrandOption(installation.installation_type, installation.brand)));
   const customBrandMatch = customBrand ? selectedBrand : null;
+  const ajaxAlarm = isAjaxAlarmInstallation(form);
+  const steps = ajaxAlarm ? AJAX_STEPS : DEFAULT_STEPS;
+  const currentStep = steps[stepIndex] || steps[0];
+  const selectedControlDevice = findAjaxControlDevice(form.control_device_key);
   const credentialFields = INSTALLATION_CREDENTIAL_FIELDS[form.installation_type] || [];
   const existingCredentialTypes = installation?.credential_types || [];
   const selectedCredentialTypes = Object.entries(form.credentials).filter(([, value]) => String(value || "").trim()).map(([key]) => key);
@@ -141,15 +162,17 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   const datesValid = (!form.last_tested_on || !form.commissioned_on || form.last_tested_on >= form.commissioned_on)
     && (!form.next_maintenance_on || !form.commissioned_on || form.next_maintenance_on >= form.commissioned_on)
     && (!form.next_maintenance_on || !form.last_tested_on || form.next_maintenance_on >= form.last_tested_on);
-  const canContinue = [
-    Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
-    Boolean(form.brand.trim() && !customBrandMatch),
-    !form.monitoring_connected || Boolean(form.monitoring_provider_name.trim()),
-    datesValid,
-  ][stepIndex];
-  const finalStep = stepIndex === STEPS.length - 1;
-  const choiceOnlyStep = (stepIndex === 0 && form.installation_type !== "other")
-    || (stepIndex === 1 && !customBrand);
+  const canContinue = {
+    type: Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
+    brand: Boolean(form.brand.trim() && !customBrandMatch),
+    "control-device": Boolean(selectedControlDevice),
+    operation: !form.monitoring_connected || Boolean(form.monitoring_provider_name.trim()),
+    management: datesValid,
+  }[currentStep.key];
+  const finalStep = stepIndex === steps.length - 1;
+  const choiceOnlyStep = (currentStep.key === "type" && form.installation_type !== "other")
+    || (currentStep.key === "brand" && !customBrand)
+    || currentStep.key === "control-device";
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const setCredential = (key, value) => setForm(current => ({
     ...current,
@@ -175,6 +198,10 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
       installation_type: value,
       custom_type: value === "other" ? current.custom_type : "",
       brand: typeChanged ? "" : current.brand,
+      control_device_key: typeChanged ? "" : current.control_device_key,
+      control_device_name: typeChanged ? "" : current.control_device_name,
+      manual_key: typeChanged ? "" : current.manual_key,
+      manual_version: typeChanged ? "" : current.manual_version,
       credentials: typeChanged ? {} : current.credentials,
       credentials_to_revoke: typeChanged ? [] : current.credentials_to_revoke,
     }));
@@ -184,13 +211,19 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   };
   const chooseBrand = option => {
     const originalBrandOption = findInstallationBrandOption(installation?.installation_type, installation?.brand);
-    const preserveOriginalBrand = installation?.installation_type === form.installation_type
+    const sameOriginalBrand = installation?.installation_type === form.installation_type
       && originalBrandOption?.value === option.value;
-    const brand = preserveOriginalBrand ? installation.brand : option.value;
+    const brand = option.value;
+    const selectsAjax = option.value === "Ajax Systems";
+    const preserveControlDevice = selectsAjax && sameOriginalBrand;
     setForm(current => ({
       ...current,
       brand,
       name: installation ? current.name : `${installationTypeLabel(current)} ${brand}`.trim(),
+      control_device_key: preserveControlDevice ? current.control_device_key : "",
+      control_device_name: preserveControlDevice ? current.control_device_name : "",
+      manual_key: preserveControlDevice ? current.manual_key : "",
+      manual_version: preserveControlDevice ? current.manual_version : "",
     }));
     setStepIndex(2);
   };
@@ -198,12 +231,31 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     ...current,
     brand: value,
     name: installation ? current.name : `${installationTypeLabel(current)} ${value}`.trim(),
+    control_device_key: "",
+    control_device_name: "",
+    manual_key: "",
+    manual_version: "",
   }));
+  const chooseControlDevice = value => {
+    const selection = ajaxControlDevicePayload(value);
+    if (!selection) return;
+    setForm(current => ({ ...current, ...selection }));
+    setStepIndex(3);
+  };
   const submit = () => {
     if (!canContinue || saving) return;
     if (!finalStep) { setStepIndex(index => index + 1); return; }
+    const manualSelection = isAjaxAlarmInstallation(form)
+      ? ajaxControlDevicePayload(form.control_device_key)
+      : {
+          control_device_key: null,
+          control_device_name: null,
+          manual_key: null,
+          manual_version: null,
+        };
     onSave({
       ...form,
+      ...manualSelection,
       name: form.name.trim() || `${installationTypeLabel(form)} ${form.brand}`.trim(),
       custom_type: form.installation_type === "other" ? form.custom_type.trim() : null,
       credentials: Object.fromEntries(Object.entries(form.credentials).map(([key, value]) => [key, String(value || "").trim()]).filter(([, value]) => value)),
@@ -216,17 +268,17 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
       <motion.div {...wizardRevealMotion}>
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">{installation ? "Installatie wijzigen" : "Nieuwe installatie"}</p>
         <h2 id="installation-wizard-title" className="sr-only">{installation ? "Installatie wijzigen" : "Installatie toevoegen"}</h2>
-        <WizardSteps stepIndex={stepIndex} steps={STEPS} label="Voortgang installatie toevoegen" />
+        <WizardSteps stepIndex={stepIndex} steps={steps} label="Voortgang installatie toevoegen" />
         <form onSubmit={event => { event.preventDefault(); submit(); }} noValidate>
           <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={STEPS[stepIndex].key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} className="space-y-5">
-              {stepIndex === 0 && <>
+            <motion.div key={currentStep.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} className="space-y-5">
+              {currentStep.key === "type" && <>
                 <StepHeading icon={BellRing} title="Welke installatie staat op dit object?" description="Kies het functionele systeem. Technische zones en uitgebreide onderhoudshistorie kunnen later per installatie worden aangevuld." />
                 <div className="grid grid-cols-1 gap-2">{INSTALLATION_TYPES.map(option => <ChoiceCard key={option.value} selected={form.installation_type === option.value} onClick={() => chooseType(option.value)} title={option.label} description={option.description} />)}</div>
                 {form.installation_type === "other" && <div className="max-w-xl"><Field label="Omschrijving installatietype" htmlFor="installation-custom-type" required><Input id="installation-custom-type" value={form.custom_type} onChange={event => set("custom_type", event.target.value)} autoFocus placeholder="Bijv. mistgeneratorbesturing" /></Field></div>}
               </>}
 
-              {stepIndex === 1 && <>
+              {currentStep.key === "brand" && <>
                 <StepHeading title="Van welk merk is de installatie?" description="Kies het merk dat op de centrale staat. Zoeken kan ook op een productlijn, zoals Galaxy, ATS, SPC of AlphaVision." />
                 {customBrand ? <div className="max-w-xl space-y-3 rounded-xl border border-primary/30 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><Field label="Merk" htmlFor="installation-custom-brand" hint={customBrandMatch ? `Dit merk is al bekend als ${customBrandMatch.label}. Kies de officiële merkoptie om verder te gaan.` : null}><Input id="installation-custom-brand" value={form.brand} onChange={event => setCustomBrandValue(event.target.value)} autoFocus aria-invalid={Boolean(customBrandMatch)} /></Field>{customBrandMatch && <ChoiceCard selected={false} onClick={() => chooseBrand(customBrandMatch)} title={`Gebruik ${customBrandMatch.label}`} description={customBrandMatch.productFamilies.slice(0, 3).join(" · ")} leading={customBrandMatch.logoSrc ? <InstallationBrandLogo option={customBrandMatch} /> : null} />}<Button type="button" variant="outline" size="sm" onClick={() => { setCustomBrand(false); set("brand", ""); }}>Terug naar merken</Button></div>
                   : <div className="space-y-4">
@@ -238,19 +290,25 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
                   </div>}
               </>}
 
-              {stepIndex === 2 && <>
+              {currentStep.key === "control-device" && <>
+                <StepHeading title="Welk Ajax-bedienpaneel wordt op dit object gebruikt?" description="Kies het exacte paneel. LOQ koppelt deze installatie daarna automatisch aan de juiste, gecontroleerde ingebouwde handleiding." />
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">{AJAX_CONTROL_DEVICE_OPTIONS.map(option => <ChoiceCard key={option.value} selected={selectedControlDevice?.value === option.value} onClick={() => chooseControlDevice(option.value)} title={option.label} description={option.description} leading={<span aria-hidden="true" className="flex h-11 w-16 shrink-0 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-center shadow-sm"><span className="text-[9px] font-bold uppercase tracking-wider text-slate-700">{option.protocol}</span></span>} />)}</div>
+                <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>De handleiding wordt door LOQ beheerd. De gebruiker hoeft geen bestand te uploaden; model, handleidingssleutel en versie worden samen met de installatie opgeslagen.</p></div>
+              </>}
+
+              {currentStep.key === "operation" && <>
                 <StepHeading icon={RadioTower} title="Is de installatie doorgemeld en hoe wordt deze bediend?" description="De aansluitreferentie is gewone objectmetadata. Bedieningscodes worden afzonderlijk versleuteld en verschijnen nooit in tabellen, zoekresultaten of het logboek." />
                 <div className="grid grid-cols-1 gap-2"><ChoiceCard selected={!form.monitoring_connected} onClick={() => set("monitoring_connected", false)} title="Niet doorgemeld" description="Geen PAC, meldkamer of externe monitoring gekoppeld." /><ChoiceCard selected={form.monitoring_connected} onClick={() => set("monitoring_connected", true)} title="Wel doorgemeld" description="Leg provider en aansluitreferentie vast." /></div>
                 {form.monitoring_connected && <div className="grid gap-4 md:grid-cols-2"><Field label="Meldkamer of provider" htmlFor="installation-provider" required><Input id="installation-provider" value={form.monitoring_provider_name} onChange={event => set("monitoring_provider_name", event.target.value)} placeholder="Bijv. PAC / alarmcentrale" autoFocus /></Field><Field label="Aansluitreferentie" htmlFor="installation-monitoring-reference"><Input id="installation-monitoring-reference" value={form.monitoring_connection_reference} onChange={event => set("monitoring_connection_reference", event.target.value)} placeholder="Geen schakel- of verificatiecode" /></Field></div>}
                 {credentialFields.length > 0 && <div className="space-y-4 rounded-xl border border-amber-300/70 bg-amber-50/60 p-4 shadow-sm backdrop-blur-xl dark:border-amber-900/70 dark:bg-amber-950/25"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" /><div><p className="text-sm font-semibold">Beveiligde bedieningscodes</p><p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Leg alleen codes vast die operationeel noodzakelijk zijn. Bestaande codes worden niet teruggelezen in deze wizard.</p></div></div><div className="grid gap-4 md:grid-cols-2">{credentialFields.map(definition => <CredentialField key={definition.key} definition={definition} value={form.credentials[definition.key]} onChange={value => setCredential(definition.key, value)} alreadySet={existingCredentialTypes.includes(definition.key)} revoked={revokedCredentialTypes.includes(definition.key)} onToggleRevoke={() => toggleCredentialRevocation(definition.key)} />)}</div></div>}
               </>}
 
-              {stepIndex === 3 && <>
+              {currentStep.key === "management" && <>
                 <StepHeading icon={Wrench} title="Wie beheert de installatie en wat is de actuele toestand?" description="Onderhoudsdata zijn operationele signalen; ze vervangen geen certificaat, onderhoudsrapport of formeel installatielogboek." />
                 <div className="grid gap-4 md:grid-cols-2"><Field label="Installateur / onderhoudspartij" htmlFor="installation-installer"><Input id="installation-installer" value={form.installer_name} onChange={event => set("installer_name", event.target.value)} /></Field><Field label="Telefoon onderhoudspartij" htmlFor="installation-installer-phone"><Input id="installation-installer-phone" type="tel" value={form.installer_phone} onChange={event => set("installer_phone", event.target.value)} /></Field></div>
                 <div className="grid gap-4 md:grid-cols-3"><Field label="In bedrijf sinds" htmlFor="installation-commissioned"><Input id="installation-commissioned" type="date" value={form.commissioned_on} onChange={event => set("commissioned_on", event.target.value)} /></Field><Field label="Laatst getest" htmlFor="installation-tested"><Input id="installation-tested" type="date" value={form.last_tested_on} onChange={event => set("last_tested_on", event.target.value)} /></Field><Field label="Volgend onderhoud" htmlFor="installation-maintenance" hint={!datesValid ? "De datums moeten in de volgorde inbedrijfstelling, test en onderhoud liggen." : null}><Input id="installation-maintenance" type="date" value={form.next_maintenance_on} onChange={event => set("next_maintenance_on", event.target.value)} aria-invalid={!datesValid} className={!datesValid ? "border-destructive" : ""} /></Field></div>
                 <div className="grid gap-4 md:grid-cols-2"><Field label="Levenscyclus" htmlFor="installation-lifecycle"><Select value={form.lifecycle_status} onValueChange={value => set("lifecycle_status", value)}><SelectTrigger id="installation-lifecycle"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_LIFECYCLE_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field><Field label="Operationele toestand" htmlFor="installation-operational"><Select value={form.operational_status} onValueChange={value => set("operational_status", value)}><SelectTrigger id="installation-operational"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_OPERATIONAL_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field></div>
-                <div className="grid gap-3 md:grid-cols-2"><Summary label="Installatie"><p className="font-medium">{form.name || "Naam ontbreekt"}</p><p className="mt-0.5 text-xs text-muted-foreground">{installationTypeLabel(form)}{form.brand ? ` · ${form.brand}` : ""}{form.model ? ` ${form.model}` : ""}</p></Summary><Summary label="Doormelding en codes"><p>{form.monitoring_connected ? form.monitoring_provider_name : "Niet doorgemeld"}</p><p className="mt-0.5 text-xs text-muted-foreground">{effectiveCredentialTypes.length ? effectiveCredentialTypes.map(installationCredentialLabel).join(", ") : "Geen bedieningscodes ingesteld"}{revokedCredentialTypes.length ? ` · ${revokedCredentialTypes.map(installationCredentialLabel).join(", ")} wordt ingetrokken` : ""}</p></Summary></div>
+                <div className="grid gap-3 md:grid-cols-2"><Summary label="Installatie"><p className="font-medium">{form.name || "Naam ontbreekt"}</p><p className="mt-0.5 text-xs text-muted-foreground">{installationTypeLabel(form)}{form.brand ? ` · ${form.brand}` : ""}{form.model ? ` ${form.model}` : ""}</p>{selectedControlDevice && <p className="mt-1 text-xs text-primary">Handleiding: {selectedControlDevice.label} · v{selectedControlDevice.manualVersion}</p>}</Summary><Summary label="Doormelding en codes"><p>{form.monitoring_connected ? form.monitoring_provider_name : "Niet doorgemeld"}</p><p className="mt-0.5 text-xs text-muted-foreground">{effectiveCredentialTypes.length ? effectiveCredentialTypes.map(installationCredentialLabel).join(", ") : "Geen bedieningscodes ingesteld"}{revokedCredentialTypes.length ? ` · ${revokedCredentialTypes.map(installationCredentialLabel).join(", ")} wordt ingetrokken` : ""}</p></Summary></div>
                 <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-card/45 p-4 text-xs text-muted-foreground shadow-sm backdrop-blur-xl"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0" /><p>Na opslaan staat alleen veilige metadata in de tabel. Codes worden versleuteld opgeslagen en wijzigingen verschijnen in het objectlogboek zonder codewaarde.</p></div>
               </>}
             </motion.div>

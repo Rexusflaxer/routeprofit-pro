@@ -2470,7 +2470,6 @@ function runCaoStaticGovernanceScenarios() {
 
   const disabledCustomerFunctions = [
     'approveCaoConfiguration',
-    'checkCaoSources',
     'extractCaoParameters'
   ];
   for (const name of disabledCustomerFunctions) {
@@ -2478,6 +2477,11 @@ function runCaoStaticGovernanceScenarios() {
     assert.ok(source.includes('DISABLED'), `${name} must remain visibly disabled for customer roles`);
     assert.ok(source.includes('status: 403'), `${name} must return 403 for customer access`);
   }
+  assert.equal(
+    fs.existsSync(path.join(repoRoot, 'base44/functions/checkCaoSources/entry.ts')),
+    false,
+    'checkCaoSources must remain retired; CAO source monitoring runs outside the customer app'
+  );
 
   const ingestSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/ingestCaoAutomationPayload/entry.ts'), 'utf8');
   assert.ok(ingestSource.includes('CAO_AUTOMATION_SHARED_SECRET'), 'ingestCaoAutomationPayload must stay secret-only');

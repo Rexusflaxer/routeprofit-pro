@@ -156,6 +156,20 @@
       "additionalProperties": true,
       "description": "Kortdurende globale CAS-lock op de oudste klant waarmee interne objectcodes over alle klanten worden geserialiseerd."
     },
+    "third_party_organization_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Kortdurende globale CAS-lock op de oudste klant waarmee mutaties van de gedeelde derde-partijcatalogus worden geserialiseerd."
+    },
+    "third_party_organization_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Onafhankelijke CAS-versie voor het derde-partijcatalogusslot; wijzigt de klantversie niet."
+    },
     "creation_idempotency_key": {
       "type": [
         "string",

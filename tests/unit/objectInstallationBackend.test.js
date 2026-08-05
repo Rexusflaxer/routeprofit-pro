@@ -3,6 +3,7 @@ import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { AJAX_CONTROL_DEVICE_OPTIONS } from "@/components/objects/objectInstallationManuals";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const entryPath = path.join(root, "base44/functions/customerPlatformApi/entry.ts");
@@ -22,7 +23,9 @@ beforeAll(async () => {
     )
     .concat(`\nexport {
       releaseObjectInstallationMutation,
-      reserveObjectInstallationMutation
+      reserveObjectInstallationMutation,
+      normalizedInstallationData,
+      safeExplicitLogbookChanges
     };`);
   const compiled = await transform(testableSource, {
     format: "esm",
@@ -35,6 +38,60 @@ beforeAll(async () => {
 const clone = value => structuredClone(value);
 
 describe("customerPlatformApi installatieconsistentie", () => {
+  const installationData = overrides => ({
+    installation_type: "alarm_system",
+    name: "Hoofdcentrale",
+    brand: "Ajax Systems",
+    monitoring_connected: false,
+    lifecycle_status: "active",
+    operational_status: "operational",
+    ...overrides,
+  });
+
+  it("leidt alle Ajax-handleidingvelden server-side af uit een bekende paneelsleutel", () => {
+    for (const option of AJAX_CONTROL_DEVICE_OPTIONS) {
+      const result = backend.normalizedInstallationData(installationData({
+        control_device_key: option.value,
+        control_device_name: "Vervalste naam",
+        manual_key: "client:mag:dit:niet:bepalen",
+        manual_version: "999",
+      }));
+      expect(result).toMatchObject({
+        brand: "Ajax Systems",
+        control_device_key: option.value,
+        control_device_name: option.label,
+        manual_key: option.manualKey,
+        manual_version: option.manualVersion,
+      });
+    }
+  });
+
+  it("weigert een onbekend Ajax-paneel en wist handleidingvelden bij andere merken", () => {
+    expect(() => backend.normalizedInstallationData(installationData({ control_device_key: "onbekend-paneel" }))).toThrow(/Ajax-bedienpaneel/);
+    expect(backend.normalizedInstallationData(installationData({
+      brand: "Honeywell",
+      control_device_key: "keypad-jeweller",
+      manual_key: "ajax:keypad-jeweller:nl",
+    }))).toMatchObject({
+      control_device_key: null,
+      control_device_name: null,
+      manual_key: null,
+      manual_version: null,
+    });
+  });
+
+  it("maakt paneel- en handleidingwijzigingen zichtbaar zonder interne sleutels te tonen", () => {
+    expect(backend.safeExplicitLogbookChanges([
+      { field: "control_device_key", label: "Bedienpaneelsleutel", before: "oud", after: "nieuw" },
+      { field: "control_device_name", label: "Bedienpaneel", before: "KeyPad", after: "KeyPad Plus" },
+      { field: "manual_key", label: "Handleiding", before: "intern-oud", after: "intern-nieuw" },
+      { field: "manual_version", label: "Handleidingversie", before: "2026.08.1", after: "2026.09.1" },
+    ])).toEqual([
+      { field: "control_device_name", label: "Bedienpaneel", before: "KeyPad", after: "KeyPad Plus" },
+      { field: "manual_version", label: "Handleidingversie", before: "2026.08.1", after: "2026.09.1" },
+    ]);
+  });
+
   it("laat bij twee gelijktijdige installatieclaims precies een schrijver toe", async () => {
     let state = {
       id: "object-1",

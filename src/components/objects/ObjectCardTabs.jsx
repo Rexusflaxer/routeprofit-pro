@@ -221,6 +221,7 @@ export default function ObjectCardTabs({
   selectedRow,
   onOpenCreate,
   onOpenEdit,
+  onOpenManual,
   onCloseView,
 }) {
   const queryClient = useQueryClient();
@@ -413,6 +414,7 @@ export default function ObjectCardTabs({
               onSearchChange={onSearchChange}
               onOpenCreate={onOpenCreate}
               onOpenEdit={onOpenEdit}
+              onOpenManual={onOpenManual}
               onCloseView={onCloseView}
             />
           ) : activeTab === "warning-addresses" ? (

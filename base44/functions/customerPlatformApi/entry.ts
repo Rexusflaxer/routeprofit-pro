@@ -85,6 +85,7 @@ const READ_ACTIONS = new Set([
   'list_object_logbook',
   'list_object_keys',
   'list_object_installations',
+  'list_object_relationships',
   'list_commercial',
   'list_billing',
   'validate_contract_rates',
@@ -104,6 +105,7 @@ const MUTATION_ACTIONS = new Set([
   'upsert_warning_availability_overrides', 'delete_warning_availability_override',
   'create_object_key', 'update_object_key', 'archive_object_key',
   'create_object_installation', 'update_object_installation', 'archive_object_installation',
+  'create_object_relationship', 'update_object_relationship', 'archive_object_relationship',
   'create_customer_account',
   'update_customer_account',
   'archive_customer_account',
@@ -291,6 +293,8 @@ const OBJECT_CODE_MUTATION_LOCK_TTL_MS = 30 * 60 * 1000;
 const OBJECT_KEY_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const WARNING_ADDRESS_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const OBJECT_INSTALLATION_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const OBJECT_RELATIONSHIP_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const THIRD_PARTY_ORGANIZATION_MUTATION_LOCK_TTL_MS = 2 * 60 * 1000;
 const OBJECT_IDENTITY_PATCH_FIELDS = [
   'object_code',
   'external_object_code',
@@ -336,6 +340,18 @@ const OBJECT_KEY_STATUSES = new Set(['in_storage', 'missing', 'out_of_service'])
 const OBJECT_INSTALLATION_TYPES = new Set(['alarm_system', 'fire_alarm_system', 'camera_system', 'access_control', 'intercom', 'evacuation_alarm', 'other']);
 const OBJECT_INSTALLATION_LIFECYCLES = new Set(['active', 'inactive', 'decommissioned', 'archived']);
 const OBJECT_INSTALLATION_OPERATIONAL_STATUSES = new Set(['unknown', 'operational', 'fault', 'maintenance']);
+const OBJECT_RELATIONSHIP_TYPES = new Set([
+  'pac',
+  'video_monitoring_center',
+  'security_installer',
+  'fire_safety_installer',
+  'camera_installer',
+  'access_control_installer',
+  'maintenance_provider',
+  'key_management',
+  'guarding_company',
+  'other',
+]);
 const OBJECT_OPERATIONS_PATCH_FIELDS = [
   'parking_instruction',
   'entry_instruction',
@@ -971,6 +987,7 @@ function mutationTarget(action: string, body: LooseRecord) {
     'key_id',
     'key_assignment_id',
     'installation_id',
+    'relationship_id',
     'customer_account_id',
     'request_id',
     'quote_id',
@@ -1292,6 +1309,47 @@ async function installationMutationMarkerReplay(
   return recovery.result as LooseRecord;
 }
 
+async function relationshipMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (!['update_object_relationship', 'archive_object_relationship'].includes(action)) return null;
+  const keyHash = await sha256(idempotencyKey);
+  const matches = await getEntity(base44, 'ObjectRelationship').filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (matches.length > 1) throw new ApiError(409, 'Relatieherstel is niet eenduidig; handmatige controle vereist');
+  if (!matches.length) return null;
+  const relationship = matches[0];
+  const recoveries = relationship.customer_platform_mutation_recoveries;
+  const loggedRecovery = recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries)
+    ? recoveries[keyHash]
+    : null;
+  const recovery = loggedRecovery || (
+    relationship.customer_platform_last_mutation_key_hash === keyHash
+      ? relationship.customer_platform_last_mutation_recovery
+      : null
+  );
+  if (
+    relationship.id !== requireString(body, 'relationship_id') ||
+    relationship.customer_id !== requireString(body, 'customer_id') ||
+    relationship.object_id !== requireString(body, 'object_id') ||
+    !recovery || recovery.action !== action || recovery.actor_id !== user.id ||
+    recovery.request_fingerprint !== requestFingerprint || recovery.mutation_target !== target ||
+    !recovery.result || typeof recovery.result !== 'object' || Array.isArray(recovery.result)
+  ) rejectIdempotencyReuse();
+  await requireCustomerObjectScope(base44, body);
+  return recovery.result as LooseRecord;
+}
+
 async function objectKeyMutationMarkerReplay(
   base44: LooseRecord,
   user: LooseRecord,
@@ -1356,6 +1414,9 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   create_object_installation: 'Installatie toegevoegd',
   update_object_installation: 'Installatie gewijzigd',
   archive_object_installation: 'Installatie gearchiveerd',
+  create_object_relationship: 'Relatie toegevoegd',
+  update_object_relationship: 'Relatie gewijzigd',
+  archive_object_relationship: 'Relatie gearchiveerd',
   create_customer_contact: 'Contactpersoon toegevoegd',
   update_customer_contact: 'Contactpersoon gewijzigd',
   archive_customer_contact: 'Contactpersoon gearchiveerd',
@@ -1411,6 +1472,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.contact_point ||
     result.contact_role ||
     result.warning_address ||
+    result.relationship ||
     result.object ||
     result.request ||
     result.quote ||
@@ -3159,6 +3221,704 @@ async function requireCustomerObjectScope(base44: LooseRecord, body: LooseRecord
   return { customer, object };
 }
 
+function safeThirdPartyOrganization(record: LooseRecord) {
+  return {
+    id: record.id,
+    name: record.name,
+    relation_types: Array.isArray(record.relation_types) ? record.relation_types : [],
+    website: record.website || null,
+    logo_url: record.logo_url || null,
+    certification: record.certification || null,
+    source: record.source || 'user_added',
+    status: record.status || 'active',
+    version: versionOf(record),
+  };
+}
+
+function safeObjectRelationship(record: LooseRecord, organization: LooseRecord) {
+  return {
+    id: record.id,
+    customer_id: record.customer_id,
+    object_id: record.object_id,
+    organization_id: record.organization_id,
+    relation_type: record.relation_type,
+    custom_relation_label: record.custom_relation_label || null,
+    reference_number: record.reference_number || null,
+    phone: record.phone || null,
+    email: record.email || null,
+    notes: record.notes || null,
+    status: record.status || 'active',
+    version: versionOf(record),
+    organization: safeThirdPartyOrganization(organization),
+  };
+}
+
+function objectRelationshipWebsite(value: unknown) {
+  const website = objectText(value, 'Website', 2048, true);
+  if (!website) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(website);
+  } catch {
+    throw new ApiError(400, 'Website moet een geldige URL zijn');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new ApiError(400, 'Website moet een veilige http- of https-URL zonder inloggegevens zijn');
+  }
+  return website;
+}
+
+function normalizedObjectRelationshipData(data: LooseRecord) {
+  const relationType = asString(data.relation_type);
+  if (!OBJECT_RELATIONSHIP_TYPES.has(relationType)) throw new ApiError(400, 'Kies een geldig relatietype');
+  const customRelationLabel = relationType === 'other'
+    ? objectText(data.custom_relation_label, 'Omschrijving relatie', 120, false)
+    : null;
+  const email = objectText(data.email, 'E-mailadres', 254, true);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new ApiError(400, 'Vul een geldig e-mailadres in');
+  }
+  return {
+    relationType,
+    patch: {
+      relation_type: relationType,
+      custom_relation_label: customRelationLabel,
+      reference_number: objectText(data.reference_number, 'Referentienummer', 180, true),
+      phone: objectText(data.phone, 'Telefoonnummer', 80, true),
+      email,
+      notes: objectText(data.notes, 'Notitie', 2000, true),
+    },
+  };
+}
+
+function thirdPartyOrganizationMutationLockVersion(customer: LooseRecord) {
+  const value = Number(customer.third_party_organization_mutation_lock_version);
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function thirdPartyOrganizationMutationLockVersionQuery(customer: LooseRecord) {
+  const value = customer.third_party_organization_mutation_lock_version;
+  return Number.isInteger(value) && value >= 0
+    ? { third_party_organization_mutation_lock_version: value }
+    : { $or: [
+      { third_party_organization_mutation_lock_version: null },
+      { third_party_organization_mutation_lock_version: { $exists: false } },
+    ] };
+}
+
+async function reserveThirdPartyOrganizationMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const ownerToken = crypto.randomUUID();
+  const keyHash = await sha256(idempotencyKey);
+  const reservedAt = nowIso();
+  const lock = {
+    owner_token: ownerToken,
+    key_hash: keyHash,
+    actor_id: user.id,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    reserved_at: reservedAt,
+    expires_at: new Date(Date.parse(reservedAt) + THIRD_PARTY_ORGANIZATION_MUTATION_LOCK_TTL_MS).toISOString(),
+  };
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const coordinators = await getEntity(base44, 'Customer').list(
+      '+created_date',
+      1,
+      0,
+      [
+        'id',
+        'created_date',
+        'third_party_organization_mutation_lock',
+        'third_party_organization_mutation_lock_version',
+      ],
+    );
+    const coordinator = coordinators[0];
+    if (!coordinator) throw new ApiError(503, 'Organisatiecataloguscoordinator is niet beschikbaar');
+    const current = coordinator.third_party_organization_mutation_lock;
+    if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
+      const sameRequest = current.key_hash === keyHash
+        && current.actor_id === user.id
+        && current.request_fingerprint === requestFingerprint
+        && current.mutation_target === target;
+      throw new ApiError(409, sameRequest
+        ? 'Deze organisatiewijziging is nog in verwerking; probeer opnieuw'
+        : 'Een andere organisatiewijziging is nog in verwerking; probeer opnieuw', {
+        retryable: true,
+        reservation_expires_at: current.expires_at || null,
+      });
+    }
+    const currentVersion = thirdPartyOrganizationMutationLockVersion(coordinator);
+    const hasPersistedVersion = Number.isInteger(coordinator.third_party_organization_mutation_lock_version)
+      && coordinator.third_party_organization_mutation_lock_version >= 0;
+    const update = hasPersistedVersion
+      ? {
+        $set: { third_party_organization_mutation_lock: lock },
+        $inc: { third_party_organization_mutation_lock_version: 1 },
+      }
+      : {
+        $set: {
+          third_party_organization_mutation_lock: lock,
+          third_party_organization_mutation_lock_version: 1,
+        },
+      };
+    const result = await getEntity(base44, 'Customer').updateMany(
+      { id: coordinator.id, ...thirdPartyOrganizationMutationLockVersionQuery(coordinator) },
+      update,
+    );
+    if (result?.success && result.updated === 1) {
+      return { coordinator_id: coordinator.id, owner_token: ownerToken, lock_version: currentVersion + 1 };
+    }
+  }
+  throw new ApiError(409, 'Organisatiewijziging kon niet veilig worden gereserveerd; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
+async function assertThirdPartyOrganizationMutation(
+  base44: LooseRecord,
+  reservation: LooseRecord | null,
+) {
+  if (!reservation) throw new ApiError(409, 'Organisatiereservering ontbreekt; probeer opnieuw', { retryable: true });
+  const coordinator = await requireRecord(base44, 'Customer', reservation.coordinator_id, 'Organisatiecataloguscoordinator');
+  const current = coordinator.third_party_organization_mutation_lock;
+  if (
+    current?.owner_token !== reservation.owner_token ||
+    !reservationIsCurrent(current) ||
+    thirdPartyOrganizationMutationLockVersion(coordinator) !== reservation.lock_version
+  ) {
+    throw new ApiError(409, 'Organisatiereservering is verlopen of overgenomen; probeer opnieuw', { retryable: true });
+  }
+  return coordinator;
+}
+
+async function releaseThirdPartyOrganizationMutation(
+  base44: LooseRecord,
+  reservation: LooseRecord | null,
+) {
+  if (!reservation) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const coordinator = await getRecord(base44, 'Customer', reservation.coordinator_id);
+    if (!coordinator || coordinator.third_party_organization_mutation_lock?.owner_token !== reservation.owner_token) return;
+    const currentVersion = thirdPartyOrganizationMutationLockVersion(coordinator);
+    if (currentVersion !== reservation.lock_version) return;
+    const result = await getEntity(base44, 'Customer').updateMany(
+      { id: coordinator.id, third_party_organization_mutation_lock_version: currentVersion },
+      {
+        $set: { third_party_organization_mutation_lock: null },
+        $inc: { third_party_organization_mutation_lock_version: 1 },
+      },
+    );
+    if (result?.success && result.updated === 1) return;
+  }
+  throw new ApiError(409, 'Organisatiewijzigingsslot kon niet veilig worden vrijgegeven; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
+async function ensureThirdPartyOrganizationRelationType(
+  base44: LooseRecord,
+  organizationId: string,
+  relationType: string,
+  reservation: LooseRecord,
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assertThirdPartyOrganizationMutation(base44, reservation);
+    const organization = await requireRecord(base44, 'ThirdPartyOrganization', organizationId, 'Instantie');
+    if (organization.status !== 'active') throw new ApiError(409, 'Deze instantie is niet beschikbaar');
+    const supportedTypes = Array.isArray(organization.relation_types) ? organization.relation_types : [];
+    if (supportedTypes.includes(relationType)) return organization;
+    try {
+      return await casUpdate(base44, 'ThirdPartyOrganization', organization, versionOf(organization), {
+        relation_types: [...new Set([...supportedTypes, relationType])],
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409 || attempt === 4) throw error;
+    }
+  }
+  throw new ApiError(409, 'Relatietype kon niet veilig aan de instantie worden toegevoegd');
+}
+
+async function resolveThirdPartyOrganization(
+  base44: LooseRecord,
+  user: LooseRecord,
+  data: LooseRecord,
+  relationType: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const organizationId = asString(data.organization_id);
+  if (organizationId) {
+    const organization = await requireRecord(base44, 'ThirdPartyOrganization', organizationId, 'Instantie');
+    if (organization.status !== 'active') throw new ApiError(409, 'Deze instantie is niet beschikbaar');
+    const supportedTypes = Array.isArray(organization.relation_types) ? organization.relation_types : [];
+    if (!supportedTypes.includes(relationType)) {
+      throw new ApiError(409, 'Deze instantie ondersteunt het gekozen relatietype niet');
+    }
+    return organization;
+  }
+
+  const name = objectText(data.organization_name, 'Naam instantie', 200, false) as string;
+  const normalizedName = normalizeName(name);
+  if (!normalizedName) throw new ApiError(400, 'Naam instantie is verplicht');
+  const website = objectRelationshipWebsite(data.organization_website);
+  const reservation = await reserveThirdPartyOrganizationMutation(
+    base44,
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    const matches = await getEntity(base44, 'ThirdPartyOrganization').filter({
+      normalized_name: normalizedName,
+      status: 'active',
+    }, '+name', 10);
+    if (matches.length > 1) throw new ApiError(409, 'Meerdere instanties hebben dezelfde naam; beheer de catalogus eerst');
+    if (matches[0]) {
+      return ensureThirdPartyOrganizationRelationType(base44, matches[0].id, relationType, reservation);
+    }
+
+    await assertThirdPartyOrganizationMutation(base44, reservation);
+    return getEntity(base44, 'ThirdPartyOrganization').create({
+      name,
+      normalized_name: normalizedName,
+      relation_types: [relationType],
+      website,
+      logo_url: null,
+      certification: null,
+      source: 'user_added',
+      status: 'active',
+      version: 1,
+    });
+  } finally {
+    await releaseThirdPartyOrganizationMutation(base44, reservation);
+  }
+}
+
+function relationshipValueStateChange(before: unknown, after: unknown) {
+  const hadValue = Boolean(asString(before));
+  const hasValue = Boolean(asString(after));
+  if (!hadValue && hasValue) return { before: 'Niet ingesteld', after: 'Ingesteld' };
+  if (hadValue && !hasValue) return { before: 'Ingesteld', after: 'Verwijderd' };
+  if (hadValue && hasValue) return { before: 'Ingesteld', after: 'Gewijzigd' };
+  return null;
+}
+
+function objectRelationshipChanges(
+  before: LooseRecord | null,
+  after: LooseRecord,
+  beforeOrganization: LooseRecord | null,
+  afterOrganization: LooseRecord,
+) {
+  const changes: LooseRecord[] = [];
+  if (!before || before.organization_id !== after.organization_id) {
+    changes.push({
+      field: 'relationship_organization',
+      label: 'Instantie',
+      before: beforeOrganization?.name || null,
+      after: afterOrganization.name,
+    });
+  }
+  if (!before || before.relation_type !== after.relation_type || before.custom_relation_label !== after.custom_relation_label) {
+    changes.push({
+      field: 'relationship_type',
+      label: 'Relatietype',
+      before: before ? (before.custom_relation_label || before.relation_type) : null,
+      after: after.custom_relation_label || after.relation_type,
+    });
+  }
+  for (const [field, label] of [
+    ['reference_number', 'Referentie'],
+    ['phone', 'Telefoon'],
+    ['email', 'E-mail'],
+    ['notes', 'Notitie'],
+  ]) {
+    if (asString(before?.[field]) !== asString(after[field])) {
+      const state = relationshipValueStateChange(before?.[field], after[field]);
+      if (!state) continue;
+      changes.push({
+        field: `relationship_${field}_state`,
+        label,
+        ...state,
+      });
+    }
+  }
+  return changes;
+}
+
+async function handleListObjectRelationships(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const [relationships, organizations] = await Promise.all([
+    getEntity(base44, 'ObjectRelationship').filter({
+      customer_id: customer.id,
+      object_id: object.id,
+      status: 'active',
+    }, '-updated_date', 500),
+    getEntity(base44, 'ThirdPartyOrganization').filter({ status: 'active' }, '+name', 2000),
+  ]);
+  const organizationsById = new Map(organizations.map((organization: LooseRecord) => [organization.id, organization]));
+  return {
+    items: relationships.flatMap((relationship: LooseRecord) => {
+      const organization = organizationsById.get(relationship.organization_id) as LooseRecord | undefined;
+      return organization ? [safeObjectRelationship(relationship, organization)] : [];
+    }),
+    organizations: organizations.map((organization: LooseRecord) => safeThirdPartyOrganization(organization)),
+  };
+}
+
+async function handleCreateObjectRelationship(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (objectLifecycleStatus(object) === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe relatie verwacht expected_version 0');
+  const data = requireObject(body);
+  const replay = await getEntity(base44, 'ObjectRelationship').filter({ creation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (replay.length > 1) throw new ApiError(409, 'Relatie-idempotency is niet eenduidig; handmatige controle vereist');
+  if (replay[0]) {
+    const relationship = replay[0];
+    if (
+      relationship.customer_id !== customer.id || relationship.object_id !== object.id ||
+      relationship.creation_actor_user_id !== user.id ||
+      relationship.creation_request_fingerprint !== requestFingerprint ||
+      relationship.creation_mutation_target !== target
+    ) rejectIdempotencyReuse();
+    const organization = await requireRecord(base44, 'ThirdPartyOrganization', relationship.organization_id, 'Instantie');
+    return {
+      relationship: safeObjectRelationship(relationship, organization),
+      customer_id: customer.id,
+      object_id: object.id,
+      replayed: true,
+      summary: `Relatie ${organization.name} toegevoegd`,
+      resource_type: 'ObjectRelationship',
+      resource_id: relationship.id,
+      category: 'operations',
+    };
+  }
+  const normalized = normalizedObjectRelationshipData(data);
+  const organization = await resolveThirdPartyOrganization(
+    base44,
+    user,
+    data,
+    normalized.relationType,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  const duplicates = await getEntity(base44, 'ObjectRelationship').filter({
+    object_id: object.id,
+    organization_id: organization.id,
+    relation_type: normalized.relationType,
+    status: 'active',
+  }, '-updated_date', 2);
+  if (duplicates.length) throw new ApiError(409, 'Deze instantie is al met dit relatietype gekoppeld');
+  const created = await getEntity(base44, 'ObjectRelationship').create({
+    customer_id: customer.id,
+    object_id: object.id,
+    organization_id: organization.id,
+    ...normalized.patch,
+    status: 'active',
+    creation_idempotency_key: idempotencyKey,
+    creation_request_fingerprint: requestFingerprint,
+    creation_actor_user_id: user.id,
+    creation_mutation_target: target,
+    version: 1,
+  });
+  const safe = safeObjectRelationship(created, organization);
+  return {
+    relationship: safe,
+    customer_id: customer.id,
+    object_id: object.id,
+    changes: objectRelationshipChanges(null, safe, null, organization),
+    summary: `Relatie ${organization.name} toegevoegd`,
+    resource_type: 'ObjectRelationship',
+    resource_id: created.id,
+    category: 'operations',
+  };
+}
+
+async function requireObjectRelationshipForMutation(
+  base44: LooseRecord,
+  customerId: string,
+  objectId: string,
+  relationshipId: string,
+) {
+  const relationship = await requireRecord(base44, 'ObjectRelationship', relationshipId, 'Relatie');
+  if (relationship.customer_id !== customerId || relationship.object_id !== objectId || relationship.status !== 'active') {
+    throw new ApiError(409, 'Relatie hoort niet bij dit object');
+  }
+  return relationship;
+}
+
+async function handleUpdateObjectRelationship(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (objectLifecycleStatus(object) === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  const current = await requireObjectRelationshipForMutation(
+    base44,
+    customer.id,
+    object.id,
+    requireString(body, 'relationship_id'),
+  );
+  if (versionOf(current) !== expectedVersion) throw new ApiError(409, 'Relatie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  const data = requireObject(body);
+  const normalized = normalizedObjectRelationshipData(data);
+  const organization = await resolveThirdPartyOrganization(
+    base44,
+    user,
+    data,
+    normalized.relationType,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  const duplicates = await getEntity(base44, 'ObjectRelationship').filter({
+    object_id: object.id,
+    organization_id: organization.id,
+    relation_type: normalized.relationType,
+    status: 'active',
+  }, '-updated_date', 20);
+  if (duplicates.some((relationship: LooseRecord) => relationship.id !== current.id)) {
+    throw new ApiError(409, 'Deze instantie is al met dit relatietype gekoppeld');
+  }
+  const beforeOrganization = await requireRecord(base44, 'ThirdPartyOrganization', current.organization_id, 'Bestaande instantie');
+  const projected = {
+    ...current,
+    organization_id: organization.id,
+    ...normalized.patch,
+    version: expectedVersion + 1,
+  };
+  const safeProjected = safeObjectRelationship(projected, organization);
+  const changes = objectRelationshipChanges(current, projected, beforeOrganization, organization);
+  const recoveryResult = {
+    relationship: safeProjected,
+    customer_id: customer.id,
+    object_id: object.id,
+    changes,
+    summary: `Relatie ${organization.name} gewijzigd`,
+    resource_type: 'ObjectRelationship',
+    resource_id: current.id,
+    category: 'operations',
+  };
+  const recoveryPatch = await mutationRecoveryPatch(
+    current,
+    'update_object_relationship',
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+    recoveryResult,
+  );
+  const updated = await casUpdate(base44, 'ObjectRelationship', current, expectedVersion, {
+    organization_id: organization.id,
+    ...normalized.patch,
+    ...recoveryPatch,
+  });
+  return { ...recoveryResult, relationship: safeObjectRelationship(updated, organization) };
+}
+
+async function handleArchiveObjectRelationship(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (objectLifecycleStatus(object) === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  const current = await requireObjectRelationshipForMutation(
+    base44,
+    customer.id,
+    object.id,
+    requireString(body, 'relationship_id'),
+  );
+  if (versionOf(current) !== expectedVersion) throw new ApiError(409, 'Relatie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  const organization = await requireRecord(base44, 'ThirdPartyOrganization', current.organization_id, 'Instantie');
+  const projected = {
+    ...current,
+    status: 'archived',
+    archived_at: nowIso(),
+    archived_by_user_id: user.id,
+    version: expectedVersion + 1,
+  };
+  const safeProjected = safeObjectRelationship(projected, organization);
+  const recoveryResult = {
+    relationship: safeProjected,
+    customer_id: customer.id,
+    object_id: object.id,
+    archived: true,
+    changes: [{ field: 'status', label: 'Status', before: 'Actief', after: 'Gearchiveerd' }],
+    summary: `Relatie ${organization.name} gearchiveerd`,
+    resource_type: 'ObjectRelationship',
+    resource_id: current.id,
+    category: 'operations',
+  };
+  const recoveryPatch = await mutationRecoveryPatch(
+    current,
+    'archive_object_relationship',
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+    recoveryResult,
+  );
+  const updated = await casUpdate(base44, 'ObjectRelationship', current, expectedVersion, {
+    status: 'archived',
+    archived_at: projected.archived_at,
+    archived_by_user_id: user.id,
+    ...recoveryPatch,
+  });
+  return { ...recoveryResult, relationship: safeObjectRelationship(updated, organization) };
+}
+
+function objectRelationshipMutationLockVersion(object: LooseRecord) {
+  const value = Number(object.relationship_mutation_lock_version);
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function objectRelationshipMutationLockVersionQuery(object: LooseRecord) {
+  const value = object.relationship_mutation_lock_version;
+  return Number.isInteger(value) && value >= 0
+    ? { relationship_mutation_lock_version: value }
+    : { $or: [
+      { relationship_mutation_lock_version: null },
+      { relationship_mutation_lock_version: { $exists: false } },
+    ] };
+}
+
+async function reserveObjectRelationshipMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  objectId: string,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const ownerToken = crypto.randomUUID();
+  const keyHash = await sha256(idempotencyKey);
+  const reservedAt = nowIso();
+  const lock = {
+    owner_token: ownerToken,
+    key_hash: keyHash,
+    actor_id: user.id,
+    request_fingerprint: requestFingerprint,
+    mutation_target: target,
+    reserved_at: reservedAt,
+    expires_at: new Date(Date.parse(reservedAt) + OBJECT_RELATIONSHIP_MUTATION_LOCK_TTL_MS).toISOString(),
+  };
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const object = await requireRecord(base44, 'SurveillanceObject', objectId, 'Object');
+    const current = object.relationship_mutation_lock;
+    if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
+      const sameRequest = current.key_hash === keyHash
+        && current.actor_id === user.id
+        && current.request_fingerprint === requestFingerprint
+        && current.mutation_target === target;
+      throw new ApiError(409, sameRequest
+        ? 'Deze relatiemutatie is nog in verwerking; probeer opnieuw'
+        : 'Een andere relatiemutatie op dit object is nog in verwerking; probeer opnieuw', {
+        retryable: true,
+        reservation_expires_at: current.expires_at || null,
+      });
+    }
+    const currentVersion = objectRelationshipMutationLockVersion(object);
+    const hasPersistedVersion = Number.isInteger(object.relationship_mutation_lock_version)
+      && object.relationship_mutation_lock_version >= 0;
+    const update = hasPersistedVersion
+      ? { $set: { relationship_mutation_lock: lock }, $inc: { relationship_mutation_lock_version: 1 } }
+      : { $set: { relationship_mutation_lock: lock, relationship_mutation_lock_version: 1 } };
+    const result = await getEntity(base44, 'SurveillanceObject').updateMany(
+      { id: object.id, ...objectRelationshipMutationLockVersionQuery(object) },
+      update,
+    );
+    if (result?.success && result.updated === 1) {
+      return { object_id: object.id, owner_token: ownerToken, lock_version: currentVersion + 1 };
+    }
+  }
+  throw new ApiError(409, 'Relatiemutatie kon niet veilig worden gereserveerd; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
+async function releaseObjectRelationshipMutation(base44: LooseRecord, reservation: LooseRecord | null) {
+  if (!reservation) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const object = await getRecord(base44, 'SurveillanceObject', reservation.object_id);
+    if (!object || object.relationship_mutation_lock?.owner_token !== reservation.owner_token) return;
+    const currentVersion = objectRelationshipMutationLockVersion(object);
+    if (currentVersion !== reservation.lock_version) return;
+    const result = await getEntity(base44, 'SurveillanceObject').updateMany(
+      { id: object.id, relationship_mutation_lock_version: currentVersion },
+      {
+        $set: { relationship_mutation_lock: null },
+        $inc: { relationship_mutation_lock_version: 1 },
+      },
+    );
+    if (result?.success && result.updated === 1) return;
+  }
+  throw new ApiError(409, 'Relatiemutatieslot kon niet veilig worden vrijgegeven; probeer opnieuw', {
+    retryable: true,
+  });
+}
+
+async function handleObjectRelationshipMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (!['create_object_relationship', 'update_object_relationship', 'archive_object_relationship'].includes(action)) {
+    throw new ApiError(400, 'Onbekende relatiemutatie');
+  }
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  const reservation = await reserveObjectRelationshipMutation(
+    base44,
+    user,
+    object.id,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    if (action === 'create_object_relationship') {
+      return await handleCreateObjectRelationship(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    }
+    if (action === 'update_object_relationship') {
+      return await handleUpdateObjectRelationship(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    }
+    return await handleArchiveObjectRelationship(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+  } finally {
+    await releaseObjectRelationshipMutation(base44, reservation);
+  }
+}
+
 function warningContactDisplayName(contact: LooseRecord) {
   return asString(contact.display_name) ||
     [contact.first_name, contact.middle_name, contact.last_name].map(asString).filter(Boolean).join(' ') ||
@@ -3573,6 +4333,8 @@ const LOGBOOK_VALUE_FIELDS = new Set([
   'custom_type',
   'brand',
   'model',
+  'control_device_name',
+  'manual_version',
   'serial_number',
   'external_reference',
   'control_panel_location',
@@ -3589,6 +4351,12 @@ const LOGBOOK_VALUE_FIELDS = new Set([
   'credential_types',
   'key_type',
   'key_set_id',
+  'relationship_organization',
+  'relationship_type',
+  'relationship_reference_number_state',
+  'relationship_phone_state',
+  'relationship_email_state',
+  'relationship_notes_state',
 ]);
 
 function safeLogbookValue(value: unknown) {
@@ -3619,6 +4387,7 @@ function derivedLogbookChanges(event: LooseRecord) {
     event.resource_type === 'ObjectWarningAddress' ||
     event.resource_type === 'ObjectInstallation' ||
     event.resource_type === 'ObjectKey' ||
+    event.resource_type === 'ObjectRelationship' ||
     (
       event.resource_type === 'SurveillanceObject' &&
       event.action === 'update_customer_object_identity'
@@ -5334,6 +6103,40 @@ const INSTALLATION_CREDENTIAL_LABELS: Record<string, string> = {
 };
 const installationCredentialTypeLabel = (type: string) => INSTALLATION_CREDENTIAL_LABELS[type] || 'Beveiligde code';
 
+const AJAX_INSTALLATION_MANUAL_VERSION = '2026.08.1';
+const AJAX_CONTROL_DEVICES: Record<string, { name: string; manualKey: string }> = {
+  'keypad-jeweller': { name: 'KeyPad Jeweller', manualKey: 'ajax:numeric-keypad:nl' },
+  'keypad-plus-jeweller': { name: 'KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'keypad-touchscreen-jeweller': { name: 'KeyPad TouchScreen Jeweller', manualKey: 'ajax:touchscreen-keypad:nl' },
+  'superior-keypad-fibra': { name: 'Superior KeyPad Fibra', manualKey: 'ajax:numeric-keypad:nl' },
+  'superior-keypad-plus-jeweller': { name: 'Superior KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'superior-keypad-touchscreen-fibra': { name: 'Superior KeyPad TouchScreen Fibra', manualKey: 'ajax:touchscreen-keypad:nl' },
+  'keypad-outdoor-jeweller': { name: 'KeyPad Outdoor Jeweller', manualKey: 'ajax:outdoor-keypad:nl' },
+  'superior-keypad-outdoor-fibra': { name: 'Superior KeyPad Outdoor Fibra', manualKey: 'ajax:outdoor-keypad:nl' },
+  'superior-keypad-plus-g3-jeweller': { name: 'Superior KeyPad Plus G3 Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'superior-keypad-touchscreen-g3-jeweller': { name: 'Superior KeyPad TouchScreen G3 Jeweller', manualKey: 'ajax:touchscreen-keypad:nl' },
+  'ajax-app-only': { name: 'Geen vast bedienpaneel', manualKey: 'ajax:app-control:nl' },
+};
+
+function normalizedInstallationManualData(data: LooseRecord, installationType: string, brand: string | null) {
+  const isAjaxAlarm = installationType === 'alarm_system' && ['ajax', 'ajax systems'].includes(normalizeName(brand));
+  if (!isAjaxAlarm) return {
+    control_device_key: null,
+    control_device_name: null,
+    manual_key: null,
+    manual_version: null,
+  };
+  const controlDeviceKey = asString(data.control_device_key);
+  const controlDevice = AJAX_CONTROL_DEVICES[controlDeviceKey];
+  if (!controlDevice) throw new ApiError(400, 'Kies het Ajax-bedienpaneel voor de juiste ingebouwde handleiding');
+  return {
+    control_device_key: controlDeviceKey,
+    control_device_name: controlDevice.name,
+    manual_key: controlDevice.manualKey,
+    manual_version: AJAX_INSTALLATION_MANUAL_VERSION,
+  };
+}
+
 function installationDate(value: unknown, field: string) {
   if (value === null || value === undefined || value === '') return null;
   const normalized = asString(value);
@@ -5346,6 +6149,11 @@ function normalizedInstallationData(data: LooseRecord) {
   if (!OBJECT_INSTALLATION_TYPES.has(installationType)) throw new ApiError(400, 'Kies een geldig installatietype');
   const customType = objectText(data.custom_type, 'Ander installatietype', 120, true);
   if (installationType === 'other' && !customType) throw new ApiError(400, 'Omschrijf het andere installatietype');
+  const submittedBrand = objectText(data.brand, 'Merk', 120, true);
+  const brand = installationType === 'alarm_system' && normalizeName(submittedBrand) === 'ajax'
+    ? 'Ajax Systems'
+    : submittedBrand;
+  const manualData = normalizedInstallationManualData(data, installationType, brand);
   const monitoringConnected = data.monitoring_connected === true;
   const monitoringProviderName = objectText(data.monitoring_provider_name, 'Meldkamer of provider', 160, true);
   if (monitoringConnected && !monitoringProviderName) throw new ApiError(400, 'Vul de meldkamer of monitoringprovider in');
@@ -5375,8 +6183,9 @@ function normalizedInstallationData(data: LooseRecord) {
     installation_type: installationType,
     custom_type: installationType === 'other' ? customType : null,
     name: objectText(data.name, 'Installatienaam', 160, false),
-    brand: objectText(data.brand, 'Merk', 120, true),
+    brand,
     model: objectText(data.model, 'Model', 120, true),
+    ...manualData,
     serial_number: objectText(data.serial_number, 'Serienummer', 160, true),
     external_reference: objectText(data.external_reference, 'Externe referentie', 160, true),
     location: controlPanelLocation,
@@ -5445,6 +6254,10 @@ function safeObjectInstallation(record: LooseRecord, credentialTypes?: string[])
     name: record.name,
     brand: record.brand || null,
     model: record.model || null,
+    control_device_key: record.control_device_key || null,
+    control_device_name: record.control_device_name || null,
+    manual_key: record.manual_key || null,
+    manual_version: record.manual_version || null,
     serial_number: record.serial_number || null,
     external_reference: record.external_reference || null,
     control_panel_location: record.control_panel_location || record.location || null,
@@ -5739,6 +6552,7 @@ async function warningAddressOrderRecoveryPatch(
 function installationChanges(before: LooseRecord | null, after: LooseRecord, credentialChanges: LooseRecord[] = []) {
   const labels: Record<string, string> = {
     installation_type: 'Type', custom_type: 'Ander type', name: 'Naam', brand: 'Merk', model: 'Model',
+    control_device_key: 'Bedienpaneelsleutel', control_device_name: 'Bedienpaneel', manual_key: 'Handleiding', manual_version: 'Handleidingversie',
     serial_number: 'Serienummer', external_reference: 'Externe referentie', control_panel_location: 'Locatie centrale',
     monitoring_connected: 'Doormelding', monitoring_provider_name: 'Meldkamer of provider', monitoring_connection_reference: 'Aansluitreferentie',
     installer_name: 'Onderhoudspartij', installer_phone: 'Telefoon onderhoudspartij', commissioned_on: 'In bedrijf sinds',
@@ -9642,6 +10456,10 @@ async function executeMutation(
     case 'update_object_installation':
     case 'archive_object_installation':
       return handleObjectInstallationMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    case 'create_object_relationship':
+    case 'update_object_relationship':
+    case 'archive_object_relationship':
+      return handleObjectRelationshipMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
     case 'create_customer_account':
       return handleCustomerAccount(base44, body, expectedVersion, 'create');
     case 'update_customer_account':
@@ -9781,6 +10599,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
       if (action === 'list_object_logbook') return json(await handleListObjectLogbook(base44, body));
       if (action === 'list_object_keys') return json(await handleListObjectKeys(base44, body));
       if (action === 'list_object_installations') return json(await handleListObjectInstallations(base44, body));
+      if (action === 'list_object_relationships') return json(await handleListObjectRelationships(base44, body));
       if (action === 'list_commercial') return json(await listRecords(base44, body, ['quote', 'contract', 'rate']));
       if (action === 'list_billing') return json(await listRecords(base44, body, ['candidate', 'invoice', 'payment', 'reminder', 'run']));
       if (action === 'validate_contract_rates') {
@@ -9803,7 +10622,15 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const target = mutationTarget(action, body);
     const replay = await mutationReplay(base44, user, action, body, idempotencyKey, requestFingerprint, target);
     if (replay) return json({ ok: true, ...replay, replayed: true });
-    const recovered = await warningAddressMutationMarkerReplay(
+    const recovered = await relationshipMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    ) || await warningAddressMutationMarkerReplay(
       base44,
       user,
       action,

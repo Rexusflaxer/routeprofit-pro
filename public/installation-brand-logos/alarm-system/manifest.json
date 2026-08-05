@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-08-04",
-  "usage_note": "Local rasterized trademark assets for nominative identification in the internal installation wizard. No partnership or endorsement is implied. Preserve each mark's aspect ratio and colors, and confirm trademark-owner permission before any external publication.",
+  "usage_note": "Local rasterized trademark assets for nominative identification in the internal installation wizard. No partnership or endorsement is implied. Every asset is prepared for one consistent white tile; official light-background artwork is preferred and a documented neutral contrast adaptation is used only when no such mark is available. Preserve aspect ratio and confirm trademark-owner permission before external publication.",
   "brands": [
     {
       "slug": "abus",
@@ -30,15 +30,6 @@
       "usage_note": "Rasterized from the official inline Ajax header SVG without redrawing; identification only. Partner marketing assets and external use may require permission."
     },
     {
-      "slug": "alphatronics",
-      "label": "Alphatronics",
-      "source_url": "https://cdn.nextchapter-ecommerce.com/Public/alphatronics_nl/Images/logo.svg",
-      "retrieved_at": "2026-08-04",
-      "sha256": "494ad5f5abf54a80cd36446238d23c393168d927b2bb4a5a28838106978871df",
-      "dark_tile": false,
-      "usage_note": "Official website header asset; legacy installed-base identification only. Current UNii installations should be stored under UNii."
-    },
-    {
       "slug": "aritech",
       "label": "Aritech",
       "source_url": "https://aritech.com.au/wp-content/uploads/2023/11/aritech_commercial-sensors_logo-1.png",
@@ -59,11 +50,11 @@
     {
       "slug": "comelit",
       "label": "Comelit",
-      "source_url": "https://comelitgroup.com/wp-content/themes/wsk-theme/media/images/logo/main-logo.svg",
+      "source_url": "https://pro.comelitgroup.com/images/logo-gb.svg",
       "retrieved_at": "2026-08-04",
-      "sha256": "071804dc508ac7d98cfcde53ec21075be7c071028d41646a314673d63ba2beca",
-      "dark_tile": true,
-      "usage_note": "Official website header asset; white wordmark requires a dark neutral tile. Identification only."
+      "sha256": "0f6f25780315a95aa623c0b69289b9eecbdb49fb2ff862fce302e020307dc7b2",
+      "dark_tile": false,
+      "usage_note": "Official Comelit light-background artwork with its dark wordmark and green accent; identification only."
     },
     {
       "slug": "dahua-technology",
@@ -149,11 +140,11 @@
     {
       "slug": "ksenia-security",
       "label": "Ksenia Security",
-      "source_url": "https://www.kseniasecurity.com/img/logo-ksenia-payoff-negativo-150x61.png",
+      "source_url": "https://www.kseniasecurity.com/img/header.png",
       "retrieved_at": "2026-08-04",
-      "sha256": "40fb2c4de373d0243479a3658cacab294b64cda8c111b86eced5a980578a282b",
-      "dark_tile": true,
-      "usage_note": "Official negative logo asset; use on a dark neutral tile. Nominative product identification only."
+      "sha256": "8f89761c57f44310745aa66ed77330e0ffa410fb1d8d48d5a82f6619d13f38dd",
+      "dark_tile": false,
+      "usage_note": "Official Ksenia light-background header artwork; nominative product identification only."
     },
     {
       "slug": "nox-systems",
@@ -196,18 +187,18 @@
       "label": "Radionix",
       "source_url": "https://www.radionix.com/us/system/radionix.png",
       "retrieved_at": "2026-08-04",
-      "sha256": "1390155f17d1c5ae59f6f2e1aea47201d81336c68b48f2c30028e2a91d93b8ae",
-      "dark_tile": true,
-      "usage_note": "Official Radionix asset; white wordmark requires a dark neutral tile. Identification only; external reproduction may require permission."
+      "sha256": "98626a847b83a464af3c78789744c7bee0cfd4e21d2649d7c692b02edab5b07c",
+      "dark_tile": false,
+      "usage_note": "Exact official Radionix wordmark shape with the white pixels converted to a dark neutral contrast color for the shared white tile; identification only."
     },
     {
       "slug": "risco",
       "label": "RISCO",
       "source_url": "https://riscogroup.com/wp-content/uploads/2023/12/logo-inverted.png",
       "retrieved_at": "2026-08-04",
-      "sha256": "6a6ad9992ac0f76c655a0100abe55a65c7e91c40f8b4bb17c0108db994a432a9",
-      "dark_tile": true,
-      "usage_note": "Official inverted RISCO asset; use on a dark neutral tile. Nominative product identification only."
+      "sha256": "b313c50f6b4583300384676c087370555e39f3d11636e2c097fa9ea5ad365b3a",
+      "dark_tile": false,
+      "usage_note": "Exact official RISCO inverted wordmark shape converted to a dark neutral contrast color for the shared white tile; nominative identification only."
     },
     {
       "slug": "satel",
@@ -259,18 +250,9 @@
       "label": "UNii",
       "source_url": "https://unii-security.com/wp-content/uploads/2023/05/unii-wit-kleur-logo.png",
       "retrieved_at": "2026-08-04",
-      "sha256": "f75b9a9939a5f0209d8dfb442ad0e7d2836fe8b9ec3ce3134661d95605f15df4",
-      "dark_tile": true,
-      "usage_note": "Official UNii asset; white wordmark requires a dark neutral tile. Store the current brand as UNii, with Alphatronics only as manufacturer or legacy search alias."
-    },
-    {
-      "slug": "vanderbilt",
-      "label": "Vanderbilt",
-      "source_url": "https://mb.cision.com/Public/10742/2063930/8e5bbe96c3a29760_org.jpg",
-      "retrieved_at": "2026-08-04",
-      "sha256": "3914d7aecdaad28fb00eddcb683a0a302c317bd3f4130bc13cb35f4335c42378",
+      "sha256": "ef77834ec8b16dc127e12e32bb89f4ff0e46f6dee16aec9497e05dc318201ddd",
       "dark_tile": false,
-      "usage_note": "Official Vanderbilt Cision press asset with only its clean white matte removed; legacy installed-base identification only. Current SPC systems belong under acre Security."
+      "usage_note": "Official UNii mark with its green accent preserved and only the white letters converted to a dark neutral contrast color for the shared white tile."
     },
     {
       "slug": "visonic",
