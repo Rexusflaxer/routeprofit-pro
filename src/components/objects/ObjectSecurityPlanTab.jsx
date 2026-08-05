@@ -107,8 +107,8 @@ function CategoryChoice({ category, summary, loading, unavailable, onClick }) {
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold text-foreground">{category.label}</span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{category.description}</span>
-        <span className="mt-1.5 block text-[11px] text-muted-foreground">{loading ? "Aantallen laden..." : unavailable ? "Aantal tijdelijk niet beschikbaar" : `${total} uitvoeringsplan${total === 1 ? "" : "nen"}`}</span>
       </span>
+      <span className="ml-4 shrink-0 whitespace-nowrap text-right text-xs text-muted-foreground">{loading ? "Laden..." : unavailable ? "Niet beschikbaar" : `${total} plan${total === 1 ? "" : "nen"}`}</span>
       <ChevronRight className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
     </button>
   );
