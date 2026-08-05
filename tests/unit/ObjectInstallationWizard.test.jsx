@@ -28,8 +28,10 @@ async function openCredentialStep() {
   fireEvent.click(getAlarmTypeButton());
   await screen.findByText("Van welk merk is de installatie?");
   fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
-  await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
-  fireEvent.click(screen.getByRole("button", { name: /KeyPad TouchScreen Jeweller/i }));
+  await screen.findByText("Hoe wordt het Ajax-systeem op dit object bediend?");
+  const touchScreen = screen.getByRole("button", { name: "KeyPad TouchScreen" });
+  expect(touchScreen).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(touchScreen);
   await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
 }
 
@@ -113,38 +115,64 @@ describe("ObjectInstallationWizard", () => {
     fireEvent.click(getAlarmTypeButton());
     await screen.findByText("Van welk merk is de installatie?");
     fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
-    await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
-    fireEvent.click(screen.getByRole("button", { name: /Superior KeyPad Fibra/i }));
+    await screen.findByText("Hoe wordt het Ajax-systeem op dit object bediend?");
+    fireEvent.click(screen.getByRole("button", { name: "KeyPad" }));
     await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
     fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
     await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
-    expect(screen.getByText(/Handleiding: Superior KeyPad Fibra/i)).toBeInTheDocument();
+    expect(screen.getByText(/Handleiding: KeyPad/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       brand: "Ajax Systems",
-      control_device_key: "superior-keypad-fibra",
-      control_device_name: "Superior KeyPad Fibra",
+      control_device_key: "keypad",
+      control_device_name: "KeyPad",
       manual_key: "ajax:numeric-keypad:nl",
       manual_version: "2026.08.1",
     }));
   });
 
-  it("toont alle Ajax-modellen met hun officiële productfoto en geen kleurvarianten", async () => {
+  it("toont vijf unieke Ajax-bedieningswijzen met grotere productfoto plus appbediening", async () => {
     render(<ObjectInstallationWizard onSave={vi.fn()} onCancel={vi.fn()} />);
 
     fireEvent.click(getAlarmTypeButton());
     await screen.findByText("Van welk merk is de installatie?");
     fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
-    await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
+    await screen.findByText("Hoe wordt het Ajax-systeem op dit object bediend?");
 
-    for (const option of AJAX_CONTROL_DEVICE_OPTIONS.filter(candidate => candidate.imageSrc)) {
+    const physicalOptions = AJAX_CONTROL_DEVICE_OPTIONS.filter(candidate => candidate.imageSrc);
+    expect(physicalOptions).toHaveLength(5);
+    expect(AJAX_CONTROL_DEVICE_OPTIONS).toHaveLength(6);
+    expect(physicalOptions.map(option => option.label)).toEqual([
+      "KeyPad",
+      "KeyPad Plus",
+      "KeyPad Combi",
+      "KeyPad TouchScreen",
+      "KeyPad Outdoor",
+    ]);
+
+    for (const option of physicalOptions) {
       const button = screen.getByRole("button", { name: option.label });
       expect(button.querySelector("img")).toHaveAttribute("src", option.imageSrc);
-      expect(button.textContent).not.toMatch(/wit|white/i);
+      expect(button.querySelector("img")).toHaveStyle({ transform: `scale(${option.imageScale})` });
+      expect(option.imageScale).toBeGreaterThanOrEqual(1.4);
+      expect(button.textContent).not.toMatch(/Jeweller|Fibra|G3|bedraad|draadloos|wit|white/i);
     }
-    expect(screen.getByRole("button", { name: "KeyPad Combi Jeweller" })).toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: /Jeweller|Fibra|G3/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Geen vast bedienpaneel" }).querySelector("img")).toBeNull();
+  });
+
+  it("selecteert voor een opgeslagen hardwarevariant de bijbehorende generieke bedieningswijze", async () => {
+    render(<ObjectInstallationWizard installation={existingInstallation} onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+    fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
+    await screen.findByText("Hoe wordt het Ajax-systeem op dit object bediend?");
+
+    expect(screen.getByRole("button", { name: "KeyPad TouchScreen" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "KeyPad TouchScreen Jeweller" })).not.toBeInTheDocument();
   });
 
   it("behoudt een onbekend bestaand merk als handmatige invoer", async () => {

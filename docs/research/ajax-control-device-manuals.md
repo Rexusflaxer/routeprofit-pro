@@ -5,23 +5,24 @@ Scope: eerste ingebouwde handleidingen voor Ajax Systems binnen de objecttab **I
 
 ## Besluit
 
-LOQ registreert het exacte bedienpaneel, maar maakt niet voor iedere elektrische of protocolvariant een gekopieerde handleiding. De functionele bedieningswijze bepaalt de handleidingfamilie. Daardoor delen een draadloze en bedrade uitvoering dezelfde Nederlandstalige werkinstructie wanneer knoppen, schermflow en gebruikershandeling gelijk zijn.
+LOQ laat de gebruiker kiezen op basis van **afwijkende bediening**, niet op basis van aansluiting, protocol of productserie. Een draadloze en bedrade uitvoering met dezelfde knoppen, schermflow en gebruikershandeling worden daarom als één keuze getoond. Een afzonderlijke keuze blijft alleen bestaan wanneer een functie de bediening en dus de werkinstructie kan veranderen, zoals een Tag/Pass-lezer, ingebouwde zoemer, touchscreen of afwijkende outdoor-toetsindeling.
 
-| Gedeelde handleidingfamilie | Bedienpaneelvarianten | Waarom gedeeld |
+| Zichtbare keuze | Bedieningskenmerk | Samengevoegde hardwarevarianten |
 | --- | --- | --- |
-| Numeriek paneel | KeyPad Jeweller; Superior KeyPad Fibra | Aanraakvlak, code en afzonderlijke toetsen voor in, uit en Nachtmodus; dezelfde groepsvolgorde. |
-| Numeriek paneel met lezer | KeyPad Plus Jeweller; KeyPad Combi Jeweller; Superior KeyPad Plus Jeweller; Superior KeyPad Plus G3 Jeweller | Dezelfde numerieke kernbediening, aangevuld met Pass/Tag en eventueel een bevestigingscode. De ingebouwde zoemer van KeyPad Combi verandert de schakelvolgorde niet. |
-| Touchscreen | KeyPad TouchScreen Jeweller; Superior KeyPad TouchScreen Fibra; Superior KeyPad TouchScreen G3 Jeweller | Dezelfde Bediening-tab, groepsselectie en authenticatie vóór of na de actie afhankelijk van Voorautorisatie. |
-| Outdoor-paneel | KeyPad Outdoor Jeweller; Superior KeyPad Outdoor Fibra | Mechanische toetsen, OK-bevestiging en configureerbare primaire/secundaire modus. |
-| Ajax-app | Geen vast bedienpaneel | Bedieningsflow verloopt volledig via een bevoegd Ajax-account. |
+| KeyPad | Numerieke codebediening met afzonderlijke toetsen voor in, uit en Nachtmodus | KeyPad Jeweller; Superior KeyPad Fibra |
+| KeyPad Plus | Dezelfde numerieke bediening, aangevuld met Tag/Pass-lezer | KeyPad Plus Jeweller; Superior KeyPad Plus Jeweller; Superior KeyPad Plus G3 Jeweller |
+| KeyPad Combi | Numerieke bediening, Tag/Pass-lezer en ingebouwde zoemer | KeyPad Combi Jeweller |
+| KeyPad TouchScreen | Touchscreen, groepsselectie en authenticatie vóór of na de actie | KeyPad TouchScreen Jeweller; Superior KeyPad TouchScreen Fibra; Superior KeyPad TouchScreen G3 Jeweller |
+| KeyPad Outdoor | Mechanische toetsen, OK-bevestiging en primaire/secundaire bedieningsmodus | KeyPad Outdoor Jeweller; Superior KeyPad Outdoor Fibra |
+| Ajax-app | Geen vast bedienpaneel; bediening via een bevoegd Ajax-account | Niet van toepassing |
 
-Het protocol (`Jeweller`, `Wings` of `Fibra`), de exacte modelnaam en de modelspecifieke officiële bron blijven wel afzonderlijk bij de installatie zichtbaar. Een gebruiker kiest dus het werkelijke model; LOQ leidt daarna server-side de gedeelde `manual_key`, versie en weergavenaam af. De client kan geen willekeurige handleiding of versie koppelen.
+Nieuwe installaties slaan de generieke bedieningssleutel en de bijbehorende server-side afgeleide `manual_key`, versie en weergavenaam op. Bestaande installaties met een exacte oudere modelsleutel blijven leesbaar en behouden hun historische modelinformatie. De client kan geen willekeurige handleiding of versie koppelen.
 
-## Visuele modelkeuze
+## Visuele keuze
 
-De wizard toont per fysiek model een lokale officiële Ajax-productrender op een vaste witte tegel. Alle renders zijn transparante PNG's van de zwarte uitvoering. Kleurvarianten zijn bewust geen afzonderlijke opties: kleur verandert de bediening of handleiding niet. De hogere-resolutiebronnen, ophaaldatum en checksums staan in `public/installation-control-devices/ajax/manifest.json`.
+De wizard toont één lokale officiële Ajax-productrender per zichtbare bedieningswijze. Dat zijn vijf transparante PNG's van een zwarte referentie-uitvoering; draadloos, bedraad, Fibra, Jeweller en Grade 3 verschijnen niet als dubbele productkaarten wanneer de bediening gelijk is. De productfoto wordt in de vaste tegel visueel opgeschaald, terwijl het originele transparante bronbestand intact blijft. Kleurvarianten zijn bewust geen afzonderlijke opties: kleur verandert de bediening of handleiding niet. De bron, ophaaldatum en checksum staan in `public/installation-control-devices/ajax/manifest.json`.
 
-De actuele Ajax Controls-catalogus wordt aangevuld met `KeyPad Combi Jeweller` als aantoonbare geïnstalleerde basis. Ajax noemt dit model nog in de actuele batterijreferentie en onderhoudt de officiële handleiding en specificatiepagina. `KeyPad UK Plus Jeweller` is een regionale VK-uitvoering; hubs, SpaceControl, Button en DoubleButton zijn centrales of afstandsbedieningen en horen daarom niet in deze Nederlandse bedienpaneelstap.
+`KeyPad Combi` blijft een eigen keuze omdat de ingebouwde zoemer een aanvullende functie is die in de werkinstructie benoemd moet worden. `KeyPad UK Plus` is een regionale VK-uitvoering; hubs, SpaceControl, Button en DoubleButton zijn centrales of afstandsbedieningen en horen daarom niet in deze Nederlandse bedieningsstap.
 
 ## Bedieningsinhoud
 
@@ -41,9 +42,9 @@ De tekst toont nooit een echte schakel-, reset-, service- of overvalcode. Alleen
 
 ## Versiebeheer
 
-- `control_device_key` identificeert de exacte hardwarevariant.
+- `control_device_key` identificeert voor nieuwe installaties de generieke bedieningswijze; oudere exacte modelsleutels blijven als compatibele aliassen ondersteund.
 - `control_device_name` is de door de server vastgelegde weergavenaam.
-- `manual_key` identificeert één van de vijf gedeelde bedieningsfamilies.
+- `manual_key` identificeert één van de zes bedieningsfamilies, inclusief de Ajax-app.
 - `manual_version` verwijst naar een append-only release; de eerste release is `2026.08.1`.
 - Een inhoudelijke wijziging krijgt een nieuwe release naast de bestaande versie. Een uitgegeven installatie wordt niet stil naar nieuwe instructies omgezet.
 - De objectlogboekdiff registreert wijzigingen van paneel en handleiding zonder gevoelige codewaarden.

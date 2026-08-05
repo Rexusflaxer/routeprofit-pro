@@ -6152,6 +6152,11 @@ const installationCredentialTypeLabel = (type: string) => INSTALLATION_CREDENTIA
 
 const AJAX_INSTALLATION_MANUAL_VERSION = '2026.08.1';
 const AJAX_CONTROL_DEVICES: Record<string, { name: string; manualKey: string }> = {
+  'keypad': { name: 'KeyPad', manualKey: 'ajax:numeric-keypad:nl' },
+  'keypad-plus': { name: 'KeyPad Plus', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'keypad-combi': { name: 'KeyPad Combi', manualKey: 'ajax:numeric-reader-buzzer-keypad:nl' },
+  'keypad-touchscreen': { name: 'KeyPad TouchScreen', manualKey: 'ajax:touchscreen-keypad:nl' },
+  'keypad-outdoor': { name: 'KeyPad Outdoor', manualKey: 'ajax:outdoor-keypad:nl' },
   'keypad-jeweller': { name: 'KeyPad Jeweller', manualKey: 'ajax:numeric-keypad:nl' },
   'keypad-plus-jeweller': { name: 'KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
   'keypad-combi-jeweller': { name: 'KeyPad Combi Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
@@ -6176,7 +6181,7 @@ function normalizedInstallationManualData(data: LooseRecord, installationType: s
   };
   const controlDeviceKey = asString(data.control_device_key);
   const controlDevice = AJAX_CONTROL_DEVICES[controlDeviceKey];
-  if (!controlDevice) throw new ApiError(400, 'Kies het Ajax-bedienpaneel voor de juiste ingebouwde handleiding');
+  if (!controlDevice) throw new ApiError(400, 'Kies de Ajax-bedieningswijze voor de juiste ingebouwde handleiding');
   return {
     control_device_key: controlDeviceKey,
     control_device_name: controlDevice.name,

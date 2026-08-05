@@ -6,128 +6,105 @@ export const AJAX_MANUAL_REVIEWED_ON = "2026-08-04";
 const AJAX_MANUAL_FAMILIES = {
   numeric: { manualKey: "ajax:numeric-keypad:nl", title: "Ajax numeriek bedienpaneel" },
   "numeric-reader": { manualKey: "ajax:numeric-reader-keypad:nl", title: "Ajax numeriek bedienpaneel met lezer" },
+  "numeric-reader-buzzer": { manualKey: "ajax:numeric-reader-buzzer-keypad:nl", title: "Ajax KeyPad Combi met lezer en zoemer" },
   touchscreen: { manualKey: "ajax:touchscreen-keypad:nl", title: "Ajax touchscreen-bedienpaneel" },
   outdoor: { manualKey: "ajax:outdoor-keypad:nl", title: "Ajax outdoor-bedienpaneel" },
   app: { manualKey: "ajax:app-control:nl", title: "Ajax-appbediening zonder vast paneel" },
 };
 
-const ajaxControlDevice = ({ value, label, description, family, sourceUrl, protocol, availability = "Actueel", hasPhoto = true }) => ({
+const ajaxControlDevice = ({ value, label, description, family, sourceUrl, operationLabel, imageScale = 1, hasPhoto = true }) => ({
   value,
   label,
   description,
   family,
   sourceUrl,
-  protocol,
-  availability,
+  protocol: "Ajax",
+  operationLabel,
   imageSrc: hasPhoto ? `/installation-control-devices/ajax/${value}.png` : null,
+  imageScale: hasPhoto ? imageScale : 1,
   manualKey: AJAX_MANUAL_FAMILIES[family].manualKey,
   manualVersion: AJAX_MANUAL_VERSION,
 });
 
 /**
- * Bedienpanelen zijn geen vrije tekst: deze sleutel bepaalt welke gecontroleerde,
- * versievaste LOQ-handleiding aan de installatie wordt gekoppeld.
+ * De zichtbare opties zijn unieke bedieningswijzen. Een verschil in aansluiting,
+ * protocol of certificeringsgraad levert geen dubbele wizardkaart op wanneer de
+ * gebruikershandeling en handleiding gelijk blijven.
  */
 export const AJAX_CONTROL_DEVICE_OPTIONS = [
   ajaxControlDevice({
-    value: "keypad-jeweller",
-    label: "KeyPad Jeweller",
-    description: "Numeriek draadloos bedienpaneel met in-, uit- en nachttoets.",
+    value: "keypad",
+    label: "KeyPad",
+    description: "Numeriek bedienpaneel met code en afzonderlijke toetsen voor in, uit en nachtstand.",
     family: "numeric",
-    protocol: "Jeweller",
-    availability: "Geïnstalleerde basis",
+    operationLabel: "Codebediening",
+    imageScale: 1.9,
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad/",
   }),
   ajaxControlDevice({
-    value: "keypad-plus-jeweller",
-    label: "KeyPad Plus Jeweller",
-    description: "Numeriek draadloos paneel met Tag- en Pass-lezer.",
+    value: "keypad-plus",
+    label: "KeyPad Plus",
+    description: "Numeriek bedienpaneel met code en contactloze Tag- en Pass-lezer.",
     family: "numeric-reader",
-    protocol: "Jeweller",
+    operationLabel: "Code · Tag · Pass",
+    imageScale: 1.9,
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad-plus/",
   }),
   ajaxControlDevice({
-    value: "keypad-combi-jeweller",
-    label: "KeyPad Combi Jeweller",
-    description: "Liggend draadloos paneel met Tag- en Pass-lezer en ingebouwde zoemer.",
-    family: "numeric-reader",
-    protocol: "Jeweller",
-    availability: "Geïnstalleerde basis",
+    value: "keypad-combi",
+    label: "KeyPad Combi",
+    description: "Liggend bedienpaneel met Tag- en Pass-lezer en ingebouwde zoemer.",
+    family: "numeric-reader-buzzer",
+    operationLabel: "Code · Tag · Pass · zoemer",
+    imageScale: 1.4,
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad-combi/",
   }),
   ajaxControlDevice({
-    value: "keypad-touchscreen-jeweller",
-    label: "KeyPad TouchScreen Jeweller",
-    description: "Draadloos touchscreen met groepen, codes, Tag, Pass en smartphone.",
+    value: "keypad-touchscreen",
+    label: "KeyPad TouchScreen",
+    description: "Touchscreen voor groepen, codes, Tag, Pass, smartphone en automatisering.",
     family: "touchscreen",
-    protocol: "Jeweller / Wings",
+    operationLabel: "Touchscreen · Tag · Pass",
+    imageScale: 1.6,
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad-touchscreen/",
   }),
   ajaxControlDevice({
-    value: "superior-keypad-fibra",
-    label: "Superior KeyPad Fibra",
-    description: "Bedraad numeriek Superior-paneel voor bediening met codes.",
-    family: "numeric",
-    protocol: "Fibra",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-fibra/",
-  }),
-  ajaxControlDevice({
-    value: "superior-keypad-plus-jeweller",
-    label: "Superior KeyPad Plus Jeweller",
-    description: "Draadloos Superior-paneel met numerieke toetsen en toegangslezer.",
-    family: "numeric-reader",
-    protocol: "Jeweller",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-jeweller/",
-  }),
-  ajaxControlDevice({
-    value: "superior-keypad-touchscreen-fibra",
-    label: "Superior KeyPad TouchScreen Fibra",
-    description: "Bedraad Superior-touchscreen met groepen en meerdere authenticatiemethoden.",
-    family: "touchscreen",
-    protocol: "Fibra",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-fibra/",
-  }),
-  ajaxControlDevice({
-    value: "keypad-outdoor-jeweller",
-    label: "KeyPad Outdoor Jeweller",
-    description: "Draadloos buitenpaneel met mechanische toetsen, OK-toets en lezer.",
+    value: "keypad-outdoor",
+    label: "KeyPad Outdoor",
+    description: "Outdoorbedienpaneel met mechanische toetsen, OK-bevestiging en contactloze lezer.",
     family: "outdoor",
-    protocol: "Jeweller",
+    operationLabel: "Mechanische toetsen · Tag · Pass",
+    imageScale: 1.42,
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad-outdoor-jeweller/",
-  }),
-  ajaxControlDevice({
-    value: "superior-keypad-outdoor-fibra",
-    label: "Superior KeyPad Outdoor Fibra",
-    description: "Bedraad Grade 3-buitenpaneel met primaire en secundaire bedienmodus.",
-    family: "outdoor",
-    protocol: "Fibra",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-outdoor-fibra/",
-  }),
-  ajaxControlDevice({
-    value: "superior-keypad-plus-g3-jeweller",
-    label: "Superior KeyPad Plus G3 Jeweller",
-    description: "Draadloos Grade 3-paneel met numerieke toetsen en toegangslezer.",
-    family: "numeric-reader",
-    protocol: "Jeweller",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-g3-jeweller/",
-  }),
-  ajaxControlDevice({
-    value: "superior-keypad-touchscreen-g3-jeweller",
-    label: "Superior KeyPad TouchScreen G3 Jeweller",
-    description: "Draadloos Grade 3-touchscreen voor beveiligingsgroepen en automatisering.",
-    family: "touchscreen",
-    protocol: "Jeweller / Wings",
-    sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-g3-jeweller/",
   }),
   ajaxControlDevice({
     value: "ajax-app-only",
     label: "Geen vast bedienpaneel",
     description: "Bediening verloopt uitsluitend via een bevoegde Ajax-app.",
     family: "app",
-    protocol: "Ajax-app",
+    operationLabel: "Ajax-app",
     hasPhoto: false,
     sourceUrl: "https://support.ajax.systems/en/how-to-configure-a-space/",
   }),
+];
+
+/**
+ * Reeds opgeslagen exacte hardwarevarianten blijven geldig. Zij worden bij het
+ * openen aan hun bedieningswijze gekoppeld en bij een gewone wijziging niet
+ * stil naar een andere sleutel herschreven.
+ */
+export const AJAX_CONTROL_DEVICE_VARIANTS = [
+  { value: "keypad-jeweller", label: "KeyPad Jeweller", optionValue: "keypad", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/keypad/" },
+  { value: "superior-keypad-fibra", label: "Superior KeyPad Fibra", optionValue: "keypad", protocol: "Fibra", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-fibra/" },
+  { value: "keypad-plus-jeweller", label: "KeyPad Plus Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-plus/" },
+  { value: "superior-keypad-plus-jeweller", label: "Superior KeyPad Plus Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-jeweller/" },
+  { value: "superior-keypad-plus-g3-jeweller", label: "Superior KeyPad Plus G3 Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-g3-jeweller/" },
+  { value: "keypad-combi-jeweller", label: "KeyPad Combi Jeweller", optionValue: "keypad-combi", protocol: "Jeweller", manualKey: "ajax:numeric-reader-keypad:nl", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-combi/" },
+  { value: "keypad-touchscreen-jeweller", label: "KeyPad TouchScreen Jeweller", optionValue: "keypad-touchscreen", protocol: "Jeweller / Wings", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-touchscreen/" },
+  { value: "superior-keypad-touchscreen-fibra", label: "Superior KeyPad TouchScreen Fibra", optionValue: "keypad-touchscreen", protocol: "Fibra", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-fibra/" },
+  { value: "superior-keypad-touchscreen-g3-jeweller", label: "Superior KeyPad TouchScreen G3 Jeweller", optionValue: "keypad-touchscreen", protocol: "Jeweller / Wings", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-g3-jeweller/" },
+  { value: "keypad-outdoor-jeweller", label: "KeyPad Outdoor Jeweller", optionValue: "keypad-outdoor", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-outdoor-jeweller/" },
+  { value: "superior-keypad-outdoor-fibra", label: "Superior KeyPad Outdoor Fibra", optionValue: "keypad-outdoor", protocol: "Fibra", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-outdoor-fibra/" },
 ];
 
 const normalize = value => String(value || "")
@@ -140,15 +117,23 @@ const normalize = value => String(value || "")
 export const isAjaxAlarmInstallation = installation => installation?.installation_type === "alarm_system"
   && AJAX_BRAND_VALUES.has(normalize(installation?.brand));
 
-export const findAjaxControlDevice = value => AJAX_CONTROL_DEVICE_OPTIONS.find(option => option.value === value) || null;
+export const findAjaxControlDeviceVariant = value => AJAX_CONTROL_DEVICE_VARIANTS.find(variant => variant.value === value) || null;
+
+export const findAjaxControlDevice = value => {
+  const direct = AJAX_CONTROL_DEVICE_OPTIONS.find(option => option.value === value);
+  if (direct) return direct;
+  const variant = findAjaxControlDeviceVariant(value);
+  return variant ? AJAX_CONTROL_DEVICE_OPTIONS.find(option => option.value === variant.optionValue) || null : null;
+};
 
 export const ajaxControlDevicePayload = value => {
   const option = findAjaxControlDevice(value);
   if (!option) return null;
+  const variant = findAjaxControlDeviceVariant(value);
   return {
-    control_device_key: option.value,
-    control_device_name: option.label,
-    manual_key: option.manualKey,
+    control_device_key: variant?.value || option.value,
+    control_device_name: variant?.label || option.label,
+    manual_key: variant?.manualKey || option.manualKey,
     manual_version: option.manualVersion,
   };
 };
@@ -308,6 +293,14 @@ const AJAX_MANUAL_CONTENT_2026_08_1 = {
   },
 };
 
+// KeyPad Combi deelt de schakelvolgorde met KeyPad Plus, maar heeft een
+// ingebouwde zoemer. De aparte handleidingssleutel voorkomt dat die extra
+// signalering bij een latere revisie onbedoeld in alle lezerpanelen verschijnt.
+AJAX_MANUAL_CONTENT_2026_08_1["numeric-reader-buzzer"] = {
+  ...AJAX_MANUAL_CONTENT_2026_08_1["numeric-reader"],
+  intro: "Dit paneel kan met een code, Ajax Pass of Tag worden bediend en heeft een ingebouwde zoemer voor geconfigureerde alarmen, vertragingen en statusmeldingen. Controleer altijd welke signalen voor dit object zijn ingesteld; de zoemer vervangt geen volwaardige sirene.",
+};
+
 const releaseKey = (manualKey, manualVersion) => `${manualKey}@${manualVersion}`;
 
 /**
@@ -346,6 +339,8 @@ export function resolveInstallationManual(installation) {
   if (!isAjaxAlarmInstallation(installation)) return null;
   const option = findAjaxControlDevice(installation?.control_device_key);
   if (!option) return null;
+  const variant = findAjaxControlDeviceVariant(installation?.control_device_key);
+  const expectedManualKey = variant?.manualKey || option.manualKey;
   const manualKey = installation?.manual_key;
   const manualVersion = installation?.manual_version;
   // Alleen een bij opslag atomair vastgelegde release mag worden geopend. Een
@@ -354,13 +349,13 @@ export function resolveInstallationManual(installation) {
   if (!manualKey || !manualVersion) return null;
   // Fail closed: een opgeslagen paneelsleutel mag nooit instructies uit een
   // andere bedieningsfamilie openen, ook niet bij legacy-drift of datacorruptie.
-  if (manualKey !== option.manualKey) return null;
+  if (manualKey !== expectedManualKey) return null;
   const release = AJAX_MANUAL_RELEASES[releaseKey(manualKey, manualVersion)];
   if (!release) return null;
   return {
     ...release,
-    controlDevice: option.label,
-    protocol: option.protocol,
-    sourceUrl: option.sourceUrl,
+    controlDevice: variant?.label || option.label,
+    protocol: variant?.protocol || option.protocol,
+    sourceUrl: variant?.sourceUrl || option.sourceUrl,
   };
 }

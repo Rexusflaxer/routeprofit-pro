@@ -117,7 +117,7 @@ function MissingManual({ installation, onBack, onEdit, disabled }) {
       <div className="mx-auto mt-14 max-w-xl rounded-2xl border border-border/70 bg-card/50 p-7 text-center shadow-sm backdrop-blur-xl">
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-border/70 bg-background/60"><BookOpenCheck className="h-5 w-5 text-muted-foreground" /></div>
         <h2 className="mt-4 text-base font-semibold">Nog geen ingebouwde handleiding beschikbaar</h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{ajaxWithoutModel ? "Kies eerst het exacte Ajax-bedienpaneel. Daarna koppelt LOQ automatisch de juiste gecontroleerde handleiding." : `Voor ${installation.brand || installationTypeLabel(installation)} is in deze eerste oplevering nog geen gecontroleerde LOQ-handleiding gepubliceerd.`}</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{ajaxWithoutModel ? "Kies eerst de Ajax-bedieningswijze. Daarna koppelt LOQ automatisch de juiste gecontroleerde handleiding." : `Voor ${installation.brand || installationTypeLabel(installation)} is in deze eerste oplevering nog geen gecontroleerde LOQ-handleiding gepubliceerd.`}</p>
         {!disabled && <Button type="button" size="sm" className="mt-5" onClick={onEdit}><Pencil className="h-4 w-4" /> Installatie wijzigen</Button>}
       </div>
     </div>

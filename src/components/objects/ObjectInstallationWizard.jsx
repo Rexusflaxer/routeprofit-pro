@@ -53,7 +53,7 @@ const DEFAULT_STEPS = [
 const AJAX_STEPS = [
   { key: "type", label: "Soort" },
   { key: "brand", label: "Merk" },
-  { key: "control-device", label: "Bedienpaneel" },
+  { key: "control-device", label: "Bediening" },
   { key: "operation", label: "Doormelding & codes" },
   { key: "management", label: "Beheer & controle" },
 ];
@@ -135,7 +135,7 @@ function AjaxControlDevicePhoto({ option }) {
       className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
     >
       {option.imageSrc && !failed
-        ? <img src={option.imageSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-contain" />
+        ? <img src={option.imageSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} style={{ transform: `scale(${option.imageScale})` }} className="h-full w-full object-contain will-change-transform" />
         : withoutFixedPanel
           ? <Smartphone className="h-10 w-10 text-slate-500" />
           : <ImageOff className="h-8 w-8 text-slate-400" />}
@@ -162,8 +162,7 @@ function AjaxControlDeviceChoice({ option, selected, onSelect }) {
         <span className="block pr-6 text-sm font-semibold leading-snug text-foreground">{option.label}</span>
         <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span>
         <span className="mt-3 flex flex-wrap gap-1.5">
-          <span className="rounded-full border border-border/80 bg-background/65 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{option.protocol}</span>
-          {option.availability !== "Actueel" && <span className="rounded-full border border-amber-300/70 bg-amber-50/80 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/35 dark:text-amber-200">{option.availability}</span>}
+          <span className="rounded-full border border-border/80 bg-background/65 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{option.operationLabel}</span>
         </span>
       </span>
       {selected
@@ -289,7 +288,9 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     manual_version: "",
   }));
   const chooseControlDevice = value => {
-    const selection = ajaxControlDevicePayload(value);
+    const keepsExistingVariant = selectedControlDevice?.value === value
+      && form.control_device_key !== value;
+    const selection = ajaxControlDevicePayload(keepsExistingVariant ? form.control_device_key : value);
     if (!selection) return;
     setForm(current => ({ ...current, ...selection }));
     setStepIndex(3);
@@ -343,9 +344,9 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
               </>}
 
               {currentStep.key === "control-device" && <>
-                <StepHeading title="Welk Ajax-bedienpaneel wordt op dit object gebruikt?" description="Kies het exacte model aan de hand van de officiële productfoto. Iedere uitvoering staat één keer in de vaste zwarte kleur; kleurvarianten veranderen de bediening niet." />
+                <StepHeading title="Hoe wordt het Ajax-systeem op dit object bediend?" description="Kies de bedieningswijze aan de hand van knoppen en functies. Uitvoeringen met dezelfde werking staan één keer in deze lijst." />
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{AJAX_CONTROL_DEVICE_OPTIONS.map(option => <AjaxControlDeviceChoice key={option.value} option={option} selected={selectedControlDevice?.value === option.value} onSelect={() => chooseControlDevice(option.value)} />)}</div>
-                <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>De handleiding wordt door LOQ beheerd. De gebruiker hoeft geen bestand te uploaden; model, handleidingssleutel en versie worden samen met de installatie opgeslagen.</p></div>
+                <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>De handleiding wordt door LOQ beheerd. De gebruiker hoeft geen bestand te uploaden; bedieningswijze, handleidingssleutel en versie worden samen met de installatie opgeslagen.</p></div>
               </>}
 
               {currentStep.key === "operation" && <>

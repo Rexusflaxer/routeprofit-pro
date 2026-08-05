@@ -3,7 +3,11 @@ import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { AJAX_CONTROL_DEVICE_OPTIONS } from "@/components/objects/objectInstallationManuals";
+import {
+  AJAX_CONTROL_DEVICE_OPTIONS,
+  AJAX_CONTROL_DEVICE_VARIANTS,
+  findAjaxControlDevice,
+} from "@/components/objects/objectInstallationManuals";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const entryPath = path.join(root, "base44/functions/customerPlatformApi/entry.ts");
@@ -48,7 +52,7 @@ describe("customerPlatformApi installatieconsistentie", () => {
     ...overrides,
   });
 
-  it("leidt alle Ajax-handleidingvelden server-side af uit een bekende paneelsleutel", () => {
+  it("accepteert alle generieke Ajax-bedieningswijzen en leidt de handleiding server-side af", () => {
     for (const option of AJAX_CONTROL_DEVICE_OPTIONS) {
       const result = backend.normalizedInstallationData(installationData({
         control_device_key: option.value,
@@ -66,8 +70,43 @@ describe("customerPlatformApi installatieconsistentie", () => {
     }
   });
 
+  it("blijft exacte legacy-paneelsleutels server-side accepteren en bewaren", () => {
+    for (const variant of AJAX_CONTROL_DEVICE_VARIANTS) {
+      const option = findAjaxControlDevice(variant.value);
+      const result = backend.normalizedInstallationData(installationData({
+        control_device_key: variant.value,
+        control_device_name: "Vervalste naam",
+        manual_key: "client:mag:dit:niet:bepalen",
+        manual_version: "999",
+      }));
+      expect(result).toMatchObject({
+        control_device_key: variant.value,
+        control_device_name: variant.label,
+        manual_key: variant.manualKey || option.manualKey,
+        manual_version: option.manualVersion,
+      });
+    }
+  });
+
+  it("geeft de generieke KeyPad Combi zijn zoemerhandleiding zonder legacyrecords te herschrijven", () => {
+    expect(backend.normalizedInstallationData(installationData({
+      control_device_key: "keypad-combi",
+    }))).toMatchObject({
+      control_device_key: "keypad-combi",
+      control_device_name: "KeyPad Combi",
+      manual_key: "ajax:numeric-reader-buzzer-keypad:nl",
+    });
+    expect(backend.normalizedInstallationData(installationData({
+      control_device_key: "keypad-combi-jeweller",
+    }))).toMatchObject({
+      control_device_key: "keypad-combi-jeweller",
+      control_device_name: "KeyPad Combi Jeweller",
+      manual_key: "ajax:numeric-reader-keypad:nl",
+    });
+  });
+
   it("weigert een onbekend Ajax-paneel en wist handleidingvelden bij andere merken", () => {
-    expect(() => backend.normalizedInstallationData(installationData({ control_device_key: "onbekend-paneel" }))).toThrow(/Ajax-bedienpaneel/);
+    expect(() => backend.normalizedInstallationData(installationData({ control_device_key: "onbekend-paneel" }))).toThrow(/Ajax-bedieningswijze/);
     expect(backend.normalizedInstallationData(installationData({
       brand: "Honeywell",
       control_device_key: "keypad-jeweller",
