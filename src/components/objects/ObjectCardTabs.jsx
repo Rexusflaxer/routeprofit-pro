@@ -26,6 +26,7 @@ import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
 import ObjectRelationshipsTab from "./ObjectRelationshipsTab";
 import ObjectSecurityPlanTab from "./ObjectSecurityPlanTab";
+import ObjectFloorPlanPlaceholderTab from "./ObjectFloorPlanPlaceholderTab";
 import ObjectTasksTab from "./ObjectTasksTab";
 import {
   OBJECT_CARD_TABS,
@@ -368,6 +369,8 @@ export default function ObjectCardTabs({
         <main role="tabpanel" tabIndex={0} className="min-w-0 flex-1 bg-background/30">
           {activeTab === "security-plan" ? (
             <ObjectSecurityPlanTab object={object} />
+          ) : activeTab === "floor-plan" ? (
+            <ObjectFloorPlanPlaceholderTab />
           ) : activeTab === "tasks" ? (
             <ObjectTasksTab
               object={object}
