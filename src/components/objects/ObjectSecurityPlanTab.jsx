@@ -131,7 +131,7 @@ function CategoryLanding({ summaries, loading, countError, migrationCount, migra
           <p className="mt-1 text-xs text-muted-foreground">Iedere categorie bevat zijn eigen varianten, instructies, secties, routes en publicatiehistorie.</p>
         </div>
         {countError && <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"><span>De aantallen zijn tijdelijk niet beschikbaar. U kunt de categorieën wel openen.</span><Button type="button" variant="ghost" size="sm" className="h-7 shrink-0" onClick={onRetryCounts}><RefreshCw className="h-3.5 w-3.5" /> Opnieuw</Button></div>}
-        <div className="grid grid-cols-1 gap-1.5">
+        <div className="grid w-full max-w-5xl grid-cols-1 gap-1.5">
           {SECURITY_PLAN_TASK_TYPES.map(category => <CategoryChoice key={category.key} category={category} summary={summaryByType.get(category.key)} loading={loading} unavailable={countError} onClick={() => onSelect(category.key)} />)}
         </div>
       </div>
