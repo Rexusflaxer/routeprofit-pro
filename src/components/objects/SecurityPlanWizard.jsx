@@ -26,8 +26,8 @@ function initialSecurityPlanForm(initialTaskType, categoryLabel) {
     custom_task_type: taskType === "other" ? categoryLabel || "Anders" : "",
     variant_name: "",
     execution_mode: securityPlanExecutionModeForTaskType(taskType),
-    duration_mode: "fixed",
-    duration_minutes: "30",
+    duration_mode: "none",
+    duration_minutes: null,
     section_policy: "not_applicable",
     default_section_ids: [],
     allowed_section_ids: [],
@@ -48,8 +48,8 @@ export default function SecurityPlanWizard({ initialTaskType = "", categoryLabel
     ...form,
     custom_task_type: form.task_type === "other" ? form.custom_task_type.trim() : null,
     variant_name: form.variant_name.trim(),
-    duration_mode: "fixed",
-    duration_minutes: Number(form.duration_minutes),
+    duration_mode: "none",
+    duration_minutes: null,
   });
   const content = <PlanNameStep value={form.variant_name} onChange={variant_name => setForm(currentForm => ({ ...currentForm, variant_name }))} />;
 
