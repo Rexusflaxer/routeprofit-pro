@@ -10112,7 +10112,7 @@ function assertNoSecurityPlanSecretFields(value: unknown, path = 'data', depth =
 }
 
 function legacySecurityPlanExecutionMode(taskType: string) {
-  if (['reception', 'object_security', 'access_control', 'fire_watch', 'concierge'].includes(taskType)) return 'continuous_post';
+  if (['reception', 'object_security', 'access_control', 'fire_watch', 'closing_assistance', 'concierge'].includes(taskType)) return 'continuous_post';
   return 'round';
 }
 
@@ -10133,8 +10133,7 @@ function normalizedSecurityPlanIdentity(data: LooseRecord, current: LooseRecord 
     200,
     false,
   ) as string;
-  const executionMode = asString(data.execution_mode ?? current?.execution_mode) || legacySecurityPlanExecutionMode(taskType);
-  if (!SECURITY_PLAN_EXECUTION_MODES.has(executionMode)) throw new ApiError(400, 'Kies een geldige uitvoeringsvorm');
+  const executionMode = legacySecurityPlanExecutionMode(taskType);
   return { task_type: taskType, custom_task_type: customTaskType, variant_name: variantName, execution_mode: executionMode };
 }
 

@@ -6,6 +6,7 @@ import {
 import {
   normalizeInstructionBlocks,
   normalizeRouteOverlay,
+  securityPlanExecutionModeForTaskType,
 } from "./securityPlanConfig";
 
 function required(value, label) {
@@ -155,11 +156,12 @@ function revisionPayload(data = {}) {
 }
 
 function planPayload(data = {}) {
+  const taskType = required(data.task_type, "Taaktype");
   return {
-    task_type: required(data.task_type, "Taaktype"),
-    custom_task_type: data.task_type === "other" ? required(data.custom_task_type, "Eigen taaktype") : null,
+    task_type: taskType,
+    custom_task_type: taskType === "other" ? required(data.custom_task_type, "Eigen taaktype") : null,
     variant_name: required(data.variant_name || data.title, "Variantnaam"),
-    execution_mode: required(data.execution_mode, "Uitvoeringsvorm"),
+    execution_mode: securityPlanExecutionModeForTaskType(taskType),
   };
 }
 

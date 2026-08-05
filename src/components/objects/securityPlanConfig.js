@@ -13,6 +13,19 @@ export const SECURITY_PLAN_TASK_TYPES = [
   { key: "other", label: "Anders", description: "Leg een eigen type beveiligingstaak vast." },
 ];
 
+const CONTINUOUS_SECURITY_PLAN_TASK_TYPES = new Set([
+  "object_security",
+  "reception",
+  "access_control",
+  "fire_watch",
+  "closing_assistance",
+  "concierge",
+]);
+
+export function securityPlanExecutionModeForTaskType(taskType) {
+  return CONTINUOUS_SECURITY_PLAN_TASK_TYPES.has(taskType) ? "continuous_post" : "round";
+}
+
 // Tijdelijke export voor oude imports buiten Beveiligingsplan V2.
 export const SECURITY_PLAN_CATEGORIES = SECURITY_PLAN_TASK_TYPES.map(type => ({
   ...type,

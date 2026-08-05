@@ -7,9 +7,9 @@ import { wizardStepMotion } from "@/components/ui-custom/wizardMotion";
 import { ChoiceCard, Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
 import {
   SECURITY_PLAN_DURATION_MODES,
-  SECURITY_PLAN_EXECUTION_MODES,
   SECURITY_PLAN_SECTION_POLICIES,
   SECURITY_PLAN_TASK_TYPES,
+  securityPlanExecutionModeForTaskType,
 } from "./securityPlanConfig";
 
 const STEPS = [
@@ -19,9 +19,10 @@ const STEPS = [
 ];
 
 function defaultsForType(taskType) {
-  const continuous = ["object_security", "reception", "access_control", "fire_watch", "concierge"].includes(taskType);
+  const executionMode = securityPlanExecutionModeForTaskType(taskType);
+  const continuous = executionMode === "continuous_post";
   return {
-    execution_mode: continuous ? "continuous_post" : "round",
+    execution_mode: executionMode,
     duration_mode: continuous ? "schedule_defined" : "fixed",
     duration_minutes: continuous ? "" : "30",
     section_policy: "not_applicable",
@@ -69,14 +70,6 @@ function VariantStep({ form, onChange }) {
       <Field label="Variantnaam" htmlFor="security-plan-variant" required hint="Het taaktype hoeft niet opnieuw in de naam te staan.">
         <Input id="security-plan-variant" value={form.variant_name} onChange={event => onChange(current => ({ ...current, variant_name: event.target.value }))} placeholder="Bijvoorbeeld Volledige avondronde" maxLength={200} autoFocus />
       </Field>
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-foreground">Uitvoeringsvorm</p>
-        <div className="grid gap-2 md:grid-cols-2">
-          {SECURITY_PLAN_EXECUTION_MODES.map(mode => (
-            <ChoiceCard key={mode.key} selected={form.execution_mode === mode.key} onClick={() => onChange(current => ({ ...current, execution_mode: mode.key }))} title={mode.label} description={mode.description} />
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -148,7 +141,7 @@ export default function SecurityPlanWizard({ initialTaskType = "", categoryLabel
   const current = steps[step].key;
   const valid = useMemo(() => {
     if (current === "type") return Boolean(form.task_type && (form.task_type !== "other" || form.custom_task_type.trim()));
-    if (current === "variant") return Boolean(form.variant_name.trim() && form.execution_mode);
+    if (current === "variant") return Boolean(form.variant_name.trim());
     return Boolean(form.duration_mode && form.section_policy && (form.duration_mode !== "fixed" || Number(form.duration_minutes) > 0));
   }, [current, form]);
   const submit = () => onSave({
