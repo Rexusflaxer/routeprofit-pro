@@ -21,7 +21,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
 import SecurityPlanWizard from "./SecurityPlanWizard";
@@ -84,7 +83,7 @@ function LibraryError({ error, onRetry }) {
 }
 
 function EmptyCategory({ category, searching, archivedObject, onCreate }) {
-  return <div className="flex min-h-[360px] flex-col items-center justify-center px-5 py-10 text-center"><div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border/70 bg-card/45 shadow-sm backdrop-blur-xl">{searching ? <Search className="h-5 w-5 text-muted-foreground" /> : <BookOpenText className="h-5 w-5 text-muted-foreground" />}</div><p className="mt-3 text-sm font-medium">{searching ? "Geen planvarianten gevonden" : `Nog geen plannen voor ${category.label}`}</p><p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">{searching ? "Pas de zoekopdracht of het statusfilter aan." : "Voeg een eerste plan toe en werk daarna de instructies, objectsecties en eventuele looproute uit."}</p>{!searching && !archivedObject && <Button type="button" size="sm" className="mt-4" onClick={onCreate}><Plus className="h-3.5 w-3.5" /> Plan toevoegen</Button>}</div>;
+  return <div className="flex min-h-[360px] flex-col items-center justify-center px-5 py-10 text-center"><div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border/70 bg-card/45 shadow-sm backdrop-blur-xl">{searching ? <Search className="h-5 w-5 text-muted-foreground" /> : <BookOpenText className="h-5 w-5 text-muted-foreground" />}</div><p className="mt-3 text-sm font-medium">{searching ? "Geen planvarianten gevonden" : `Nog geen plannen voor ${category.label}`}</p><p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">{searching ? "Pas de zoekopdracht aan." : "Voeg een eerste plan toe en werk daarna de instructies, objectsecties en eventuele looproute uit."}</p>{!searching && !archivedObject && <Button type="button" size="sm" className="mt-4" onClick={onCreate}><Plus className="h-3.5 w-3.5" /> Plan toevoegen</Button>}</div>;
 }
 
 function PlanStatus({ plan }) {
@@ -154,9 +153,9 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const selectedType = searchParams.get("plan_type") || "";
   const selectedCategory = getSecurityPlanTaskType(selectedType);
-  const statusFilter = searchParams.get("plan_status") || "current";
+  const statusFilter = "current";
   const archivedObject = object.status === "archived";
-  const status = statusFilter === "current" ? null : statusFilter;
+  const status = null;
   const facetQuery = useQuery({
     queryKey: ["object-card", object.id, "security-plans", "categories"],
     queryFn: () => listObjectSecurityPlans({ customerId: object.customer_id, objectId: object.id, page: 1, pageSize: 100 }),
@@ -238,14 +237,6 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
     CATEGORY_RESET_PARAMS.forEach(param => next.delete(param));
     setSearchParams(next);
   };
-  const setStatus = value => {
-    const next = new URLSearchParams(searchParams);
-    if (value === "current") next.delete("plan_status");
-    else next.set("plan_status", value);
-    ["page", "view", "row", "plan_tab"].forEach(key => next.delete(key));
-    setSearchParams(next);
-  };
-
   const detailOpen = view === "edit"
     && searchParams.get("view") === "edit"
     && selectedRow
@@ -279,11 +270,10 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative min-w-0 sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchTerm} onChange={event => onSearchChange(event.target.value)} placeholder="Zoek planvariant..." aria-label={`${selectedCategory.label} doorzoeken`} className="h-9 pl-9 pr-9" />{searchTerm && <button type="button" onClick={() => onSearchChange("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Zoekopdracht wissen"><X className="h-4 w-4" /></button>}</div>
-        <Select value={statusFilter} onValueChange={setStatus}><SelectTrigger className="h-9 w-full sm:w-40" aria-label="Filter op status"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="current">Actieve plannen</SelectItem><SelectItem value="draft">Concepten</SelectItem><SelectItem value="published">Gepubliceerd</SelectItem><SelectItem value="archived">Gearchiveerd</SelectItem></SelectContent></Select>
         {!wizardOpen && <Button type="button" size="sm" onClick={onOpenCreate} disabled={archivedObject}><Plus className="h-3.5 w-3.5" /> Plan toevoegen</Button>}
       </div>
     </div>
-    <div className="min-h-0 flex-1">{listQuery.isLoading ? <LibraryLoading /> : listQuery.isError ? <LibraryError error={listQuery.error} onRetry={() => listQuery.refetch()} /> : rows.length ? <PlanRows rows={rows} category={selectedCategory} onOpen={onOpenEdit} /> : <EmptyCategory category={selectedCategory} searching={Boolean(searchTerm.trim() || statusFilter !== "current")} archivedObject={archivedObject} onCreate={onOpenCreate} />}</div>
+    <div className="min-h-0 flex-1">{listQuery.isLoading ? <LibraryLoading /> : listQuery.isError ? <LibraryError error={listQuery.error} onRetry={() => listQuery.refetch()} /> : rows.length ? <PlanRows rows={rows} category={selectedCategory} onOpen={onOpenEdit} /> : <EmptyCategory category={selectedCategory} searching={Boolean(searchTerm.trim())} archivedObject={archivedObject} onCreate={onOpenCreate} />}</div>
     {(page > 1 || hasNext) && <div className="flex items-center justify-between border-t border-border/70 px-4 py-3"><p className="text-xs text-muted-foreground">Pagina {page} · {total} planvariant{total === 1 ? "" : "en"}</p><div className="flex gap-2"><Button type="button" variant="outline" size="sm" disabled={page === 1 || listQuery.isFetching} onClick={() => onPageChange(page - 1)}>Vorige</Button><Button type="button" variant="outline" size="sm" disabled={!hasNext || listQuery.isFetching} onClick={() => onPageChange(page + 1)}>Volgende</Button></div></div>}
   </div>;
 }
