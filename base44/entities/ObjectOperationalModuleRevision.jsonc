@@ -1,0 +1,759 @@
+{
+  "name": "ObjectOperationalModuleRevision",
+  "type": "object",
+  "properties": {
+    "module_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "customer_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "object_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "revision_number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "published", "superseded"],
+      "default": "draft"
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["loq-object-module-v1"],
+      "default": "loq-object-module-v1"
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "maxLength": 2000
+    },
+    "responsible_role": {
+      "type": ["string", "null"],
+      "maxLength": 160
+    },
+    "retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650
+    },
+    "anonymize_after_retention": {
+      "type": "boolean",
+      "default": true
+    },
+    "field_definitions": {
+      "type": "array",
+      "maxItems": 75,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 75
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "help_text": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          },
+          "field_type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "textarea",
+              "email",
+              "phone",
+              "number",
+              "date",
+              "time",
+              "select",
+              "multiselect",
+              "checkbox",
+              "photo",
+              "signature"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "default": false
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "default": []
+          },
+          "reference_list_id": {
+            "type": ["string", "null"],
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "label",
+          "help_text",
+          "field_type",
+          "required",
+          "enabled",
+          "options",
+          "reference_list_id"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "reference_lists": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "person",
+              "employee",
+              "room",
+              "department",
+              "supplier",
+              "host",
+              "recipient",
+              "location",
+              "resource",
+              "other"
+            ]
+          },
+          "description": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "secondary_label": {
+                  "type": ["string", "null"],
+                  "maxLength": 240
+                },
+                "external_reference": {
+                  "type": ["string", "null"],
+                  "maxLength": 160
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["active", "inactive"],
+                  "default": "active"
+                }
+              },
+              "required": [
+                "id",
+                "sequence",
+                "label",
+                "secondary_label",
+                "external_reference",
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "name",
+          "subject_type",
+          "description",
+          "entries"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "catalog_items": {
+      "type": "array",
+      "maxItems": 1500,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1500
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "category": {
+            "type": ["string", "null"],
+            "maxLength": 120
+          },
+          "description": {
+            "type": ["string", "null"],
+            "maxLength": 1000
+          },
+          "tracking_mode": {
+            "type": "string",
+            "enum": ["serialized", "quantity", "reference_only"],
+            "default": "serialized"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000,
+            "default": 1
+          },
+          "expected_return_minutes": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 525600
+          },
+          "requires_authorization": {
+            "type": "boolean",
+            "default": false
+          },
+          "eligibility_mode": {
+            "type": "string",
+            "enum": ["all", "allow_list"],
+            "default": "all"
+          },
+          "allowed_reference_entry_ids": {
+            "type": "array",
+            "maxItems": 3000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "denied_reference_entry_ids": {
+            "type": "array",
+            "maxItems": 3000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "availability_window_ids": {
+            "type": "array",
+            "maxItems": 75,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive"],
+            "default": "active"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "code",
+          "name",
+          "category",
+          "description",
+          "tracking_mode",
+          "quantity",
+          "expected_return_minutes",
+          "requires_authorization",
+          "eligibility_mode",
+          "allowed_reference_entry_ids",
+          "denied_reference_entry_ids",
+          "availability_window_ids",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "availability_windows": {
+      "type": "array",
+      "maxItems": 75,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "days": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            }
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "spans_next_day": {
+            "type": "boolean",
+            "default": false
+          },
+          "timezone": {
+            "type": "string",
+            "enum": ["Europe/Amsterdam"],
+            "default": "Europe/Amsterdam"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "days",
+          "start_time",
+          "end_time",
+          "spans_next_day",
+          "timezone"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "authorization_rules": {
+      "type": "array",
+      "maxItems": 750,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 750
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["allow", "deny"]
+          },
+          "catalog_item_ids": {
+            "type": "array",
+            "maxItems": 1500,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "subject_entry_ids": {
+            "type": "array",
+            "maxItems": 3000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "availability_window_ids": {
+            "type": "array",
+            "maxItems": 75,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9:_-]*$"
+            },
+            "default": []
+          },
+          "note": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive"],
+            "default": "active"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "name",
+          "effect",
+          "catalog_item_ids",
+          "subject_entry_ids",
+          "availability_window_ids",
+          "note",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "workflow_settings": {
+      "type": "object",
+      "properties": {
+        "allow_preregistration": { "type": "boolean" },
+        "require_host": { "type": "boolean" },
+        "maintain_evacuation_list": { "type": "boolean" },
+        "badge_enabled": { "type": "boolean" },
+        "automatic_checkout_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 525600
+        },
+        "allow_reservations": { "type": "boolean" },
+        "require_expected_return": { "type": "boolean" },
+        "require_condition_on_return": { "type": "boolean" },
+        "allow_authorized_override": { "type": "boolean" },
+        "block_critical_faults": { "type": "boolean" },
+        "default_due_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 525600
+        },
+        "photo_on_receipt": { "type": "boolean" },
+        "require_recipient": { "type": "boolean" },
+        "pickup_proof": {
+          "type": "string",
+          "enum": ["none", "signature", "photo", "pin"]
+        },
+        "reminders_enabled": { "type": "boolean" },
+        "office_hours_only": { "type": "boolean" },
+        "require_photo": { "type": "boolean" },
+        "public_description_enabled": { "type": "boolean" },
+        "claim_verification_required": { "type": "boolean" },
+        "custody_tracking": { "type": "boolean" },
+        "disposal_approval_required": { "type": "boolean" },
+        "approval_required": { "type": "boolean" },
+        "conflict_detection": { "type": "boolean" },
+        "allow_recurring": { "type": "boolean" },
+        "default_duration_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 525600
+        },
+        "owner_required": { "type": "boolean" },
+        "due_date_required": { "type": "boolean" },
+        "completion_evidence_required": { "type": "boolean" },
+        "recurring_enabled": { "type": "boolean" },
+        "escalation_enabled": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "notification_settings": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "channels": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["in_app", "email", "mobile"]
+          },
+          "default": []
+        },
+        "reminder_minutes": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 525600
+          },
+          "default": []
+        },
+        "escalation_role": {
+          "type": ["string", "null"],
+          "maxLength": 160
+        }
+      },
+      "required": [
+        "enabled",
+        "channels",
+        "reminder_minutes",
+        "escalation_role"
+      ],
+      "additionalProperties": false
+    },
+    "readiness_snapshot": {
+      "type": ["object", "null"],
+      "properties": {
+        "ready_to_publish": {
+          "type": "boolean"
+        },
+        "readiness_status": {
+          "type": "string",
+          "enum": ["blocked", "attention", "ready"]
+        },
+        "blocking_issues": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "field_id": {
+                "type": ["string", "null"],
+                "maxLength": 100
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "field_id": {
+                "type": ["string", "null"],
+                "maxLength": 100
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "ready_to_publish",
+        "readiness_status",
+        "blocking_issues",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "content_checksum": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "created_by_user_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "published_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "published_by_user_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "superseded_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "superseded_by_revision_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "source_revision_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "mutation_idempotency_key": {
+      "type": ["string", "null"],
+      "maxLength": 180
+    },
+    "mutation_request_fingerprint": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "mutation_actor_user_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "mutation_target": {
+      "type": ["string", "null"],
+      "maxLength": 320
+    },
+    "publication_idempotency_key": {
+      "type": ["string", "null"],
+      "maxLength": 180
+    },
+    "publication_request_fingerprint": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "publication_actor_user_id": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "publication_mutation_target": {
+      "type": ["string", "null"],
+      "maxLength": 320
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "default": 1
+    }
+  },
+  "required": [
+    "module_id",
+    "customer_id",
+    "object_id",
+    "revision_number",
+    "status",
+    "schema_version",
+    "retention_days",
+    "anonymize_after_retention",
+    "field_definitions",
+    "reference_lists",
+    "catalog_items",
+    "availability_windows",
+    "authorization_rules",
+    "workflow_settings",
+    "notification_settings",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

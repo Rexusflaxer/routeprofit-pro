@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
@@ -95,6 +95,18 @@ export default function ObjectDetailView({ object, onBack }) {
   const [form, setForm] = useState(() => identityForm(dossierObject));
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [profileError, setProfileError] = useState(null);
+  const moduleNavigationGuardRef = useRef(null);
+
+  const registerModuleNavigationGuard = useCallback(guard => {
+    moduleNavigationGuardRef.current = guard;
+    return () => {
+      if (moduleNavigationGuardRef.current === guard) moduleNavigationGuardRef.current = null;
+    };
+  }, []);
+  const withModuleNavigationGuard = useCallback(action => {
+    if (typeof moduleNavigationGuardRef.current === "function") moduleNavigationGuardRef.current(action);
+    else action();
+  }, []);
 
   const requestedTab = searchParams.get("tab") || "warning-addresses";
   const activeTab = OBJECT_CARD_TABS.some(tab => tab.key === requestedTab)
@@ -114,6 +126,7 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("row");
     next.delete("query");
     next.delete("page");
+    next.delete("module_tab");
     setSearchParams(next, { replace: true });
   }, [activeTab, object.id, requestedTab, searchParams, setSearchParams]);
 
@@ -160,18 +173,21 @@ export default function ObjectDetailView({ object, onBack }) {
   });
 
   const setTab = useCallback(nextTab => {
-    const next = new URLSearchParams(searchParams);
-    next.set("id", object.id);
-    next.set("tab", nextTab);
-    next.delete("view");
-    next.delete("row");
-    next.delete("query");
-    next.delete("page");
-    next.delete("plan_type");
-    next.delete("plan_status");
-    next.delete("plan_tab");
-    setSearchParams(next);
-  }, [object.id, searchParams, setSearchParams]);
+    withModuleNavigationGuard(() => {
+      const next = new URLSearchParams(searchParams);
+      next.set("id", object.id);
+      next.set("tab", nextTab);
+      next.delete("view");
+      next.delete("row");
+      next.delete("query");
+      next.delete("page");
+      next.delete("plan_type");
+      next.delete("plan_status");
+      next.delete("plan_tab");
+      next.delete("module_tab");
+      setSearchParams(next);
+    });
+  }, [object.id, searchParams, setSearchParams, withModuleNavigationGuard]);
   const setSearch = useCallback(value => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set("query", value);
@@ -179,6 +195,7 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("page");
     next.delete("view");
     next.delete("row");
+    next.delete("module_tab");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
   const setPage = useCallback(nextPage => {
@@ -195,6 +212,7 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("page");
     next.delete("plan_status");
     next.delete("plan_tab");
+    next.delete("module_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const openEdit = useCallback(id => {
@@ -202,6 +220,7 @@ export default function ObjectDetailView({ object, onBack }) {
     next.set("view", "edit");
     next.set("row", id);
     next.delete("plan_tab");
+    next.delete("module_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const openManual = useCallback(id => {
@@ -215,6 +234,7 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("view");
     next.delete("row");
     next.delete("plan_tab");
+    next.delete("module_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
 
@@ -303,9 +323,9 @@ export default function ObjectDetailView({ object, onBack }) {
   return (
     <PageTransition>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Objecten</Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => withModuleNavigationGuard(onBack)}><ArrowLeft className="h-4 w-4" /> Objecten</Button>
         <span className="text-muted-foreground/40">/</span>
-        <button type="button" onClick={() => navigate(`/CustomerDetail?id=${encodeURIComponent(customer.id)}&tab=objects`)} className="max-w-[220px] truncate text-sm text-muted-foreground hover:text-foreground hover:underline">{customerName(customer)}</button>
+        <button type="button" onClick={() => withModuleNavigationGuard(() => navigate(`/CustomerDetail?id=${encodeURIComponent(customer.id)}&tab=objects`))} className="max-w-[220px] truncate text-sm text-muted-foreground hover:text-foreground hover:underline">{customerName(customer)}</button>
         <span className="text-muted-foreground/40">/</span>
         <span className="max-w-[280px] truncate text-sm font-medium text-foreground">{dossierObject.name}</span>
       </div>
@@ -340,6 +360,7 @@ export default function ObjectDetailView({ object, onBack }) {
         onOpenEdit={openEdit}
         onOpenManual={openManual}
         onCloseView={closeView}
+        onRegisterModuleNavigationGuard={registerModuleNavigationGuard}
       />
     </PageTransition>
   );

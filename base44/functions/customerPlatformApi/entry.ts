@@ -86,6 +86,8 @@ const READ_ACTIONS = new Set([
   'list_object_keys',
   'list_object_installations',
   'list_object_relationships',
+  'list_object_modules',
+  'get_object_module',
   'list_object_security_plans',
   'get_object_security_plan',
   'list_object_sections',
@@ -109,6 +111,7 @@ const MUTATION_ACTIONS = new Set([
   'create_object_key', 'update_object_key', 'archive_object_key',
   'create_object_installation', 'update_object_installation', 'archive_object_installation',
   'create_object_relationship', 'update_object_relationship', 'archive_object_relationship',
+  'create_object_module', 'save_object_module_draft', 'publish_object_module', 'set_object_module_status',
   'create_object_security_plan', 'save_object_security_plan_draft',
   'duplicate_object_security_plan', 'publish_object_security_plan', 'archive_object_security_plan',
   'upsert_object_section', 'archive_object_section', 'migrate_legacy_object_security_plans',
@@ -360,6 +363,23 @@ const OBJECT_RELATIONSHIP_TYPES = new Set([
   'guarding_company',
   'other',
 ]);
+const OBJECT_MODULE_TYPES = new Set([
+  'visitor_registration',
+  'item_issuance',
+  'mail_package_receipt',
+  'lost_and_found',
+  'object_calendar',
+  'action_points',
+]);
+const OBJECT_MODULE_STATUSES = new Set(['concept', 'active', 'suspended', 'archived']);
+const OBJECT_MODULE_FIELD_TYPES = new Set([
+  'text', 'textarea', 'email', 'phone', 'number', 'date', 'time', 'select', 'multiselect', 'checkbox', 'photo', 'signature',
+]);
+const OBJECT_MODULE_SUBJECT_TYPES = new Set(['person', 'employee', 'room', 'department', 'supplier', 'host', 'recipient', 'location', 'resource', 'other']);
+const OBJECT_MODULE_TRACKING_MODES = new Set(['serialized', 'quantity', 'reference_only']);
+const OBJECT_MODULE_AUTHORIZATION_EFFECTS = new Set(['allow', 'deny']);
+const OBJECT_MODULE_ACCESS_MODES = new Set(['read', 'register']);
+const OBJECT_MODULE_WEEKDAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const OBJECT_OPERATIONS_PATCH_FIELDS = [
   'parking_instruction',
   'entry_instruction',
@@ -996,6 +1016,8 @@ function mutationTarget(action: string, body: LooseRecord) {
     'key_assignment_id',
     'installation_id',
     'relationship_id',
+    'module_id',
+    'module_revision_id',
     'customer_account_id',
     'request_id',
     'quote_id',
@@ -1361,6 +1383,44 @@ async function relationshipMutationMarkerReplay(
   return recovery.result as LooseRecord;
 }
 
+async function objectModuleMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (!['save_object_module_draft', 'publish_object_module', 'set_object_module_status'].includes(action)) return null;
+  const keyHash = await sha256(idempotencyKey);
+  const matches = await getEntity(base44, 'ObjectOperationalModule').filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (matches.length > 1) throw new ApiError(409, 'Moduleherstel is niet eenduidig; handmatige controle vereist');
+  if (!matches.length) return null;
+  const module = matches[0];
+  const recoveries = module.customer_platform_mutation_recoveries;
+  const recovery = recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries)
+    ? recoveries[keyHash]
+    : module.customer_platform_last_mutation_key_hash === keyHash
+      ? module.customer_platform_last_mutation_recovery
+      : null;
+  if (
+    module.id !== requireString(body, 'module_id') ||
+    module.customer_id !== requireString(body, 'customer_id') ||
+    module.object_id !== requireString(body, 'object_id') ||
+    !recovery || recovery.action !== action || recovery.actor_id !== user.id ||
+    recovery.request_fingerprint !== requestFingerprint || recovery.mutation_target !== target ||
+    !recovery.result || typeof recovery.result !== 'object' || Array.isArray(recovery.result)
+  ) rejectIdempotencyReuse();
+  await requireCustomerObjectScope(base44, body);
+  return recovery.result as LooseRecord;
+}
+
 async function objectKeyMutationMarkerReplay(
   base44: LooseRecord,
   user: LooseRecord,
@@ -1428,6 +1488,10 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   create_object_relationship: 'Relatie toegevoegd',
   update_object_relationship: 'Relatie gewijzigd',
   archive_object_relationship: 'Relatie gearchiveerd',
+  create_object_module: 'Objectmodule toegevoegd',
+  save_object_module_draft: 'Concept objectmodule gewijzigd',
+  publish_object_module: 'Objectmodule geactiveerd',
+  set_object_module_status: 'Objectmodulestatus gewijzigd',
   create_object_security_plan: 'Beveiligingsplan toegevoegd',
   save_object_security_plan_draft: 'Concept beveiligingsplan gewijzigd',
   duplicate_object_security_plan: 'Beveiligingsplan gedupliceerd',
@@ -1492,6 +1556,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.contact_role ||
     result.warning_address ||
     result.relationship ||
+    result.module ||
     result.object ||
     result.request ||
     result.quote ||
@@ -1532,6 +1597,9 @@ async function recordMutationResult(
   const context = eventContext(result, body);
   if (!context.customer_id) return;
   const actorName = asString(user.full_name || user.display_name || user.name || user.email) || 'Backofficegebruiker';
+  const auditResult = result.audit_result && typeof result.audit_result === 'object' && !Array.isArray(result.audit_result)
+    ? result.audit_result
+    : result;
   await appendEvent(base44, {
     ...context,
     event_type: action.replaceAll('_', '.'),
@@ -1544,7 +1612,7 @@ async function recordMutationResult(
     idempotency_key: idempotencyKey,
     payload: {
       action,
-      result,
+      result: auditResult,
       request_fingerprint: requestFingerprint,
       mutation_target: target,
     },
@@ -4346,6 +4414,19 @@ const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
   publication_revision: 'Publicatierevisie',
   section_code: 'Sectiecode',
   section_name: 'Sectienaam',
+  module_name: 'Modulenaam',
+  module_type: 'Moduletype',
+  module_revision: 'Moduleversie',
+  module_field_count: 'Aantal registratievelden',
+  module_reference_list_count: 'Aantal keuzelijsten',
+  module_reference_entry_count: 'Aantal lijstkeuzes',
+  module_catalog_item_count: 'Aantal catalogusitems',
+  module_availability_window_count: 'Aantal tijdvensters',
+  module_authorization_rule_count: 'Aantal bevoegdheidsregels',
+  module_retention_days: 'Bewaartermijn in dagen',
+  module_responsible_role: 'Verantwoordelijke rol',
+  module_suspension_reason: 'Reden pauzeren',
+  module_archive_reason: 'Reden archiveren',
 };
 
 const LOGBOOK_VALUE_FIELDS = new Set([
@@ -4401,6 +4482,19 @@ const LOGBOOK_VALUE_FIELDS = new Set([
   'publication_revision',
   'section_code',
   'section_name',
+  'module_name',
+  'module_type',
+  'module_revision',
+  'module_field_count',
+  'module_reference_list_count',
+  'module_reference_entry_count',
+  'module_catalog_item_count',
+  'module_availability_window_count',
+  'module_authorization_rule_count',
+  'module_retention_days',
+  'module_responsible_role',
+  'module_suspension_reason',
+  'module_archive_reason',
 ]);
 
 function safeLogbookValue(value: unknown) {
@@ -4435,6 +4529,7 @@ function derivedLogbookChanges(event: LooseRecord) {
     event.resource_type === 'ObjectSecurityPlan' ||
     event.resource_type === 'ObjectSecurityPlanRevision' ||
     event.resource_type === 'ObjectSection' ||
+    event.resource_type === 'ObjectOperationalModule' ||
     (
       event.resource_type === 'SurveillanceObject' &&
       event.action === 'update_customer_object_identity'
@@ -10127,6 +10222,1229 @@ function securityPlanTaskType(record: LooseRecord) {
   return SECURITY_PLAN_TASK_TYPES.has(taskType) ? taskType : 'other';
 }
 
+const OBJECT_MODULE_DEFAULT_NAMES: Record<string, string> = {
+  visitor_registration: 'Bezoekersregistratie',
+  item_issuance: 'Middelenuitgifte',
+  mail_package_receipt: 'Post- & pakketregistratie',
+  lost_and_found: 'Gevonden voorwerpen',
+  object_calendar: 'Objectagenda',
+  action_points: 'Actiepunten',
+};
+
+const OBJECT_MODULE_REQUIRED_FIELDS: Record<string, Record<string, string>> = {
+  visitor_registration: { visitor_name: 'text', arrival_at: 'time' },
+  item_issuance: { issued_to: 'select', issued_at: 'time' },
+  mail_package_receipt: { recipient: 'select', received_at: 'time' },
+  lost_and_found: { description: 'textarea', found_at: 'date', found_location: 'select' },
+  object_calendar: { title: 'text', starts_at: 'date', ends_at: 'date' },
+  action_points: { title: 'text', priority: 'select' },
+};
+
+const OBJECT_MODULE_WORKFLOW_DEFAULTS: Record<string, LooseRecord> = {
+  visitor_registration: {
+    allow_preregistration: true,
+    require_host: false,
+    maintain_evacuation_list: true,
+    badge_enabled: false,
+    automatic_checkout_minutes: 0,
+  },
+  item_issuance: {
+    allow_reservations: false,
+    require_expected_return: true,
+    require_condition_on_return: true,
+    allow_authorized_override: false,
+    block_critical_faults: true,
+    default_due_minutes: 720,
+  },
+  mail_package_receipt: {
+    photo_on_receipt: false,
+    require_recipient: true,
+    pickup_proof: 'none',
+    reminders_enabled: true,
+    office_hours_only: false,
+  },
+  lost_and_found: {
+    require_photo: false,
+    public_description_enabled: false,
+    claim_verification_required: true,
+    custody_tracking: true,
+    disposal_approval_required: true,
+  },
+  object_calendar: {
+    approval_required: false,
+    conflict_detection: true,
+    allow_recurring: true,
+    reminders_enabled: true,
+    default_duration_minutes: 60,
+  },
+  action_points: {
+    owner_required: true,
+    due_date_required: false,
+    completion_evidence_required: false,
+    recurring_enabled: true,
+    escalation_enabled: true,
+  },
+};
+
+const OBJECT_MODULE_DEFAULT_FIELDS: Record<string, LooseRecord[]> = {
+  visitor_registration: [
+    { id: 'visitor_name', label: 'Naam bezoeker', field_type: 'text', required: true },
+    { id: 'company', label: 'Bedrijf', field_type: 'text', required: false },
+    { id: 'host', label: 'Contactpersoon / host', field_type: 'select', required: false },
+    { id: 'arrival_at', label: 'Aankomsttijd', field_type: 'time', required: true },
+    { id: 'vehicle_plate', label: 'Kenteken', field_type: 'text', required: false },
+  ],
+  item_issuance: [
+    { id: 'issued_to', label: 'Uitgegeven aan', field_type: 'select', required: true },
+    { id: 'issued_at', label: 'Uitgiftetijd', field_type: 'time', required: true },
+    { id: 'expected_return_at', label: 'Verwachte retourtijd', field_type: 'time', required: false },
+    { id: 'purpose', label: 'Reden van uitgifte', field_type: 'textarea', required: false },
+  ],
+  mail_package_receipt: [
+    { id: 'recipient', label: 'Ontvanger', field_type: 'select', required: true },
+    { id: 'carrier', label: 'Vervoerder', field_type: 'select', required: false },
+    { id: 'received_at', label: 'Ontvangsttijd', field_type: 'time', required: true },
+    { id: 'storage_location', label: 'Opslaglocatie', field_type: 'select', required: false },
+  ],
+  lost_and_found: [
+    { id: 'description', label: 'Omschrijving', field_type: 'textarea', required: true },
+    { id: 'found_at', label: 'Gevonden op', field_type: 'date', required: true },
+    { id: 'found_location', label: 'Vindplaats', field_type: 'select', required: true },
+    { id: 'photo', label: 'Foto', field_type: 'photo', required: false },
+  ],
+  object_calendar: [
+    { id: 'title', label: 'Titel', field_type: 'text', required: true },
+    { id: 'starts_at', label: 'Begint', field_type: 'date', required: true },
+    { id: 'ends_at', label: 'Eindigt', field_type: 'date', required: true },
+    { id: 'location', label: 'Locatie', field_type: 'select', required: false },
+  ],
+  action_points: [
+    { id: 'title', label: 'Actiepunt', field_type: 'text', required: true },
+    { id: 'priority', label: 'Prioriteit', field_type: 'select', required: true, options: ['Laag', 'Normaal', 'Hoog', 'Urgent'] },
+    { id: 'owner', label: 'Eigenaar', field_type: 'select', required: false },
+    { id: 'due_at', label: 'Deadline', field_type: 'date', required: false },
+  ],
+};
+
+function normalizedObjectModuleConfigId(value: unknown, label: string) {
+  const id = asString(value);
+  if (!id || id.length > 100 || !/^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/.test(id)) {
+    throw new ApiError(400, `${label} heeft een ongeldig ID`);
+  }
+  return id;
+}
+
+function normalizedObjectModuleStringIds(value: unknown, label: string, maximum = 1000) {
+  if (value === undefined || value === null) return [] as string[];
+  if (!Array.isArray(value) || value.length > maximum) throw new ApiError(400, `${label} heeft een ongeldig formaat of is te groot`);
+  return [...new Set(value.map(item => normalizedObjectModuleConfigId(item, label)))];
+}
+
+function normalizedObjectModuleFields(value: unknown) {
+  if (!Array.isArray(value) || value.length > 75) throw new ApiError(400, 'Formuliervelden hebben een ongeldig formaat of zijn te groot');
+  const ids = new Set<string>();
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een formulierveld is ongeldig');
+    const field = raw as LooseRecord;
+    const id = normalizedObjectModuleConfigId(field.id, 'Formulierveld');
+    if (ids.has(id)) throw new ApiError(400, 'Formuliervelden bevatten een dubbel ID');
+    ids.add(id);
+    const fieldType = asString(field.field_type) || 'text';
+    if (!OBJECT_MODULE_FIELD_TYPES.has(fieldType)) throw new ApiError(400, 'Een formulierveld heeft een onbekend type');
+    const rawOptions = field.options ?? [];
+    if (!Array.isArray(rawOptions) || rawOptions.length > 100) throw new ApiError(400, 'Veldopties hebben een ongeldig formaat of zijn te groot');
+    const options = [...new Set(rawOptions.map(option => objectText(option, 'Veldoptie', 160, false)))];
+    return {
+      id,
+      sequence: index + 1,
+      label: objectText(field.label, 'Veldlabel', 160, false),
+      help_text: objectText(field.help_text, 'Veldtoelichting', 500, true),
+      field_type: fieldType,
+      required: field.required === true,
+      enabled: field.enabled !== false,
+      options,
+      reference_list_id: asString(field.reference_list_id) || null,
+    };
+  });
+}
+
+function normalizedObjectModuleReferenceLists(value: unknown) {
+  if (!Array.isArray(value) || value.length > 30) throw new ApiError(400, 'Keuzelijsten hebben een ongeldig formaat of zijn te groot');
+  const listIds = new Set<string>();
+  const entryIds = new Set<string>();
+  let totalEntries = 0;
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een keuzelijst is ongeldig');
+    const list = raw as LooseRecord;
+    const id = normalizedObjectModuleConfigId(list.id, 'Keuzelijst');
+    if (listIds.has(id)) throw new ApiError(400, 'Keuzelijsten bevatten een dubbel ID');
+    listIds.add(id);
+    const subjectType = asString(list.subject_type) || 'other';
+    if (!OBJECT_MODULE_SUBJECT_TYPES.has(subjectType)) throw new ApiError(400, 'Een keuzelijst heeft een onbekend type');
+    const rawEntries = list.entries ?? [];
+    if (!Array.isArray(rawEntries) || rawEntries.length > 1000) throw new ApiError(400, 'Keuzelijstitems hebben een ongeldig formaat of zijn te groot');
+    totalEntries += rawEntries.length;
+    if (totalEntries > 3000) throw new ApiError(400, 'Het totale aantal keuzelijstitems is te groot');
+    const entries = rawEntries.map((rawEntry, entryIndex) => {
+      if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) throw new ApiError(400, 'Een keuzelijstitem is ongeldig');
+      const entry = rawEntry as LooseRecord;
+      const entryId = normalizedObjectModuleConfigId(entry.id, 'Keuzelijstitem');
+      if (entryIds.has(entryId)) throw new ApiError(400, 'Keuzelijstitems bevatten een dubbel ID');
+      entryIds.add(entryId);
+      return {
+        id: entryId,
+        sequence: entryIndex + 1,
+        label: objectText(entry.label, 'Naam keuzelijstitem', 200, false),
+        secondary_label: objectText(entry.secondary_label, 'Toelichting keuzelijstitem', 240, true),
+        external_reference: objectText(entry.external_reference, 'Externe referentie', 160, true),
+        status: entry.status === 'inactive' ? 'inactive' : 'active',
+      };
+    });
+    return {
+      id,
+      sequence: index + 1,
+      name: objectText(list.name, 'Naam keuzelijst', 160, false),
+      subject_type: subjectType,
+      description: objectText(list.description, 'Omschrijving keuzelijst', 500, true),
+      entries,
+    };
+  });
+}
+
+function normalizedObjectModuleWindows(value: unknown) {
+  if (!Array.isArray(value) || value.length > 75) throw new ApiError(400, 'Tijdvensters hebben een ongeldig formaat of zijn te groot');
+  const ids = new Set<string>();
+  return value.map(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een tijdvenster is ongeldig');
+    const window = raw as LooseRecord;
+    const id = normalizedObjectModuleConfigId(window.id, 'Tijdvenster');
+    if (ids.has(id)) throw new ApiError(400, 'Tijdvensters bevatten een dubbel ID');
+    ids.add(id);
+    const days = normalizedObjectModuleStringIds(window.days, 'Dagen', 7);
+    if (!days.length || days.some(day => !OBJECT_MODULE_WEEKDAYS.has(day))) throw new ApiError(400, 'Kies minimaal één geldige dag voor ieder tijdvenster');
+    const startTime = asString(window.start_time);
+    const endTime = asString(window.end_time);
+    if (!WARNING_TIME_PATTERN.test(startTime) || !WARNING_TIME_PATTERN.test(endTime) || startTime === endTime) {
+      throw new ApiError(400, 'Vul voor ieder tijdvenster een geldige begin- en eindtijd in');
+    }
+    return {
+      id,
+      name: objectText(window.name, 'Naam tijdvenster', 160, false),
+      days,
+      start_time: startTime,
+      end_time: endTime,
+      spans_next_day: endTime < startTime,
+      timezone: 'Europe/Amsterdam',
+    };
+  });
+}
+
+function normalizedObjectModuleCatalog(value: unknown, entryIds: Set<string>, windowIds: Set<string>) {
+  if (!Array.isArray(value) || value.length > 1500) throw new ApiError(400, 'Catalogus heeft een ongeldig formaat of is te groot');
+  const ids = new Set<string>();
+  const codes = new Set<string>();
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een catalogusitem is ongeldig');
+    const item = raw as LooseRecord;
+    const id = normalizedObjectModuleConfigId(item.id, 'Catalogusitem');
+    if (ids.has(id)) throw new ApiError(400, 'Catalogusitems bevatten een dubbel ID');
+    ids.add(id);
+    const code = objectText(item.code, 'Itemcode', 80, false);
+    const normalizedCode = normalizeName(code);
+    if (codes.has(normalizedCode)) throw new ApiError(400, `Itemcode ${code} komt meer dan één keer voor`);
+    codes.add(normalizedCode);
+    const trackingMode = asString(item.tracking_mode) || 'serialized';
+    if (!OBJECT_MODULE_TRACKING_MODES.has(trackingMode)) throw new ApiError(400, 'Een catalogusitem heeft een onbekende voorraadwijze');
+    const quantity = trackingMode === 'quantity' ? requireInteger(item.quantity ?? 1, 'quantity', 1) : 1;
+    if (quantity > 100000) throw new ApiError(400, 'Een catalogusvoorraad mag maximaal 100000 zijn');
+    const expectedReturnMinutes = item.expected_return_minutes === null || item.expected_return_minutes === undefined || item.expected_return_minutes === ''
+      ? null
+      : requireInteger(item.expected_return_minutes, 'expected_return_minutes', 1);
+    if (expectedReturnMinutes !== null && expectedReturnMinutes > 525600) throw new ApiError(400, 'De standaard retourtermijn is te lang');
+    const allowedEntryIds = normalizedObjectModuleStringIds(item.allowed_reference_entry_ids, 'Toegestane personen of ruimtes', 3000);
+    const deniedEntryIds = normalizedObjectModuleStringIds(item.denied_reference_entry_ids, 'Uitgesloten personen of ruimtes', 3000);
+    const availabilityWindowIds = normalizedObjectModuleStringIds(item.availability_window_ids, 'Tijdvensters catalogusitem', 75);
+    if ([...allowedEntryIds, ...deniedEntryIds].some(entryId => !entryIds.has(entryId))) throw new ApiError(409, 'Een catalogusitem verwijst naar een onbekend keuzelijstitem');
+    if (availabilityWindowIds.some(windowId => !windowIds.has(windowId))) throw new ApiError(409, 'Een catalogusitem verwijst naar een onbekend tijdvenster');
+    return {
+      id,
+      sequence: index + 1,
+      code,
+      name: objectText(item.name, 'Naam catalogusitem', 200, false),
+      category: objectText(item.category, 'Categorie catalogusitem', 120, true),
+      description: objectText(item.description, 'Omschrijving catalogusitem', 1000, true),
+      tracking_mode: trackingMode,
+      quantity,
+      expected_return_minutes: expectedReturnMinutes,
+      requires_authorization: item.requires_authorization === true,
+      eligibility_mode: item.eligibility_mode === 'allow_list' ? 'allow_list' : 'all',
+      allowed_reference_entry_ids: allowedEntryIds,
+      denied_reference_entry_ids: deniedEntryIds,
+      availability_window_ids: availabilityWindowIds,
+      status: item.status === 'inactive' ? 'inactive' : 'active',
+    };
+  });
+}
+
+function normalizedObjectModuleAuthorizationRules(
+  value: unknown,
+  catalogIds: Set<string>,
+  entryIds: Set<string>,
+  windowIds: Set<string>,
+) {
+  if (!Array.isArray(value) || value.length > 750) throw new ApiError(400, 'Bevoegdheidsregels hebben een ongeldig formaat of zijn te groot');
+  const ids = new Set<string>();
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een bevoegdheidsregel is ongeldig');
+    const rule = raw as LooseRecord;
+    const id = normalizedObjectModuleConfigId(rule.id, 'Bevoegdheidsregel');
+    if (ids.has(id)) throw new ApiError(400, 'Bevoegdheidsregels bevatten een dubbel ID');
+    ids.add(id);
+    const effect = asString(rule.effect) || 'allow';
+    if (!OBJECT_MODULE_AUTHORIZATION_EFFECTS.has(effect)) throw new ApiError(400, 'Een bevoegdheidsregel heeft een onbekend effect');
+    const catalogItemIds = normalizedObjectModuleStringIds(rule.catalog_item_ids, 'Catalogusitems bevoegdheidsregel', 1500);
+    const subjectEntryIds = normalizedObjectModuleStringIds(rule.subject_entry_ids, 'Personen of ruimtes bevoegdheidsregel', 3000);
+    const availabilityWindowIds = normalizedObjectModuleStringIds(rule.availability_window_ids, 'Tijdvensters bevoegdheidsregel', 75);
+    if (catalogItemIds.some(itemId => !catalogIds.has(itemId))) throw new ApiError(409, 'Een bevoegdheidsregel verwijst naar een onbekend catalogusitem');
+    if (subjectEntryIds.some(entryId => !entryIds.has(entryId))) throw new ApiError(409, 'Een bevoegdheidsregel verwijst naar een onbekend keuzelijstitem');
+    if (availabilityWindowIds.some(windowId => !windowIds.has(windowId))) throw new ApiError(409, 'Een bevoegdheidsregel verwijst naar een onbekend tijdvenster');
+    return {
+      id,
+      sequence: index + 1,
+      name: objectText(rule.name, 'Naam bevoegdheidsregel', 160, false),
+      effect,
+      catalog_item_ids: catalogItemIds,
+      subject_entry_ids: subjectEntryIds,
+      availability_window_ids: availabilityWindowIds,
+      note: objectText(rule.note, 'Toelichting bevoegdheidsregel', 500, true),
+      status: rule.status === 'inactive' ? 'inactive' : 'active',
+    };
+  });
+}
+
+function normalizedObjectModuleSettings(value: unknown, moduleType: string) {
+  const submitted = value && typeof value === 'object' && !Array.isArray(value) ? value as LooseRecord : {};
+  const defaults = OBJECT_MODULE_WORKFLOW_DEFAULTS[moduleType] || {};
+  const allowed = new Set(Object.keys(defaults));
+  if (Object.keys(submitted).some(key => !allowed.has(key))) throw new ApiError(400, 'Module-instellingen bevatten een onbekende optie');
+  const settings: LooseRecord = { ...defaults };
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const rawValue = submitted[key];
+    if (rawValue === undefined) continue;
+    if (typeof defaultValue === 'boolean') settings[key] = rawValue === true;
+    else if (typeof defaultValue === 'number') {
+      const numberValue = Number(rawValue);
+      if (!Number.isInteger(numberValue) || numberValue < 0 || numberValue > 525600) throw new ApiError(400, `Instelling ${key} heeft een ongeldige waarde`);
+      settings[key] = numberValue;
+    } else if (typeof defaultValue === 'string') {
+      const stringValue = asString(rawValue);
+      if (key === 'pickup_proof' && !['none', 'signature', 'photo', 'pin'].includes(stringValue)) throw new ApiError(400, 'Kies een geldig afhaalbewijs');
+      settings[key] = stringValue.slice(0, 120);
+    }
+  }
+  return settings;
+}
+
+function normalizedObjectModuleNotifications(value: unknown) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value as LooseRecord : {};
+  const rawChannels = source.channels ?? ['in_app'];
+  if (!Array.isArray(rawChannels) || rawChannels.length > 3) throw new ApiError(400, 'Notificatiekanalen zijn ongeldig');
+  const channels = [...new Set(rawChannels.map(asString).filter(channel => ['in_app', 'email', 'mobile'].includes(channel)))];
+  const rawReminders = source.reminder_minutes ?? [];
+  if (!Array.isArray(rawReminders) || rawReminders.length > 20) throw new ApiError(400, 'Herinneringsmomenten zijn ongeldig');
+  const reminderMinutes = [...new Set(rawReminders.map(value => requireInteger(value, 'Herinneringsminuten', 1)))].sort((left, right) => left - right);
+  if (reminderMinutes.some(value => value > 525600)) throw new ApiError(400, 'Een herinneringsmoment ligt te ver in de toekomst');
+  return {
+    enabled: source.enabled === true,
+    channels,
+    reminder_minutes: reminderMinutes,
+    escalation_role: objectText(source.escalation_role, 'Escalatierol', 160, true),
+  };
+}
+
+function defaultObjectModuleRevisionData(moduleType: string) {
+  return {
+    summary: null,
+    responsible_role: 'object_manager',
+    retention_days: moduleType === 'visitor_registration' ? 90 : moduleType === 'mail_package_receipt' ? 180 : 365,
+    anonymize_after_retention: true,
+    field_definitions: (OBJECT_MODULE_DEFAULT_FIELDS[moduleType] || []).map((field, index) => ({
+      ...field,
+      sequence: index + 1,
+      help_text: null,
+      enabled: true,
+      options: field.options || [],
+      reference_list_id: null,
+    })),
+    reference_lists: [],
+    catalog_items: [],
+    availability_windows: [],
+    authorization_rules: [],
+    workflow_settings: { ...(OBJECT_MODULE_WORKFLOW_DEFAULTS[moduleType] || {}) },
+    notification_settings: { enabled: false, channels: ['in_app'], reminder_minutes: [], escalation_role: null },
+  };
+}
+
+function normalizedObjectModuleRevisionData(data: LooseRecord, moduleType: string, current: LooseRecord | null = null) {
+  const defaults = defaultObjectModuleRevisionData(moduleType);
+  const source = { ...defaults, ...(current || {}), ...data };
+  const referenceLists = normalizedObjectModuleReferenceLists(source.reference_lists ?? []);
+  const entryIds = new Set(referenceLists.flatMap(list => list.entries.map((entry: LooseRecord) => entry.id)));
+  const windows = normalizedObjectModuleWindows(source.availability_windows ?? []);
+  const windowIds = new Set(windows.map(window => window.id));
+  const catalog = normalizedObjectModuleCatalog(source.catalog_items ?? [], entryIds, windowIds);
+  const catalogIds = new Set(catalog.map(item => item.id));
+  const fieldDefinitions = normalizedObjectModuleFields(source.field_definitions ?? []);
+  const listIds = new Set(referenceLists.map(list => list.id));
+  if (fieldDefinitions.some(field => field.reference_list_id && !listIds.has(field.reference_list_id))) {
+    throw new ApiError(409, 'Een formulierveld verwijst naar een onbekende keuzelijst');
+  }
+  const retentionDays = requireInteger(source.retention_days ?? defaults.retention_days, 'retention_days', 1);
+  if (retentionDays > 3650) throw new ApiError(400, 'De bewaartermijn mag maximaal tien jaar zijn');
+  return {
+    schema_version: 'loq-object-module-v1',
+    summary: objectText(source.summary, 'Doel en werkwijze', 2000, true),
+    responsible_role: objectText(source.responsible_role, 'Verantwoordelijke rol of team', 160, true),
+    retention_days: retentionDays,
+    anonymize_after_retention: source.anonymize_after_retention !== false,
+    field_definitions: fieldDefinitions,
+    reference_lists: referenceLists,
+    catalog_items: catalog,
+    availability_windows: windows,
+    authorization_rules: normalizedObjectModuleAuthorizationRules(source.authorization_rules ?? [], catalogIds, entryIds, windowIds),
+    workflow_settings: normalizedObjectModuleSettings(source.workflow_settings, moduleType),
+    notification_settings: normalizedObjectModuleNotifications(source.notification_settings),
+  };
+}
+
+function objectModuleReadiness(module: LooseRecord, revision: LooseRecord | null) {
+  const blockingIssues: LooseRecord[] = [];
+  const warnings: LooseRecord[] = [];
+  if (!revision) blockingIssues.push({ code: 'draft_missing', message: 'Conceptconfiguratie ontbreekt.' });
+  if (!asString(module.display_name)) blockingIssues.push({ code: 'display_name_missing', message: 'Geef de module een herkenbare naam.' });
+  if (revision) {
+    const enabledFields = (Array.isArray(revision.field_definitions) ? revision.field_definitions : []).filter((field: LooseRecord) => field.enabled !== false);
+    const enabledById = new Map(enabledFields.map((field: LooseRecord) => [field.id, field]));
+    for (const [requiredId, requiredType] of Object.entries(OBJECT_MODULE_REQUIRED_FIELDS[module.module_type] || {})) {
+      const field = enabledById.get(requiredId);
+      if (!field) {
+        blockingIssues.push({ code: 'required_field_missing', message: 'Een essentieel standaardveld is uitgeschakeld of verwijderd.', field_id: requiredId });
+      } else if (field.required !== true || field.field_type !== requiredType) {
+        blockingIssues.push({
+          code: 'required_field_invalid',
+          message: `${field.label} moet verplicht blijven en het oorspronkelijke invoertype behouden.`,
+          field_id: requiredId,
+          required_type: requiredType,
+        });
+      }
+    }
+    for (const field of enabledFields) {
+      if (
+        field.required === true && ['select', 'multiselect'].includes(field.field_type) &&
+        !(Array.isArray(field.options) && field.options.length) && !asString(field.reference_list_id)
+      ) {
+        blockingIssues.push({
+          code: 'selection_source_missing',
+          message: `${field.label} heeft nog geen keuzelijst of vaste opties.`,
+          field_id: field.id,
+        });
+      }
+    }
+    if (!enabledFields.length) blockingIssues.push({ code: 'fields_missing', message: 'Schakel minimaal één registratieveld in.' });
+    if (module.module_type === 'item_issuance' && !(revision.catalog_items || []).some((item: LooseRecord) => item.status !== 'inactive')) {
+      blockingIssues.push({ code: 'catalog_empty', message: 'Voeg minimaal één actief middel aan de catalogus toe.' });
+    }
+    if (module.module_type === 'item_issuance') {
+      const activeRules = (Array.isArray(revision.authorization_rules) ? revision.authorization_rules : [])
+        .filter((rule: LooseRecord) => rule.status !== 'inactive' && rule.effect === 'allow');
+      for (const item of (Array.isArray(revision.catalog_items) ? revision.catalog_items : []).filter((entry: LooseRecord) => entry.status !== 'inactive')) {
+        if (item.requires_authorization !== true && item.eligibility_mode !== 'allow_list') continue;
+        const hasDirectAllow = Array.isArray(item.allowed_reference_entry_ids) && item.allowed_reference_entry_ids.length > 0;
+        const hasRuleAllow = activeRules.some((rule: LooseRecord) =>
+          (!rule.catalog_item_ids?.length || rule.catalog_item_ids.includes(item.id)) && rule.subject_entry_ids?.length);
+        if (!hasDirectAllow && !hasRuleAllow) {
+          blockingIssues.push({
+            code: 'item_authorization_missing',
+            message: `${item.name} vereist bevoegdheid, maar heeft nog geen toegestane persoon, kamer of regel.`,
+            field_id: item.id,
+          });
+        }
+      }
+    }
+    if (!asString(revision.responsible_role)) warnings.push({ code: 'responsible_role_missing', message: 'Leg vast welke rol of welk team verantwoordelijk is.' });
+    if (!(revision.availability_windows || []).length && ['item_issuance', 'object_calendar'].includes(module.module_type)) {
+      warnings.push({ code: 'availability_missing', message: 'Er zijn nog geen gebruiks- of openingstijden ingesteld.' });
+    }
+    if (module.module_type === 'item_issuance' && !(revision.reference_lists || []).length) {
+      warnings.push({ code: 'subject_lists_missing', message: 'Voeg een personen-, kamer- of afdelingenlijst toe voor snelle en gecontroleerde uitgifte.' });
+    }
+  }
+  return {
+    ready_to_publish: blockingIssues.length === 0,
+    readiness_status: blockingIssues.length ? 'blocked' : warnings.length ? 'attention' : 'ready',
+    blocking_issues: blockingIssues,
+    warnings,
+  };
+}
+
+function objectModuleEntryCount(revision: LooseRecord | null | undefined) {
+  return (Array.isArray(revision?.reference_lists) ? revision.reference_lists : [])
+    .reduce((total: number, list: LooseRecord) => total + (Array.isArray(list.entries) ? list.entries.length : 0), 0);
+}
+
+function safeObjectModuleRevisionSummary(revision: LooseRecord | null | undefined, readiness?: LooseRecord | null) {
+  if (!revision) return null;
+  const effectiveReadiness = readiness || revision.readiness_snapshot || null;
+  return {
+    id: revision.id,
+    module_id: revision.module_id,
+    revision_number: Number(revision.revision_number || 0),
+    status: revision.status || 'draft',
+    schema_version: revision.schema_version || 'loq-object-module-v1',
+    field_count: Array.isArray(revision.field_definitions) ? revision.field_definitions.length : 0,
+    reference_list_count: Array.isArray(revision.reference_lists) ? revision.reference_lists.length : 0,
+    reference_entry_count: objectModuleEntryCount(revision),
+    catalog_item_count: Array.isArray(revision.catalog_items) ? revision.catalog_items.length : 0,
+    availability_window_count: Array.isArray(revision.availability_windows) ? revision.availability_windows.length : 0,
+    authorization_rule_count: Array.isArray(revision.authorization_rules) ? revision.authorization_rules.length : 0,
+    retention_days: Number(revision.retention_days || 0),
+    readiness_status: effectiveReadiness?.readiness_status || 'attention',
+    readiness_warning_count: Array.isArray(effectiveReadiness?.warnings) ? effectiveReadiness.warnings.length : 0,
+    content_checksum: revision.content_checksum || null,
+    published_at: revision.published_at || null,
+    published_by_user_id: revision.published_by_user_id || null,
+    version: versionOf(revision),
+    updated_date: revision.updated_date || null,
+    read_only: revision.status !== 'draft',
+  };
+}
+
+function safeObjectModuleRevision(revision: LooseRecord | null | undefined, readiness?: LooseRecord | null) {
+  if (!revision) return null;
+  return {
+    ...safeObjectModuleRevisionSummary(revision, readiness),
+    customer_id: revision.customer_id,
+    object_id: revision.object_id,
+    summary: revision.summary || null,
+    responsible_role: revision.responsible_role || null,
+    anonymize_after_retention: revision.anonymize_after_retention !== false,
+    field_definitions: Array.isArray(revision.field_definitions) ? revision.field_definitions : [],
+    reference_lists: Array.isArray(revision.reference_lists) ? revision.reference_lists : [],
+    catalog_items: Array.isArray(revision.catalog_items) ? revision.catalog_items : [],
+    availability_windows: Array.isArray(revision.availability_windows) ? revision.availability_windows : [],
+    authorization_rules: Array.isArray(revision.authorization_rules) ? revision.authorization_rules : [],
+    workflow_settings: revision.workflow_settings && typeof revision.workflow_settings === 'object' ? revision.workflow_settings : {},
+    notification_settings: revision.notification_settings && typeof revision.notification_settings === 'object' ? revision.notification_settings : {},
+    readiness_snapshot: revision.readiness_snapshot || null,
+    published_by_user_id: revision.published_by_user_id || null,
+    superseded_at: revision.superseded_at || null,
+    superseded_by_revision_id: revision.superseded_by_revision_id || null,
+    source_revision_id: revision.source_revision_id || null,
+  };
+}
+
+function safeObjectModule(module: LooseRecord, revision: LooseRecord | null = null, linkedPlanCount = 0) {
+  const readiness = revision ? objectModuleReadiness(module, revision) : null;
+  return {
+    id: module.id,
+    customer_id: module.customer_id,
+    object_id: module.object_id,
+    module_type: module.module_type,
+    display_name: module.display_name || OBJECT_MODULE_DEFAULT_NAMES[module.module_type] || 'Objectmodule',
+    purpose: module.purpose || null,
+    status: OBJECT_MODULE_STATUSES.has(module.status) ? module.status : 'concept',
+    current_published_revision_id: module.current_published_revision_id || null,
+    draft_revision_id: module.draft_revision_id || null,
+    latest_revision_number: Number(module.latest_revision_number || 0),
+    current_revision_summary: safeObjectModuleRevisionSummary(revision, readiness),
+    linked_plan_count: Number(linkedPlanCount || 0),
+    published_at: module.published_at || null,
+    activated_at: module.activated_at || null,
+    activated_by_user_id: module.activated_by_user_id || null,
+    suspended_at: module.suspended_at || null,
+    suspended_by_user_id: module.suspended_by_user_id || null,
+    suspension_reason: module.suspension_reason || null,
+    archived_at: module.archived_at || null,
+    archived_by_user_id: module.archived_by_user_id || null,
+    archive_reason: module.archive_reason || null,
+    version: versionOf(module),
+    created_date: module.created_date || null,
+    updated_date: module.updated_date || null,
+  };
+}
+
+async function objectModulePlanLinks(base44: LooseRecord, customerId: string, objectId: string, moduleId?: string) {
+  const plans = await getEntity(base44, 'ObjectSecurityPlan').filter({ customer_id: customerId, object_id: objectId }, '-updated_date', 2000);
+  const revisionIds = [...new Set(plans.flatMap((plan: LooseRecord) => [plan.draft_revision_id, plan.current_published_revision_id].map(asString).filter(Boolean)))];
+  const revisions = revisionIds.length
+    ? await getEntity(base44, 'ObjectSecurityPlanRevision').filter({ id: { $in: revisionIds } }, '-revision_number', 5000)
+    : [];
+  const planById = new Map(plans.map((plan: LooseRecord) => [plan.id, plan]));
+  return revisions.flatMap((revision: LooseRecord) => {
+    const plan = planById.get(revision.security_plan_id);
+    if (!plan || plan.status === 'archived' || revision.customer_id !== customerId || revision.object_id !== objectId) return [];
+    return (Array.isArray(revision.module_assignments) ? revision.module_assignments : [])
+      .filter((assignment: LooseRecord) => !moduleId || assignment.module_id === moduleId)
+      .map((assignment: LooseRecord) => ({
+        security_plan_id: plan.id,
+        security_plan_name: plan.variant_name || plan.title,
+        security_plan_status: plan.status,
+        revision_id: revision.id,
+        revision_status: revision.status,
+        module_id: assignment.module_id,
+        access_mode: assignment.access_mode || 'register',
+        quick_action: assignment.quick_action === true,
+      }));
+  });
+}
+
+async function handleListObjectModules(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const modules = await getEntity(base44, 'ObjectOperationalModule').filter({ customer_id: customer.id, object_id: object.id }, '-updated_date', 100);
+  const revisionIds = [...new Set(modules.flatMap((module: LooseRecord) => [module.draft_revision_id, module.current_published_revision_id].map(asString).filter(Boolean)))];
+  const [revisions, links] = await Promise.all([
+    revisionIds.length
+      ? getEntity(base44, 'ObjectOperationalModuleRevision').filter({ id: { $in: revisionIds } }, '-revision_number', 250)
+      : Promise.resolve([]),
+    objectModulePlanLinks(base44, customer.id, object.id),
+  ]);
+  const revisionById = new Map(revisions.map((revision: LooseRecord) => [revision.id, revision]));
+  const linkedPlanIds = new Map<string, Set<string>>();
+  for (const link of links) {
+    const planIds = linkedPlanIds.get(link.module_id) || new Set<string>();
+    planIds.add(link.security_plan_id);
+    linkedPlanIds.set(link.module_id, planIds);
+  }
+  return {
+    items: modules.map((module: LooseRecord) => safeObjectModule(
+      module,
+      revisionById.get(module.draft_revision_id) || revisionById.get(module.current_published_revision_id) || null,
+      linkedPlanIds.get(module.id)?.size || 0,
+    )),
+    total: modules.length,
+    available_module_types: [...OBJECT_MODULE_TYPES].filter(moduleType => !modules.some((module: LooseRecord) => module.module_type === moduleType)),
+  };
+}
+
+async function requireObjectModule(base44: LooseRecord, body: LooseRecord, mutable = false) {
+  const scope = mutable
+    ? await requireCustomerObjectForMutation(base44, body)
+    : await requireCustomerObjectScope(base44, body);
+  const module = await requireRecord(base44, 'ObjectOperationalModule', requireString(body, 'module_id'), 'Objectmodule');
+  if (module.customer_id !== scope.customer.id || module.object_id !== scope.object.id) throw new ApiError(409, 'Objectmodule hoort niet bij dit object');
+  if (mutable && scope.object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  return { ...scope, module };
+}
+
+async function handleGetObjectModule(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object, module } = await requireObjectModule(base44, body);
+  const [revisions, planLinks] = await Promise.all([
+    getEntity(base44, 'ObjectOperationalModuleRevision').filter({ module_id: module.id }, '-revision_number', 250),
+    objectModulePlanLinks(base44, customer.id, object.id, module.id),
+  ]);
+  const scoped = revisions.filter((revision: LooseRecord) => revision.customer_id === customer.id && revision.object_id === object.id && revision.module_id === module.id);
+  const byId = new Map(scoped.map((revision: LooseRecord) => [revision.id, revision]));
+  const draft = byId.get(module.draft_revision_id) || null;
+  const published = byId.get(module.current_published_revision_id) || null;
+  const current = draft || published;
+  const readiness = objectModuleReadiness(module, current);
+  return {
+    module: safeObjectModule(module, current, new Set(planLinks.map((link: LooseRecord) => link.security_plan_id)).size),
+    draft_revision: safeObjectModuleRevision(draft, draft ? readiness : null),
+    published_revision: safeObjectModuleRevision(published, published && !draft ? readiness : null),
+    current_revision: safeObjectModuleRevision(current, readiness),
+    revision_history: scoped.map(revision => safeObjectModuleRevisionSummary(revision)),
+    plan_links: planLinks,
+    readiness,
+  };
+}
+
+function normalizedObjectModuleIdentity(data: LooseRecord, current: LooseRecord | null = null) {
+  const source = { ...(current || {}), ...data };
+  const moduleType = asString(source.module_type);
+  if (!OBJECT_MODULE_TYPES.has(moduleType)) throw new ApiError(400, 'Kies een geldig moduletype');
+  return {
+    module_type: moduleType,
+    display_name: objectText(source.display_name || OBJECT_MODULE_DEFAULT_NAMES[moduleType], 'Modulenaam', 160, false),
+    purpose: objectText(source.purpose, 'Doel van de module', 1000, true),
+  };
+}
+
+function objectModuleLogbookChanges(
+  beforeModule: LooseRecord | null,
+  beforeRevision: LooseRecord | null,
+  afterModule: LooseRecord,
+  afterRevision: LooseRecord | null,
+) {
+  const beforeSummary = safeObjectModuleRevisionSummary(beforeRevision);
+  const afterSummary = safeObjectModuleRevisionSummary(afterRevision);
+  const candidates = [
+    ['module_name', 'Modulenaam', beforeModule?.display_name || null, afterModule.display_name || null],
+    ['module_type', 'Moduletype', beforeModule?.module_type || null, afterModule.module_type || null],
+    ['status', 'Status', beforeModule?.status || null, afterModule.status || null],
+    ['module_revision', 'Moduleversie', beforeSummary?.revision_number || null, afterSummary?.revision_number || null],
+    ['module_field_count', 'Aantal registratievelden', beforeSummary?.field_count || 0, afterSummary?.field_count || 0],
+    ['module_reference_list_count', 'Aantal keuzelijsten', beforeSummary?.reference_list_count || 0, afterSummary?.reference_list_count || 0],
+    ['module_reference_entry_count', 'Aantal lijstkeuzes', beforeSummary?.reference_entry_count || 0, afterSummary?.reference_entry_count || 0],
+    ['module_catalog_item_count', 'Aantal catalogusitems', beforeSummary?.catalog_item_count || 0, afterSummary?.catalog_item_count || 0],
+    ['module_availability_window_count', 'Aantal tijdvensters', beforeSummary?.availability_window_count || 0, afterSummary?.availability_window_count || 0],
+    ['module_authorization_rule_count', 'Aantal bevoegdheidsregels', beforeSummary?.authorization_rule_count || 0, afterSummary?.authorization_rule_count || 0],
+    ['module_retention_days', 'Bewaartermijn in dagen', beforeRevision?.retention_days || null, afterRevision?.retention_days || null],
+    ['module_responsible_role', 'Verantwoordelijke rol', beforeRevision?.responsible_role || null, afterRevision?.responsible_role || null],
+    ['module_suspension_reason', 'Reden pauzeren', beforeModule?.suspension_reason || null, afterModule.suspension_reason || null],
+    ['module_archive_reason', 'Reden archiveren', beforeModule?.archive_reason || null, afterModule.archive_reason || null],
+  ];
+  return candidates.flatMap(([field, label, before, after]) =>
+    before === after ? [] : [{ field, label, before, after }]);
+}
+
+function objectModuleAuditResult(
+  module: LooseRecord,
+  revision: LooseRecord | null,
+  summary: string,
+  beforeModule: LooseRecord | null = null,
+  beforeRevision: LooseRecord | null = null,
+) {
+  return {
+    module: safeObjectModule(module, revision),
+    revision: safeObjectModuleRevisionSummary(revision),
+    changes: objectModuleLogbookChanges(beforeModule, beforeRevision, module, revision),
+    customer_id: module.customer_id,
+    object_id: module.object_id,
+    summary,
+    resource_type: 'ObjectOperationalModule',
+    resource_id: module.id,
+    category: 'operations',
+  };
+}
+
+async function objectModuleContentChecksum(module: LooseRecord, revision: LooseRecord) {
+  return sha256(JSON.stringify(canonicalMutationValue({
+    schema_version: 'loq-object-module-v1',
+    module: pick(module, ['customer_id', 'object_id', 'module_type', 'display_name', 'purpose']),
+    configuration: pick(revision, [
+      'summary', 'responsible_role', 'retention_days', 'anonymize_after_retention', 'field_definitions', 'reference_lists',
+      'catalog_items', 'availability_windows', 'authorization_rules', 'workflow_settings', 'notification_settings',
+    ]),
+  })));
+}
+
+function objectModuleRevisionContentPatch(revision: LooseRecord) {
+  return pick(revision, [
+    'schema_version', 'summary', 'responsible_role', 'retention_days', 'anonymize_after_retention', 'field_definitions',
+    'reference_lists', 'catalog_items', 'availability_windows', 'authorization_rules', 'workflow_settings',
+    'notification_settings', 'readiness_snapshot', 'content_checksum', 'mutation_idempotency_key',
+    'mutation_request_fingerprint', 'mutation_actor_user_id', 'mutation_target',
+  ]);
+}
+
+async function handleCreateObjectModule(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe objectmodule verwacht expected_version 0');
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  const data = requireObject(body);
+  const identity = normalizedObjectModuleIdentity(data);
+  const matches = await getEntity(base44, 'ObjectOperationalModule').filter({
+    customer_id: customer.id,
+    object_id: object.id,
+    module_type: identity.module_type,
+  }, '-created_date', 5);
+  if (matches.length) {
+    let matching = matches[0];
+    if (
+      matching.creation_idempotency_key !== idempotencyKey || matching.creation_request_fingerprint !== requestFingerprint ||
+      matching.creation_actor_user_id !== user.id || matching.creation_mutation_target !== target
+    ) throw new ApiError(409, `${OBJECT_MODULE_DEFAULT_NAMES[identity.module_type]} is al aan dit object toegevoegd`);
+    const revisionMatches = await getEntity(base44, 'ObjectOperationalModuleRevision').filter({
+      module_id: matching.id,
+      mutation_idempotency_key: idempotencyKey,
+    }, '-created_date', 2);
+    if (revisionMatches.length > 1) throw new ApiError(409, 'Moduleconfiguratie-idempotency is niet eenduidig; handmatige controle vereist');
+    let recoveredRevision = revisionMatches[0] || null;
+    if (!recoveredRevision) {
+      const recoveredData = normalizedObjectModuleRevisionData(data, identity.module_type);
+      recoveredRevision = await getEntity(base44, 'ObjectOperationalModuleRevision').create({
+        module_id: matching.id,
+        customer_id: customer.id,
+        object_id: object.id,
+        revision_number: 1,
+        status: 'draft',
+        ...recoveredData,
+        readiness_snapshot: null,
+        content_checksum: null,
+        published_at: null,
+        published_by_user_id: null,
+        superseded_at: null,
+        superseded_by_revision_id: null,
+        source_revision_id: null,
+        created_by_user_id: user.id,
+        mutation_idempotency_key: idempotencyKey,
+        mutation_request_fingerprint: requestFingerprint,
+        mutation_actor_user_id: user.id,
+        mutation_target: target,
+        version: 1,
+      });
+    }
+    if (!matching.draft_revision_id) {
+      matching = await casUpdate(base44, 'ObjectOperationalModule', matching, versionOf(matching), {
+        draft_revision_id: recoveredRevision.id,
+        latest_revision_number: Math.max(1, Number(matching.latest_revision_number || 0)),
+      });
+    } else if (matching.draft_revision_id !== recoveredRevision.id) {
+      throw new ApiError(409, 'De herstelde moduleconfiguratie wijkt af; handmatige controle vereist');
+    }
+    const replayBody = { ...body, module_id: matching.id };
+    const replay = await handleGetObjectModule(base44, replayBody);
+    return { ...replay, replayed: true, recovered_partial_creation: true, audit_result: objectModuleAuditResult(matching, replay.current_revision, `${matching.display_name} toegevoegd`) };
+  }
+  let module = await getEntity(base44, 'ObjectOperationalModule').create({
+    customer_id: customer.id,
+    object_id: object.id,
+    ...identity,
+    status: 'concept',
+    current_published_revision_id: null,
+    draft_revision_id: null,
+    latest_revision_number: 1,
+    published_at: null,
+    archived_at: null,
+    archived_by_user_id: null,
+    created_by_user_id: user.id,
+    creation_idempotency_key: idempotencyKey,
+    creation_request_fingerprint: requestFingerprint,
+    creation_actor_user_id: user.id,
+    creation_mutation_target: target,
+    version: 1,
+  });
+  const revisionMatches = await getEntity(base44, 'ObjectOperationalModuleRevision').filter({ module_id: module.id, mutation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (revisionMatches.length > 1) throw new ApiError(409, 'Moduleconfiguratie-idempotency is niet eenduidig; handmatige controle vereist');
+  const revisionData = normalizedObjectModuleRevisionData(data, identity.module_type);
+  const revision = revisionMatches[0] || await getEntity(base44, 'ObjectOperationalModuleRevision').create({
+    module_id: module.id,
+    customer_id: customer.id,
+    object_id: object.id,
+    revision_number: 1,
+    status: 'draft',
+    ...revisionData,
+    readiness_snapshot: null,
+    content_checksum: null,
+    published_at: null,
+    published_by_user_id: null,
+    superseded_at: null,
+    superseded_by_revision_id: null,
+    source_revision_id: null,
+    created_by_user_id: user.id,
+    mutation_idempotency_key: idempotencyKey,
+    mutation_request_fingerprint: requestFingerprint,
+    mutation_actor_user_id: user.id,
+    mutation_target: target,
+    version: 1,
+  });
+  if (!module.draft_revision_id) module = await casUpdate(base44, 'ObjectOperationalModule', module, versionOf(module), { draft_revision_id: revision.id });
+  const auditResult = objectModuleAuditResult(module, revision, `${module.display_name} toegevoegd`);
+  return {
+    module: safeObjectModule(module, revision),
+    draft_revision: safeObjectModuleRevision(revision, objectModuleReadiness(module, revision)),
+    current_revision: safeObjectModuleRevision(revision, objectModuleReadiness(module, revision)),
+    revision_history: [],
+    plan_links: [],
+    readiness: objectModuleReadiness(module, revision),
+    customer_id: customer.id,
+    object_id: object.id,
+    summary: auditResult.summary,
+    resource_type: auditResult.resource_type,
+    resource_id: module.id,
+    category: 'operations',
+    audit_result: auditResult,
+  };
+}
+
+async function handleSaveObjectModuleDraft(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, module } = await requireObjectModule(base44, body, true);
+  if (module.status === 'archived') throw new ApiError(409, 'Een gearchiveerde module moet eerst worden hersteld');
+  if (versionOf(module) !== expectedVersion) throw new ApiError(409, 'Objectmodule is intussen gewijzigd');
+  const data = requireObject(body);
+  const identity = normalizedObjectModuleIdentity(data, module);
+  let draft = module.draft_revision_id
+    ? await requireRecord(base44, 'ObjectOperationalModuleRevision', module.draft_revision_id, 'Conceptconfiguratie')
+    : null;
+  if (draft && (draft.module_id !== module.id || draft.customer_id !== customer.id || draft.object_id !== object.id || draft.status !== 'draft')) {
+    throw new ApiError(409, 'De gekoppelde conceptconfiguratie is ongeldig');
+  }
+  const published = module.current_published_revision_id
+    ? await requireRecord(base44, 'ObjectOperationalModuleRevision', module.current_published_revision_id, 'Gepubliceerde configuratie')
+    : null;
+  if (published && (published.module_id !== module.id || published.customer_id !== customer.id || published.object_id !== object.id)) {
+    throw new ApiError(409, 'De gepubliceerde configuratie hoort niet bij deze module');
+  }
+  const existingMutation = await getEntity(base44, 'ObjectOperationalModuleRevision').filter({ module_id: module.id, mutation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (existingMutation.length > 1) throw new ApiError(409, 'Conceptmutatie is niet eenduidig; handmatige controle vereist');
+  let savedRevision = existingMutation[0] || null;
+  if (savedRevision && (
+    savedRevision.mutation_request_fingerprint !== requestFingerprint || savedRevision.mutation_actor_user_id !== user.id || savedRevision.mutation_target !== target
+  )) rejectIdempotencyReuse();
+  const revisionData = normalizedObjectModuleRevisionData(data, identity.module_type, draft || published);
+  const revisionNumber = draft ? Number(draft.revision_number) : Math.max(Number(module.latest_revision_number || 0), Number(published?.revision_number || 0)) + 1;
+  const projectedRevision = {
+    ...(draft || {}),
+    module_id: module.id,
+    customer_id: customer.id,
+    object_id: object.id,
+    revision_number: revisionNumber,
+    status: 'draft',
+    ...revisionData,
+  };
+  const projectedModule = { ...module, ...identity };
+  const readiness = objectModuleReadiness(projectedModule, projectedRevision);
+  if (!savedRevision && draft) {
+    savedRevision = await casUpdate(base44, 'ObjectOperationalModuleRevision', draft, versionOf(draft), {
+      ...revisionData,
+      readiness_snapshot: null,
+      content_checksum: null,
+      mutation_idempotency_key: idempotencyKey,
+      mutation_request_fingerprint: requestFingerprint,
+      mutation_actor_user_id: user.id,
+      mutation_target: target,
+    });
+  } else if (!savedRevision) {
+    savedRevision = await getEntity(base44, 'ObjectOperationalModuleRevision').create({
+      ...projectedRevision,
+      readiness_snapshot: null,
+      content_checksum: null,
+      published_at: null,
+      published_by_user_id: null,
+      superseded_at: null,
+      superseded_by_revision_id: null,
+      source_revision_id: published?.id || null,
+      created_by_user_id: user.id,
+      mutation_idempotency_key: idempotencyKey,
+      mutation_request_fingerprint: requestFingerprint,
+      mutation_actor_user_id: user.id,
+      mutation_target: target,
+      version: 1,
+    });
+  }
+  const projectedAfter = {
+    ...module,
+    ...identity,
+    draft_revision_id: savedRevision.id,
+    latest_revision_number: Math.max(Number(module.latest_revision_number || 0), revisionNumber),
+    version: expectedVersion + 1,
+  };
+  const auditResult = objectModuleAuditResult(
+    projectedAfter,
+    savedRevision,
+    `${identity.display_name} als concept opgeslagen`,
+    module,
+    draft || published,
+  );
+  const recoveryPatch = await mutationRecoveryPatch(module, 'save_object_module_draft', user, idempotencyKey, requestFingerprint, target, auditResult);
+  try {
+    const updated = await casUpdate(base44, 'ObjectOperationalModule', module, expectedVersion, {
+      ...identity,
+      draft_revision_id: savedRevision.id,
+      latest_revision_number: projectedAfter.latest_revision_number,
+      ...recoveryPatch,
+    });
+    return {
+      module: safeObjectModule(updated, savedRevision),
+      draft_revision: safeObjectModuleRevision(savedRevision, readiness),
+      published_revision: safeObjectModuleRevision(published),
+      current_revision: safeObjectModuleRevision(savedRevision, readiness),
+      readiness,
+      customer_id: customer.id,
+      object_id: object.id,
+      summary: auditResult.summary,
+      resource_type: 'ObjectOperationalModule',
+      resource_id: module.id,
+      category: 'operations',
+      audit_result: auditResult,
+    };
+  } catch (error) {
+    if (draft && !existingMutation[0]) await casUpdateLatest(base44, 'ObjectOperationalModuleRevision', savedRevision.id, objectModuleRevisionContentPatch(draft)).catch(() => null);
+    throw error;
+  }
+}
+
+async function handlePublishObjectModule(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, module } = await requireObjectModule(base44, body, true);
+  if (module.status === 'archived') throw new ApiError(409, 'Een gearchiveerde module moet eerst worden hersteld');
+  if (versionOf(module) !== expectedVersion) throw new ApiError(409, 'Objectmodule is intussen gewijzigd');
+  const draft = await requireRecord(base44, 'ObjectOperationalModuleRevision', asString(module.draft_revision_id), 'Conceptconfiguratie');
+  if (draft.module_id !== module.id || draft.customer_id !== customer.id || draft.object_id !== object.id || !['draft', 'published'].includes(draft.status)) {
+    throw new ApiError(409, 'Conceptconfiguratie hoort niet bij deze module');
+  }
+  const readiness = objectModuleReadiness(module, draft);
+  if (!readiness.ready_to_publish) throw new ApiError(409, 'De module is nog niet gereed voor activatie', { readiness });
+  const checksum = await objectModuleContentChecksum(module, draft);
+  let publishedDraft = draft;
+  if (draft.status === 'published') {
+    if (draft.content_checksum !== checksum) throw new ApiError(409, 'De gedeeltelijk gepubliceerde moduleconfiguratie is inhoudelijk gewijzigd; handmatige controle vereist');
+    if (
+      draft.publication_idempotency_key === idempotencyKey &&
+      (
+        draft.publication_request_fingerprint !== requestFingerprint || draft.publication_actor_user_id !== user.id ||
+        draft.publication_mutation_target !== target
+      )
+    ) rejectIdempotencyReuse();
+  } else {
+    publishedDraft = await casUpdate(base44, 'ObjectOperationalModuleRevision', draft, versionOf(draft), {
+      status: 'published',
+      readiness_snapshot: readiness,
+      content_checksum: checksum,
+      published_at: nowIso(),
+      published_by_user_id: user.id,
+      publication_idempotency_key: idempotencyKey,
+      publication_request_fingerprint: requestFingerprint,
+      publication_actor_user_id: user.id,
+      publication_mutation_target: target,
+    });
+  }
+  let previousPublished: LooseRecord | null = null;
+  if (module.current_published_revision_id && module.current_published_revision_id !== publishedDraft.id) {
+    previousPublished = await requireRecord(base44, 'ObjectOperationalModuleRevision', module.current_published_revision_id, 'Vorige moduleconfiguratie');
+    if (previousPublished.module_id !== module.id || previousPublished.customer_id !== customer.id || previousPublished.object_id !== object.id) throw new ApiError(409, 'Vorige moduleconfiguratie hoort niet bij deze module');
+    if (previousPublished.status === 'published') {
+      previousPublished = await casUpdate(base44, 'ObjectOperationalModuleRevision', previousPublished, versionOf(previousPublished), {
+        status: 'superseded',
+        superseded_at: nowIso(),
+        superseded_by_revision_id: publishedDraft.id,
+      });
+    } else if (previousPublished.status !== 'superseded' || previousPublished.superseded_by_revision_id !== publishedDraft.id) {
+      throw new ApiError(409, 'Vorige moduleconfiguratie heeft een onverwachte status');
+    }
+  }
+  const projected = {
+    ...module,
+    status: 'active',
+    current_published_revision_id: publishedDraft.id,
+    draft_revision_id: null,
+    published_at: publishedDraft.published_at,
+    activated_at: nowIso(),
+    activated_by_user_id: user.id,
+    suspended_at: null,
+    suspended_by_user_id: null,
+    suspension_reason: null,
+    version: expectedVersion + 1,
+  };
+  const auditResult = objectModuleAuditResult(
+    projected,
+    publishedDraft,
+    `${module.display_name} geactiveerd`,
+    module,
+    draft,
+  );
+  const recoveryPatch = await mutationRecoveryPatch(module, 'publish_object_module', user, idempotencyKey, requestFingerprint, target, auditResult);
+  try {
+    const updated = await casUpdate(base44, 'ObjectOperationalModule', module, expectedVersion, {
+      status: 'active',
+      current_published_revision_id: publishedDraft.id,
+      draft_revision_id: null,
+      published_at: publishedDraft.published_at,
+      activated_at: projected.activated_at,
+      activated_by_user_id: projected.activated_by_user_id,
+      suspended_at: null,
+      suspended_by_user_id: null,
+      suspension_reason: null,
+      ...recoveryPatch,
+    });
+    return {
+      module: safeObjectModule(updated, publishedDraft),
+      draft_revision: null,
+      published_revision: safeObjectModuleRevision(publishedDraft, readiness),
+      current_revision: safeObjectModuleRevision(publishedDraft, readiness),
+      readiness,
+      customer_id: customer.id,
+      object_id: object.id,
+      summary: auditResult.summary,
+      resource_type: 'ObjectOperationalModule',
+      resource_id: module.id,
+      category: 'operations',
+      audit_result: auditResult,
+    };
+  } catch (error) {
+    if (draft.status === 'draft') {
+      await casUpdateLatest(base44, 'ObjectOperationalModuleRevision', publishedDraft.id, {
+        status: 'draft',
+        readiness_snapshot: null,
+        content_checksum: null,
+        published_at: null,
+        published_by_user_id: null,
+        publication_idempotency_key: null,
+        publication_request_fingerprint: null,
+        publication_actor_user_id: null,
+        publication_mutation_target: null,
+      }).catch(() => null);
+    }
+    if (previousPublished?.status === 'superseded' && previousPublished.superseded_by_revision_id === publishedDraft.id) {
+      await casUpdateLatest(base44, 'ObjectOperationalModuleRevision', previousPublished.id, {
+        status: 'published',
+        superseded_at: null,
+        superseded_by_revision_id: null,
+      }).catch(() => null);
+    }
+    throw error;
+  }
+}
+
+function normalizedObjectModuleStatusReason(body: LooseRecord, requested: string) {
+  if (!['suspended', 'archived'].includes(requested)) return null;
+  const data = body.data && typeof body.data === 'object' && !Array.isArray(body.data)
+    ? body.data as LooseRecord
+    : {};
+  const submitted = body.reason !== undefined ? body.reason : data.reason;
+  return objectText(
+    submitted,
+    requested === 'archived' ? 'Reden voor archiveren' : 'Reden voor pauzeren',
+    500,
+    false,
+  ) as string;
+}
+
+function projectedObjectModuleStatus(
+  module: LooseRecord,
+  requested: string,
+  userId: string,
+  reason: string | null,
+  changedAt: string,
+  nextVersion: number,
+) {
+  return {
+    ...module,
+    status: requested,
+    activated_at: requested === 'active' ? changedAt : module.activated_at || null,
+    activated_by_user_id: requested === 'active' ? userId : module.activated_by_user_id || null,
+    suspended_at: requested === 'suspended' ? changedAt : requested === 'active' ? null : module.suspended_at || null,
+    suspended_by_user_id: requested === 'suspended' ? userId : requested === 'active' ? null : module.suspended_by_user_id || null,
+    suspension_reason: requested === 'suspended' ? reason : requested === 'active' ? null : module.suspension_reason || null,
+    archived_at: requested === 'archived' ? changedAt : null,
+    archived_by_user_id: requested === 'archived' ? userId : null,
+    archive_reason: requested === 'archived' ? reason : null,
+    version: nextVersion,
+  };
+}
+
+async function handleSetObjectModuleStatus(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { customer, object, module } = await requireObjectModule(base44, body, true);
+  if (versionOf(module) !== expectedVersion) throw new ApiError(409, 'Objectmodule is intussen gewijzigd');
+  const requested = asString(body.status || (body.data as LooseRecord)?.status);
+  if (!OBJECT_MODULE_STATUSES.has(requested) || requested === module.status) throw new ApiError(400, 'Kies een geldige nieuwe modulestatus');
+  const transitions: Record<string, string[]> = {
+    concept: ['archived'],
+    active: ['suspended', 'archived'],
+    suspended: ['active', 'archived'],
+    archived: [module.current_published_revision_id ? 'suspended' : 'concept'],
+  };
+  if (!(transitions[module.status] || []).includes(requested)) throw new ApiError(409, 'Deze modulestatus kan niet rechtstreeks worden ingesteld');
+  if (requested === 'active' && !module.current_published_revision_id) throw new ApiError(409, 'Publiceer de moduleconfiguratie voordat de module wordt geactiveerd');
+  const reason = normalizedObjectModuleStatusReason(body, requested);
+  const planLinks = await objectModulePlanLinks(base44, customer.id, object.id, module.id);
+  if (requested === 'archived' && planLinks.length) throw new ApiError(409, 'Ontkoppel deze module eerst uit de actuele beveiligingsplannen', {
+    linked_plan_count: new Set(planLinks.map((link: LooseRecord) => link.security_plan_id)).size,
+  });
+  const revision = module.draft_revision_id
+    ? await getRecord(base44, 'ObjectOperationalModuleRevision', module.draft_revision_id)
+    : module.current_published_revision_id
+      ? await getRecord(base44, 'ObjectOperationalModuleRevision', module.current_published_revision_id)
+      : null;
+  const projected = projectedObjectModuleStatus(module, requested, user.id, reason, nowIso(), expectedVersion + 1);
+  const statusLabel = requested === 'archived' ? 'gearchiveerd' : requested === 'suspended' ? 'gepauzeerd' : requested === 'active' ? 'hervat' : 'hersteld';
+  const auditResult = objectModuleAuditResult(
+    projected,
+    revision,
+    `${module.display_name} ${statusLabel}`,
+    module,
+    revision,
+  );
+  const recoveryPatch = await mutationRecoveryPatch(module, 'set_object_module_status', user, idempotencyKey, requestFingerprint, target, auditResult);
+  const updated = await casUpdate(base44, 'ObjectOperationalModule', module, expectedVersion, {
+    status: requested,
+    activated_at: projected.activated_at,
+    activated_by_user_id: projected.activated_by_user_id,
+    suspended_at: projected.suspended_at,
+    suspended_by_user_id: projected.suspended_by_user_id,
+    suspension_reason: projected.suspension_reason,
+    archived_at: projected.archived_at,
+    archived_by_user_id: projected.archived_by_user_id,
+    archive_reason: projected.archive_reason,
+    ...recoveryPatch,
+  });
+  return {
+    module: safeObjectModule(updated, revision, new Set(planLinks.map((link: LooseRecord) => link.security_plan_id)).size),
+    customer_id: customer.id,
+    object_id: object.id,
+    summary: auditResult.summary,
+    resource_type: 'ObjectOperationalModule',
+    resource_id: module.id,
+    category: 'operations',
+    audit_result: auditResult,
+  };
+}
+
+async function handleObjectModuleMutation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  // Module status/configuration and security-plan assignments must share one
+  // object lock. Otherwise archiving and linking the same module can both win.
+  const reservation = await reserveSecurityPlanMutation(
+    base44,
+    user,
+    object.id,
+    action,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    if (action === 'create_object_module') return await handleCreateObjectModule(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'save_object_module_draft') return await handleSaveObjectModuleDraft(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'publish_object_module') return await handlePublishObjectModule(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'set_object_module_status') return await handleSetObjectModuleStatus(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    throw new ApiError(400, 'Onbekende objectmodulemutatie');
+  } finally {
+    await releaseSecurityPlanMutation(base44, reservation);
+  }
+}
+
 function normalizedSecurityPlanIdentity(data: LooseRecord, current: LooseRecord | null = null) {
   const taskType = asString(data.task_type ?? current?.task_type ?? current?.category);
   if (!SECURITY_PLAN_TASK_TYPES.has(taskType)) throw new ApiError(400, 'Kies een geldig taaktype');
@@ -10273,10 +11591,44 @@ function normalizedSecurityPlanRoute(value: unknown) {
   };
 }
 
+function normalizedSecurityPlanModuleAssignments(value: unknown) {
+  if (value === undefined || value === null) return [] as LooseRecord[];
+  if (!Array.isArray(value) || value.length > 20) throw new ApiError(400, 'Modulekoppelingen hebben een ongeldig formaat of zijn te groot');
+  const moduleIds = new Set<string>();
+  const assignmentIds = new Set<string>();
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'Een modulekoppeling is ongeldig');
+    const assignment = raw as LooseRecord;
+    const moduleId = normalizedSecurityPlanId(assignment.module_id, 'Objectmodule', true);
+    if (moduleIds.has(moduleId)) throw new ApiError(400, 'Een objectmodule kan maar een keer aan een planvariant worden gekoppeld');
+    moduleIds.add(moduleId);
+    const id = normalizedSecurityPlanId(assignment.id || `module-${moduleId}`, 'Modulekoppeling', true);
+    if (assignmentIds.has(id)) throw new ApiError(400, 'Modulekoppelingen bevatten een dubbel ID');
+    assignmentIds.add(id);
+    const accessMode = asString(assignment.access_mode) || 'register';
+    if (!OBJECT_MODULE_ACCESS_MODES.has(accessMode)) throw new ApiError(400, 'Kies een geldige moduletoegang');
+    return {
+      id,
+      sequence: index + 1,
+      module_id: moduleId,
+      module_revision_id: assignment.module_revision_id
+        ? normalizedSecurityPlanId(assignment.module_revision_id, 'Moduleconfiguratierevisie', true)
+        : null,
+      access_mode: accessMode,
+      quick_action: assignment.quick_action === true,
+      instruction: objectText(assignment.instruction, 'Aanvullende module-instructie', 500, true),
+    };
+  });
+}
+
 function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRecord | null = null) {
   assertNoSecurityPlanSecretFields(data);
   const source = { ...(current || {}), ...data };
-  const hasDuration = source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '';
+  const requestedDurationMode = asString(source.duration_mode) || (
+    source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '' ? 'fixed' : 'none'
+  );
+  if (!['fixed', 'schedule_defined', 'none'].includes(requestedDurationMode)) throw new ApiError(400, 'Kies een geldig duurmodel');
+  const hasDuration = requestedDurationMode === 'fixed' && source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '';
   const durationMinutes = hasDuration ? requireInteger(source.duration_minutes, 'duration_minutes', 1) : null;
   if (durationMinutes !== null && durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
   const sectionPolicy = asString(source.section_policy) || 'not_applicable';
@@ -10297,12 +11649,13 @@ function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRec
   }
   return {
     summary: objectText(source.summary ?? source.description, 'Samenvatting', 2000, true),
-    duration_mode: durationMinutes === null ? 'none' : 'fixed',
+    duration_mode: requestedDurationMode,
     duration_minutes: durationMinutes,
     section_policy: sectionPolicy,
     default_section_ids: defaultSectionIds,
     allowed_section_ids: allowedSectionIds,
     instruction_blocks: normalizedSecurityPlanInstructionBlocks(source.instruction_blocks),
+    module_assignments: normalizedSecurityPlanModuleAssignments(source.module_assignments),
     floorplan_id: floorplanId,
     floorplan_revision: floorplanRevision,
     route_overlay: normalizedSecurityPlanRoute(source.route_overlay),
@@ -10375,6 +11728,7 @@ function safeSecurityPlanRevisionSummary(revision: LooseRecord | null | undefine
     allowed_section_count: Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids.length : 0,
     instruction_block_count: Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks.length : 0,
     instruction_step_count: securityPlanInstructionStepCount(revision),
+    module_count: Array.isArray(revision.module_assignments) ? revision.module_assignments.length : 0,
     floorplan_revision: Number.isInteger(revision.floorplan_revision) ? revision.floorplan_revision : null,
     has_route: securityPlanHasRoute(revision),
     readiness_status: effectiveReadiness?.readiness_status || (effectiveReadiness?.ready_to_publish ? 'ready' : 'attention'),
@@ -10397,6 +11751,7 @@ function safeSecurityPlanRevision(revision: LooseRecord | null | undefined) {
     default_section_ids: Array.isArray(revision.default_section_ids) ? revision.default_section_ids : [],
     allowed_section_ids: Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids : [],
     instruction_blocks: Array.isArray(revision.instruction_blocks) ? revision.instruction_blocks : [],
+    module_assignments: Array.isArray(revision.module_assignments) ? revision.module_assignments : [],
     floorplan_id: revision.floorplan_id || null,
     route_overlay: revision.route_overlay || null,
     readiness_snapshot: revision.readiness_snapshot || null,
@@ -10504,6 +11859,7 @@ export function securityPlanStructuralReadiness(
   sections: LooseRecord[] = [],
   floorplans: LooseRecord[] = [],
   installations: LooseRecord[] = [],
+  modules: LooseRecord[] = [],
 ) {
   const blockingIssues: LooseRecord[] = [];
   const warnings: LooseRecord[] = [];
@@ -10512,7 +11868,7 @@ export function securityPlanStructuralReadiness(
     blockingIssues.push(securityPlanIssue('custom_task_type_missing', 'Vul het eigen taaktype in.'));
   }
   if (!asString(plan.variant_name || plan.title)) blockingIssues.push(securityPlanIssue('variant_name_missing', 'Vul een variantnaam in.'));
-  if (!Number.isInteger(revision.duration_minutes)) {
+  if (revision.duration_mode === 'fixed' && !Number.isInteger(revision.duration_minutes)) {
     blockingIssues.push(securityPlanIssue('fixed_duration_missing', 'Vul de geschatte duur in minuten in.'));
   }
   if (securityPlanInstructionStepCount(revision) < 1) {
@@ -10561,6 +11917,26 @@ export function securityPlanStructuralReadiness(
       }
     }
   }
+  const moduleById = new Map(modules.map(module => [module.id, module]));
+  const assignedModuleIds = new Set<string>();
+  for (const assignment of Array.isArray(revision.module_assignments) ? revision.module_assignments : []) {
+    if (assignedModuleIds.has(assignment.module_id)) {
+      blockingIssues.push(securityPlanIssue('module_duplicate', 'Een objectmodule is meer dan één keer gekoppeld.', { module_id: assignment.module_id }));
+      continue;
+    }
+    assignedModuleIds.add(assignment.module_id);
+    const module = moduleById.get(assignment.module_id);
+    if (
+      !module || module.customer_id !== plan.customer_id || module.object_id !== plan.object_id ||
+      module.status !== 'active' || !asString(module.current_published_revision_id)
+    ) {
+      blockingIssues.push(securityPlanIssue('module_unavailable', 'Een gekoppelde module is niet actief en gepubliceerd binnen dit object.', { module_id: assignment.module_id }));
+      continue;
+    }
+    if (assignment.module_revision_id && assignment.module_revision_id !== module.current_published_revision_id) {
+      warnings.push(securityPlanIssue('module_configuration_changed', 'Een gekoppelde module heeft inmiddels een nieuwere gedeelde configuratie.', { module_id: assignment.module_id }));
+    }
+  }
   const floorplan = revision.floorplan_id
     ? floorplans.find(item => item.id === revision.floorplan_id)
     : null;
@@ -10598,12 +11974,24 @@ export function securityPlanStructuralReadiness(
 }
 
 async function securityPlanReferenceData(base44: LooseRecord, customerId: string, objectId: string) {
-  const [sections, floorplans, installations] = await Promise.all([
+  const [sections, floorplans, installations, modules] = await Promise.all([
     getEntity(base44, 'ObjectSection').filter({ customer_id: customerId, object_id: objectId }, '+name', 2000),
     getEntity(base44, 'ObjectFloorPlan').filter({ object_id: objectId }, '-revision', 500),
     getEntity(base44, 'ObjectInstallation').filter({ customer_id: customerId, object_id: objectId }, '+name', 1000),
+    getEntity(base44, 'ObjectOperationalModule').filter({ customer_id: customerId, object_id: objectId }, '+display_name', 100),
   ]);
-  return { sections, floorplans, installations };
+  return { sections, floorplans, installations, modules };
+}
+
+function resolvedSecurityPlanModuleAssignments(revision: LooseRecord, modules: LooseRecord[]) {
+  const moduleById = new Map(modules.map(module => [module.id, module]));
+  return (Array.isArray(revision.module_assignments) ? revision.module_assignments : []).map((assignment: LooseRecord) => {
+    const module = moduleById.get(assignment.module_id);
+    return {
+      ...assignment,
+      module_revision_id: module?.current_published_revision_id || assignment.module_revision_id || null,
+    };
+  });
 }
 
 async function requireSecurityPlan(base44: LooseRecord, body: LooseRecord, mutable = false) {
@@ -10651,6 +12039,7 @@ function synthesizedLegacySecurityPlanRevision(plan: LooseRecord) {
         required: true,
       })),
     }] : [],
+    module_assignments: [],
     floorplan_id: null,
     floorplan_revision: null,
     route_overlay: null,
@@ -10694,7 +12083,7 @@ async function handleListObjectSecurityPlans(base44: LooseRecord, body: LooseRec
     let revision = revisionById.get(plan.draft_revision_id) || revisionById.get(plan.current_published_revision_id) || null;
     if (!revision && safePlan.migration_required) revision = synthesizedLegacySecurityPlanRevision(plan);
     const readiness = revision
-      ? securityPlanStructuralReadiness(safePlan, revision, references.sections, references.floorplans, references.installations)
+      ? securityPlanStructuralReadiness(safePlan, revision, references.sections, references.floorplans, references.installations, references.modules)
       : { ready_to_publish: false, readiness_status: 'blocked', blocking_issues: [securityPlanIssue('draft_missing', 'Conceptrevisie ontbreekt.')], warnings: [] };
     return { ...safePlan, current_revision_summary: safeSecurityPlanRevisionSummary(revision, readiness), readiness };
   });
@@ -10735,9 +12124,14 @@ async function handleGetObjectSecurityPlan(base44: LooseRecord, body: LooseRecor
   const draft = revisionById.get(plan.draft_revision_id) || (migrationRequired ? synthesizedLegacySecurityPlanRevision(plan) : null);
   const published = revisionById.get(plan.current_published_revision_id) || null;
   const current = draft || published;
+  const assignedModuleIds = new Set(
+    (Array.isArray(current?.module_assignments) ? current.module_assignments : [])
+      .map((assignment: LooseRecord) => asString(assignment.module_id))
+      .filter(Boolean),
+  );
   const safePlan = safeSecurityPlan(plan);
   const readiness = current
-    ? securityPlanStructuralReadiness(safePlan, current, references.sections, references.floorplans, references.installations)
+    ? securityPlanStructuralReadiness(safePlan, current, references.sections, references.floorplans, references.installations, references.modules)
     : { ready_to_publish: false, readiness_status: 'blocked', blocking_issues: [securityPlanIssue('draft_missing', 'Conceptrevisie ontbreekt.')], warnings: [] };
   if (migrationRequired) {
     readiness.ready_to_publish = false;
@@ -10758,6 +12152,10 @@ async function handleGetObjectSecurityPlan(base44: LooseRecord, body: LooseRecor
     installations: references.installations
       .filter((installation: LooseRecord) => legacyInstallationLifecycle(installation) === 'active')
       .map(safeSecurityPlanInstallation),
+    modules: references.modules
+      .filter((module: LooseRecord) =>
+        (module.status === 'active' && asString(module.current_published_revision_id)) || assignedModuleIds.has(module.id))
+      .map((module: LooseRecord) => safeObjectModule(module)),
     readiness,
     migration_required: migrationRequired,
   };
@@ -10799,6 +12197,7 @@ function securityPlanChanges(
     ['duration_minutes', 'Geplande duur', beforeRevision?.duration_minutes || null, afterRevision?.duration_minutes || null],
     ['section_policy', 'Sectiebeleid', beforeRevision?.section_policy || null, afterRevision?.section_policy || null],
     ['instruction_step_count', 'Aantal instructiestappen', securityPlanInstructionStepCount(beforeRevision), securityPlanInstructionStepCount(afterRevision)],
+    ['module_count', 'Aantal gekoppelde modules', Array.isArray(beforeRevision?.module_assignments) ? beforeRevision.module_assignments.length : 0, Array.isArray(afterRevision?.module_assignments) ? afterRevision.module_assignments.length : 0],
     ['route_point_count', 'Aantal routepunten', Array.isArray(beforeRevision?.route_overlay?.path) ? beforeRevision.route_overlay.path.length : 0, Array.isArray(afterRevision?.route_overlay?.path) ? afterRevision.route_overlay.path.length : 0],
     ['publication_revision', 'Publicatierevisie', null, publicationRevision || null],
   ];
@@ -10906,7 +12305,7 @@ async function securityPlanMutationMarkerReplay(
 async function assertSecurityPlanRevisionReferences(
   plan: LooseRecord,
   revision: LooseRecord,
-  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[] },
+  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[]; modules: LooseRecord[] },
 ) {
   const readiness = securityPlanStructuralReadiness(
     plan,
@@ -10914,11 +12313,13 @@ async function assertSecurityPlanRevisionReferences(
     references.sections,
     references.floorplans,
     references.installations,
+    references.modules,
   );
   const invalidReferenceCodes = new Set([
     'section_unavailable', 'step_section_unavailable', 'step_installation_unavailable',
     'floorplan_unavailable', 'floorplan_revision_mismatch', 'route_floorplan_missing',
     'route_step_unavailable', 'route_section_unavailable',
+    'module_duplicate', 'module_unavailable',
   ]);
   const invalidReferences = readiness.blocking_issues.filter((issue: LooseRecord) => invalidReferenceCodes.has(issue.code));
   if (invalidReferences.length) {
@@ -10949,20 +12350,24 @@ function legacyPlanMirrors(identity: LooseRecord, revision: LooseRecord) {
 function revisionContentPatch(revision: LooseRecord) {
   return pick(revision, [
     'summary', 'duration_mode', 'duration_minutes', 'section_policy', 'default_section_ids', 'allowed_section_ids',
-    'instruction_blocks', 'floorplan_id', 'floorplan_revision', 'route_overlay', 'readiness_snapshot', 'content_checksum',
+    'instruction_blocks', 'module_assignments', 'floorplan_id', 'floorplan_revision', 'route_overlay', 'readiness_snapshot', 'content_checksum',
     'mutation_idempotency_key', 'mutation_request_fingerprint', 'mutation_actor_user_id', 'mutation_target',
     'migration_review_required',
   ]);
 }
 
 async function securityPlanContentChecksum(plan: LooseRecord, revision: LooseRecord) {
+  const revisionContent = pick(revision, [
+    'revision_number', 'summary', 'duration_mode', 'duration_minutes', 'section_policy', 'default_section_ids',
+    'allowed_section_ids', 'instruction_blocks', 'floorplan_id', 'floorplan_revision', 'route_overlay',
+  ]);
+  if (Array.isArray(revision.module_assignments) && revision.module_assignments.length) {
+    revisionContent.module_assignments = revision.module_assignments;
+  }
   return sha256(JSON.stringify(canonicalMutationValue({
     schema_version: 'loq-security-plan-v2',
     plan: pick(plan, ['customer_id', 'object_id', 'task_type', 'custom_task_type', 'variant_name', 'execution_mode']),
-    revision: pick(revision, [
-      'revision_number', 'summary', 'duration_mode', 'duration_minutes', 'section_policy', 'default_section_ids',
-      'allowed_section_ids', 'instruction_blocks', 'floorplan_id', 'floorplan_revision', 'route_overlay',
-    ]),
+    revision: revisionContent,
   })));
 }
 
@@ -11090,7 +12495,7 @@ async function persistNewSecurityPlan(
   idempotencyKey: string,
   requestFingerprint: string,
   target: string,
-  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[] },
+  references: { sections: LooseRecord[]; floorplans: LooseRecord[]; installations: LooseRecord[]; modules: LooseRecord[] },
   sourcePlanId: string | null = null,
   sourceRevisionId: string | null = null,
 ) {
@@ -11205,6 +12610,7 @@ async function handleCreateObjectSecurityPlan(
   const identity = normalizedSecurityPlanIdentity(data);
   const revisionData = normalizedSecurityPlanRevisionData(data);
   const references = await securityPlanReferenceData(base44, scope.customer.id, scope.object.id);
+  revisionData.module_assignments = resolvedSecurityPlanModuleAssignments(revisionData, references.modules);
   return persistNewSecurityPlan(
     base44, user, scope, identity, revisionData, 'create_object_security_plan',
     idempotencyKey, requestFingerprint, target, references,
@@ -11255,6 +12661,7 @@ async function handleSaveObjectSecurityPlanDraft(
     ? Number(draft.revision_number)
     : Math.max(Number(plan.latest_revision_number || 0), Number(baseRevision?.revision_number || 0)) + 1;
   const references = await securityPlanReferenceData(base44, customer.id, object.id);
+  revisionData.module_assignments = resolvedSecurityPlanModuleAssignments(revisionData, references.modules);
   const projectedPlan = { ...plan, ...identity };
   const projectedRevision = {
     ...(draft || {}),
@@ -11356,6 +12763,7 @@ async function handleDuplicateObjectSecurityPlan(
   const identity = { ...sourceIdentity, variant_name: variantName };
   const revisionData = normalizedSecurityPlanRevisionData(sourceRevision);
   const references = await securityPlanReferenceData(base44, customer.id, object.id);
+  revisionData.module_assignments = resolvedSecurityPlanModuleAssignments(revisionData, references.modules);
   return persistNewSecurityPlan(
     base44, user, { customer, object }, identity, revisionData, 'duplicate_object_security_plan',
     idempotencyKey, requestFingerprint, target, references, plan.id, sourceRevision.id,
@@ -11382,11 +12790,20 @@ async function handlePublishObjectSecurityPlan(
     throw new ApiError(409, 'Conceptrevisie hoort niet bij dit beveiligingsplan');
   }
   const references = await securityPlanReferenceData(base44, customer.id, object.id);
-  const readiness = securityPlanStructuralReadiness(plan, draft, references.sections, references.floorplans, references.installations);
+  const resolvedAssignments = resolvedSecurityPlanModuleAssignments(draft, references.modules);
+  const publishableDraft = { ...draft, module_assignments: resolvedAssignments };
+  const readiness = securityPlanStructuralReadiness(
+    plan,
+    publishableDraft,
+    references.sections,
+    references.floorplans,
+    references.installations,
+    references.modules,
+  );
   if (!readiness.ready_to_publish) {
     throw new ApiError(409, 'Beveiligingsplan is nog niet gereed voor publicatie', { readiness });
   }
-  const checksum = await securityPlanContentChecksum(plan, draft);
+  const checksum = await securityPlanContentChecksum(plan, publishableDraft);
   let publishedDraft = draft;
   if (draft.status === 'published') {
     if (
@@ -11399,6 +12816,7 @@ async function handlePublishObjectSecurityPlan(
       status: 'published',
       readiness_snapshot: readiness,
       content_checksum: checksum,
+      module_assignments: resolvedAssignments,
       published_at: nowIso(),
       published_by_user_id: user.id,
       publication_idempotency_key: idempotencyKey,
@@ -11766,6 +13184,7 @@ function legacySecurityPlanRevisionData(plan: LooseRecord) {
         required: true,
       })),
     }] : [],
+    module_assignments: [],
     floorplan_id: null,
     floorplan_revision: null,
     route_overlay: null,
@@ -12400,6 +13819,11 @@ async function executeMutation(
     case 'update_object_relationship':
     case 'archive_object_relationship':
       return handleObjectRelationshipMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    case 'create_object_module':
+    case 'save_object_module_draft':
+    case 'publish_object_module':
+    case 'set_object_module_status':
+      return handleObjectModuleMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
     case 'create_object_security_plan':
     case 'save_object_security_plan_draft':
     case 'duplicate_object_security_plan':
@@ -12551,6 +13975,8 @@ export async function handleCustomerPlatformRequest(req: Request) {
       if (action === 'list_object_keys') return json(await handleListObjectKeys(base44, body));
       if (action === 'list_object_installations') return json(await handleListObjectInstallations(base44, body));
       if (action === 'list_object_relationships') return json(await handleListObjectRelationships(base44, body));
+      if (action === 'list_object_modules') return json(await handleListObjectModules(base44, body));
+      if (action === 'get_object_module') return json(await handleGetObjectModule(base44, body));
       if (action === 'list_object_security_plans') return json(await handleListObjectSecurityPlans(base44, body));
       if (action === 'get_object_security_plan') return json(await handleGetObjectSecurityPlan(base44, body));
       if (action === 'list_object_sections') return json(await handleListObjectSections(base44, body));
@@ -12577,6 +14003,14 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const replay = await mutationReplay(base44, user, action, body, idempotencyKey, requestFingerprint, target);
     if (replay) return json({ ok: true, ...replay, replayed: true });
     const recovered = await relationshipMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    ) || await objectModuleMutationMarkerReplay(
       base44,
       user,
       action,

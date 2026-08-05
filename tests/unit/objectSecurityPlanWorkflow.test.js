@@ -144,6 +144,14 @@ describe("securityPlanWorkflow", () => {
             section_id: "section-1",
           }],
         }],
+        module_assignments: [{
+          id: "module-link-1",
+          module_id: "module-items",
+          module_revision_id: "module-revision-2",
+          access_mode: "register",
+          quick_action: true,
+          instruction: "Controleer openstaande uitgiftes.",
+        }],
         route_overlay: { path: [{ x: 0.2, y: 0.3 }, { x: 0.8, y: 0.7 }] },
       },
     });
@@ -158,6 +166,15 @@ describe("securityPlanWorkflow", () => {
         duration_minutes: 45,
         default_section_ids: ["section-1"],
         allowed_section_ids: ["section-1", "section-2"],
+        module_assignments: [{
+          id: "module-link-1",
+          sequence: 1,
+          module_id: "module-items",
+          module_revision_id: "module-revision-2",
+          access_mode: "register",
+          quick_action: true,
+          instruction: "Controleer openstaande uitgiftes.",
+        }],
         route_overlay: expect.objectContaining({
           schema_version: "loq-route-v1",
           coordinate_space: "normalized",

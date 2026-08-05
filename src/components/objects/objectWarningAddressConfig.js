@@ -1,6 +1,7 @@
 export const OBJECT_CARD_TABS = [
   { key: "tasks", label: "Taken" },
   { key: "security-plan", label: "Beveiligingsplan" },
+  { key: "modules", label: "Modules" },
   { key: "handbook", label: "Handboek" },
   { key: "floor-plan", label: "Plattegrond" },
   { key: "warning-addresses", label: "Waarschuwingsadressen" },

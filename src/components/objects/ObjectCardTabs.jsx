@@ -26,6 +26,7 @@ import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
 import ObjectRelationshipsTab from "./ObjectRelationshipsTab";
 import ObjectSecurityPlanTab from "./ObjectSecurityPlanTab";
+import ObjectModulesTab from "./ObjectModulesTab";
 import ObjectHandbookTab from "./ObjectHandbookTab";
 import ObjectFloorPlanPlaceholderTab from "./ObjectFloorPlanPlaceholderTab";
 import ObjectTasksTab from "./ObjectTasksTab";
@@ -224,6 +225,7 @@ export default function ObjectCardTabs({
   onOpenEdit,
   onOpenManual,
   onCloseView,
+  onRegisterModuleNavigationGuard,
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -381,6 +383,18 @@ export default function ObjectCardTabs({
               onOpenCreate={onOpenCreate}
               onOpenEdit={onOpenEdit}
               onCloseView={onCloseView}
+            />
+          ) : activeTab === "modules" ? (
+            <ObjectModulesTab
+              object={object}
+              view={view}
+              selectedRow={selectedRow}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
+              onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
+              onCloseView={onCloseView}
+              onRegisterNavigationGuard={onRegisterModuleNavigationGuard}
             />
           ) : activeTab === "handbook" ? (
             <ObjectHandbookTab

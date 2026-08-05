@@ -58,6 +58,15 @@ export function normalizeSecurityPlanRevision(revision) {
           : []
       ),
     ),
+    module_assignments: asArray(revision.module_assignments).map((assignment, index) => ({
+      id: assignment?.id || `module-${assignment?.module_id || index + 1}`,
+      sequence: index + 1,
+      module_id: assignment?.module_id || "",
+      module_revision_id: assignment?.module_revision_id || null,
+      access_mode: assignment?.access_mode === "read" ? "read" : "register",
+      quick_action: Boolean(assignment?.quick_action),
+      instruction: String(assignment?.instruction || ""),
+    })).filter(assignment => assignment.module_id),
     floorplan_id: revision.floorplan_id || null,
     floorplan_revision: revision.floorplan_revision == null ? null : Number(revision.floorplan_revision),
     route_overlay: normalizeRouteOverlay(revision.route_overlay),
@@ -91,6 +100,7 @@ export function normalizeSecurityPlanSummary(value) {
       allowed_section_count: Number(summary.allowed_section_count || 0),
       instruction_block_count: Number(summary.instruction_block_count || 0),
       instruction_step_count: Number(summary.instruction_step_count || 0),
+      module_count: Number(summary.module_count || 0),
       has_route: Boolean(summary.has_route),
       readiness_warning_count: Number(summary.readiness_warning_count || 0),
     } : null,
@@ -112,6 +122,7 @@ export function normalizeSecurityPlanDetail(value) {
     revision_history: revisionHistory,
     sections: asArray(result.sections),
     installations: asArray(result.installations),
+    modules: asArray(result.modules),
     floorplans: asArray(result.floorplans),
     readiness: result.readiness || null,
   };
@@ -139,16 +150,30 @@ export function normalizeSecurityPlanList(value) {
 
 function revisionPayload(data = {}) {
   const duration = Number(data.duration_minutes);
-  const hasDuration = data.duration_minutes !== null && data.duration_minutes !== "" && Number.isFinite(duration) && duration > 0;
+  const requestedDurationMode = ["fixed", "schedule_defined", "none"].includes(data.duration_mode)
+    ? data.duration_mode
+    : data.duration_minutes !== null && data.duration_minutes !== "" && Number.isFinite(duration) && duration > 0
+      ? "fixed"
+      : "none";
+  const hasDuration = requestedDurationMode === "fixed" && data.duration_minutes !== null && data.duration_minutes !== "" && Number.isFinite(duration) && duration > 0;
   const normalizedRoute = normalizeRouteOverlay(data.route_overlay);
   return {
     summary: compactNullable(data.summary),
-    duration_mode: hasDuration ? "fixed" : "none",
+    duration_mode: requestedDurationMode,
     duration_minutes: hasDuration ? duration : null,
     section_policy: data.section_policy || data.selection_policy || "not_applicable",
     default_section_ids: [...new Set(asArray(data.default_section_ids).filter(Boolean))],
     allowed_section_ids: [...new Set(asArray(data.allowed_section_ids).filter(Boolean))],
     instruction_blocks: normalizeInstructionBlocks(data.instruction_blocks),
+    module_assignments: asArray(data.module_assignments).map((assignment, index) => ({
+      id: assignment?.id || `module-${assignment?.module_id || index + 1}`,
+      sequence: index + 1,
+      module_id: assignment?.module_id,
+      module_revision_id: assignment?.module_revision_id || null,
+      access_mode: assignment?.access_mode === "read" ? "read" : "register",
+      quick_action: Boolean(assignment?.quick_action),
+      instruction: compactNullable(assignment?.instruction),
+    })).filter(assignment => assignment.module_id),
     floorplan_id: data.floorplan_id || null,
     floorplan_revision: data.floorplan_revision == null ? null : Number(data.floorplan_revision),
     route_overlay: normalizedRoute.path.length || normalizedRoute.markers.length ? normalizedRoute : null,
