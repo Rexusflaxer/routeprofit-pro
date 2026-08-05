@@ -1,5 +1,5 @@
 {
-  "name": "ObjectHandbookArticle",
+  "name": "ObjectHandbookCategory",
   "type": "object",
   "properties": {
     "customer_id": {
@@ -8,20 +8,16 @@
     "object_id": {
       "type": "string"
     },
-    "category_id": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "parent_category_id": {
       "type": [
         "string",
         "null"
       ]
-    },
-    "title": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "content": {
-      "type": "string",
-      "maxLength": 20000
     },
     "status": {
       "type": "string",
@@ -40,8 +36,7 @@
   "required": [
     "customer_id",
     "object_id",
-    "title",
-    "content",
+    "name",
     "status"
   ]
 }
