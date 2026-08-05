@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { wizardStepMotion } from "@/components/ui-custom/wizardMotion";
 import { ChoiceCard, Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
 import {
-  SECURITY_PLAN_DURATION_MODES,
   SECURITY_PLAN_SECTION_POLICIES,
   SECURITY_PLAN_TASK_TYPES,
   securityPlanExecutionModeForTaskType,
@@ -20,11 +19,10 @@ const STEPS = [
 
 function defaultsForType(taskType) {
   const executionMode = securityPlanExecutionModeForTaskType(taskType);
-  const continuous = executionMode === "continuous_post";
   return {
     execution_mode: executionMode,
-    duration_mode: continuous ? "schedule_defined" : "fixed",
-    duration_minutes: continuous ? "" : "30",
+    duration_mode: "fixed",
+    duration_minutes: "30",
     section_policy: "not_applicable",
   };
 }
@@ -78,23 +76,13 @@ function PlanningStep({ form, onChange }) {
   return (
     <div className="space-y-5">
       <StepHeading title="Leg de basis van de uitvoering vast" description="Na aanmaken opent de planwerkruimte voor instructies, secties en de looproute." />
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-foreground">Duur</p>
-        <div className="grid gap-2 md:grid-cols-3">
-          {SECURITY_PLAN_DURATION_MODES.map(mode => (
-            <ChoiceCard key={mode.key} selected={form.duration_mode === mode.key} onClick={() => onChange(current => ({ ...current, duration_mode: mode.key, duration_minutes: mode.key === "fixed" ? current.duration_minutes || "30" : "" }))} title={mode.label} description={mode.description} />
-          ))}
+      <Field label="Duur in minuten" htmlFor="security-plan-duration" required hint="Geef de geklokte of bekende tijd op, zodat het programma weet hoe lang deze taak ongeveer duurt.">
+        <div className="relative max-w-xs">
+          <Clock3 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input id="security-plan-duration" type="number" min="1" max="1440" step="1" value={form.duration_minutes} onChange={event => onChange(current => ({ ...current, duration_minutes: event.target.value }))} className="pl-9 pr-16" />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">min.</span>
         </div>
-      </div>
-      {form.duration_mode === "fixed" && (
-        <Field label="Geplande duur in minuten" htmlFor="security-plan-duration" required hint="Deze tijd wordt later gebruikt bij roosteren en het samenstellen van diensten.">
-          <div className="relative max-w-xs">
-            <Clock3 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input id="security-plan-duration" type="number" min="1" max="1440" step="1" value={form.duration_minutes} onChange={event => onChange(current => ({ ...current, duration_minutes: event.target.value }))} className="pl-9 pr-16" />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">min.</span>
-          </div>
-        </Field>
-      )}
+      </Field>
       <div className="space-y-2">
         <p className="text-xs font-semibold text-foreground">Objectsecties</p>
         <div className="grid gap-2 md:grid-cols-3">
@@ -142,13 +130,14 @@ export default function SecurityPlanWizard({ initialTaskType = "", categoryLabel
   const valid = useMemo(() => {
     if (current === "type") return Boolean(form.task_type && (form.task_type !== "other" || form.custom_task_type.trim()));
     if (current === "variant") return Boolean(form.variant_name.trim());
-    return Boolean(form.duration_mode && form.section_policy && (form.duration_mode !== "fixed" || Number(form.duration_minutes) > 0));
+    return Boolean(form.section_policy && Number(form.duration_minutes) > 0);
   }, [current, form]);
   const submit = () => onSave({
     ...form,
     custom_task_type: form.task_type === "other" ? form.custom_task_type.trim() : null,
     variant_name: form.variant_name.trim(),
-    duration_minutes: form.duration_mode === "fixed" ? Number(form.duration_minutes) : null,
+    duration_mode: "fixed",
+    duration_minutes: Number(form.duration_minutes),
   });
   const content = current === "type"
     ? <TypeStep form={form} onChange={setForm} fixedTaskType={initialTaskType} />

@@ -138,12 +138,11 @@ export function normalizeSecurityPlanList(value) {
 }
 
 function revisionPayload(data = {}) {
-  const durationMode = data.duration_mode || "none";
-  const duration = durationMode === "fixed" ? Number(data.duration_minutes) : null;
+  const duration = Number(data.duration_minutes);
   const normalizedRoute = normalizeRouteOverlay(data.route_overlay);
   return {
     summary: compactNullable(data.summary),
-    duration_mode: durationMode,
+    duration_mode: "fixed",
     duration_minutes: Number.isFinite(duration) && duration > 0 ? duration : null,
     section_policy: data.section_policy || data.selection_policy || "not_applicable",
     default_section_ids: [...new Set(asArray(data.default_section_ids).filter(Boolean))],

@@ -10270,13 +10270,9 @@ function normalizedSecurityPlanRoute(value: unknown) {
 function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRecord | null = null) {
   assertNoSecurityPlanSecretFields(data);
   const source = { ...(current || {}), ...data };
-  const durationMode = asString(source.duration_mode) || 'none';
-  if (!SECURITY_PLAN_DURATION_MODES.has(durationMode)) throw new ApiError(400, 'Kies een geldig duurmodel');
-  let durationMinutes: number | null = null;
-  if (durationMode === 'fixed' && source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '') {
-    durationMinutes = requireInteger(source.duration_minutes, 'duration_minutes', 1);
-    if (durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
-  }
+  const durationMode = 'fixed';
+  const durationMinutes = requireInteger(source.duration_minutes, 'duration_minutes', 1);
+  if (durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
   const sectionPolicy = asString(source.section_policy) || 'not_applicable';
   if (!SECURITY_PLAN_SECTION_POLICIES.has(sectionPolicy)) throw new ApiError(400, 'Kies een geldig sectiebeleid');
   const defaultSectionIds = sectionPolicy === 'not_applicable'
@@ -10510,8 +10506,8 @@ export function securityPlanStructuralReadiness(
     blockingIssues.push(securityPlanIssue('custom_task_type_missing', 'Vul het eigen taaktype in.'));
   }
   if (!asString(plan.variant_name || plan.title)) blockingIssues.push(securityPlanIssue('variant_name_missing', 'Vul een variantnaam in.'));
-  if (revision.duration_mode === 'fixed' && !Number.isInteger(revision.duration_minutes)) {
-    blockingIssues.push(securityPlanIssue('fixed_duration_missing', 'Vul voor dit duurmodel een vaste duur in.'));
+  if (!Number.isInteger(revision.duration_minutes)) {
+    blockingIssues.push(securityPlanIssue('fixed_duration_missing', 'Vul de geschatte duur in minuten in.'));
   }
   if (securityPlanInstructionStepCount(revision) < 1) {
     blockingIssues.push(securityPlanIssue('instructions_missing', 'Voeg minimaal één uitvoeringsstap toe.'));
