@@ -102,14 +102,16 @@ function CategoryChoice({ category, summary, loading, unavailable, onClick }) {
       type="button"
       onClick={onClick}
       aria-label={`${category.label} openen`}
-      className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-card/45 px-3 py-2 text-left shadow-sm backdrop-blur-xl transition-all hover:border-primary hover:bg-accent/50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-card/45 px-3 py-1.5 text-left shadow-sm backdrop-blur-xl transition-all hover:border-primary hover:bg-accent/50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold text-foreground">{category.label}</span>
         <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{category.description}</span>
-        <span className="mt-1 block text-[11px] text-muted-foreground">{loading ? "Aantallen laden..." : unavailable ? "Aantal tijdelijk niet beschikbaar" : `${total} uitvoeringsplan${total === 1 ? "" : "nen"}`}</span>
       </span>
-      <ChevronRight className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="ml-4 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+        <span>{loading ? "Laden..." : unavailable ? "—" : `${total} plan${total === 1 ? "" : "nen"}`}</span>
+        <ChevronRight className="h-4 w-4" />
+      </span>
     </button>
   );
 }
