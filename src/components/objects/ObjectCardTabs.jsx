@@ -277,8 +277,8 @@ export default function ObjectCardTabs({
   }, [selectedRow, view]);
 
   useEffect(() => {
-    if (view === "edit" && !warningQuery.isLoading && !warningQuery.isError && !selectedWarning) onCloseView();
-  }, [onCloseView, selectedWarning, view, warningQuery.isError, warningQuery.isLoading]);
+    if (activeTab === "warning-addresses" && view === "edit" && !warningQuery.isLoading && !warningQuery.isError && !selectedWarning) onCloseView();
+  }, [activeTab, onCloseView, selectedWarning, view, warningQuery.isError, warningQuery.isLoading]);
 
   const invalidate = async () => {
     await Promise.all([
