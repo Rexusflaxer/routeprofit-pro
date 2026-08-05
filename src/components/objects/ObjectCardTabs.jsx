@@ -26,6 +26,7 @@ import ObjectInstallationsTab from "./ObjectInstallationsTab";
 import ObjectKeysTab from "./ObjectKeysTab";
 import ObjectRelationshipsTab from "./ObjectRelationshipsTab";
 import ObjectSecurityPlanTab from "./ObjectSecurityPlanTab";
+import ObjectHandbookTab from "./ObjectHandbookTab";
 import ObjectFloorPlanPlaceholderTab from "./ObjectFloorPlanPlaceholderTab";
 import ObjectTasksTab from "./ObjectTasksTab";
 import {
@@ -377,6 +378,17 @@ export default function ObjectCardTabs({
               onSearchChange={onSearchChange}
               page={page}
               onPageChange={onPageChange}
+              onOpenCreate={onOpenCreate}
+              onOpenEdit={onOpenEdit}
+              onCloseView={onCloseView}
+            />
+          ) : activeTab === "handbook" ? (
+            <ObjectHandbookTab
+              object={object}
+              view={view}
+              selectedRow={selectedRow}
+              searchTerm={searchTerm}
+              onSearchChange={onSearchChange}
               onOpenCreate={onOpenCreate}
               onOpenEdit={onOpenEdit}
               onCloseView={onCloseView}

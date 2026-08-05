@@ -1,0 +1,41 @@
+{
+  "name": "ObjectHandbookArticle",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "content": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "minimum": 1,
+      "default": 1
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "title",
+    "content",
+    "status"
+  ]
+}
