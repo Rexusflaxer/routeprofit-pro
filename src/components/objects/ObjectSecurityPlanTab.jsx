@@ -174,7 +174,6 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
     ? facetQuery.data.category_summary
     : fallbackCategorySummary(facetRows), [facetQuery.data?.category_summary, facetRows]);
   const migrationRequiredCount = Number(facetQuery.data?.migration_required_count ?? facetRows.filter(plan => plan.migration_required).length);
-  const selectedSummary = categorySummaries.find(summary => summary.task_type === selectedType) || { total: 0, published: 0, draft: 0, attention: 0 };
   const total = Number(listQuery.data?.total || 0);
   const hasNext = page * PAGE_SIZE < total;
   const wizardOpen = view === "new" && Boolean(selectedCategory) && !archivedObject;
@@ -264,7 +263,7 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
       <div className="flex min-w-0 items-start gap-2">
         <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-muted-foreground hover:text-foreground" onClick={closeCategory}><ChevronLeft className="mr-1 h-4 w-4" /> Alle categorieën</Button>
         <div className="min-w-0 border-l border-border/70 pl-3">
-          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">{selectedCategory.label}</h2><Badge variant="outline" className="border-primary/25 bg-primary/5 text-primary">{Number(selectedSummary.total || 0)} actief</Badge>{Number(selectedSummary.attention || 0) > 0 && <Badge variant="outline" className="border-amber-300/70 bg-amber-500/10 text-amber-800 dark:text-amber-200">{selectedSummary.attention} aandacht</Badge>}</div>
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">{selectedCategory.label}</h2></div>
           <p className="mt-1 text-xs text-muted-foreground">{selectedCategory.description}</p>
         </div>
       </div>
