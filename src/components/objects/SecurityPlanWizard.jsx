@@ -67,7 +67,7 @@ function VariantStep({ form, onChange }) {
   return (
     <div className="space-y-5">
       <StepHeading title="Geef deze variant een duidelijke naam" description="Gebruik een naam die het verschil met andere varianten direct uitlegt, zoals Volledig, Werkdagen of Secties 1–4." />
-      <Field label="Variantnaam" htmlFor="security-plan-variant" required hint="Het taaktype hoeft niet opnieuw in de naam te staan.">
+      <Field label="Plannaam" htmlFor="security-plan-variant" required hint="Het taaktype hoeft niet opnieuw in de naam te staan.">
         <Input id="security-plan-variant" value={form.variant_name} onChange={event => onChange(current => ({ ...current, variant_name: event.target.value }))} placeholder="Bijvoorbeeld Volledige avondronde" maxLength={200} autoFocus />
       </Field>
     </div>
