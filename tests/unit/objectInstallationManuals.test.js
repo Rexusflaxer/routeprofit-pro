@@ -23,6 +23,15 @@ describe("Ajax installation manuals", () => {
       .toBe(ajaxControlDevicePayload("superior-keypad-fibra").manual_key);
     expect(ajaxControlDevicePayload("keypad-touchscreen-jeweller").manual_key)
       .toBe(ajaxControlDevicePayload("superior-keypad-touchscreen-fibra").manual_key);
+    expect(ajaxControlDevicePayload("keypad-combi-jeweller").manual_key)
+      .toBe(ajaxControlDevicePayload("keypad-plus-jeweller").manual_key);
+  });
+
+  it("heeft voor ieder fysiek Ajax-paneel één lokale zwarte productfoto", () => {
+    const physicalDevices = AJAX_CONTROL_DEVICE_OPTIONS.filter(option => option.value !== "ajax-app-only");
+    expect(physicalDevices).toHaveLength(11);
+    expect(physicalDevices.every(option => option.imageSrc === `/installation-control-devices/ajax/${option.value}.png`)).toBe(true);
+    expect(AJAX_CONTROL_DEVICE_OPTIONS.find(option => option.value === "ajax-app-only")?.imageSrc).toBeNull();
   });
 
   it("lost uitsluitend de exact opgeslagen handleidingsversie op", () => {

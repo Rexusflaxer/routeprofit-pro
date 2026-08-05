@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ObjectInstallationWizard from "@/components/objects/ObjectInstallationWizard";
+import { AJAX_CONTROL_DEVICE_OPTIONS } from "@/components/objects/objectInstallationManuals";
 
 const existingInstallation = {
   id: "installation-1",
@@ -127,6 +128,23 @@ describe("ObjectInstallationWizard", () => {
       manual_key: "ajax:numeric-keypad:nl",
       manual_version: "2026.08.1",
     }));
+  });
+
+  it("toont alle Ajax-modellen met hun officiële productfoto en geen kleurvarianten", async () => {
+    render(<ObjectInstallationWizard onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(getAlarmTypeButton());
+    await screen.findByText("Van welk merk is de installatie?");
+    fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
+    await screen.findByText("Welk Ajax-bedienpaneel wordt op dit object gebruikt?");
+
+    for (const option of AJAX_CONTROL_DEVICE_OPTIONS.filter(candidate => candidate.imageSrc)) {
+      const button = screen.getByRole("button", { name: option.label });
+      expect(button.querySelector("img")).toHaveAttribute("src", option.imageSrc);
+      expect(button.textContent).not.toMatch(/wit|white/i);
+    }
+    expect(screen.getByRole("button", { name: "KeyPad Combi Jeweller" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Geen vast bedienpaneel" }).querySelector("img")).toBeNull();
   });
 
   it("behoudt een onbekend bestaand merk als handmatige invoer", async () => {

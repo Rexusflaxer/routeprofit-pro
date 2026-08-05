@@ -6154,6 +6154,7 @@ const AJAX_INSTALLATION_MANUAL_VERSION = '2026.08.1';
 const AJAX_CONTROL_DEVICES: Record<string, { name: string; manualKey: string }> = {
   'keypad-jeweller': { name: 'KeyPad Jeweller', manualKey: 'ajax:numeric-keypad:nl' },
   'keypad-plus-jeweller': { name: 'KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'keypad-combi-jeweller': { name: 'KeyPad Combi Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
   'keypad-touchscreen-jeweller': { name: 'KeyPad TouchScreen Jeweller', manualKey: 'ajax:touchscreen-keypad:nl' },
   'superior-keypad-fibra': { name: 'Superior KeyPad Fibra', manualKey: 'ajax:numeric-keypad:nl' },
   'superior-keypad-plus-jeweller': { name: 'Superior KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },

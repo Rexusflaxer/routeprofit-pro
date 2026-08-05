@@ -10,12 +10,18 @@ LOQ registreert het exacte bedienpaneel, maar maakt niet voor iedere elektrische
 | Gedeelde handleidingfamilie | Bedienpaneelvarianten | Waarom gedeeld |
 | --- | --- | --- |
 | Numeriek paneel | KeyPad Jeweller; Superior KeyPad Fibra | Aanraakvlak, code en afzonderlijke toetsen voor in, uit en Nachtmodus; dezelfde groepsvolgorde. |
-| Numeriek paneel met lezer | KeyPad Plus Jeweller; Superior KeyPad Plus Jeweller; Superior KeyPad Plus G3 Jeweller | Dezelfde numerieke kernbediening, aangevuld met Pass/Tag en eventueel een bevestigingscode. |
+| Numeriek paneel met lezer | KeyPad Plus Jeweller; KeyPad Combi Jeweller; Superior KeyPad Plus Jeweller; Superior KeyPad Plus G3 Jeweller | Dezelfde numerieke kernbediening, aangevuld met Pass/Tag en eventueel een bevestigingscode. De ingebouwde zoemer van KeyPad Combi verandert de schakelvolgorde niet. |
 | Touchscreen | KeyPad TouchScreen Jeweller; Superior KeyPad TouchScreen Fibra; Superior KeyPad TouchScreen G3 Jeweller | Dezelfde Bediening-tab, groepsselectie en authenticatie vóór of na de actie afhankelijk van Voorautorisatie. |
 | Outdoor-paneel | KeyPad Outdoor Jeweller; Superior KeyPad Outdoor Fibra | Mechanische toetsen, OK-bevestiging en configureerbare primaire/secundaire modus. |
 | Ajax-app | Geen vast bedienpaneel | Bedieningsflow verloopt volledig via een bevoegd Ajax-account. |
 
 Het protocol (`Jeweller`, `Wings` of `Fibra`), de exacte modelnaam en de modelspecifieke officiële bron blijven wel afzonderlijk bij de installatie zichtbaar. Een gebruiker kiest dus het werkelijke model; LOQ leidt daarna server-side de gedeelde `manual_key`, versie en weergavenaam af. De client kan geen willekeurige handleiding of versie koppelen.
+
+## Visuele modelkeuze
+
+De wizard toont per fysiek model een lokale officiële Ajax-productrender op een vaste witte tegel. Alle renders zijn transparante PNG's van de zwarte uitvoering. Kleurvarianten zijn bewust geen afzonderlijke opties: kleur verandert de bediening of handleiding niet. De hogere-resolutiebronnen, ophaaldatum en checksums staan in `public/installation-control-devices/ajax/manifest.json`.
+
+De actuele Ajax Controls-catalogus wordt aangevuld met `KeyPad Combi Jeweller` als aantoonbare geïnstalleerde basis. Ajax noemt dit model nog in de actuele batterijreferentie en onderhoudt de officiële handleiding en specificatiepagina. `KeyPad UK Plus Jeweller` is een regionale VK-uitvoering; hubs, SpaceControl, Button en DoubleButton zijn centrales of afstandsbedieningen en horen daarom niet in deze Nederlandse bedienpaneelstap.
 
 ## Bedieningsinhoud
 
@@ -47,6 +53,7 @@ De tekst toont nooit een echte schakel-, reset-, service- of overvalcode. Alleen
 - [Ajax Remote Controls](https://support.ajax.systems/en/controls/)
 - [KeyPad Jeweller](https://support.ajax.systems/en/manuals/keypad/)
 - [KeyPad Plus Jeweller](https://support.ajax.systems/en/manuals/keypad-plus/)
+- [KeyPad Combi Jeweller](https://support.ajax.systems/en/manuals/keypad-combi/)
 - [KeyPad TouchScreen Jeweller](https://support.ajax.systems/en/manuals/keypad-touchscreen/)
 - [Superior KeyPad Fibra](https://support.ajax.systems/en/manuals/superior-keypad-fibra/)
 - [Superior KeyPad Plus Jeweller](https://support.ajax.systems/en/manuals/superior-keypad-plus-jeweller/)
@@ -56,6 +63,7 @@ De tekst toont nooit een echte schakel-, reset-, service- of overvalcode. Alleen
 - [Superior KeyPad Plus G3 Jeweller](https://support.ajax.systems/en/manuals/superior-keypad-plus-g3-jeweller/)
 - [Superior KeyPad TouchScreen G3 Jeweller](https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-g3-jeweller/)
 - [Ajax Eenmalige deactivering](https://support.ajax.systems/en/one-arming-device-deactivation/)
+- [Actuele Ajax-batterijreferentie met KeyPad Combi](https://support.ajax.systems/en/how-long-operate-from-batteries/)
 - [Space en gebruikersrechten configureren](https://support.ajax.systems/en/how-to-configure-a-space/)
 
 ## Onderhoudsgrens

@@ -11,7 +11,7 @@ const AJAX_MANUAL_FAMILIES = {
   app: { manualKey: "ajax:app-control:nl", title: "Ajax-appbediening zonder vast paneel" },
 };
 
-const ajaxControlDevice = ({ value, label, description, family, sourceUrl, protocol, availability = "Actueel" }) => ({
+const ajaxControlDevice = ({ value, label, description, family, sourceUrl, protocol, availability = "Actueel", hasPhoto = true }) => ({
   value,
   label,
   description,
@@ -19,6 +19,7 @@ const ajaxControlDevice = ({ value, label, description, family, sourceUrl, proto
   sourceUrl,
   protocol,
   availability,
+  imageSrc: hasPhoto ? `/installation-control-devices/ajax/${value}.png` : null,
   manualKey: AJAX_MANUAL_FAMILIES[family].manualKey,
   manualVersion: AJAX_MANUAL_VERSION,
 });
@@ -44,6 +45,15 @@ export const AJAX_CONTROL_DEVICE_OPTIONS = [
     family: "numeric-reader",
     protocol: "Jeweller",
     sourceUrl: "https://support.ajax.systems/en/manuals/keypad-plus/",
+  }),
+  ajaxControlDevice({
+    value: "keypad-combi-jeweller",
+    label: "KeyPad Combi Jeweller",
+    description: "Liggend draadloos paneel met Tag- en Pass-lezer en ingebouwde zoemer.",
+    family: "numeric-reader",
+    protocol: "Jeweller",
+    availability: "Geïnstalleerde basis",
+    sourceUrl: "https://support.ajax.systems/en/manuals/keypad-combi/",
   }),
   ajaxControlDevice({
     value: "keypad-touchscreen-jeweller",
@@ -115,6 +125,7 @@ export const AJAX_CONTROL_DEVICE_OPTIONS = [
     description: "Bediening verloopt uitsluitend via een bevoegde Ajax-app.",
     family: "app",
     protocol: "Ajax-app",
+    hasPhoto: false,
     sourceUrl: "https://support.ajax.systems/en/how-to-configure-a-space/",
   }),
 ];
