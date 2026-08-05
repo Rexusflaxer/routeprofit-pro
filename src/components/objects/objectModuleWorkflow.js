@@ -101,6 +101,7 @@ export function normalizeObjectModuleList(value) {
   const result = value?.data || value || {};
   const items = asArray(result.items || result.modules || result).map(normalizeObjectModuleSummary);
   return {
+    api_contract_version: result.api_contract_version || null,
     items,
     total: Number(result.total ?? items.length),
     page: Number(result.page || 1),

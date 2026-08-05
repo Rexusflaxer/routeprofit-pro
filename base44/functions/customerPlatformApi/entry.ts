@@ -380,6 +380,7 @@ const OBJECT_MODULE_TRACKING_MODES = new Set(['serialized', 'quantity', 'referen
 const OBJECT_MODULE_AUTHORIZATION_EFFECTS = new Set(['allow', 'deny']);
 const OBJECT_MODULE_ACCESS_MODES = new Set(['read', 'register']);
 const OBJECT_MODULE_WEEKDAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const OBJECT_MODULE_API_CONTRACT_VERSION = '2026-08-05.2';
 const OBJECT_OPERATIONS_PATCH_FIELDS = [
   'parking_instruction',
   'entry_instruction',
@@ -10816,6 +10817,7 @@ async function handleListObjectModules(base44: LooseRecord, body: LooseRecord) {
     linkedPlanIds.set(link.module_id, planIds);
   }
   return {
+    api_contract_version: OBJECT_MODULE_API_CONTRACT_VERSION,
     items: modules.map((module: LooseRecord) => safeObjectModule(
       module,
       revisionById.get(module.draft_revision_id) || revisionById.get(module.current_published_revision_id) || null,
@@ -10849,6 +10851,7 @@ async function handleGetObjectModule(base44: LooseRecord, body: LooseRecord) {
   const current = draft || published;
   const readiness = objectModuleReadiness(module, current);
   return {
+    api_contract_version: OBJECT_MODULE_API_CONTRACT_VERSION,
     module: safeObjectModule(module, current, new Set(planLinks.map((link: LooseRecord) => link.security_plan_id)).size),
     draft_revision: safeObjectModuleRevision(draft, draft ? readiness : null),
     published_revision: safeObjectModuleRevision(published, published && !draft ? readiness : null),

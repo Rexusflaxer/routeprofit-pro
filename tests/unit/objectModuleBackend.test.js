@@ -44,6 +44,21 @@ const moduleRecord = overrides => ({
 });
 
 describe("objectmodule-backendcontract", () => {
+  it("registreert alle frontendacties en een controleerbare API-contractversie", () => {
+    for (const action of [
+      "list_object_modules",
+      "get_object_module",
+      "create_object_module",
+      "save_object_module_draft",
+      "publish_object_module",
+      "set_object_module_status",
+    ]) {
+      expect(source).toContain(`'${action}'`);
+    }
+    expect(source).toContain("const OBJECT_MODULE_API_CONTRACT_VERSION = '2026-08-05.2'");
+    expect(source).toContain("api_contract_version: OBJECT_MODULE_API_CONTRACT_VERSION");
+  });
+
   it("gebruikt hetzelfde objectslot als beveiligingsplanmutaties", () => {
     const handler = source.slice(
       source.indexOf("async function handleObjectModuleMutation("),

@@ -1,6 +1,7 @@
 {
   "name": "ObjectOperationalModule",
   "type": "object",
+  "description": "Stabiele objectmodule-identiteit voor het LOQ objectmodule-API-contract 2026-08-05.2.",
   "properties": {
     "customer_id": {
       "type": "string",
