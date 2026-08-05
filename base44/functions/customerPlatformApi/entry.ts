@@ -10270,9 +10270,9 @@ function normalizedSecurityPlanRoute(value: unknown) {
 function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRecord | null = null) {
   assertNoSecurityPlanSecretFields(data);
   const source = { ...(current || {}), ...data };
-  const durationMode = 'fixed';
-  const durationMinutes = requireInteger(source.duration_minutes, 'duration_minutes', 1);
-  if (durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
+  const hasDuration = source.duration_minutes !== null && source.duration_minutes !== undefined && source.duration_minutes !== '';
+  const durationMinutes = hasDuration ? requireInteger(source.duration_minutes, 'duration_minutes', 1) : null;
+  if (durationMinutes !== null && durationMinutes > 10080) throw new ApiError(400, 'duration_minutes mag maximaal 10080 zijn');
   const sectionPolicy = asString(source.section_policy) || 'not_applicable';
   if (!SECURITY_PLAN_SECTION_POLICIES.has(sectionPolicy)) throw new ApiError(400, 'Kies een geldig sectiebeleid');
   const defaultSectionIds = sectionPolicy === 'not_applicable'
@@ -10291,7 +10291,7 @@ function normalizedSecurityPlanRevisionData(data: LooseRecord, current: LooseRec
   }
   return {
     summary: objectText(source.summary ?? source.description, 'Samenvatting', 2000, true),
-    duration_mode: durationMode,
+    duration_mode: durationMinutes === null ? 'none' : 'fixed',
     duration_minutes: durationMinutes,
     section_policy: sectionPolicy,
     default_section_ids: defaultSectionIds,
