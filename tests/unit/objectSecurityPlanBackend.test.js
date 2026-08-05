@@ -27,7 +27,9 @@ beforeAll(async () => {
       securityPlanMigrationRequired,
       handleMigrateLegacyObjectSecurityPlans,
       reserveSecurityPlanMutation,
-      releaseSecurityPlanMutation
+      releaseSecurityPlanMutation,
+      securityPlanCategorySummary,
+      currentSecurityPlanMigrationRequiredCount
     };`);
   const compiled = await transform(testableSource, {
     format: "esm",
@@ -149,6 +151,57 @@ function migrationBackend(plans) {
 }
 
 describe("customerPlatformApi Beveiligingsplan V2", () => {
+  it("telt categorieen over alle actuele plannen zonder draft en publicatie als exclusief te behandelen", () => {
+    const summary = backend.securityPlanCategorySummary([
+      plan({ id: "plan-draft", has_draft: true, has_publication: false, readiness: { readiness_status: "ready" } }),
+      plan({
+        id: "plan-published-with-draft",
+        has_draft: true,
+        has_publication: true,
+        readiness: { readiness_status: "attention" },
+      }),
+      plan({
+        id: "plan-reception",
+        task_type: "reception",
+        has_draft: false,
+        has_publication: true,
+        readiness: { readiness_status: "ready" },
+      }),
+      plan({
+        id: "plan-legacy",
+        task_type: "other",
+        has_draft: true,
+        has_publication: false,
+        migration_required: true,
+        readiness: { readiness_status: "ready" },
+      }),
+      plan({ id: "plan-archived", status: "archived", has_draft: true, readiness: { readiness_status: "blocked" } }),
+    ]);
+
+    expect(summary).toHaveLength(12);
+    expect(summary.find(item => item.task_type === "fire_closing_round")).toEqual({
+      task_type: "fire_closing_round",
+      total: 2,
+      published: 1,
+      draft: 2,
+      attention: 1,
+    });
+    expect(summary.find(item => item.task_type === "reception")).toEqual({
+      task_type: "reception",
+      total: 1,
+      published: 1,
+      draft: 0,
+      attention: 0,
+    });
+    expect(summary.find(item => item.task_type === "other")).toMatchObject({ total: 1, attention: 1 });
+    expect(summary.find(item => item.task_type === "opening_round")).toMatchObject({ total: 0, published: 0, draft: 0, attention: 0 });
+    expect(backend.currentSecurityPlanMigrationRequiredCount([
+      { status: "draft", migration_required: true },
+      { status: "published", migration_required: false },
+      { status: "archived", migration_required: true },
+    ])).toBe(1);
+  });
+
   it("accepteert Saturns hybride sectieplan en houdt de ontbrekende route als waarschuwing", () => {
     const sections = Array.from({ length: 8 }, (_, index) => section(index + 1));
     const result = backend.securityPlanStructuralReadiness(

@@ -10408,6 +10408,37 @@ function safeSecurityPlanRevision(revision: LooseRecord | null | undefined) {
   };
 }
 
+function securityPlanCategorySummary(rows: LooseRecord[]) {
+  const summaryByTaskType = new Map<string, LooseRecord>(
+    [...SECURITY_PLAN_TASK_TYPES].map(taskType => [taskType, {
+      task_type: taskType,
+      total: 0,
+      published: 0,
+      draft: 0,
+      attention: 0,
+    }]),
+  );
+  for (const row of rows) {
+    if (row.status === 'archived') continue;
+    const taskType = securityPlanTaskType(row);
+    const summary = summaryByTaskType.get(taskType);
+    if (!summary) continue;
+    const readinessStatus = asString(
+      row.readiness?.readiness_status || row.current_revision_summary?.readiness_status,
+    );
+    summary.total += 1;
+    if (row.has_publication === true) summary.published += 1;
+    if (row.has_draft === true) summary.draft += 1;
+    if (row.migration_required === true || readinessStatus !== 'ready') summary.attention += 1;
+  }
+  return [...summaryByTaskType.values()];
+}
+
+function currentSecurityPlanMigrationRequiredCount(rows: LooseRecord[]) {
+  return rows.filter((row: LooseRecord) =>
+    row.status !== 'archived' && row.migration_required === true).length;
+}
+
 function safeObjectSection(section: LooseRecord, includeGeometry = true) {
   return {
     id: section.id,
@@ -10657,26 +10688,32 @@ async function handleListObjectSecurityPlans(base44: LooseRecord, body: LooseRec
   const scopedRevisions = revisions.filter((revision: LooseRecord) =>
     revision.customer_id === customer.id && revision.object_id === object.id && planIds.includes(revision.security_plan_id));
   const revisionById = new Map(scopedRevisions.map((revision: LooseRecord) => [revision.id, revision]));
-  const rows = plans.flatMap((plan: LooseRecord) => {
+  const hydratedRows = plans.map((plan: LooseRecord) => {
     const safePlan = safeSecurityPlan(plan);
-    if (!status && safePlan.status === 'archived') return [];
-    if (status === 'draft' && (safePlan.status === 'archived' || !safePlan.has_draft)) return [];
-    if (status === 'published' && (safePlan.status === 'archived' || !safePlan.has_publication)) return [];
-    if (status && !['draft', 'published'].includes(status) && safePlan.status !== status) return [];
-    if (taskType && safePlan.task_type !== taskType) return [];
-    const searchable = normalizeName(`${safePlan.variant_name} ${safePlan.task_type} ${safePlan.custom_task_type || ''}`);
-    if (search && !searchable.includes(search)) return [];
     let revision = revisionById.get(plan.draft_revision_id) || revisionById.get(plan.current_published_revision_id) || null;
     if (!revision && safePlan.migration_required) revision = synthesizedLegacySecurityPlanRevision(plan);
     const readiness = revision
       ? securityPlanStructuralReadiness(safePlan, revision, references.sections, references.floorplans, references.installations)
       : { ready_to_publish: false, readiness_status: 'blocked', blocking_issues: [securityPlanIssue('draft_missing', 'Conceptrevisie ontbreekt.')], warnings: [] };
-    return [{ ...safePlan, current_revision_summary: safeSecurityPlanRevisionSummary(revision, readiness), readiness }];
+    return { ...safePlan, current_revision_summary: safeSecurityPlanRevisionSummary(revision, readiness), readiness };
+  });
+  const categorySummary = securityPlanCategorySummary(hydratedRows);
+  const migrationRequiredCount = currentSecurityPlanMigrationRequiredCount(hydratedRows);
+  const rows = hydratedRows.filter((safePlan: LooseRecord) => {
+    if (!status && safePlan.status === 'archived') return false;
+    if (status === 'draft' && (safePlan.status === 'archived' || !safePlan.has_draft)) return false;
+    if (status === 'published' && (safePlan.status === 'archived' || !safePlan.has_publication)) return false;
+    if (status && !['draft', 'published'].includes(status) && safePlan.status !== status) return false;
+    if (taskType && safePlan.task_type !== taskType) return false;
+    const searchable = normalizeName(`${safePlan.variant_name} ${safePlan.task_type} ${safePlan.custom_task_type || ''}`);
+    return !search || searchable.includes(search);
   });
   const total = rows.length;
   const skip = (page - 1) * pageSize;
   return {
     items: rows.slice(skip, skip + pageSize),
+    category_summary: categorySummary,
+    migration_required_count: migrationRequiredCount,
     total,
     page,
     page_size: pageSize,

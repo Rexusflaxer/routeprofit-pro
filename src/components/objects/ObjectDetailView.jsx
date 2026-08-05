@@ -167,6 +167,9 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("row");
     next.delete("query");
     next.delete("page");
+    next.delete("plan_type");
+    next.delete("plan_status");
+    next.delete("plan_tab");
     setSearchParams(next);
   }, [object.id, searchParams, setSearchParams]);
   const setSearch = useCallback(value => {
@@ -188,12 +191,17 @@ export default function ObjectDetailView({ object, onBack }) {
     const next = new URLSearchParams(searchParams);
     next.set("view", "new");
     next.delete("row");
+    next.delete("query");
+    next.delete("page");
+    next.delete("plan_status");
+    next.delete("plan_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const openEdit = useCallback(id => {
     const next = new URLSearchParams(searchParams);
     next.set("view", "edit");
     next.set("row", id);
+    next.delete("plan_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const openManual = useCallback(id => {
@@ -206,6 +214,7 @@ export default function ObjectDetailView({ object, onBack }) {
     const next = new URLSearchParams(searchParams);
     next.delete("view");
     next.delete("row");
+    next.delete("plan_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
 

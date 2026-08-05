@@ -134,6 +134,8 @@ describe("SecurityPlanWorkspace", () => {
     expect(screen.getByDisplayValue("Volledige vrijdagronde")).toBeInTheDocument();
     expect(screen.getByDisplayValue(summary)).toBeInTheDocument();
     expect(screen.getByText("Brand- & sluitronde · Ronde · revisie 3", { exact: mode === "draft" })).toBeInTheDocument();
+    expect(screen.getByText("De categorie staat vast zodat het plan in het juiste categorieoverzicht blijft.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Taaktype")).not.toBeInTheDocument();
 
     await waitFor(() => expect(workflow.getObjectSecurityPlan).toHaveBeenCalledWith({
       customerId: object.customer_id,

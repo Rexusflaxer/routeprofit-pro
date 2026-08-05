@@ -28,13 +28,23 @@ function defaultsForType(taskType) {
   };
 }
 
-function TypeStep({ form, onChange }) {
+function TypeStep({ form, onChange, fixedTaskType = "" }) {
   const choose = taskType => onChange(current => ({
     ...current,
     task_type: taskType,
     custom_task_type: taskType === "other" ? current.custom_task_type : "",
     ...defaultsForType(taskType),
   }));
+  if (fixedTaskType === "other") {
+    return (
+      <div className="space-y-4">
+        <StepHeading title="Hoe heet dit eigen taaktype?" description="Gebruik een korte, herkenbare naam die ook in Taken en Planning duidelijk blijft." />
+        <Field label="Eigen taaktype" htmlFor="security-plan-custom-type" required>
+          <Input id="security-plan-custom-type" value={form.custom_task_type} onChange={event => onChange(current => ({ ...current, custom_task_type: event.target.value }))} placeholder="Bijvoorbeeld terreinbegeleiding" maxLength={120} autoFocus />
+        </Field>
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
       <StepHeading title="Wat voor taakvariant maakt u?" description="Kies de operationele taakfamilie. Binnen hetzelfde type kunt u later meerdere varianten beheren." />
@@ -110,10 +120,9 @@ function PlanningStep({ form, onChange }) {
   );
 }
 
-export default function SecurityPlanWizard({ onCancel, onSave, saving, error }) {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState({
-    task_type: "",
+function initialSecurityPlanForm(initialTaskType) {
+  return {
+    task_type: initialTaskType || "",
     custom_task_type: "",
     variant_name: "",
     execution_mode: "",
@@ -126,8 +135,17 @@ export default function SecurityPlanWizard({ onCancel, onSave, saving, error }) 
     floorplan_id: null,
     floorplan_revision: null,
     route_overlay: null,
-  });
-  const current = STEPS[step].key;
+    ...(initialTaskType ? defaultsForType(initialTaskType) : {}),
+  };
+}
+
+export default function SecurityPlanWizard({ initialTaskType = "", categoryLabel = "", onCancel, onSave, saving, error }) {
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState(() => initialSecurityPlanForm(initialTaskType));
+  const steps = useMemo(() => initialTaskType && initialTaskType !== "other"
+    ? STEPS.filter(item => item.key !== "type")
+    : STEPS, [initialTaskType]);
+  const current = steps[step].key;
   const valid = useMemo(() => {
     if (current === "type") return Boolean(form.task_type && (form.task_type !== "other" || form.custom_task_type.trim()));
     if (current === "variant") return Boolean(form.variant_name.trim() && form.execution_mode);
@@ -140,14 +158,14 @@ export default function SecurityPlanWizard({ onCancel, onSave, saving, error }) 
     duration_minutes: form.duration_mode === "fixed" ? Number(form.duration_minutes) : null,
   });
   const content = current === "type"
-    ? <TypeStep form={form} onChange={setForm} />
+    ? <TypeStep form={form} onChange={setForm} fixedTaskType={initialTaskType} />
     : current === "variant"
       ? <VariantStep form={form} onChange={setForm} />
       : <PlanningStep form={form} onChange={setForm} />;
 
   return (
     <WizardPanel className="bg-card/55 backdrop-blur-2xl">
-      <WizardSteps stepIndex={step} steps={STEPS} label="Beveiligingsplan toevoegen" />
+      <WizardSteps stepIndex={step} steps={steps} label={categoryLabel ? `${categoryLabel} toevoegen` : "Beveiligingsplan toevoegen"} />
       <motion.div key={current} {...wizardStepMotion}>{content}</motion.div>
       {error && (
         <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -159,8 +177,8 @@ export default function SecurityPlanWizard({ onCancel, onSave, saving, error }) 
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={saving}>Annuleren</Button>
         <div className="flex gap-2">
           {step > 0 && <Button type="button" variant="outline" size="sm" onClick={() => setStep(value => value - 1)} disabled={saving}>Vorige</Button>}
-          <Button type="button" size="sm" onClick={() => step === STEPS.length - 1 ? submit() : setStep(value => value + 1)} disabled={!valid || saving}>
-            {step === STEPS.length - 1 ? (saving ? "Aanmaken..." : "Concept aanmaken") : "Volgende"}
+          <Button type="button" size="sm" onClick={() => step === steps.length - 1 ? submit() : setStep(value => value + 1)} disabled={!valid || saving}>
+            {step === steps.length - 1 ? (saving ? "Aanmaken..." : "Concept aanmaken") : "Volgende"}
           </Button>
         </div>
       </div>

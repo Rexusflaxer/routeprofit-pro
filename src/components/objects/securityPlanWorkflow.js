@@ -29,6 +29,11 @@ function compactNullable(value) {
   return normalized || null;
 }
 
+function nonNegativeCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0;
+}
+
 export function createSecurityPlanMutationKey(action) {
   return createCustomerMutationKey(`object-security-plan:${action}`);
 }
@@ -116,9 +121,18 @@ export function normalizeSecurityPlanList(value) {
   const items = asArray(result.items || result.plans || result).map(normalizeSecurityPlanSummary);
   return {
     items,
+    category_summary: asArray(result.category_summary).map(summary => ({
+      task_type: String(summary?.task_type || "other"),
+      total: nonNegativeCount(summary?.total),
+      published: nonNegativeCount(summary?.published),
+      draft: nonNegativeCount(summary?.draft),
+      attention: nonNegativeCount(summary?.attention),
+    })),
+    migration_required_count: nonNegativeCount(result.migration_required_count),
     total: Number(result.total ?? items.length),
     page: Number(result.page || 1),
     page_size: Number(result.page_size || Math.max(items.length, 1)),
+    has_more: Boolean(result.has_more),
   };
 }
 

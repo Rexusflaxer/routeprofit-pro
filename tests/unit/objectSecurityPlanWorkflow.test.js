@@ -78,6 +78,45 @@ describe("securityPlanWorkflow", () => {
     });
   });
 
+  it("normaliseert de paginatie-onafhankelijke categoriesamenvatting voor de kaartweergave", async () => {
+    invokeRead.mockResolvedValue({
+      items: [{ id: "plan-1", task_type: "fire_closing_round", variant_name: "Volledig", version: 1 }],
+      total: 121,
+      page: 1,
+      page_size: 25,
+      has_more: true,
+      migration_required_count: "4",
+      category_summary: [{
+        task_type: "fire_closing_round",
+        total: "42",
+        published: 30,
+        draft: 15,
+        attention: 3,
+      }],
+    });
+
+    const result = await listObjectSecurityPlans({
+      customerId: "customer-saturn",
+      objectId: "object-saturn",
+      pageSize: 25,
+    });
+
+    expect(result).toMatchObject({
+      total: 121,
+      page: 1,
+      page_size: 25,
+      has_more: true,
+      migration_required_count: 4,
+      category_summary: [{
+        task_type: "fire_closing_round",
+        total: 42,
+        published: 30,
+        draft: 15,
+        attention: 3,
+      }],
+    });
+  });
+
   it("maakt een concept met expected_version 0 en een genormaliseerde revisiepayload", async () => {
     invokeMutation.mockResolvedValue({ plan: { id: "plan-1", version: 1 } });
 
