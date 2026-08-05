@@ -86,8 +86,20 @@ describe("objectnavigatie", () => {
       "/Objects?id=object%2F1&tab=warning-addresses",
     ));
     expect(await screen.findAllByRole("tab", { name: "Waarschuwingsadressen" })).toHaveLength(2);
+    expect(screen.getAllByRole("tab", { name: "Modules" })).toHaveLength(2);
     expect(screen.getAllByRole("tab", { name: "Logboek" })).toHaveLength(2);
     expect(screen.getByText("OBJ-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("tab", { name: "Modules" })[0]);
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(
+      "/Objects?id=object%2F1&tab=modules",
+    ));
+    expect(await screen.findByRole("heading", { name: "Modules" })).toBeInTheDocument();
+    expect(functionInvoke).toHaveBeenCalledWith("customerPlatformApi", expect.objectContaining({
+      action: "list_object_modules",
+      customer_id: "customer-1",
+      object_id: "object/1",
+    }));
   });
 
   it("laadt een directe deeplink los van de eerste objecttabelpagina en zonder afgeschermde velden", async () => {

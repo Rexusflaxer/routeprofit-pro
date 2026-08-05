@@ -185,7 +185,7 @@ export function normalizeRouteOverlay(value) {
   };
 }
 
-export function buildSecurityPlanReadiness({ plan, revision, sections = [], floorplans = [] }) {
+export function buildSecurityPlanReadiness({ plan, revision, sections = [], floorplans = [], modules = [] }) {
   const blocking = [];
   const warnings = [];
   if (!String(plan?.variant_name || "").trim()) blocking.push("Geef de planvariant een herkenbare naam.");
@@ -209,5 +209,17 @@ export function buildSecurityPlanReadiness({ plan, revision, sections = [], floo
   if (!floorplans.length) warnings.push("Voor dit object is nog geen plattegrond beschikbaar.");
   else if (!revision?.floorplan_id) warnings.push("Koppel een plattegrond om een route vast te leggen.");
   if (!normalizeRouteOverlay(revision?.route_overlay).path.length) warnings.push("Er is nog geen voorgestelde looproute ingetekend.");
+  const moduleById = new Map(modules.map(module => [module.id, module]));
+  const assignedIds = new Set();
+  for (const assignment of revision?.module_assignments || []) {
+    if (assignedIds.has(assignment.module_id)) blocking.push("Een objectmodule is meer dan één keer gekoppeld.");
+    assignedIds.add(assignment.module_id);
+    const module = moduleById.get(assignment.module_id);
+    if (!module || module.status !== "active" || !module.current_published_revision_id) {
+      blocking.push("Een gekoppelde objectmodule is niet meer actief en gepubliceerd.");
+    } else if (assignment.module_revision_id && assignment.module_revision_id !== module.current_published_revision_id) {
+      warnings.push(`${module.display_name} heeft een nieuwere gedeelde configuratie; bij opslaan wordt de koppeling bijgewerkt.`);
+    }
+  }
   return { blocking, warnings, publishable: blocking.length === 0 };
 }

@@ -24,6 +24,8 @@ const REQUIRED_ENTITIES = [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectOperationalModule",
+  "ObjectOperationalModuleRevision",
   "ObjectSecurityPlan",
   "ObjectSecurityPlanRevision",
   "ObjectSection",
@@ -147,7 +149,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 109, "De verwachte 109 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 113, "De verwachte 113 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -157,6 +159,8 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectKeySet.jsonc",
   "ObjectInstallation.jsonc",
   "ObjectInstallationCredential.jsonc",
+  "ObjectOperationalModule.jsonc",
+  "ObjectOperationalModuleRevision.jsonc",
   "ObjectRelationship.jsonc",
   "ObjectSecurityPlan.jsonc",
   "ObjectSecurityPlanRevision.jsonc",
@@ -309,6 +313,37 @@ for (const field of [
   property("ObjectInstallation", field);
 }
 for (const field of [
+  "customer_id",
+  "object_id",
+  "module_type",
+  "display_name",
+  "status",
+  "current_published_revision_id",
+  "draft_revision_id",
+  "suspension_reason",
+  "archive_reason",
+  "creation_idempotency_key",
+  "customer_platform_mutation_recoveries",
+  "version",
+]) {
+  property("ObjectOperationalModule", field);
+}
+for (const field of [
+  "module_id",
+  "revision_number",
+  "status",
+  "field_definitions",
+  "reference_lists",
+  "catalog_items",
+  "availability_windows",
+  "authorization_rules",
+  "retention_days",
+  "content_checksum",
+  "version",
+]) {
+  property("ObjectOperationalModuleRevision", field);
+}
+for (const field of [
   "warning_address_mutation_lock",
   "warning_address_mutation_lock_version",
   "warning_address_order_ids",
@@ -322,6 +357,8 @@ for (const field of [
   "relationship_mutation_lock_version",
   "security_plan_mutation_lock",
   "security_plan_mutation_lock_version",
+  "operational_module_mutation_lock",
+  "operational_module_mutation_lock_version",
 ]) {
   property("SurveillanceObject", field);
 }
@@ -339,6 +376,8 @@ for (const entity of [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectOperationalModule",
+  "ObjectOperationalModuleRevision",
   "ObjectRelationship",
   "ObjectSecurityPlan",
   "ObjectSecurityPlanRevision",
@@ -393,12 +432,16 @@ const objectModuleFrontend = [
   "ObjectRelationshipsTab.jsx",
   "ObjectSecurityPlanTab.jsx",
   "SecurityPlanWorkspace.jsx",
+  "SecurityPlanModulesEditor.jsx",
+  "ObjectModulesTab.jsx",
+  "ObjectModuleWorkspace.jsx",
+  "objectModuleWorkflow.js",
   "securityPlanWorkflow.js",
   "objectRelationshipWorkflow.js",
 ].map(file => read(`src/components/objects/${file}`)).join("\n");
 assert.doesNotMatch(
   objectModuleFrontend,
-  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectRelationship|ObjectSecurityPlan|ObjectSecurityPlanRevision|ObjectSection|ThirdPartyOrganization)/,
+  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectOperationalModule|ObjectOperationalModuleRevision|ObjectRelationship|ObjectSecurityPlan|ObjectSecurityPlanRevision|ObjectSection|ThirdPartyOrganization)/,
   "Objectmodules mogen beveiligde entiteiten niet rechtstreeks lezen of muteren",
 );
 assert.match(
@@ -486,6 +529,12 @@ for (const action of [
   "create_object_relationship",
   "update_object_relationship",
   "archive_object_relationship",
+  "list_object_modules",
+  "get_object_module",
+  "create_object_module",
+  "save_object_module_draft",
+  "publish_object_module",
+  "set_object_module_status",
   "list_object_security_plans",
   "get_object_security_plan",
   "list_object_sections",

@@ -1,0 +1,220 @@
+{
+  "name": "ObjectOperationalModule",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "object_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "module_type": {
+      "type": "string",
+      "enum": [
+        "visitor_registration",
+        "item_issuance",
+        "mail_package_receipt",
+        "lost_and_found",
+        "object_calendar",
+        "action_points"
+      ],
+      "description": "Stabiel moduletype. Per object mag ieder type maximaal eenmaal bestaan."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "purpose": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1000
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "active",
+        "suspended",
+        "archived"
+      ],
+      "default": "concept"
+    },
+    "current_published_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "draft_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "latest_revision_number": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000,
+      "default": 0
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "activated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "activated_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "suspended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "suspended_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "suspension_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "archive_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 180
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 320
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "maxItems": 50,
+      "uniqueItems": true,
+      "default": []
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "default": 1
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "module_type",
+    "display_name",
+    "status",
+    "latest_revision_number",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

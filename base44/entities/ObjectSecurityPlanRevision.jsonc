@@ -183,6 +183,66 @@
       },
       "default": []
     },
+    "module_assignments": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sequence": {
+            "type": "number",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "module_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120,
+            "description": "Gepubliceerde moduleconfiguratie bij de laatste planopslag of publicatie; de stabiele module-ID blijft de gedeelde gegevensbron."
+          },
+          "access_mode": {
+            "type": "string",
+            "enum": [
+              "read",
+              "register"
+            ]
+          },
+          "quick_action": {
+            "type": "boolean",
+            "default": false
+          },
+          "instruction": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "module_id",
+          "access_mode",
+          "quick_action"
+        ],
+        "additionalProperties": false
+      },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Versiegebonden selectie van objectbrede modules. Moduleconfiguratie en operationele gegevens worden niet naar het plan gekopieerd."
+    },
     "floorplan_id": {
       "type": [
         "string",

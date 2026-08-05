@@ -519,7 +519,7 @@ describe("customerPlatformApi Beveiligingsplan V2", () => {
     expect(entities.ObjectSecurityPlanRevision.records).toHaveLength(2);
   });
 
-  it("serialiseert plan-, sectie- en migratiemutaties per object", async () => {
+  it("serialiseert plan-, module-, sectie- en migratiemutaties per object", async () => {
     let state = {
       id: "object-saturn",
       customer_id: "customer-saturn",
@@ -558,20 +558,25 @@ describe("customerPlatformApi Beveiligingsplan V2", () => {
         base44, user, "object-saturn", "create_object_security_plan", "key-a", "fingerprint-a", "target-a",
       ),
       backend.reserveSecurityPlanMutation(
+        base44, user, "object-saturn", "set_object_module_status", "key-module", "fingerprint-module", "target-module",
+      ),
+      backend.reserveSecurityPlanMutation(
         base44, user, "object-saturn", "upsert_object_section", "key-b", "fingerprint-b", "target-b",
       ),
     ]);
 
     expect(outcomes.filter(outcome => outcome.status === "fulfilled")).toHaveLength(1);
-    expect(outcomes.filter(outcome => outcome.status === "rejected")).toHaveLength(1);
-    expect(outcomes.find(outcome => outcome.status === "rejected").reason).toMatchObject({
-      status: 409,
-      details: expect.objectContaining({ retryable: true }),
-    });
+    expect(outcomes.filter(outcome => outcome.status === "rejected")).toHaveLength(2);
+    for (const outcome of outcomes.filter(item => item.status === "rejected")) {
+      expect(outcome.reason).toMatchObject({
+        status: 409,
+        details: expect.objectContaining({ retryable: true }),
+      });
+    }
     expect(state.version).toBe(7);
     expect(state.security_plan_mutation_lock).toMatchObject({
       actor_id: "admin-1",
-      action: expect.stringMatching(/create_object_security_plan|upsert_object_section/),
+      action: expect.stringMatching(/create_object_security_plan|set_object_module_status|upsert_object_section/),
     });
 
     const reservation = outcomes.find(outcome => outcome.status === "fulfilled").value;

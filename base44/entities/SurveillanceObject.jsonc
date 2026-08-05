@@ -171,13 +171,27 @@
         "null"
       ],
       "additionalProperties": true,
-      "description": "Kortdurend objectgebonden slot dat plan-, sectie- en legacy-planmutaties atomair serialiseert."
+      "description": "Gedeeld kortdurend objectslot dat plan-, sectie-, module- en legacy-planmutaties atomair serialiseert."
     },
     "security_plan_mutation_lock_version": {
       "type": "integer",
       "minimum": 0,
       "default": 0,
       "description": "Onafhankelijke CAS-versie voor het beveiligingsplanslot; wijzigt de dossier-versie niet."
+    },
+    "operational_module_mutation_lock": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Legacy moduleslot; nieuwe modulemutaties gebruiken het gedeelde security_plan_mutation_lock om planlinks en modulestatus atomair te serialiseren."
+    },
+    "operational_module_mutation_lock_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Legacy CAS-versie voor het voormalige afzonderlijke objectmoduleslot; blijft uitsluitend voor compatibiliteit bestaan."
     },
     "customer_platform_last_mutation_key_hash": {
       "type": [
