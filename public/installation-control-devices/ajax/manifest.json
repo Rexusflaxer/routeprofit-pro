@@ -1,0 +1,107 @@
+{
+  "manufacturer": "Ajax Systems",
+  "retrieved_at": "2026-08-05",
+  "selection_rule": "One official black product render per hardware model; colour variants are intentionally not separate choices.",
+  "usage_note": "Official manufacturer renders are stored locally for product identification inside the installation wizard. Ajax Systems retains all rights to the product imagery.",
+  "devices": [
+    {
+      "key": "keypad-jeweller",
+      "label": "KeyPad Jeweller",
+      "asset": "keypad-jeweller.png",
+      "source_page": "https://ajax.systems/products/keypad/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_black_65510b2e2c@2.png",
+      "colour": "black",
+      "sha256": "3d35d5b4e9866d4fe207e53c0983e5a557873d6f54741a11e6736dceb7139ba0"
+    },
+    {
+      "key": "keypad-plus-jeweller",
+      "label": "KeyPad Plus Jeweller",
+      "asset": "keypad-plus-jeweller.png",
+      "source_page": "https://ajax.systems/products/keypad-plus/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_plus_black_89b1fc7e4f@2.png",
+      "colour": "black",
+      "sha256": "47d86696afd8349f72adfbedb105383565121b8f808fb4a4613bc43abe6c9627"
+    },
+    {
+      "key": "keypad-combi-jeweller",
+      "label": "KeyPad Combi Jeweller",
+      "asset": "keypad-combi-jeweller.png",
+      "source_page": "https://ajax.systems/products/specs/keypad-combi-jeweller/",
+      "source_url": "https://ajax.systems/cdn/upload/kpc_black_77b7817636@2.png",
+      "colour": "black",
+      "sha256": "9caeb2c30cfad3f01039f10141892bef4c4fb797658815e7dcf2db04318e7422"
+    },
+    {
+      "key": "keypad-touchscreen-jeweller",
+      "label": "KeyPad TouchScreen Jeweller",
+      "asset": "keypad-touchscreen-jeweller.png",
+      "source_page": "https://ajax.systems/products/keypad-touchscreen/",
+      "source_url": "https://ajax.systems/cdn/upload/kpt_j_black_bf9625dbbb@2.png",
+      "colour": "black",
+      "sha256": "a1f462cd40fed4fa22b7c7693f8b03b14fcf1b3aae185eaa94c64e49a68ed9e8"
+    },
+    {
+      "key": "superior-keypad-fibra",
+      "label": "Superior KeyPad Fibra",
+      "asset": "superior-keypad-fibra.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-fibra/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_f_black_cf50c40c22@2.png",
+      "colour": "black",
+      "sha256": "c0330d816b6b072d8ab215e648de558a4c32863111aa631fa731e2d16fb954fa"
+    },
+    {
+      "key": "superior-keypad-plus-jeweller",
+      "label": "Superior KeyPad Plus Jeweller",
+      "asset": "superior-keypad-plus-jeweller.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-plus-jeweller/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_sp_black_33f1d88c95@2.png",
+      "colour": "black",
+      "sha256": "f037bf1d58f68fd2d2cda4d5e32b339a831b6d3ac8055888266b74d2449ff821"
+    },
+    {
+      "key": "superior-keypad-touchscreen-fibra",
+      "label": "Superior KeyPad TouchScreen Fibra",
+      "asset": "superior-keypad-touchscreen-fibra.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-touchscreen-fibra/",
+      "source_url": "https://ajax.systems/cdn/upload/kpt_black_1b6665db02@2.png",
+      "colour": "black",
+      "sha256": "7a9ceec0dffa2a27f684aa55d3d797175e5ed7e9a1304c1a5256fd233995e903"
+    },
+    {
+      "key": "keypad-outdoor-jeweller",
+      "label": "KeyPad Outdoor Jeweller",
+      "asset": "keypad-outdoor-jeweller.png",
+      "source_page": "https://ajax.systems/products/keypad-outdoor-jeweller/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_out_j_black_671d8a10c4@2.png",
+      "colour": "black",
+      "sha256": "6b5b25492ea9d1217b9b0b065f5659ae42f1e10e920e4e65359e5c1c24138364"
+    },
+    {
+      "key": "superior-keypad-outdoor-fibra",
+      "label": "Superior KeyPad Outdoor Fibra",
+      "asset": "superior-keypad-outdoor-fibra.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-outdoor-fibra/",
+      "source_url": "https://ajax.systems/cdn/upload/kp_out_f_black_0d708d36b0@2.png",
+      "colour": "black",
+      "sha256": "e7648b5afdd98de704cffc3c937303ce0769ec95ce8126bb3b81c5bc86ad1826"
+    },
+    {
+      "key": "superior-keypad-plus-g3-jeweller",
+      "label": "Superior KeyPad Plus G3 Jeweller",
+      "asset": "superior-keypad-plus-g3-jeweller.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-plus-g3-jeweller/",
+      "source_url": "https://ajax.systems/cdn/upload/kpp_g3_j_black_9f9c91b78f@2.png",
+      "colour": "black",
+      "sha256": "eec00bcc741b7c9e82f49568328932e278ef45c0ae323f017c0b7b446862bee5"
+    },
+    {
+      "key": "superior-keypad-touchscreen-g3-jeweller",
+      "label": "Superior KeyPad TouchScreen G3 Jeweller",
+      "asset": "superior-keypad-touchscreen-g3-jeweller.png",
+      "source_page": "https://ajax.systems/products/superior-keypad-touchscreen-g3-jeweller/",
+      "source_url": "https://ajax.systems/cdn/upload/kpt_g3_j_black_0ebad6fdb2@2.png",
+      "colour": "black",
+      "sha256": "a1f462cd40fed4fa22b7c7693f8b03b14fcf1b3aae185eaa94c64e49a68ed9e8"
+    }
+  ]
+}

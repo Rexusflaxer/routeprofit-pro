@@ -5,21 +5,25 @@ import {
   ArrowRight,
   BellRing,
   Check,
+  ChevronRight,
   ClipboardCheck,
   Eye,
   EyeOff,
+  ImageOff,
   Loader2,
   LockKeyhole,
   RadioTower,
   RotateCcw,
   Search,
   ShieldX,
+  Smartphone,
   Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
+import { cn } from "@/lib/utils";
 import { ChoiceCard, Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
 import {
   INSTALLATION_CREDENTIAL_FIELDS,
@@ -118,6 +122,54 @@ function InstallationBrandChoices({ options, selectedBrand, onSelect }) {
         />
       ))}
     </div>
+  );
+}
+
+function AjaxControlDevicePhoto({ option }) {
+  const [failed, setFailed] = useState(false);
+  const withoutFixedPanel = option.value === "ajax-app-only";
+
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+    >
+      {option.imageSrc && !failed
+        ? <img src={option.imageSrc} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-contain" />
+        : withoutFixedPanel
+          ? <Smartphone className="h-10 w-10 text-slate-500" />
+          : <ImageOff className="h-8 w-8 text-slate-400" />}
+    </span>
+  );
+}
+
+function AjaxControlDeviceChoice({ option, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      aria-label={option.label}
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        "group relative flex min-h-36 w-full items-center gap-4 rounded-lg border p-3 text-left transition-all active:scale-[0.99]",
+        selected
+          ? "border-primary bg-accent shadow-sm"
+          : "border-border bg-card hover:border-primary hover:bg-accent",
+      )}
+    >
+      <AjaxControlDevicePhoto option={option} />
+      <span className="min-w-0 flex-1 self-stretch py-1">
+        <span className="block pr-6 text-sm font-semibold leading-snug text-foreground">{option.label}</span>
+        <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span>
+        <span className="mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-border/80 bg-background/65 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{option.protocol}</span>
+          {option.availability !== "Actueel" && <span className="rounded-full border border-amber-300/70 bg-amber-50/80 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/35 dark:text-amber-200">{option.availability}</span>}
+        </span>
+      </span>
+      {selected
+        ? <Check className="absolute right-3 top-3 h-4 w-4 text-primary" />
+        : <ChevronRight className="absolute right-3 top-3 h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />}
+    </button>
   );
 }
 
@@ -291,8 +343,8 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
               </>}
 
               {currentStep.key === "control-device" && <>
-                <StepHeading title="Welk Ajax-bedienpaneel wordt op dit object gebruikt?" description="Kies het exacte paneel. LOQ koppelt deze installatie daarna automatisch aan de juiste, gecontroleerde ingebouwde handleiding." />
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">{AJAX_CONTROL_DEVICE_OPTIONS.map(option => <ChoiceCard key={option.value} selected={selectedControlDevice?.value === option.value} onClick={() => chooseControlDevice(option.value)} title={option.label} description={option.description} leading={<span aria-hidden="true" className="flex h-11 w-16 shrink-0 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-center shadow-sm"><span className="text-[9px] font-bold uppercase tracking-wider text-slate-700">{option.protocol}</span></span>} />)}</div>
+                <StepHeading title="Welk Ajax-bedienpaneel wordt op dit object gebruikt?" description="Kies het exacte model aan de hand van de officiële productfoto. Iedere uitvoering staat één keer in de vaste zwarte kleur; kleurvarianten veranderen de bediening niet." />
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{AJAX_CONTROL_DEVICE_OPTIONS.map(option => <AjaxControlDeviceChoice key={option.value} option={option} selected={selectedControlDevice?.value === option.value} onSelect={() => chooseControlDevice(option.value)} />)}</div>
                 <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>De handleiding wordt door LOQ beheerd. De gebruiker hoeft geen bestand te uploaden; model, handleidingssleutel en versie worden samen met de installatie opgeslagen.</p></div>
               </>}
 
