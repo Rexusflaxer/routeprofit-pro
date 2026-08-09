@@ -19,6 +19,13 @@ export function createHandbookCategory(object, form) {
   });
 }
 
+export function archiveHandbookCategory(category) {
+  return base44.entities.ObjectHandbookCategory.update(category.id, {
+    status: "archived",
+    version: Number(category.version || 1) + 1,
+  });
+}
+
 export function createHandbookArticle(object, form) {
   return base44.entities.ObjectHandbookArticle.create({
     customer_id: object.customer_id,
