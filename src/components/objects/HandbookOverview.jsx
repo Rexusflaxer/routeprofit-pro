@@ -1,21 +1,22 @@
 import React from "react";
-import { BookOpen, ChevronLeft, Folder, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import HandbookCategoryManager from "./HandbookCategoryManager";
+import HandbookTree from "./HandbookTree";
 
-export default function HandbookOverview({ articles, currentCategory, childCategories, onOpenCategory, onBack, onCreateCategory, categorySaving, search, onSearch, onCreate, onEdit, onDelete, archived, deleting }) {
-  const hasContent = childCategories.length > 0 || articles.length > 0;
+export default function HandbookOverview({ articles, categories, currentCategory, selectedArticleId, onSelectCategory, onCreateCategory, categorySaving, search, onSearch, onCreate, onEdit, onDelete, archived, deleting, children }) {
+  const hasContent = categories.length > 0 || articles.length > 0;
   return (
     <div className="min-h-[620px]">
       <div className="flex flex-col gap-3 border-b border-border/70 bg-card/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">{currentCategory && <Button variant="ghost" size="icon" onClick={onBack} aria-label="Terug"><ChevronLeft className="h-4 w-4" /></Button>}<div><h2 className="text-sm font-semibold">{currentCategory?.name || "Handboek"}</h2><p className="mt-0.5 text-xs text-muted-foreground">{articles.length} artikel{articles.length === 1 ? "" : "en"}</p></div></div>
+        <div><h2 className="text-sm font-semibold">Handboek</h2><p className="mt-0.5 text-xs text-muted-foreground">{articles.length} artikel{articles.length === 1 ? "" : "en"}</p></div>
         <div className="flex flex-col gap-2 sm:flex-row"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input value={search} onChange={event => onSearch(event.target.value)} placeholder="Zoek in het handboek..." className="h-9 pl-9 sm:w-72" /></div><HandbookCategoryManager parentCategoryId={currentCategory?.id} onCreate={onCreateCategory} saving={categorySaving} archived={archived} /><Button size="sm" onClick={onCreate} disabled={archived}><Plus className="h-4 w-4" /> Artikel schrijven</Button></div>
       </div>
-      {hasContent ? <div className="flex min-h-[520px] flex-col sm:flex-row">
-        {childCategories.length > 0 && <aside className="w-full shrink-0 border-b border-border/70 bg-card/20 p-3 sm:w-60 sm:border-b-0 sm:border-r"><p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Categorieën</p><nav className="flex flex-col gap-1" aria-label="Handboekcategorieën">{childCategories.map(category => <button key={category.id} type="button" onClick={() => onOpenCategory(category.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-medium hover:bg-muted/50"><Folder className="h-4 w-4 shrink-0 text-primary" /><span className="truncate">{category.name}</span></button>)}</nav></aside>}
-        <div className="min-w-0 flex-1">{articles.length > 0 ? <div className="divide-y divide-border/70">{articles.map(article => <article key={article.id} className="flex items-start gap-3 px-4 py-4 hover:bg-muted/20"><div className="mt-0.5 rounded-md bg-primary/10 p-2 text-primary"><BookOpen className="h-4 w-4" /></div><button type="button" onClick={() => onEdit(article.id)} className="min-w-0 flex-1 text-left"><h3 className="truncate text-sm font-semibold">{article.title}</h3><p className="mt-1 line-clamp-2 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{article.content}</p></button>{!archived && <div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(article.id)} aria-label="Artikel bewerken"><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => onDelete(article)} disabled={deleting} aria-label="Artikel verwijderen" className="text-destructive"><Trash2 className="h-4 w-4" /></Button></div>}</article>)}</div> : <div className="flex min-h-[450px] flex-col items-center justify-center p-8 text-center"><BookOpen className="h-8 w-8 text-muted-foreground" /><h3 className="mt-3 text-sm font-medium">{search ? "Geen artikelen gevonden" : "Geen artikelen in deze categorie"}</h3><p className="mt-1 text-xs text-muted-foreground">{search ? "Pas de zoekopdracht aan." : "Schrijf een artikel om te beginnen."}</p></div>}</div>
-      </div> : <div className="flex min-h-[450px] flex-col items-center justify-center p-8 text-center"><BookOpen className="h-8 w-8 text-muted-foreground" /><h3 className="mt-3 text-sm font-medium">{search ? "Geen artikelen gevonden" : "Deze categorie is leeg"}</h3><p className="mt-1 text-xs text-muted-foreground">{search ? "Pas de zoekopdracht aan." : "Maak een categorie aan of schrijf een artikel."}</p></div>}
+      <div className="flex min-h-[520px] flex-col sm:flex-row">
+        <aside className="w-full shrink-0 border-b border-border/70 bg-card/20 p-3 sm:w-64 sm:border-b-0 sm:border-r"><p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Categorieën</p>{hasContent ? <HandbookTree categories={categories} articles={articles} selectedArticleId={selectedArticleId} onSelectCategory={onSelectCategory} onOpenArticle={onEdit} onDelete={onDelete} archived={archived} deleting={deleting} /> : <p className="px-2 py-3 text-xs text-muted-foreground">Nog geen categorieën.</p>}</aside>
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
     </div>
   );
 }

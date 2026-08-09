@@ -19,14 +19,12 @@ export default function ObjectHandbookTab({ object, view, selectedRow, searchTer
   const remove = useMutation({ mutationFn: archiveHandbookArticle, onSuccess: finish });
   const createCategory = useMutation({ mutationFn: form => createHandbookCategory(object, form), onSuccess: () => queryClient.invalidateQueries({ queryKey: categoryKey }) });
   const currentCategory = categories.find(category => category.id === currentCategoryId) || null;
-  const childCategories = categories.filter(category => (category.parent_category_id || null) === currentCategoryId);
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLocaleLowerCase("nl-NL");
-    const inCategory = articles.filter(article => (article.category_id || null) === currentCategoryId);
-    return term ? inCategory.filter(article => `${article.title} ${article.content}`.toLocaleLowerCase("nl-NL").includes(term)) : inCategory;
-  }, [articles, currentCategoryId, searchTerm]);
+    return term ? articles.filter(article => `${article.title} ${article.content}`.toLocaleLowerCase("nl-NL").includes(term)) : articles;
+  }, [articles, searchTerm]);
   if (query.isLoading || categoryQuery.isLoading) return <div className="p-6 text-xs text-muted-foreground">Handboek laden...</div>;
   if (query.isError || categoryQuery.isError) return <div className="m-4 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">{query.error?.message || categoryQuery.error?.message || "Het handboek kon niet worden geladen."}</div>;
-  if (view === "new" || selected) return <HandbookArticleEditor article={selected} categories={categories} onSave={form => save.mutate(form)} onCancel={onCloseView} saving={save.isPending} error={save.error} />;
-  return <HandbookOverview articles={filtered} currentCategory={currentCategory} childCategories={childCategories} onOpenCategory={setCurrentCategoryId} onBack={() => setCurrentCategoryId(currentCategory?.parent_category_id || null)} onCreateCategory={(form, done) => createCategory.mutate(form, { onSuccess: done })} categorySaving={createCategory.isPending} search={searchTerm} onSearch={onSearchChange} onCreate={onOpenCreate} onEdit={onOpenEdit} onDelete={article => window.confirm(`Artikel “${article.title}” verwijderen?`) && remove.mutate(article)} archived={object.status === "archived"} deleting={remove.isPending} />;
+  const editor = view === "new" || selected ? <HandbookArticleEditor article={selected} categories={categories} onSave={form => save.mutate(form)} onCancel={onCloseView} saving={save.isPending} error={save.error} /> : null;
+  return <HandbookOverview articles={filtered} categories={categories} currentCategory={currentCategory} selectedArticleId={selected?.id || null} onSelectCategory={setCurrentCategoryId} onCreateCategory={(form, done) => createCategory.mutate(form, { onSuccess: done })} categorySaving={createCategory.isPending} search={searchTerm} onSearch={onSearchChange} onCreate={onOpenCreate} onEdit={onOpenEdit} onDelete={article => window.confirm(`Artikel “${article.title}” verwijderen?`) && remove.mutate(article)} archived={object.status === "archived"} deleting={remove.isPending}>{editor}</HandbookOverview>;
 }
