@@ -114,6 +114,8 @@ export default function ObjectDetailView({ object, onBack }) {
     : "warning-addresses";
   const view = searchParams.get("view") || "";
   const selectedRow = searchParams.get("row") || null;
+  const selectedCategoryId = searchParams.get("category") || null;
+  const selectedInstallationId = searchParams.get("installation") || null;
   const searchTerm = searchParams.get("query") || "";
   const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
 
@@ -127,6 +129,8 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("query");
     next.delete("page");
     next.delete("module_tab");
+    next.delete("category");
+    next.delete("installation");
     setSearchParams(next, { replace: true });
   }, [activeTab, object.id, requestedTab, searchParams, setSearchParams]);
 
@@ -185,6 +189,8 @@ export default function ObjectDetailView({ object, onBack }) {
       next.delete("plan_status");
       next.delete("plan_tab");
       next.delete("module_tab");
+      next.delete("category");
+      next.delete("installation");
       setSearchParams(next);
     });
   }, [object.id, searchParams, setSearchParams, withModuleNavigationGuard]);
@@ -196,6 +202,8 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("view");
     next.delete("row");
     next.delete("module_tab");
+    next.delete("category");
+    next.delete("installation");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
   const setPage = useCallback(nextPage => {
@@ -223,10 +231,43 @@ export default function ObjectDetailView({ object, onBack }) {
     next.delete("module_tab");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
-  const openManual = useCallback(id => {
+  const openManual = useCallback(installation => {
     const next = new URLSearchParams(searchParams);
-    next.set("view", "manual");
+    const id = typeof installation === "string" ? installation : installation?.id;
+    const ajaxAlarm = installation?.installation_type === "alarm_system" && ["ajax", "ajax systems"].includes(String(installation?.brand || "").trim().toLowerCase());
+    if (ajaxAlarm) {
+      next.set("tab", "handbook");
+      next.set("installation", id);
+      next.delete("view");
+      next.delete("row");
+      next.delete("category");
+      next.delete("query");
+      next.delete("page");
+    } else {
+      next.set("view", "manual");
+      next.set("row", id);
+      next.delete("installation");
+    }
+    setSearchParams(next);
+  }, [searchParams, setSearchParams]);
+  const openArticle = useCallback((id, categoryId = null) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", "detail");
     next.set("row", id);
+    if (categoryId) next.set("category", categoryId);
+    else next.delete("category");
+    next.delete("installation");
+    next.delete("query");
+    setSearchParams(next);
+  }, [searchParams, setSearchParams]);
+  const selectHandbookCategory = useCallback(categoryId => {
+    const next = new URLSearchParams(searchParams);
+    if (categoryId) next.set("category", categoryId);
+    else next.delete("category");
+    next.delete("view");
+    next.delete("row");
+    next.delete("installation");
+    next.delete("query");
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
   const closeView = useCallback(() => {
@@ -356,9 +397,13 @@ export default function ObjectDetailView({ object, onBack }) {
         onPageChange={setPage}
         view={view}
         selectedRow={selectedRow}
+        selectedCategoryId={selectedCategoryId}
+        selectedInstallationId={selectedInstallationId}
         onOpenCreate={openCreate}
         onOpenEdit={openEdit}
         onOpenManual={openManual}
+        onOpenArticle={openArticle}
+        onSelectCategory={selectHandbookCategory}
         onCloseView={closeView}
         onRegisterModuleNavigationGuard={registerModuleNavigationGuard}
       />

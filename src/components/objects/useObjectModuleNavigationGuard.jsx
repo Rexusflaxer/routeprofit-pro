@@ -36,14 +36,17 @@ export function useObjectModuleNavigationGuard({
   dirty,
   moduleName,
   onSave,
+  onDiscard,
   saving = false,
   onRegisterNavigationGuard,
 }) {
   const navigate = useNavigate();
   const [pending, setPending] = useState(null);
+  const [discarding, setDiscarding] = useState(false);
   const pendingActionRef = useRef(null);
   const dirtyRef = useRef(dirty);
   const saveRef = useRef(onSave);
+  const discardRef = useRef(onDiscard);
   const guardIdRef = useRef(`module-${Math.random().toString(36).slice(2)}`);
   const sentinelPresentRef = useRef(false);
   const bypassPopRef = useRef(false);
@@ -51,6 +54,7 @@ export function useObjectModuleNavigationGuard({
 
   dirtyRef.current = dirty;
   saveRef.current = onSave;
+  discardRef.current = onDiscard;
 
   const pushSentinel = useCallback(() => {
     if (!dirtyRef.current || typeof window === "undefined") return;
@@ -112,8 +116,18 @@ export function useObjectModuleNavigationGuard({
     releaseSentinelThen(action, true);
   }, [releaseSentinelThen]);
 
-  const runPending = useCallback((saved) => {
+  const runPending = useCallback(async (saved) => {
     if (!pending) return;
+    if (!saved && discardRef.current) {
+      setDiscarding(true);
+      try {
+        await discardRef.current();
+      } catch {
+        setDiscarding(false);
+        return;
+      }
+      setDiscarding(false);
+    }
     const action = pendingActionRef.current;
     pendingActionRef.current = null;
     setPending(null);
@@ -135,7 +149,7 @@ export function useObjectModuleNavigationGuard({
   const saveAndContinue = useCallback(async () => {
     try {
       await saveRef.current?.();
-      runPending(true);
+      await runPending(true);
     } catch {
       // The mutation owns the error toast. Keep the dialog open so the user
       // can correct or retry without losing the local configuration.
@@ -204,8 +218,9 @@ export function useObjectModuleNavigationGuard({
 
   const workspaceSwitch = pending?.kind === "workspace-tab";
   const destinationText = pending?.destinationLabel ? ` naar ${pending.destinationLabel}` : "";
+  const busy = saving || discarding;
   const dialog = (
-    <AlertDialog open={Boolean(pending)} onOpenChange={open => { if (!open && !saving) cancelPending(); }}>
+    <AlertDialog open={Boolean(pending)} onOpenChange={open => { if (!open && !busy) cancelPending(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-xl border border-amber-300/60 bg-amber-500/10">
@@ -219,12 +234,13 @@ export function useObjectModuleNavigationGuard({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="sm:justify-between">
-          <AlertDialogCancel disabled={saving}>Blijven</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>Blijven</AlertDialogCancel>
           <div className="flex flex-col-reverse gap-2 sm:flex-row">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => runPending(false)}>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => runPending(false)}>
+              {discarding && <Loader2 className="h-4 w-4 animate-spin" />}
               {workspaceSwitch ? "Onderdeel openen" : "Zonder opslaan doorgaan"}
             </Button>
-            <Button type="button" disabled={saving} onClick={saveAndContinue}>
+            <Button type="button" disabled={busy} onClick={saveAndContinue}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Opslaan en doorgaan
             </Button>

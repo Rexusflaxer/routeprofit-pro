@@ -2,7 +2,10 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ObjectInstallationWizard from "@/components/objects/ObjectInstallationWizard";
-import { AJAX_CONTROL_DEVICE_OPTIONS } from "@/components/objects/objectInstallationManuals";
+import {
+  AJAX_CONTROL_DEVICE_OPTIONS,
+  AJAX_MANUAL_VERSION,
+} from "@/components/objects/objectInstallationManuals";
 
 const existingInstallation = {
   id: "installation-1",
@@ -17,7 +20,7 @@ const existingInstallation = {
   monitoring_connected: false,
   lifecycle_status: "active",
   operational_status: "operational",
-  credential_types: ["switching_code"],
+  credential_types: ["arming_code"],
 };
 
 function getAlarmTypeButton() {
@@ -32,7 +35,7 @@ async function openCredentialStep() {
   const touchScreen = screen.getByRole("button", { name: "KeyPad TouchScreen" });
   expect(touchScreen).toHaveAttribute("aria-pressed", "true");
   fireEvent.click(touchScreen);
-  await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
+  await screen.findByRole("heading", { name: "Schakelcodes" });
 }
 
 describe("ObjectInstallationWizard", () => {
@@ -41,14 +44,12 @@ describe("ObjectInstallationWizard", () => {
     render(<ObjectInstallationWizard installation={existingInstallation} onSave={onSave} onCancel={vi.fn()} />);
 
     await openCredentialStep();
-    expect(screen.getByLabelText("Schakelcode")).toHaveAttribute("placeholder", "Bestaande code behouden");
+    expect(screen.getByLabelText("Inschakelcode")).toHaveAttribute("placeholder", "Bestaande code behouden");
 
-    fireEvent.click(screen.getByRole("button", { name: "Schakelcode intrekken" }));
-    expect(screen.getByLabelText("Schakelcode")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Inschakelcode intrekken" }));
+    expect(screen.getByLabelText("Inschakelcode")).toBeDisabled();
     expect(screen.getByText(/veilig ingetrokken en als wijziging gelogd/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
-    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
     fireEvent.click(screen.getByRole("button", { name: "Wijzigingen opslaan" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -56,9 +57,9 @@ describe("ObjectInstallationWizard", () => {
       control_device_key: "keypad-touchscreen-jeweller",
       control_device_name: "KeyPad TouchScreen Jeweller",
       manual_key: "ajax:touchscreen-keypad:nl",
-      manual_version: "2026.08.1",
+      manual_version: AJAX_MANUAL_VERSION,
       credentials: {},
-      credentials_to_revoke: ["switching_code"],
+      credentials_to_revoke: ["arming_code"],
     }));
   });
 
@@ -67,12 +68,10 @@ describe("ObjectInstallationWizard", () => {
     render(<ObjectInstallationWizard installation={existingInstallation} onSave={onSave} onCancel={vi.fn()} />);
 
     await openCredentialStep();
-    fireEvent.click(screen.getByRole("button", { name: "Schakelcode intrekken" }));
+    fireEvent.click(screen.getByRole("button", { name: "Inschakelcode intrekken" }));
     fireEvent.click(screen.getByRole("button", { name: "Intrekken ongedaan maken" }));
-    expect(screen.getByLabelText("Schakelcode")).not.toBeDisabled();
+    expect(screen.getByLabelText("Inschakelcode")).not.toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
-    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
     fireEvent.click(screen.getByRole("button", { name: "Wijzigingen opslaan" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ credentials_to_revoke: [] }));
   });
@@ -100,9 +99,7 @@ describe("ObjectInstallationWizard", () => {
     expect(screen.getByRole("button", { name: /Honeywell/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Ajax Systems/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Honeywell/i }));
-    await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
-    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
-    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
+    await screen.findByRole("heading", { name: "Schakelcodes" });
     fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ brand: "Honeywell" }));
@@ -117,10 +114,9 @@ describe("ObjectInstallationWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Ajax Systems/i }));
     await screen.findByText("Hoe wordt het Ajax-systeem op dit object bediend?");
     fireEvent.click(screen.getByRole("button", { name: "KeyPad" }));
-    await screen.findByText("Is de installatie doorgemeld en hoe wordt deze bediend?");
-    fireEvent.click(screen.getByRole("button", { name: /Volgende/i }));
-    await screen.findByText("Wie beheert de installatie en wat is de actuele toestand?");
-    expect(screen.getByText(/Handleiding: KeyPad/i)).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Schakelcodes" });
+    const progress = screen.getByRole("list", { name: "Voortgang installatie toevoegen" });
+    for (const label of ["Soort", "Merk", "Bediening", "Schakelcodes"]) expect(progress).toHaveTextContent(label);
     fireEvent.click(screen.getByRole("button", { name: "Installatie toevoegen" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -128,7 +124,7 @@ describe("ObjectInstallationWizard", () => {
       control_device_key: "keypad",
       control_device_name: "KeyPad",
       manual_key: "ajax:numeric-keypad:nl",
-      manual_version: "2026.08.1",
+      manual_version: AJAX_MANUAL_VERSION,
     }));
   });
 

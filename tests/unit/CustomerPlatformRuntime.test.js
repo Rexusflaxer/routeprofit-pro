@@ -113,7 +113,7 @@ describe("customerPlatformApi runtimecontract", () => {
     expect(invokeLatest).toHaveBeenCalledWith("customerPlatformApi", payload);
   });
 
-  it("toont een gerichte publicatiemelding als ook de nieuwste snapshot de moduleactie niet kent", async () => {
+  it("toont één gerichte objectplatformmelding als ook de nieuwste snapshot de actie niet kent", async () => {
     const unknownAction = Object.assign(new Error("Request failed with status code 400"), {
       response: { status: 400, data: { error: "Onbekende actie" } },
     });
@@ -121,9 +121,9 @@ describe("customerPlatformApi runtimecontract", () => {
     invokeLatest.mockRejectedValue(unknownAction);
 
     await expect(invokeCustomerPlatformRead({ action: "list_object_modules" })).rejects.toMatchObject({
-      message: "De objectmodule-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.",
+      message: "De objectkaart-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.",
       status: 400,
-      details: { code: "object_module_backend_outdated" },
+      details: { code: "object_platform_backend_outdated" },
     });
   });
 });

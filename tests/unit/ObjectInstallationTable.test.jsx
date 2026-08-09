@@ -11,7 +11,7 @@ const ajaxInstallation = {
   control_device_key: "superior-keypad-fibra",
   control_device_name: "Superior KeyPad Fibra",
   manual_key: "ajax:numeric-keypad:nl",
-  manual_version: "2026.08.1",
+  manual_version: "2026.08.2",
   monitoring_connected: false,
   credential_types: [],
   lifecycle_status: "active",

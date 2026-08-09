@@ -26,6 +26,14 @@ const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "save_object_module_draft",
   "publish_object_module",
   "set_object_module_status",
+  "list_object_handbook",
+  "create_object_handbook_category",
+  "update_object_handbook_category",
+  "archive_object_handbook_category",
+  "create_object_handbook_article",
+  "update_object_handbook_article",
+  "archive_object_handbook_article",
+  "sync_object_installation_handbooks",
 ]);
 
 export const CUSTOMER_TABS = [
@@ -229,8 +237,8 @@ async function invokeCustomerPlatformRequest(payload) {
     } catch (latestError) {
       const latest = normalizedCustomerPlatformError(latestError, payload?.action);
       if (latest.status === 400 && /^Onbekende actie\.?$/i.test(String(latest.message || "").trim())) {
-        latest.message = "De objectmodule-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
-        latest.details = { ...(latest.details || {}), code: "object_module_backend_outdated" };
+        latest.message = "De objectkaart-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
+        latest.details = { ...(latest.details || {}), code: "object_platform_backend_outdated" };
       }
       throw latest;
     }

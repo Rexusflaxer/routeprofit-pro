@@ -2,41 +2,43 @@
   "name": "ObjectHandbookCategory",
   "type": "object",
   "properties": {
-    "customer_id": {
-      "type": "string"
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "parent_category_id": { "type": ["string", "null"] },
+    "system_key": {
+      "type": ["string", "null"],
+      "maxLength": 240,
+      "description": "Stabiele, door de server beheerde sleutel voor installatiecategorieën; null voor handmatige categorieën"
     },
-    "object_id": {
-      "type": "string"
-    },
-    "name": {
+    "origin": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 120
+      "enum": ["user", "installation_template"],
+      "default": "user"
     },
-    "parent_category_id": {
-      "type": [
-        "string",
-        "null"
-      ]
+    "source_installation_id": { "type": ["string", "null"] },
+    "protected": {
+      "type": "boolean",
+      "default": false,
+      "description": "Beschermde systeemcategorieën kunnen niet handmatig worden verplaatst of gearchiveerd"
     },
-    "status": {
-      "type": "string",
-      "enum": [
-        "active",
-        "archived"
-      ],
-      "default": "active"
-    },
-    "version": {
-      "type": "number",
-      "minimum": 1,
-      "default": 1
-    }
+    "sort_order": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 1000 },
+    "creation_idempotency_key": { "type": ["string", "null"] },
+    "creation_request_fingerprint": { "type": ["string", "null"] },
+    "creation_actor_user_id": { "type": ["string", "null"] },
+    "creation_mutation_target": { "type": ["string", "null"] },
+    "customer_platform_last_mutation_key_hash": { "type": ["string", "null"] },
+    "customer_platform_last_mutation_recovery": { "type": ["object", "null"], "additionalProperties": true },
+    "customer_platform_mutation_key_hashes": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "customer_platform_mutation_recoveries": { "type": ["object", "null"], "additionalProperties": true },
+    "status": { "type": "string", "enum": ["active", "archived"], "default": "active" },
+    "version": { "type": "integer", "minimum": 1, "maximum": 2147483647, "default": 1 }
   },
-  "required": [
-    "customer_id",
-    "object_id",
-    "name",
-    "status"
-  ]
+  "required": ["customer_id", "object_id", "name", "status"],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
 }
