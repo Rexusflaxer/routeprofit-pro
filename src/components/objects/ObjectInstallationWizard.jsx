@@ -16,23 +16,18 @@ import {
   Search,
   ShieldX,
   Smartphone,
-  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import { cn } from "@/lib/utils";
 import { ChoiceCard, Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
 import {
   INSTALLATION_CREDENTIAL_FIELDS,
-  INSTALLATION_LIFECYCLE_OPTIONS,
-  INSTALLATION_OPERATIONAL_OPTIONS,
   INSTALLATION_TYPES,
   filterInstallationBrandOptions,
   findInstallationBrandOption,
   installationBrandOptions,
-  installationCredentialLabel,
   installationTypeLabel,
 } from "./objectInstallationConfig";
 import {
@@ -46,7 +41,6 @@ const DEFAULT_STEPS = [
   { key: "type", label: "Soort" },
   { key: "brand", label: "Merk" },
   { key: "operation", label: "Schakelcodes" },
-  { key: "management", label: "Beheer & controle" },
 ];
 
 const AJAX_STEPS = [
@@ -54,7 +48,6 @@ const AJAX_STEPS = [
   { key: "brand", label: "Merk" },
   { key: "control-device", label: "Bediening" },
   { key: "operation", label: "Schakelcodes" },
-  { key: "management", label: "Beheer & controle" },
 ];
 
 function initialForm(value) {
@@ -81,10 +74,6 @@ function initialForm(value) {
     credentials: {},
     credentials_to_revoke: [],
   };
-}
-
-function Summary({ label, children }) {
-  return <div className="rounded-xl border border-border/70 bg-card/45 px-3.5 py-3 shadow-sm backdrop-blur-xl"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><div className="mt-1 text-sm">{children}</div></div>;
 }
 
 function InstallationBrandLogo({ option }) {
@@ -199,22 +188,12 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
   const selectedControlDevice = findAjaxControlDevice(form.control_device_key);
   const credentialFields = INSTALLATION_CREDENTIAL_FIELDS[form.installation_type] || [];
   const existingCredentialTypes = installation?.credential_types || [];
-  const selectedCredentialTypes = Object.entries(form.credentials).filter(([, value]) => String(value || "").trim()).map(([key]) => key);
   const revokedCredentialTypes = form.credentials_to_revoke || [];
-  const allowedCredentialTypes = credentialFields.map(definition => definition.key);
-  const effectiveCredentialTypes = [...new Set([
-    ...existingCredentialTypes.filter(type => allowedCredentialTypes.includes(type) && !revokedCredentialTypes.includes(type)),
-    ...selectedCredentialTypes,
-  ])];
-  const datesValid = (!form.last_tested_on || !form.commissioned_on || form.last_tested_on >= form.commissioned_on)
-    && (!form.next_maintenance_on || !form.commissioned_on || form.next_maintenance_on >= form.commissioned_on)
-    && (!form.next_maintenance_on || !form.last_tested_on || form.next_maintenance_on >= form.last_tested_on);
   const canContinue = {
     type: Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
     brand: Boolean(form.brand.trim() && !customBrandMatch),
     "control-device": Boolean(selectedControlDevice),
     operation: true,
-    management: datesValid,
   }[currentStep.key];
   const finalStep = stepIndex === steps.length - 1;
   const choiceOnlyStep = (currentStep.key === "type" && form.installation_type !== "other")
@@ -350,14 +329,6 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
                 <div className="grid gap-4 md:grid-cols-2">{credentialFields.map(definition => <CredentialField key={definition.key} definition={definition} value={form.credentials[definition.key]} onChange={value => setCredential(definition.key, value)} alreadySet={existingCredentialTypes.includes(definition.key)} revoked={revokedCredentialTypes.includes(definition.key)} onToggleRevoke={() => toggleCredentialRevocation(definition.key)} />)}</div>
               </>}
 
-              {currentStep.key === "management" && <>
-                <StepHeading icon={Wrench} title="Wie beheert de installatie en wat is de actuele toestand?" description="Onderhoudsdata zijn operationele signalen; ze vervangen geen certificaat, onderhoudsrapport of formeel installatielogboek." />
-                <div className="grid gap-4 md:grid-cols-2"><Field label="Installateur / onderhoudspartij" htmlFor="installation-installer"><Input id="installation-installer" value={form.installer_name} onChange={event => set("installer_name", event.target.value)} /></Field><Field label="Telefoon onderhoudspartij" htmlFor="installation-installer-phone"><Input id="installation-installer-phone" type="tel" value={form.installer_phone} onChange={event => set("installer_phone", event.target.value)} /></Field></div>
-                <div className="grid gap-4 md:grid-cols-3"><Field label="In bedrijf sinds" htmlFor="installation-commissioned"><Input id="installation-commissioned" type="date" value={form.commissioned_on} onChange={event => set("commissioned_on", event.target.value)} /></Field><Field label="Laatst getest" htmlFor="installation-tested"><Input id="installation-tested" type="date" value={form.last_tested_on} onChange={event => set("last_tested_on", event.target.value)} /></Field><Field label="Volgend onderhoud" htmlFor="installation-maintenance" hint={!datesValid ? "De datums moeten in de volgorde inbedrijfstelling, test en onderhoud liggen." : null}><Input id="installation-maintenance" type="date" value={form.next_maintenance_on} onChange={event => set("next_maintenance_on", event.target.value)} aria-invalid={!datesValid} className={!datesValid ? "border-destructive" : ""} /></Field></div>
-                <div className="grid gap-4 md:grid-cols-2"><Field label="Levenscyclus" htmlFor="installation-lifecycle"><Select value={form.lifecycle_status} onValueChange={value => set("lifecycle_status", value)}><SelectTrigger id="installation-lifecycle"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_LIFECYCLE_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field><Field label="Operationele toestand" htmlFor="installation-operational"><Select value={form.operational_status} onValueChange={value => set("operational_status", value)}><SelectTrigger id="installation-operational"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_OPERATIONAL_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field></div>
-                <div className="grid gap-3 md:grid-cols-2"><Summary label="Installatie"><p className="font-medium">{form.name || "Naam ontbreekt"}</p><p className="mt-0.5 text-xs text-muted-foreground">{installationTypeLabel(form)}{form.brand ? ` · ${form.brand}` : ""}{form.model ? ` ${form.model}` : ""}</p>{selectedControlDevice && <p className="mt-1 text-xs text-primary">Handleiding: {selectedControlDevice.label} · v{selectedControlDevice.manualVersion}</p>}</Summary><Summary label="Schakelcodes"><p>{effectiveCredentialTypes.length ? effectiveCredentialTypes.map(installationCredentialLabel).join(", ") : "Geen schakelcodes ingesteld"}{revokedCredentialTypes.length ? ` · ${revokedCredentialTypes.map(installationCredentialLabel).join(", ")} wordt ingetrokken` : ""}</p></Summary></div>
-                <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-card/45 p-4 text-xs text-muted-foreground shadow-sm backdrop-blur-xl"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0" /><p>Na opslaan staat alleen veilige metadata in de tabel. Codes worden versleuteld opgeslagen en wijzigingen verschijnen in het objectlogboek zonder codewaarde.</p></div>
-              </>}
             </motion.div>
           </AnimatePresence>
           {error && <div className="mt-5 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert"><p>{error.message || "De installatie kon niet worden opgeslagen."}</p>{error.requestId && <p className="mt-1 text-xs opacity-80">Referentie: {error.requestId}</p>}</div>}
