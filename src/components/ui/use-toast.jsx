@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 
 const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+const TOAST_REMOVE_DELAY = 5000;
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
@@ -62,27 +62,11 @@ export const reducer = (state, action) => {
 
     case actionTypes.DISMISS_TOAST: {
       const { toastId } = action;
-
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
-      if (toastId) {
-        addToRemoveQueue(toastId);
-      } else {
-        state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id);
-        });
-      }
-
+      if (toastId) _clearFromRemoveQueue(toastId);
+      else state.toasts.forEach((item) => _clearFromRemoveQueue(item.id));
       return {
         ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === toastId || toastId === undefined
-            ? {
-                ...t,
-                open: false,
-              }
-            : t
-        ),
+        toasts: toastId === undefined ? [] : state.toasts.filter((item) => item.id !== toastId),
       };
     }
     case actionTypes.REMOVE_TOAST:
@@ -133,6 +117,7 @@ function toast({ ...props }) {
       },
     },
   });
+  addToRemoveQueue(id);
 
   return {
     id,
@@ -152,7 +137,7 @@ function useToast() {
         listeners.splice(index, 1);
       }
     };
-  }, [state]);
+  }, []);
 
   return {
     ...state,
@@ -161,4 +146,4 @@ function useToast() {
   };
 }
 
-export { useToast, toast }; 
+export { useToast, toast };
