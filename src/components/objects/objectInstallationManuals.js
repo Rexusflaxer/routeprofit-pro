@@ -1,7 +1,7 @@
 const AJAX_BRAND_VALUES = new Set(["ajax", "ajax systems"]);
 
-export const AJAX_MANUAL_VERSION = "2026.08.1";
-export const AJAX_MANUAL_REVIEWED_ON = "2026-08-04";
+export const AJAX_MANUAL_VERSION = "2026.08.2";
+export const AJAX_MANUAL_REVIEWED_ON = "2026-08-09";
 
 const AJAX_MANUAL_FAMILIES = {
   numeric: { manualKey: "ajax:numeric-keypad:nl", title: "Ajax numeriek bedienpaneel" },
@@ -99,7 +99,7 @@ export const AJAX_CONTROL_DEVICE_VARIANTS = [
   { value: "keypad-plus-jeweller", label: "KeyPad Plus Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-plus/" },
   { value: "superior-keypad-plus-jeweller", label: "Superior KeyPad Plus Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-jeweller/" },
   { value: "superior-keypad-plus-g3-jeweller", label: "Superior KeyPad Plus G3 Jeweller", optionValue: "keypad-plus", protocol: "Jeweller", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-plus-g3-jeweller/" },
-  { value: "keypad-combi-jeweller", label: "KeyPad Combi Jeweller", optionValue: "keypad-combi", protocol: "Jeweller", manualKey: "ajax:numeric-reader-keypad:nl", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-combi/" },
+  { value: "keypad-combi-jeweller", label: "KeyPad Combi Jeweller", optionValue: "keypad-combi", protocol: "Jeweller", manualKey: "ajax:numeric-reader-buzzer-keypad:nl", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-combi/" },
   { value: "keypad-touchscreen-jeweller", label: "KeyPad TouchScreen Jeweller", optionValue: "keypad-touchscreen", protocol: "Jeweller / Wings", sourceUrl: "https://support.ajax.systems/en/manuals/keypad-touchscreen/" },
   { value: "superior-keypad-touchscreen-fibra", label: "Superior KeyPad TouchScreen Fibra", optionValue: "keypad-touchscreen", protocol: "Fibra", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-fibra/" },
   { value: "superior-keypad-touchscreen-g3-jeweller", label: "Superior KeyPad TouchScreen G3 Jeweller", optionValue: "keypad-touchscreen", protocol: "Jeweller / Wings", sourceUrl: "https://support.ajax.systems/en/manuals/superior-keypad-touchscreen-g3-jeweller/" },
@@ -309,6 +309,11 @@ const releaseKey = (manualKey, manualVersion) => `${manualKey}@${manualVersion}`
  */
 const AJAX_MANUAL_RELEASE_DEFINITIONS = [
   {
+    version: "2026.08.1",
+    reviewedOn: "2026-08-04",
+    content: AJAX_MANUAL_CONTENT_2026_08_1,
+  },
+  {
     version: AJAX_MANUAL_VERSION,
     reviewedOn: AJAX_MANUAL_REVIEWED_ON,
     content: AJAX_MANUAL_CONTENT_2026_08_1,
@@ -340,9 +345,15 @@ export function resolveInstallationManual(installation) {
   const option = findAjaxControlDevice(installation?.control_device_key);
   if (!option) return null;
   const variant = findAjaxControlDeviceVariant(installation?.control_device_key);
-  const expectedManualKey = variant?.manualKey || option.manualKey;
   const manualKey = installation?.manual_key;
   const manualVersion = installation?.manual_version;
+  // De eerste release koppelde de exacte legacyvariant KeyPad Combi Jeweller
+  // nog aan de gewone lezerfamilie. Nieuwe records krijgen de correcte
+  // zoemerfamilie, terwijl de reeds opgeslagen 2026.08.1-release leesbaar
+  // blijft totdat de server deze gecontroleerd naar 2026.08.2 migreert.
+  const expectedManualKey = manualVersion === "2026.08.1" && variant?.value === "keypad-combi-jeweller"
+    ? "ajax:numeric-reader-keypad:nl"
+    : variant?.manualKey || option.manualKey;
   // Alleen een bij opslag atomair vastgelegde release mag worden geopend. Een
   // onvolledig legacyrecord krijgt geen stilzwijgende koppeling naar de actuele
   // handleiding, omdat daarmee de historische instructie niet reproduceerbaar is.

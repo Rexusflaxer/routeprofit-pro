@@ -3,6 +3,7 @@ import {
   AJAX_CONTROL_DEVICE_OPTIONS,
   AJAX_CONTROL_DEVICE_VARIANTS,
   AJAX_MANUAL_RELEASES,
+  AJAX_MANUAL_VERSION,
   ajaxControlDevicePayload,
   findAjaxControlDevice,
   findAjaxControlDeviceVariant,
@@ -84,7 +85,7 @@ describe("Ajax installation manuals", () => {
 
     expect(payload("keypad-combi").manual_key).toBe("ajax:numeric-reader-buzzer-keypad:nl");
     expect(payload("keypad-combi").manual_key).not.toBe(payload("keypad-plus").manual_key);
-    expect(payload("keypad-combi-jeweller").manual_key).toBe(payload("keypad-plus").manual_key);
+    expect(payload("keypad-combi-jeweller").manual_key).toBe(payload("keypad-combi").manual_key);
   });
 
   it("lost uitsluitend de exact opgeslagen handleidingsversie op", () => {
@@ -101,7 +102,8 @@ describe("Ajax installation manuals", () => {
     expect(resolveInstallationManual({ ...installation, brand: "Honeywell" })).toBeNull();
   });
 
-  it("houdt de eerste gepubliceerde release expliciet beschikbaar", () => {
+  it("houdt de eerste release beschikbaar en publiceert 2026.08.2 als actuele release", () => {
+    expect(AJAX_MANUAL_VERSION).toBe("2026.08.2");
     expect(AJAX_MANUAL_RELEASES["ajax:numeric-keypad:nl@2026.08.1"]).toMatchObject({
       version: "2026.08.1",
       reviewedOn: "2026-08-04",
@@ -111,6 +113,34 @@ describe("Ajax installation manuals", () => {
       intro: expect.stringContaining("ingebouwde zoemer"),
     });
     expect(AJAX_MANUAL_RELEASES["ajax:touchscreen-keypad:nl@2026.08.1"]).toBeTruthy();
+    expect(AJAX_MANUAL_RELEASES["ajax:numeric-keypad:nl@2026.08.2"]).toMatchObject({
+      version: "2026.08.2",
+      reviewedOn: "2026-08-09",
+    });
+    expect(AJAX_MANUAL_RELEASES["ajax:numeric-reader-buzzer-keypad:nl@2026.08.2"]).toMatchObject({
+      intro: expect.stringContaining("ingebouwde zoemer"),
+    });
+  });
+
+  it("leest een oude Combi-koppeling reproduceerbaar en gebruikt voor nieuwe opslag de zoemerfamilie", () => {
+    const legacy = {
+      installation_type: "alarm_system",
+      brand: "Ajax Systems",
+      control_device_key: "keypad-combi-jeweller",
+      manual_key: "ajax:numeric-reader-keypad:nl",
+      manual_version: "2026.08.1",
+    };
+    expect(resolveInstallationManual(legacy)).toMatchObject({
+      version: "2026.08.1",
+      controlDevice: "KeyPad Combi Jeweller",
+    });
+
+    const current = { ...legacy, ...ajaxControlDevicePayload("keypad-combi-jeweller") };
+    expect(current).toMatchObject({
+      manual_key: "ajax:numeric-reader-buzzer-keypad:nl",
+      manual_version: "2026.08.2",
+    });
+    expect(resolveInstallationManual(current)).toMatchObject({ version: "2026.08.2" });
   });
 
   it("neemt sectiebediening en veilige eenmalige deactivering op zonder echte codes", () => {

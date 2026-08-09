@@ -24,6 +24,8 @@ const REQUIRED_ENTITIES = [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectHandbookCategory",
+  "ObjectHandbookArticle",
   "ObjectOperationalModule",
   "ObjectOperationalModuleRevision",
   "ObjectSecurityPlan",
@@ -159,6 +161,8 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectKeySet.jsonc",
   "ObjectInstallation.jsonc",
   "ObjectInstallationCredential.jsonc",
+  "ObjectHandbookCategory.jsonc",
+  "ObjectHandbookArticle.jsonc",
   "ObjectOperationalModule.jsonc",
   "ObjectOperationalModuleRevision.jsonc",
   "ObjectRelationship.jsonc",
@@ -315,6 +319,35 @@ for (const field of [
 for (const field of [
   "customer_id",
   "object_id",
+  "name",
+  "parent_category_id",
+  "system_key",
+  "origin",
+  "protected",
+  "sort_order",
+  "version",
+]) {
+  property("ObjectHandbookCategory", field);
+}
+for (const field of [
+  "customer_id",
+  "object_id",
+  "category_id",
+  "title",
+  "content_format",
+  "managed_blocks",
+  "supplement_blocks",
+  "article_key",
+  "source_installation_id",
+  "source_manual_version",
+  "read_only",
+  "version",
+]) {
+  property("ObjectHandbookArticle", field);
+}
+for (const field of [
+  "customer_id",
+  "object_id",
   "module_type",
   "display_name",
   "status",
@@ -376,6 +409,8 @@ for (const entity of [
   "ObjectKeySet",
   "ObjectInstallation",
   "ObjectInstallationCredential",
+  "ObjectHandbookCategory",
+  "ObjectHandbookArticle",
   "ObjectOperationalModule",
   "ObjectOperationalModuleRevision",
   "ObjectRelationship",
@@ -438,10 +473,12 @@ const objectModuleFrontend = [
   "objectModuleWorkflow.js",
   "securityPlanWorkflow.js",
   "objectRelationshipWorkflow.js",
+  "ObjectHandbookTab.jsx",
+  "objectHandbookWorkflow.js",
 ].map(file => read(`src/components/objects/${file}`)).join("\n");
 assert.doesNotMatch(
   objectModuleFrontend,
-  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectOperationalModule|ObjectOperationalModuleRevision|ObjectRelationship|ObjectSecurityPlan|ObjectSecurityPlanRevision|ObjectSection|ThirdPartyOrganization)/,
+  /base44\.entities\.(ObjectWarningAddress|WarningAddressAvailabilityOverride|ObjectKey|ObjectKeyAssignment|ObjectKeySet|ObjectInstallation|ObjectInstallationCredential|ObjectHandbookCategory|ObjectHandbookArticle|ObjectOperationalModule|ObjectOperationalModuleRevision|ObjectRelationship|ObjectSecurityPlan|ObjectSecurityPlanRevision|ObjectSection|ThirdPartyOrganization)/,
   "Objectmodules mogen beveiligde entiteiten niet rechtstreeks lezen of muteren",
 );
 assert.match(
@@ -525,6 +562,14 @@ for (const action of [
   "create_object_installation",
   "update_object_installation",
   "archive_object_installation",
+  "list_object_handbook",
+  "create_object_handbook_category",
+  "update_object_handbook_category",
+  "archive_object_handbook_category",
+  "create_object_handbook_article",
+  "update_object_handbook_article",
+  "archive_object_handbook_article",
+  "sync_object_installation_handbooks",
   "list_object_relationships",
   "create_object_relationship",
   "update_object_relationship",

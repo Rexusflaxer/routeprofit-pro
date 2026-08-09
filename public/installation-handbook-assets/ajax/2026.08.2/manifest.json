@@ -1,0 +1,44 @@
+{
+  "manufacturer": "Ajax Systems",
+  "release": "2026.08.2",
+  "retrieved_at": "2026-08-09",
+  "rights_notice": "Official Ajax Systems images and icons. Ajax Systems retains all rights. Production use requires the applicable Ajax partner or brand permission.",
+  "source_pages": [
+    "https://ajax.systems/nl/support/manuals/keypad/",
+    "https://ajax.systems/nl/support/manuals/keypad-plus/",
+    "https://ajax.systems/nl/support/manuals/keypad-combi/",
+    "https://ajax.systems/nl/support/manuals/keypad-touchscreen/",
+    "https://ajax.systems/nl/support/manuals/keypad-outdoor-jeweller/",
+    "https://ajax.systems/support/posts/one-arming-device-deactivation/",
+    "https://ajax.systems/support/posts/ajax-group-mode/"
+  ],
+  "assets": [
+    { "key": "ajax:icon:armed", "file": "icons/armed.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Armed_M_f14f305184.svg", "sha256": "ed0b696feab2f2aef2e69f4f7b6c8344ade87ca64d914a25145d6fb74456259b", "alt": "Ajax pictogram Ingeschakeld" },
+    { "key": "ajax:icon:disarmed", "file": "icons/disarmed.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Disarmed_M_ca9052b2b8.svg", "sha256": "4083b1e94ec4bf3dad1bb6d473073c61f66a5369f10ebeb69e76d9d1f360814d", "alt": "Ajax pictogram Uitgeschakeld" },
+    { "key": "ajax:icon:night-mode", "file": "icons/night-mode.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Night_Mode_M_b18da6d320.svg", "sha256": "9d57816cf566d3d123e442f2346403163f6a8bfece94dc494d15754c710f6708", "alt": "Ajax pictogram Nachtmodus" },
+    { "key": "ajax:icon:reset", "file": "icons/reset.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Reset_818738d6d8.svg", "sha256": "eed5f971193a951b212a5923368d26e8deb260804c8c176f22e5124966c5d65b", "alt": "Ajax pictogram Wissen" },
+    { "key": "ajax:icon:function", "file": "icons/function.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Function_e68079ba98.svg", "sha256": "8920dc6276bd97f6956cc579b43fbc2e3c7db6b79e63cde4145f4848eaf50340", "alt": "Ajax functiepictogram" },
+    { "key": "ajax:icon:control", "file": "icons/control.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Control_Filled_M_892286dfc3.svg", "sha256": "f5231f0307d7d9e34417d213cecfbf66cf60f4f4a9b4c90be6d33c4f0b6ee883", "alt": "Ajax tab Bediening" },
+    { "key": "ajax:icon:user", "file": "icons/user.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/User_Black_M_4ea9c3821f.svg", "sha256": "7a885799ab0e7269d2bc91b0d132200e2216c7d9871a52147a9ac1716b9bc4f0", "alt": "Ajax gebruikerspictogram" },
+    { "key": "ajax:icon:pass-tag", "file": "icons/pass-tag.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Pass_Tag_Reading_M_30795c8e02.svg", "sha256": "85fbd36b5a369b1f5a1d81c36b024c3d99ba7e728d2da45f03cdfb4770f947c7", "alt": "Ajax Pass- en Tag-lezer" },
+    { "key": "ajax:icon:settings", "file": "icons/settings.svg", "kind": "icon", "source_url": "https://ajax.systems/cdn/upload/Settings_M_25c64f83bb.svg", "sha256": "3b47911a7b43724f8f1da181b64e09fe78dcc51b3056f4f1f2cfca30b88d9601", "alt": "Ajax instellingenpictogram" },
+
+    { "key": "ajax:image:keypad:functional", "file": "images/keypad-functional-elements.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_functional_elements_c2303248a9@1.jpg", "sha256": "13a6c1fbc09643f856d4b7174160406da57996876ef8883fa46c544d6212cb5d", "alt": "Officiële Ajax KeyPad voorzijde met genummerde bedieningselementen" },
+    { "key": "ajax:image:keypad-plus:functional", "file": "images/keypad-plus-functional-elements.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_plus_funkczionalnye_elementy_7cc80fc29e@1.jpg", "sha256": "cc032e33a04c1ca5ed1a3e77c5286f17d148ef7af66b8c173f99244b8cc90281", "alt": "Officiële Ajax KeyPad Plus voorzijde met genummerde bedieningselementen" },
+    { "key": "ajax:image:keypad-combi:functional", "file": "images/keypad-combi-functional-elements.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/2_kpc_faq_front_022af71252@1.jpg", "sha256": "8ba412274836852d48495224642513fb83ee2149f61080c71af8bc9a5ea02c7d", "alt": "Officiële Ajax KeyPad Combi voorzijde met bedieningselementen" },
+    { "key": "ajax:image:touchscreen:functional", "file": "images/keypad-touchscreen-functional-elements.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_touchscreen_1_0_new_a89ffd08d3@1.jpg", "sha256": "ccfc7199c5ff6f50ba9ade3e5cb67ab92f44135c68d16bec712fc0bf647caf7f", "alt": "Officiële Ajax KeyPad TouchScreen met bedieningselementen" },
+    { "key": "ajax:image:touchscreen:control", "file": "images/touchscreen-control.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_touchscreen_13_0_1_en_46810f7f18@1.jpg", "sha256": "5004b59eed135145397646c2c93e50c7f74093a00151335d06807912e49ca903", "alt": "Officieel Ajax TouchScreen-scherm voor objectbediening" },
+    { "key": "ajax:image:touchscreen:groups", "file": "images/touchscreen-groups.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_touchscreen_13_0_2_en_d8ede49c49@1.jpg", "sha256": "70618fb66cd2db4533bf75a38917b302ea561c7ed5a82b7aedd8987c51bc7c00", "alt": "Officieel Ajax TouchScreen-scherm voor groepsbediening" },
+    { "key": "ajax:image:touchscreen:night", "file": "images/touchscreen-night-mode.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/keypad_touchscreen_13_0_3_en_cb9cb2949f@1.jpg", "sha256": "a3a5c53a00e97f92b147bde98c8a29bf873e822899b0c8c14f3e8aed89742779", "alt": "Officieel Ajax TouchScreen-scherm voor Nachtmodus" },
+    { "key": "ajax:image:outdoor:functional", "file": "images/keypad-outdoor-functional-elements.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/kpo_j_functional_1_bdc17b3eea@1.jpg", "sha256": "a123331fa9d53949d1ce8de5b8c2015e7b11f0d32b2337e65fecc55805887c15", "alt": "Officiële Ajax KeyPad Outdoor voorzijde met bedieningselementen" },
+
+    { "key": "ajax:image:bypass:device", "file": "images/one-time-deactivation-device.png", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/one_time_bypass_2_1_en_977f6984b4.png", "sha256": "f5c48bc2111c2e47a319b9f91938cfb88343b81224e1fea8e5ae325feef22976", "alt": "Ajax-app met de te overbruggen melder geselecteerd" },
+    { "key": "ajax:image:bypass:settings", "file": "images/one-time-deactivation-settings.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/one_time_bypass_2_2_en_386c792b3f.jpg", "sha256": "592394482c0acc506ffe8a6c8f525d52bf3bfbe00257e26986a294f1466537d6", "alt": "Ajax-instellingen voor eenmalige deactivering" },
+    { "key": "ajax:image:bypass:choice", "file": "images/one-time-deactivation-choice.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/one_time_bypass_2_3_en_1870de3bd5.jpg", "sha256": "537f30737ed9e76e985831c55666a8dcecb786b701c33bb0ebbeb84c7cfdc2a9", "alt": "Ajax-keuze voor volledige of deksel-deactivering" },
+    { "key": "ajax:image:bypass:result", "file": "images/one-time-deactivation-result.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/one_time_bypass_3_1_en_aacbf64bb1.jpg", "sha256": "ebb21d77392034015724ba0ba478856504acd01f1b9ee1b7efeb37600940f962", "alt": "Ajax-status na eenmalige deactivering" },
+    { "key": "ajax:image:app:arm", "file": "images/app-arm.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/6_arm_button_en_3ae72cd1dc.jpg", "sha256": "253c0f7998c37e8290909e827b0d39acf7de6446eb6134284ec64a6805a65377", "alt": "Ajax-app knop voor inschakelen" },
+    { "key": "ajax:image:app:disarm", "file": "images/app-disarm.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/7_disarm_button_en_c4adaa704b.jpg", "sha256": "1cab4b4fb5cfac9162e54331ff24fc0b8871ef392a21e90d6949503b5fd1b8d3", "alt": "Ajax-app knop voor uitschakelen" },
+    { "key": "ajax:image:app:night", "file": "images/app-night-mode.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/8_night_mode_en_44e4deced8.jpg", "sha256": "f7c38518106a0e16cd12f4b8f5e5b62f7eb6a478e3a09fce3ba00bc0e2300b10", "alt": "Ajax-app knop voor Nachtmodus" },
+    { "key": "ajax:image:app:group", "file": "images/app-group.jpg", "kind": "image", "source_url": "https://ajax.systems/cdn/upload/9_arm_group_en_ea24941291.jpg", "sha256": "0228c02b1dc50c64a97c454f22430a8da87a06e7d0db2079e3aca31753703e12", "alt": "Ajax-app bediening van een groep" }
+  ]
+}

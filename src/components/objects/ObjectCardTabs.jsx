@@ -221,9 +221,13 @@ export default function ObjectCardTabs({
   onPageChange,
   view,
   selectedRow,
+  selectedCategoryId,
+  selectedInstallationId,
   onOpenCreate,
   onOpenEdit,
   onOpenManual,
+  onOpenArticle,
+  onSelectCategory,
   onCloseView,
   onRegisterModuleNavigationGuard,
 }) {
@@ -401,11 +405,16 @@ export default function ObjectCardTabs({
               object={object}
               view={view}
               selectedRow={selectedRow}
+              selectedCategoryId={selectedCategoryId}
+              selectedInstallationId={selectedInstallationId}
               searchTerm={searchTerm}
               onSearchChange={onSearchChange}
+              onSelectCategory={onSelectCategory}
               onOpenCreate={onOpenCreate}
               onOpenEdit={onOpenEdit}
+              onOpenArticle={onOpenArticle}
               onCloseView={onCloseView}
+              onRegisterNavigationGuard={onRegisterModuleNavigationGuard}
             />
           ) : activeTab === "floor-plan" ? (
             <ObjectFloorPlanPlaceholderTab />

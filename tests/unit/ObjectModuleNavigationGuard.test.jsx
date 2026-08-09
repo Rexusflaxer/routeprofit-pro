@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useObjectModuleNavigationGuard } from "@/components/objects/useObjectModuleNavigationGuard";
 
-function GuardHarness({ initiallyDirty = true, onLeave = () => {}, onSave = async () => {}, register = null }) {
+function GuardHarness({ initiallyDirty = true, onLeave = () => {}, onSave = async () => {}, onDiscard, register = null }) {
   const [dirty, setDirty] = useState(initiallyDirty);
   const guard = useObjectModuleNavigationGuard({
     dirty,
@@ -13,6 +13,7 @@ function GuardHarness({ initiallyDirty = true, onLeave = () => {}, onSave = asyn
       await onSave();
       setDirty(false);
     },
+    onDiscard,
     onRegisterNavigationGuard: register,
   });
   return <>
@@ -88,5 +89,33 @@ describe("useObjectModuleNavigationGuard", () => {
     expect(window.history.back).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Zonder opslaan doorgaan" }));
     await waitFor(() => expect(window.history.back).toHaveBeenCalledTimes(2));
+  });
+
+  it("ruimt een lokaal concept volledig op voordat de aangevraagde navigatie start", async () => {
+    const volgorde = [];
+    const onDiscard = vi.fn(async () => { volgorde.push("cleanup"); });
+    const onLeave = vi.fn(() => { volgorde.push("navigate"); });
+    render(<MemoryRouter><GuardHarness onLeave={onLeave} onDiscard={onDiscard} /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Werkruimte verlaten" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zonder opslaan doorgaan" }));
+
+    await waitFor(() => expect(onDiscard).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onLeave).toHaveBeenCalledOnce());
+    expect(volgorde).toEqual(["cleanup", "navigate"]);
+  });
+
+  it("blijft in de werkruimte wanneer het opruimen van een lokaal concept mislukt", async () => {
+    const onDiscard = vi.fn().mockRejectedValue(new Error("Tijdelijke afbeelding kon niet worden verwijderd"));
+    const onLeave = vi.fn();
+    render(<MemoryRouter><GuardHarness onLeave={onLeave} onDiscard={onDiscard} /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Werkruimte verlaten" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zonder opslaan doorgaan" }));
+
+    await waitFor(() => expect(onDiscard).toHaveBeenCalledOnce());
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Wijzigingen nog niet opgeslagen" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Zonder opslaan doorgaan" })).toBeEnabled());
   });
 });

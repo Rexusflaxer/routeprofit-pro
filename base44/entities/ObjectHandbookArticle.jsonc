@@ -2,46 +2,133 @@
   "name": "ObjectHandbookArticle",
   "type": "object",
   "properties": {
-    "customer_id": {
-      "type": "string"
-    },
-    "object_id": {
-      "type": "string"
-    },
-    "category_id": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "title": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "category_id": { "type": ["string", "null"] },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "summary": { "type": ["string", "null"], "maxLength": 500 },
     "content": {
       "type": "string",
-      "maxLength": 20000
+      "maxLength": 60000,
+      "description": "Door de server afgeleide plattetekstmirror voor legacyweergave en zoeken"
     },
-    "status": {
+    "content_format": {
       "type": "string",
-      "enum": [
-        "active",
-        "archived"
-      ],
-      "default": "active"
+      "enum": ["plain_text", "blocks_v1"],
+      "default": "plain_text"
     },
-    "version": {
-      "type": "number",
-      "minimum": 1,
-      "default": 1
-    }
+    "managed_blocks": {
+      "type": "array",
+      "maxItems": 80,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "type": { "type": "string", "enum": ["heading", "paragraph", "steps", "image", "callout", "button_sequence", "link", "divider"] },
+          "text": { "type": ["string", "null"], "maxLength": 6000 },
+          "level": { "type": ["integer", "null"], "minimum": 2, "maximum": 4 },
+          "tone": { "type": ["string", "null"], "enum": ["info", "warning", "danger", "success", null] },
+          "items": { "type": "array", "maxItems": 40, "items": { "type": "string", "maxLength": 1200 }, "default": [] },
+          "asset_key": { "type": ["string", "null"], "maxLength": 200 },
+          "managed_file_id": { "type": ["string", "null"] },
+          "alt": { "type": ["string", "null"], "maxLength": 300 },
+          "caption": { "type": ["string", "null"], "maxLength": 500 },
+          "layout": { "type": ["string", "null"], "enum": ["wide", "contained", "inline", null] },
+          "sequence": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["text", "icon"] },
+                "value": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "label": { "type": ["string", "null"], "maxLength": 200 }
+              },
+              "required": ["type", "value"],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "target_type": { "type": ["string", "null"], "enum": ["article", "category", null] },
+          "target_id": { "type": ["string", "null"] },
+          "target_key": { "type": ["string", "null"], "maxLength": 400 },
+          "label": { "type": ["string", "null"], "maxLength": 240 },
+          "description": { "type": ["string", "null"], "maxLength": 500 }
+        },
+        "required": ["id", "type"],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "supplement_blocks": {
+      "type": "array",
+      "maxItems": 80,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "type": { "type": "string", "enum": ["heading", "paragraph", "steps", "image", "callout", "button_sequence", "link", "divider"] },
+          "text": { "type": ["string", "null"], "maxLength": 6000 },
+          "level": { "type": ["integer", "null"], "minimum": 2, "maximum": 4 },
+          "tone": { "type": ["string", "null"], "enum": ["info", "warning", "danger", "success", null] },
+          "items": { "type": "array", "maxItems": 40, "items": { "type": "string", "maxLength": 1200 }, "default": [] },
+          "asset_key": { "type": ["string", "null"], "maxLength": 200 },
+          "managed_file_id": { "type": ["string", "null"] },
+          "alt": { "type": ["string", "null"], "maxLength": 300 },
+          "caption": { "type": ["string", "null"], "maxLength": 500 },
+          "layout": { "type": ["string", "null"], "enum": ["wide", "contained", "inline", null] },
+          "sequence": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["text", "icon"] },
+                "value": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "label": { "type": ["string", "null"], "maxLength": 200 }
+              },
+              "required": ["type", "value"],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "target_type": { "type": ["string", "null"], "enum": ["article", "category", null] },
+          "target_id": { "type": ["string", "null"] },
+          "target_key": { "type": ["string", "null"], "maxLength": 400 },
+          "label": { "type": ["string", "null"], "maxLength": 240 },
+          "description": { "type": ["string", "null"], "maxLength": 500 }
+        },
+        "required": ["id", "type"],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "article_key": { "type": ["string", "null"], "maxLength": 300 },
+    "origin": { "type": "string", "enum": ["user", "installation_template"], "default": "user" },
+    "source_installation_id": { "type": ["string", "null"] },
+    "source_manual_key": { "type": ["string", "null"], "maxLength": 200 },
+    "source_manual_version": { "type": ["string", "null"], "maxLength": 80 },
+    "source_procedure_key": { "type": ["string", "null"], "maxLength": 120 },
+    "source_urls": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 1000 }, "default": [] },
+    "generated_checksum": { "type": ["string", "null"], "maxLength": 128 },
+    "read_only": { "type": "boolean", "default": false },
+    "sort_order": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 1000 },
+    "creation_idempotency_key": { "type": ["string", "null"] },
+    "creation_request_fingerprint": { "type": ["string", "null"] },
+    "creation_actor_user_id": { "type": ["string", "null"] },
+    "creation_mutation_target": { "type": ["string", "null"] },
+    "customer_platform_last_mutation_key_hash": { "type": ["string", "null"] },
+    "customer_platform_last_mutation_recovery": { "type": ["object", "null"], "additionalProperties": true },
+    "customer_platform_mutation_key_hashes": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "customer_platform_mutation_recoveries": { "type": ["object", "null"], "additionalProperties": true },
+    "status": { "type": "string", "enum": ["active", "archived", "superseded"], "default": "active" },
+    "version": { "type": "integer", "minimum": 1, "maximum": 2147483647, "default": 1 }
   },
-  "required": [
-    "customer_id",
-    "object_id",
-    "title",
-    "content",
-    "status"
-  ]
+  "required": ["customer_id", "object_id", "title", "content", "status"],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
 }

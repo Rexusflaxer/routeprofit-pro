@@ -85,6 +85,7 @@ const READ_ACTIONS = new Set([
   'list_object_logbook',
   'list_object_keys',
   'list_object_installations',
+  'list_object_handbook',
   'list_object_relationships',
   'list_object_modules',
   'get_object_module',
@@ -94,6 +95,11 @@ const READ_ACTIONS = new Set([
   'list_commercial',
   'list_billing',
   'validate_contract_rates',
+]);
+
+const HANDBOOK_ENTITY_MUTATION_ACTIONS = new Set([
+  'create_object_handbook_category', 'update_object_handbook_category', 'archive_object_handbook_category',
+  'create_object_handbook_article', 'update_object_handbook_article', 'archive_object_handbook_article',
 ]);
 
 const MUTATION_ACTIONS = new Set([
@@ -110,6 +116,9 @@ const MUTATION_ACTIONS = new Set([
   'upsert_warning_availability_overrides', 'delete_warning_availability_override',
   'create_object_key', 'update_object_key', 'archive_object_key',
   'create_object_installation', 'update_object_installation', 'archive_object_installation',
+  'create_object_handbook_category', 'update_object_handbook_category', 'archive_object_handbook_category',
+  'create_object_handbook_article', 'update_object_handbook_article', 'archive_object_handbook_article',
+  'sync_object_installation_handbooks',
   'create_object_relationship', 'update_object_relationship', 'archive_object_relationship',
   'create_object_module', 'save_object_module_draft', 'publish_object_module', 'set_object_module_status',
   'create_object_security_plan', 'save_object_security_plan_draft',
@@ -1016,6 +1025,8 @@ function mutationTarget(action: string, body: LooseRecord) {
     'key_id',
     'key_assignment_id',
     'installation_id',
+    'category_id',
+    'article_id',
     'relationship_id',
     'module_id',
     'module_revision_id',
@@ -1151,6 +1162,26 @@ async function mutationReplay(
         );
       }
       return sanitizedCustomerObjectReplay(matching.payload.result, customerId);
+    } else if (HANDBOOK_ENTITY_MUTATION_ACTIONS.has(action)) {
+      if (
+        !storedFingerprint || matching.actor_id !== user.id || storedFingerprint !== requestFingerprint ||
+        asString(matching.payload?.mutation_target) !== target
+      ) rejectIdempotencyReuse();
+      const storedResult = matching.payload.result as LooseRecord;
+      const { customer, object } = await requireCustomerObjectScope(base44, body);
+      if (asString(storedResult.customer_id) !== customer.id || asString(storedResult.object_id) !== object.id) rejectIdempotencyReuse();
+      const resourceId = asString(storedResult.resource_id);
+      if (storedResult.resource_type === 'ObjectHandbookArticle' && resourceId) {
+        const article = await requireRecord(base44, 'ObjectHandbookArticle', resourceId, 'Handboekartikel');
+        if (article.customer_id !== customer.id || article.object_id !== object.id) rejectIdempotencyReuse();
+        return { ...storedResult, article: safeHandbookArticle(article) };
+      }
+      if (storedResult.resource_type === 'ObjectHandbookCategory' && resourceId) {
+        const handbookCategory = await requireRecord(base44, 'ObjectHandbookCategory', resourceId, 'Handboekcategorie');
+        if (handbookCategory.customer_id !== customer.id || handbookCategory.object_id !== object.id) rejectIdempotencyReuse();
+        return { ...storedResult, handbook_category: safeHandbookCategory(handbookCategory) };
+      }
+      rejectIdempotencyReuse();
     } else if (
       storedFingerprint &&
       (
@@ -1339,8 +1370,63 @@ async function installationMutationMarkerReplay(
     recovery.request_fingerprint !== requestFingerprint || recovery.mutation_target !== target ||
     !recovery.result || typeof recovery.result !== 'object' || Array.isArray(recovery.result)
   ) rejectIdempotencyReuse();
+  const { object } = await requireCustomerObjectScope(base44, body);
+  const reservation = await reserveObjectInstallationMutation(
+    base44,
+    user,
+    object.id,
+    idempotencyKey,
+    requestFingerprint,
+    target,
+  );
+  try {
+    await requireNoRetiringInstallationHandbookLinks(base44, object, installation, installation);
+    await reconcileInstallationHandbooks(base44, object);
+    const latest = await requireRecord(base44, 'ObjectInstallation', installation.id, 'Installatie');
+    return { ...(recovery.result as LooseRecord), installation: safeObjectInstallation(latest) };
+  } finally {
+    await releaseObjectInstallationMutation(base44, reservation);
+  }
+}
+
+async function handbookMutationMarkerReplay(
+  base44: LooseRecord,
+  user: LooseRecord,
+  action: string,
+  body: LooseRecord,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const articleAction = ['update_object_handbook_article', 'archive_object_handbook_article'].includes(action);
+  const categoryAction = ['update_object_handbook_category', 'archive_object_handbook_category'].includes(action);
+  if (!articleAction && !categoryAction) return null;
+  const keyHash = await sha256(idempotencyKey);
+  const entityName = articleAction ? 'ObjectHandbookArticle' : 'ObjectHandbookCategory';
+  const idField = articleAction ? 'article_id' : 'category_id';
+  const matches = await getEntity(base44, entityName).filter({
+    $or: [
+      { customer_platform_mutation_key_hashes: { $all: [keyHash] } },
+      { customer_platform_last_mutation_key_hash: keyHash },
+    ],
+  }, '-updated_date', 2);
+  if (matches.length > 1) throw new ApiError(409, 'Handboekmutatieherstel is niet eenduidig; handmatige reconciliatie vereist');
+  if (!matches.length) return null;
+  const record = matches[0];
+  const recoveries = record.customer_platform_mutation_recoveries;
+  const recovery = (recoveries && typeof recoveries === 'object' && !Array.isArray(recoveries) ? recoveries[keyHash] : null)
+    || (record.customer_platform_last_mutation_key_hash === keyHash ? record.customer_platform_last_mutation_recovery : null);
+  if (
+    record.id !== requireString(body, idField) || record.customer_id !== requireString(body, 'customer_id') ||
+    record.object_id !== requireString(body, 'object_id') || !recovery || recovery.action !== action ||
+    recovery.actor_id !== user.id || recovery.request_fingerprint !== requestFingerprint ||
+    recovery.mutation_target !== target || !recovery.result || typeof recovery.result !== 'object' || Array.isArray(recovery.result)
+  ) rejectIdempotencyReuse();
   await requireCustomerObjectScope(base44, body);
-  return recovery.result as LooseRecord;
+  return {
+    ...(recovery.result as LooseRecord),
+    ...(articleAction ? { article: safeHandbookArticle(record) } : { handbook_category: safeHandbookCategory(record) }),
+  };
 }
 
 async function relationshipMutationMarkerReplay(
@@ -1486,6 +1572,13 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   create_object_installation: 'Installatie toegevoegd',
   update_object_installation: 'Installatie gewijzigd',
   archive_object_installation: 'Installatie gearchiveerd',
+  create_object_handbook_category: 'Handboekcategorie toegevoegd',
+  update_object_handbook_category: 'Handboekcategorie gewijzigd',
+  archive_object_handbook_category: 'Handboekcategorie gearchiveerd',
+  create_object_handbook_article: 'Handboekartikel toegevoegd',
+  update_object_handbook_article: 'Handboekartikel gewijzigd',
+  archive_object_handbook_article: 'Handboekartikel gearchiveerd',
+  sync_object_installation_handbooks: 'Installatiehandleidingen bijgewerkt',
   create_object_relationship: 'Relatie toegevoegd',
   update_object_relationship: 'Relatie gewijzigd',
   archive_object_relationship: 'Relatie gearchiveerd',
@@ -1598,9 +1691,22 @@ async function recordMutationResult(
   const context = eventContext(result, body);
   if (!context.customer_id) return;
   const actorName = asString(user.full_name || user.display_name || user.name || user.email) || 'Backofficegebruiker';
+  const handbookAuditResult = ['ObjectHandbookArticle', 'ObjectHandbookCategory'].includes(asString(result.resource_type))
+    ? {
+      customer_id: result.customer_id || body.customer_id || null,
+      object_id: result.object_id || body.object_id || null,
+      resource_type: result.resource_type,
+      resource_id: result.resource_id,
+      category: result.category,
+      summary: result.summary,
+      changes: Array.isArray(result.changes) ? result.changes : [],
+      ...(result.article ? { article: pick(result.article, ['id', 'title', 'category_id', 'origin', 'source_manual_version', 'version', 'status']) } : {}),
+      ...(result.handbook_category && typeof result.handbook_category === 'object' ? { handbook_category: pick(result.handbook_category, ['id', 'name', 'parent_category_id', 'origin', 'version', 'status']) } : {}),
+    }
+    : null;
   const auditResult = result.audit_result && typeof result.audit_result === 'object' && !Array.isArray(result.audit_result)
     ? result.audit_result
-    : result;
+    : handbookAuditResult || result;
   await appendEvent(base44, {
     ...context,
     event_type: action.replaceAll('_', '.'),
@@ -6245,7 +6351,7 @@ const INSTALLATION_CREDENTIAL_LABELS: Record<string, string> = {
 };
 const installationCredentialTypeLabel = (type: string) => INSTALLATION_CREDENTIAL_LABELS[type] || 'Beveiligde code';
 
-const AJAX_INSTALLATION_MANUAL_VERSION = '2026.08.1';
+const AJAX_INSTALLATION_MANUAL_VERSION = '2026.08.2';
 const AJAX_CONTROL_DEVICES: Record<string, { name: string; manualKey: string }> = {
   'keypad': { name: 'KeyPad', manualKey: 'ajax:numeric-keypad:nl' },
   'keypad-plus': { name: 'KeyPad Plus', manualKey: 'ajax:numeric-reader-keypad:nl' },
@@ -6254,7 +6360,7 @@ const AJAX_CONTROL_DEVICES: Record<string, { name: string; manualKey: string }> 
   'keypad-outdoor': { name: 'KeyPad Outdoor', manualKey: 'ajax:outdoor-keypad:nl' },
   'keypad-jeweller': { name: 'KeyPad Jeweller', manualKey: 'ajax:numeric-keypad:nl' },
   'keypad-plus-jeweller': { name: 'KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
-  'keypad-combi-jeweller': { name: 'KeyPad Combi Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
+  'keypad-combi-jeweller': { name: 'KeyPad Combi Jeweller', manualKey: 'ajax:numeric-reader-buzzer-keypad:nl' },
   'keypad-touchscreen-jeweller': { name: 'KeyPad TouchScreen Jeweller', manualKey: 'ajax:touchscreen-keypad:nl' },
   'superior-keypad-fibra': { name: 'Superior KeyPad Fibra', manualKey: 'ajax:numeric-keypad:nl' },
   'superior-keypad-plus-jeweller': { name: 'Superior KeyPad Plus Jeweller', manualKey: 'ajax:numeric-reader-keypad:nl' },
@@ -6711,6 +6817,1003 @@ function installationChanges(before: LooseRecord | null, after: LooseRecord, cre
   }), ...credentialChanges];
 }
 
+const HANDBOOK_CONTENT_FORMAT = 'blocks_v1';
+const HANDBOOK_CATEGORY_ORIGINS = new Set(['user', 'installation_template']);
+const HANDBOOK_BLOCK_TYPES = new Set(['heading', 'paragraph', 'steps', 'image', 'callout', 'button_sequence', 'link', 'divider']);
+const HANDBOOK_CALLOUT_TONES = new Set(['info', 'warning', 'danger', 'success']);
+const HANDBOOK_IMAGE_LAYOUTS = new Set(['wide', 'contained', 'inline']);
+const HANDBOOK_LINK_TYPES = new Set(['article', 'category']);
+const HANDBOOK_MAX_BLOCKS = 80;
+const HANDBOOK_MAX_TEXT_LENGTH = 60000;
+const HANDBOOK_MAX_SERIALIZED_BYTES = 120000;
+const AJAX_HANDBOOK_ICON_KEYS = new Set([
+  'ajax:icon:armed', 'ajax:icon:disarmed', 'ajax:icon:night-mode', 'ajax:icon:reset',
+  'ajax:icon:function', 'ajax:icon:control', 'ajax:icon:user', 'ajax:icon:pass-tag', 'ajax:icon:settings',
+]);
+const AJAX_HANDBOOK_IMAGE_KEYS = new Set([
+  'ajax:image:keypad:functional', 'ajax:image:keypad-plus:functional', 'ajax:image:keypad-combi:functional',
+  'ajax:image:touchscreen:functional', 'ajax:image:touchscreen:control', 'ajax:image:touchscreen:groups',
+  'ajax:image:touchscreen:night', 'ajax:image:outdoor:functional',
+  'ajax:image:bypass:device', 'ajax:image:bypass:settings', 'ajax:image:bypass:choice', 'ajax:image:bypass:result',
+  'ajax:image:app:arm', 'ajax:image:app:disarm', 'ajax:image:app:night', 'ajax:image:app:group',
+]);
+const AJAX_HANDBOOK_ASSET_KEYS = new Set([...AJAX_HANDBOOK_ICON_KEYS, ...AJAX_HANDBOOK_IMAGE_KEYS]);
+const AJAX_MANUAL_SOURCE_BY_FAMILY: Record<string, string> = {
+  numeric: 'https://ajax.systems/nl/support/manuals/keypad/',
+  reader: 'https://ajax.systems/nl/support/manuals/keypad-plus/',
+  combi: 'https://ajax.systems/nl/support/manuals/keypad-combi/',
+  touchscreen: 'https://ajax.systems/nl/support/manuals/keypad-touchscreen/',
+  outdoor: 'https://ajax.systems/nl/support/manuals/keypad-outdoor-jeweller/',
+  app: 'https://ajax.systems/support/posts/ajax-group-mode/',
+};
+const AJAX_BYPASS_SOURCE = 'https://ajax.systems/support/posts/one-arming-device-deactivation/';
+
+const handbookBlock = (id: string, type: string, data: LooseRecord = {}) => ({ id, type, ...data });
+const handbookParagraph = (id: string, text: string) => handbookBlock(id, 'paragraph', { text });
+const handbookHeading = (id: string, text: string, level = 2) => handbookBlock(id, 'heading', { text, level });
+const handbookSteps = (id: string, items: string[]) => handbookBlock(id, 'steps', { items });
+const handbookCallout = (id: string, text: string, tone = 'info') => handbookBlock(id, 'callout', { text, tone });
+const handbookImage = (id: string, assetKey: string, alt: string, caption: string, layout = 'wide') => handbookBlock(id, 'image', {
+  asset_key: assetKey, managed_file_id: null, alt, caption, layout,
+});
+const handbookSequence = (id: string, sequence: LooseRecord[]) => handbookBlock(id, 'button_sequence', { sequence });
+const sequenceText = (value: string, label: string | null = null) => ({ type: 'text', value, label });
+const sequenceIcon = (value: string, label: string) => ({ type: 'icon', value, label });
+
+function ajaxManualFamily(manualKey: string) {
+  if (manualKey === 'ajax:numeric-keypad:nl') return 'numeric';
+  if (manualKey === 'ajax:numeric-reader-keypad:nl') return 'reader';
+  if (manualKey === 'ajax:numeric-reader-buzzer-keypad:nl') return 'combi';
+  if (manualKey === 'ajax:touchscreen-keypad:nl') return 'touchscreen';
+  if (manualKey === 'ajax:outdoor-keypad:nl') return 'outdoor';
+  if (manualKey === 'ajax:app-control:nl') return 'app';
+  return null;
+}
+
+function ajaxFunctionalAsset(family: string) {
+  if (family === 'reader') return 'ajax:image:keypad-plus:functional';
+  if (family === 'combi') return 'ajax:image:keypad-combi:functional';
+  if (family === 'touchscreen') return 'ajax:image:touchscreen:functional';
+  if (family === 'outdoor') return 'ajax:image:outdoor:functional';
+  if (family === 'numeric') return 'ajax:image:keypad:functional';
+  return null;
+}
+
+function ajaxOverviewArticle(family: string, installation: LooseRecord) {
+  const image = ajaxFunctionalAsset(family);
+  const panel = asString(installation.control_device_name) || 'Ajax-bediening';
+  const blocks = [
+    handbookCallout('overview-safety', 'Controleer vóór iedere handeling de objectnaam, de actuele systeemstatus en je bevoegdheid. Objectspecifieke instructies en meldkamerafspraken gaan altijd voor.', 'warning'),
+    handbookParagraph('overview-intro', `${panel} is aan deze installatie gekoppeld. Gebruik alleen de bedieningswijze die in dit handboek staat en bevestig iedere statuswijziging op het paneel of in de Ajax-app.`),
+  ];
+  if (image) blocks.push(handbookImage('overview-panel', image, `Officiële afbeelding van ${panel}`, 'De nummers en symbolen op deze originele Ajax-afbeelding helpen het juiste bedienpaneel en de juiste toetsen te herkennen.', 'contained'));
+  blocks.push(handbookSteps('overview-checks', [
+    'Controleer dat je bij het juiste object, systeem en — indien van toepassing — de juiste groep of sectie bent.',
+    'Controleer storingen, openstaande melders en de actuele status vóórdat je een opdracht geeft.',
+    'Voer uitsluitend je eigen bevoegde code, Pass, Tag of smartphone-autorisatie in; codes staan nooit in dit artikel.',
+    'Wacht op de zichtbare of hoorbare bevestiging en controleer daarna de werkelijke nieuwe status.',
+  ]));
+  return {
+    key: 'overview', title: 'Bedienpaneel herkennen en veilig beginnen',
+    summary: `Herken ${panel} en voer de vaste controles uit voordat je het Ajax-systeem bedient.`,
+    blocks, sources: [AJAX_MANUAL_SOURCE_BY_FAMILY[family]], sortOrder: 100,
+  };
+}
+
+function numericSecurityArticles(family: string) {
+  const reader = family === 'reader' || family === 'combi';
+  const authentication = reader ? 'Bevoegde code of Pass/Tag' : 'Bevoegde code';
+  const authenticationStep = reader
+    ? 'Activeer het paneel met een handbeweging. Voer de bevoegde code in óf bied Pass/Tag aan bij het golfsymbool. Voer een aanvullende bevestigingscode in wanneer die functie is ingesteld.'
+    : 'Raak het paneel eenmaal aan om het te activeren en voer daarna de bevoegde bediendeel- of persoonlijke code in.';
+  return [
+    {
+      key: 'arm', title: 'Volledig inschakelen', summary: 'Schakel het volledige Ajax-object gecontroleerd in en controleer de bevestiging.', sortOrder: 200,
+      blocks: [
+        handbookSequence('arm-sequence', [sequenceText(authentication), sequenceIcon('ajax:icon:armed', 'Inschakelen')]),
+        handbookSteps('arm-steps', [authenticationStep, 'Druk op de toets Inschakelen. Bij Easy Armed Mode met Pass/Tag kan de extra modustoets volgens de installatie-instelling vervallen.', 'Controleer de bevestiging, eventuele openstaande melders en de ingestelde uitlooptijd.', 'Verlaat het object via de afgesproken route en controleer dat de beveiligde status actief blijft.']),
+        handbookCallout('arm-warning', 'Negeer een storing of openstaande melder nooit zonder expliciete objectinstructie en bevoegdheid.', 'warning'),
+      ],
+    },
+    {
+      key: 'disarm', title: 'Volledig uitschakelen', summary: 'Schakel het Ajax-object uit voordat de beveiligde ruimte wordt betreden.', sortOrder: 300,
+      blocks: [
+        handbookSequence('disarm-sequence', [sequenceText(authentication), sequenceIcon('ajax:icon:disarmed', 'Uitschakelen')]),
+        handbookSteps('disarm-steps', [authenticationStep, 'Druk op de toets Uitschakelen.', 'Controleer dat de uitschakelstatus zichtbaar en bevestigd is vóórdat je verder het object betreedt.', 'Volg bij alarm, sabotage, storing of een onverwachte status direct de objectspecifieke calamiteitenprocedure.']),
+      ],
+    },
+    {
+      key: 'night-mode', title: 'Nachtmodus (deelinschakeling)', summary: 'Activeer uitsluitend de melders die voor Nachtmodus zijn ingesteld.', sortOrder: 400,
+      blocks: [
+        handbookSequence('night-sequence', [sequenceText(authentication), sequenceIcon('ajax:icon:night-mode', 'Nachtmodus')]),
+        handbookSteps('night-steps', ['Controleer vooraf welke melders en ruimten voor Nachtmodus zijn geconfigureerd.', authenticationStep, 'Druk op Nachtmodus en controleer de statusindicatie.', 'Controleer dat alleen de afgesproken deelinschakeling actief is.']),
+        handbookCallout('night-group-note', 'Is het paneel aan één groep gekoppeld, dan kan Nachtmodus met de algemene bediendeelcode niet beschikbaar zijn. Gebruik alleen een persoonlijke code met het juiste recht of volg de objectinstructie.', 'info'),
+      ],
+    },
+    {
+      key: 'groups', title: 'Een groep of sectie bedienen', summary: 'Bedien één specifieke Ajax-groep zonder andere groepen onbedoeld te wijzigen.', sortOrder: 500,
+      blocks: [
+        handbookHeading('groups-general-heading', 'Met een algemene bediendeelcode', 3),
+        handbookSequence('groups-general-arm', [sequenceText('Bediendeelcode'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:armed', 'Inschakelen')]),
+        handbookSequence('groups-general-disarm', [sequenceText('Bediendeelcode'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:disarmed', 'Uitschakelen')]),
+        handbookSequence('groups-general-night', [sequenceText('Bediendeelcode'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:night-mode', 'Nachtmodus')]),
+        handbookHeading('groups-personal-heading', 'Met een persoonlijke code', 3),
+        handbookSequence('groups-personal-arm', [sequenceText('Gebruikers-ID'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Persoonlijke code'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:armed', 'Inschakelen')]),
+        handbookSequence('groups-personal-disarm', [sequenceText('Gebruikers-ID'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Persoonlijke code'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:disarmed', 'Uitschakelen')]),
+        handbookSequence('groups-personal-night', [sequenceText('Gebruikers-ID'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Persoonlijke code'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceIcon('ajax:icon:night-mode', 'Nachtmodus')]),
+        handbookSteps('groups-steps', ['Activeer het paneel en controleer het groepsnummer in de objectspecifieke instructie.', 'Voer de toepasselijke reeks in en kies daarna Inschakelen, Uitschakelen of Nachtmodus.', 'Controleer in de statusindicatie of uitsluitend de bedoelde groep is gewijzigd.']),
+        handbookCallout('groups-assigned', 'Bij een aan één groep toegewezen paneel kan de Groeps-ID vervallen. Verander de reeks niet op eigen initiatief wanneer het paneel anders reageert dan verwacht.', 'info'),
+      ],
+    },
+  ];
+}
+
+function touchscreenSecurityArticles() {
+  return [
+    {
+      key: 'arm', title: 'Volledig inschakelen via het touchscreen', summary: 'Gebruik het tabblad Bediening en volg de ingestelde authenticatievolgorde.', sortOrder: 200,
+      blocks: [
+        handbookImage('touch-arm-screen', 'ajax:image:touchscreen:control', 'Officieel Ajax-scherm voor objectbediening', 'Het officiële Ajax-scherm toont de beschikbare objectstatussen. De taal op het paneel kan afwijken.'),
+        handbookSequence('touch-arm-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:armed', 'Inschakelen')]),
+        handbookSteps('touch-arm-steps', ['Activeer het scherm door te naderen of een hand voor de sensor te houden.', 'Bij pre-autorisatie: authenticeer eerst en open daarna Bediening. Zonder pre-autorisatie: kies eerst Inschakelen en authenticeer vervolgens met code, Pass, Tag of bevoegde smartphone.', 'Controleer de bevestiging, openstaande melders en uitlooptijd.', 'Verlaat het object en controleer de ingeschakelde status.']),
+      ],
+    },
+    {
+      key: 'disarm', title: 'Volledig uitschakelen via het touchscreen', summary: 'Schakel het object uit met de authenticatievolgorde die op het paneel is ingesteld.', sortOrder: 300,
+      blocks: [
+        handbookSequence('touch-disarm-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:disarmed', 'Uitschakelen')]),
+        handbookSteps('touch-disarm-steps', ['Activeer het touchscreen.', 'Bij pre-autorisatie: authenticeer en kies daarna Uitschakelen. Zonder pre-autorisatie: kies Uitschakelen en volg daarna de authenticatieprompt.', 'Controleer de bevestigde uitschakelstatus vóórdat je de beveiligde ruimte betreedt.']),
+      ],
+    },
+    {
+      key: 'night-mode', title: 'Nachtmodus (deelinschakeling) via het touchscreen', summary: 'Activeer de ingestelde Nachtmodus en controleer de deelinschakeling.', sortOrder: 400,
+      blocks: [
+        handbookImage('touch-night-screen', 'ajax:image:touchscreen:night', 'Officieel Ajax-scherm met Nachtmodus', 'Het officiële scherm laat zien hoe groepen in Nachtmodus worden aangeduid.'),
+        handbookSequence('touch-night-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:night-mode', 'Nachtmodus')]),
+        handbookSteps('touch-night-steps', ['Activeer het scherm en authenticeer vóór of na de actie volgens de ingestelde pre-autorisatie.', 'Open Bediening en kies Nachtmodus.', 'Controleer dat alleen de voor dit object afgesproken melders en groepen actief zijn.']),
+      ],
+    },
+    {
+      key: 'groups', title: 'Groepen of secties via het touchscreen', summary: 'Selecteer alleen de zichtbare groepen waarvoor je bevoegd bent.', sortOrder: 500,
+      blocks: [
+        handbookImage('touch-groups-screen', 'ajax:image:touchscreen:groups', 'Officieel Ajax-scherm voor groepsbediening', 'Selecteer op het echte paneel uitsluitend de groep die in de objectinstructie staat.'),
+        handbookSteps('touch-groups-steps', ['Activeer het scherm en authenticeer volgens de ingestelde pre-autorisatie.', 'Open Bediening en selecteer de bedoelde zichtbare groep of groepen.', 'Kies de gewenste status en controleer iedere geselecteerde groep afzonderlijk.', 'Voor persoonlijke groepen die niet gedeeld zijn: authenticeer eerst via Inloggen en selecteer daarna de groep.']),
+        handbookCallout('touch-groups-rights', 'Ontbreekt een groep, dan heeft deze gebruiker of dit gedeelde paneel daar geen recht op. Laat de rechten door een bevoegde beheerder controleren; kies geen andere groep.', 'warning'),
+      ],
+    },
+  ];
+}
+
+function outdoorSecurityArticles() {
+  const contextWarning = 'KeyPad Outdoor heeft geen vaste toetsen voor Inschakelen, Uitschakelen of Nachtmodus. De OK-toets voert de functie uit die voor de actieve primaire of secundaire modus is geconfigureerd.';
+  return [
+    {
+      key: 'arm', title: 'Inschakelen met KeyPad Outdoor', summary: 'Gebruik de actieve beveiligingsmodus en bevestig contextafhankelijk met OK.', sortOrder: 200,
+      blocks: [handbookCallout('outdoor-arm-context', contextWarning, 'warning'), handbookSequence('outdoor-arm-sequence', [sequenceText('Bevoegde code, Pass, Tag of smartphone'), sequenceText('OK')]), handbookSteps('outdoor-arm-steps', ['Controleer welke primaire of secundaire functie voor dit object is ingesteld. Houd OK alleen lang ingedrukt wanneer de objectinstructie voorschrijft dat je naar de andere modus moet wisselen.', 'Authenticeer met de bevoegde code, Pass, Tag of smartphone. Voer een bevestigingscode in wanneer het paneel daarom vraagt.', 'Druk op OK. Bij Easy Armed Mode kan deze bevestiging volgens de installatie-instelling vervallen.', 'Controleer welke status of automatiseringsactie werkelijk is uitgevoerd en controleer de uitlooptijd.'])],
+    },
+    {
+      key: 'disarm', title: 'Uitschakelen met KeyPad Outdoor', summary: 'Schakel de toegewezen beveiligingsscope uit en controleer de echte status.', sortOrder: 300,
+      blocks: [handbookCallout('outdoor-disarm-context', contextWarning, 'warning'), handbookSequence('outdoor-disarm-sequence', [sequenceText('Bevoegde code, Pass, Tag of smartphone'), sequenceText('OK')]), handbookSteps('outdoor-disarm-steps', ['Activeer zo nodig de juiste primaire of secundaire modus volgens de objectinstructie.', 'Authenticeer met het afgesproken middel en bevestig met OK.', 'Controleer dat de bedoelde scope daadwerkelijk is uitgeschakeld vóórdat je binnengaat.'])],
+    },
+    {
+      key: 'night-mode', title: 'Nachtmodus met KeyPad Outdoor', summary: 'Gebruik Nachtmodus alleen wanneer die aan de actieve modus en scope is toegewezen.', sortOrder: 400,
+      blocks: [handbookCallout('outdoor-night-context', 'Outdoor-panelen hebben geen aparte Nachtmodus-toets. Nachtmodus werkt alleen wanneer deze functie in Ajax aan de actieve primaire of secundaire beveiligingsmodus is toegewezen.', 'warning'), handbookSteps('outdoor-night-steps', ['Controleer de objectspecifieke instelling voor primaire en secundaire modus.', 'Wissel alleen indien voorgeschreven met lang OK naar de juiste modus.', 'Authenticeer en druk op OK.', 'Controleer op het systeem dat werkelijk Nachtmodus — en niet volledig in, uit, automatisering of een entry/exit-delay — is uitgevoerd.'])],
+    },
+    {
+      key: 'groups', title: 'Een groep of sectie met KeyPad Outdoor', summary: 'Gebruik * en de Groeps-ID vóór de contextafhankelijke OK-bevestiging.', sortOrder: 500,
+      blocks: [handbookSequence('outdoor-group-general', [sequenceText('Bediendeelcode'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceText('OK')]), handbookSequence('outdoor-group-personal', [sequenceText('Gebruikers-ID'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Persoonlijke code'), sequenceIcon('ajax:icon:function', '*'), sequenceText('Groeps-ID'), sequenceText('OK')]), handbookSteps('outdoor-groups-steps', ['Controleer de actieve primaire of secundaire beveiligingsmodus.', 'Voer de algemene of persoonlijke groepsreeks in.', 'Bevestig met OK en controleer uitsluitend de bedoelde groepsstatus.']), handbookCallout('outdoor-bypass-note', 'De Ajax-instelling “Start entry/exit delay” wordt soms bypass keypad genoemd, maar overbrugt géén zone of melder. Gebruik voor een zone/melder altijd het aparte artikel Eenmalige deactivering in de Ajax-app.', 'info')],
+    },
+  ];
+}
+
+function appSecurityArticles() {
+  return [
+    { key: 'arm', title: 'Inschakelen via de Ajax-app', summary: 'Kies de juiste Space en schakel het volledige object in via Bediening.', sortOrder: 200, blocks: [handbookImage('app-arm-screen', 'ajax:image:app:arm', 'Officiële Ajax-appweergave voor inschakelen', 'De precieze appweergave kan per versie of rechtenprofiel verschillen.'), handbookSequence('app-arm-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:armed', 'Inschakelen')]), handbookSteps('app-arm-steps', ['Open de Ajax-app en kies de juiste Space of hub.', 'Controleer objectnaam, adres, actuele status en openstaande melders.', 'Open Bediening, kies Inschakelen en bevestig wanneer de app daarom vraagt.', 'Controleer de gebeurtenisbevestiging en uitlooptijd.'])] },
+    { key: 'disarm', title: 'Uitschakelen via de Ajax-app', summary: 'Schakel het juiste object uit en controleer de bevestigde status.', sortOrder: 300, blocks: [handbookImage('app-disarm-screen', 'ajax:image:app:disarm', 'Officiële Ajax-appweergave voor uitschakelen', 'Controleer altijd de naam van de gekozen Space vóór de handeling.'), handbookSequence('app-disarm-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:disarmed', 'Uitschakelen')]), handbookSteps('app-disarm-steps', ['Open de juiste Space en controleer de actuele status.', 'Open Bediening en kies Uitschakelen.', 'Controleer de bevestiging voordat de beveiligde ruimte wordt betreden.'])] },
+    { key: 'night-mode', title: 'Nachtmodus (deelinschakeling) via de Ajax-app', summary: 'Activeer de ingestelde deelinschakeling vanuit Bediening.', sortOrder: 400, blocks: [handbookImage('app-night-screen', 'ajax:image:app:night', 'Officiële Ajax-appweergave voor Nachtmodus', 'Nachtmodus beveiligt alleen de melders die hiervoor zijn geconfigureerd.'), handbookSequence('app-night-sequence', [sequenceIcon('ajax:icon:control', 'Bediening'), sequenceIcon('ajax:icon:night-mode', 'Nachtmodus')]), handbookSteps('app-night-steps', ['Kies de juiste Space.', 'Controleer welke melders volgens de objectinstructie aan Nachtmodus zijn toegewezen.', 'Open Bediening, activeer Nachtmodus en controleer de nieuwe status.'])] },
+    { key: 'groups', title: 'Een groep of sectie via de Ajax-app', summary: 'Wijzig uitsluitend de afgesproken groepsstatus.', sortOrder: 500, blocks: [handbookImage('app-group-screen', 'ajax:image:app:group', 'Officiële Ajax-appweergave voor groepsbediening', 'Tik in groepsmodus uitsluitend op de afgesproken groep.'), handbookSteps('app-groups-steps', ['Open de juiste Space en ga naar de groepsweergave.', 'Selecteer uitsluitend de groep uit de objectinstructie.', 'Wijzig de groepsstatus en controleer de bevestiging in de gebeurtenisfeed.'])] },
+  ];
+}
+
+function ajaxBypassArticle() {
+  return {
+    key: 'one-time-deactivation', title: 'Zone of melder tijdelijk overbruggen',
+    summary: 'Gebruik Ajax Eenmalige deactivering in de app; dit is geen bedienpaneeltoetscombinatie.', sortOrder: 600,
+    sources: [AJAX_BYPASS_SOURCE],
+    blocks: [
+      handbookCallout('bypass-warning', 'Alleen uitvoeren met expliciete toestemming en het recht om apparaatinstellingen te wijzigen. Een volledig gedeactiveerde melder stuurt tijdelijk geen alarm- of storingsgebeurtenissen door.', 'danger'),
+      handbookParagraph('bypass-intro', 'Ajax noemt deze tijdelijke overbrugging Eenmalige deactivering. Het systeem moet eerst uitgeschakeld zijn. De instelling vervalt automatisch na de eerstvolgende uitschakeling.'),
+      handbookImage('bypass-device', 'ajax:image:bypass:device', 'Ajax-app met de betreffende melder geselecteerd', '1. Kies binnen de juiste Space onder Apparaten de betreffende melder of zone.'),
+      handbookImage('bypass-settings', 'ajax:image:bypass:settings', 'Ajax-instellingen met Eenmalige deactivering', '2. Open Instellingen en kies Eenmalige deactivering.'),
+      handbookImage('bypass-choice', 'ajax:image:bypass:choice', 'Ajax-keuze voor volledige of deksel-deactivering', '3. Kies uitsluitend de afgesproken scope: Volledig of Alleen deksel.'),
+      handbookImage('bypass-result', 'ajax:image:bypass:result', 'Ajax-status na eenmalige deactivering', '4. Sla op en controleer de zichtbare status voordat het object wordt ingeschakeld.'),
+      handbookSteps('bypass-steps', ['Leg vóór de handeling de operationele reden en toestemming vast.', 'Open de juiste Space en controleer dat het systeem is uitgeschakeld.', 'Ga naar Apparaten, kies de melder, open Instellingen en kies Eenmalige deactivering.', 'Kies Volledig of Alleen deksel en sla op.', 'Controleer de status en schakel daarna uitsluitend de afgesproken scope in.', 'Controleer na de eerstvolgende uitschakeling dat de melder weer actief is.']),
+    ],
+  };
+}
+
+function ajaxManualArticleDefinitions(installation: LooseRecord) {
+  const family = ajaxManualFamily(asString(installation.manual_key));
+  if (!family) return [] as LooseRecord[];
+  const source = AJAX_MANUAL_SOURCE_BY_FAMILY[family];
+  const core = family === 'touchscreen'
+    ? touchscreenSecurityArticles()
+    : family === 'outdoor'
+      ? outdoorSecurityArticles()
+      : family === 'app'
+        ? appSecurityArticles()
+        : numericSecurityArticles(family);
+  const definitions = [ajaxOverviewArticle(family, installation), ...core, ajaxBypassArticle()];
+  if (family === 'combi') definitions.push({
+    key: 'buzzer-signals', title: 'Zoemer, vertragingen en signalen',
+    summary: 'Herken de extra geluidssignalen van KeyPad Combi zonder de zoemer als volwaardige sirene te behandelen.', sortOrder: 700,
+    blocks: [
+      handbookCallout('combi-buzzer-warning', 'De ingebouwde zoemer kan alarmen, in-/uitloopvertragingen en statuswijzigingen signaleren, afhankelijk van de Ajax-instellingen. De zoemer vervangt geen gecertificeerde sirene of meldkamerprocedure.', 'warning'),
+      handbookSteps('combi-buzzer-steps', ['Controleer in de objectinstructie welke geluidssignalen op dit object zijn geconfigureerd.', 'Stop bij een onverwacht alarm-, sabotage- of storingssignaal en controleer de status.', 'Volg de calamiteitenprocedure wanneer de oorzaak niet direct veilig en bevoegd kan worden vastgesteld.']),
+    ],
+  });
+  return definitions.map(definition => ({ ...definition, sources: [...new Set([...(definition.sources || []), source].filter(Boolean))] }));
+}
+
+function handbookString(value: unknown, label: string, maxLength: number, required = false) {
+  if (value === null || value === undefined) {
+    if (required) throw new ApiError(400, `${label} is verplicht`);
+    return null;
+  }
+  const normalized = String(value).replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    if (required) throw new ApiError(400, `${label} is verplicht`);
+    return null;
+  }
+  if (normalized.length > maxLength || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(normalized)) {
+    throw new ApiError(400, `${label} is te lang of bevat ongeldige tekens`);
+  }
+  if (/<\/?[a-z][^>]*>/i.test(normalized)) throw new ApiError(400, `${label} mag geen HTML bevatten`);
+  return normalized;
+}
+
+function safeHandbookCategory(record: LooseRecord) {
+  return {
+    id: record.id,
+    customer_id: record.customer_id,
+    object_id: record.object_id,
+    name: record.name,
+    parent_category_id: record.parent_category_id || null,
+    system_key: record.system_key || null,
+    origin: HANDBOOK_CATEGORY_ORIGINS.has(record.origin) ? record.origin : 'user',
+    source_installation_id: record.source_installation_id || null,
+    protected: record.protected === true,
+    sort_order: Number.isInteger(record.sort_order) ? record.sort_order : 1000,
+    status: record.status || 'active',
+    version: versionOf(record),
+    created_date: record.created_date || null,
+    updated_date: record.updated_date || null,
+  };
+}
+
+function safeHandbookArticle(record: LooseRecord) {
+  const contentFormat = record.content_format === HANDBOOK_CONTENT_FORMAT ? HANDBOOK_CONTENT_FORMAT : 'plain_text';
+  return {
+    id: record.id,
+    customer_id: record.customer_id,
+    object_id: record.object_id,
+    category_id: record.category_id || null,
+    title: record.title,
+    summary: record.summary || null,
+    content: asString(record.content),
+    content_format: contentFormat,
+    managed_blocks: contentFormat === HANDBOOK_CONTENT_FORMAT && Array.isArray(record.managed_blocks) ? record.managed_blocks : [],
+    supplement_blocks: contentFormat === HANDBOOK_CONTENT_FORMAT && Array.isArray(record.supplement_blocks) ? record.supplement_blocks : [],
+    article_key: record.article_key || null,
+    origin: record.origin === 'installation_template' ? 'installation_template' : 'user',
+    source_installation_id: record.source_installation_id || null,
+    source_manual_key: record.source_manual_key || null,
+    source_manual_version: record.source_manual_version || null,
+    source_procedure_key: record.source_procedure_key || null,
+    source_urls: Array.isArray(record.source_urls) ? record.source_urls.map(asString).filter(Boolean) : [],
+    generated_checksum: record.generated_checksum || null,
+    read_only: record.read_only === true,
+    sort_order: Number.isInteger(record.sort_order) ? record.sort_order : 1000,
+    status: record.status || 'active',
+    version: versionOf(record),
+    created_date: record.created_date || null,
+    updated_date: record.updated_date || null,
+  };
+}
+
+function handbookRecoveryReceipt(result: LooseRecord) {
+  return pick(result, [
+    'customer_id', 'object_id', 'resource_type', 'resource_id', 'category',
+    'summary', 'changes', 'archived', 'unchanged',
+  ]);
+}
+
+function handbookBlocksPlainText(blocks: LooseRecord[]) {
+  return blocks.flatMap(block => {
+    if (block.type === 'steps') return [(block.items || []).join('\n')];
+    if (block.type === 'button_sequence') return [(block.sequence || []).map((item: LooseRecord) => item.label || item.value).join(' → ')];
+    if (block.type === 'image') return [[block.alt, block.caption].filter(Boolean).join(' ')];
+    if (block.type === 'link') return [[block.label, block.description].filter(Boolean).join(' ')];
+    return [asString(block.text)];
+  }).filter(Boolean).join('\n\n').slice(0, 60000);
+}
+
+function assertHandbookArticleBlocks(managedBlocks: LooseRecord[], supplementBlocks: LooseRecord[]) {
+  const all = [...managedBlocks, ...supplementBlocks];
+  if (all.length > HANDBOOK_MAX_BLOCKS) throw new ApiError(400, `Een handboekartikel kan maximaal ${HANDBOOK_MAX_BLOCKS} onderdelen bevatten`);
+  const ids = all.map(block => asString(block.id));
+  if (new Set(ids).size !== ids.length) throw new ApiError(400, 'Artikelonderdeel-ID’s moeten over het volledige artikel uniek zijn');
+  const plainTextLength = all.reduce((total, block) => {
+    if (block.type === 'steps') return total + (block.items || []).reduce((sum: number, item: unknown) => sum + asString(item).length, 0);
+    if (block.type === 'button_sequence') return total + (block.sequence || []).reduce((sum: number, item: LooseRecord) => sum + asString(item.value).length + asString(item.label).length, 0);
+    return total + asString(block.text).length + asString(block.alt).length + asString(block.caption).length + asString(block.label).length + asString(block.description).length;
+  }, 0);
+  if (plainTextLength > HANDBOOK_MAX_TEXT_LENGTH) throw new ApiError(400, 'De totale artikelinhoud is te lang; verdeel de instructie over meerdere artikelen');
+  const serializedBytes = new TextEncoder().encode(JSON.stringify(all)).byteLength;
+  if (serializedBytes > HANDBOOK_MAX_SERIALIZED_BYTES) throw new ApiError(400, 'Het artikel is te groot; verdeel afbeeldingen en stappen over meerdere artikelen');
+}
+
+const HANDBOOK_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const HANDBOOK_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+async function requireHandbookManagedImage(base44: LooseRecord, object: LooseRecord, managedFileId: string) {
+  const file = await requireRecord(base44, 'ManagedFile', managedFileId, 'Handboekafbeelding');
+  const exactObjectOwner = file.owner_type === 'object'
+    && file.owner_id === object.id
+    && file.object_id === object.id;
+  const exactHandbookScope = file.domain === 'operations'
+    && file.category === 'handbook'
+    && file.source_entity === 'ObjectHandbookArticle';
+  const sizeBytes = Number(file.size_bytes);
+  const privateActiveImage = file.storage_visibility === 'private'
+    && file.status === 'active'
+    && HANDBOOK_IMAGE_MIME_TYPES.has(asString(file.mime_type).toLowerCase())
+    && Number.isInteger(sizeBytes)
+    && sizeBytes > 0
+    && sizeBytes <= HANDBOOK_IMAGE_MAX_BYTES;
+  if (!exactObjectOwner || !exactHandbookScope || !privateActiveImage) {
+    throw new ApiError(409, 'Kies een actieve privéafbeelding (JPEG, PNG of WebP, maximaal 10 MiB) die voor het handboek van dit object is geüpload');
+  }
+  return file;
+}
+
+async function requireHandbookLinkTarget(base44: LooseRecord, object: LooseRecord, targetType: string, targetId: string) {
+  const entityName = targetType === 'article' ? 'ObjectHandbookArticle' : 'ObjectHandbookCategory';
+  const record = await requireRecord(base44, entityName, targetId, targetType === 'article' ? 'Handboekartikel' : 'Handboekcategorie');
+  if (record.customer_id !== object.customer_id || record.object_id !== object.id || record.status !== 'active') {
+    throw new ApiError(409, 'De handboekverwijzing hoort niet bij dit object of is niet actief');
+  }
+  return record;
+}
+
+async function requireNoInboundHandbookLinks(base44: LooseRecord, object: LooseRecord, targetType: string, targetId: string) {
+  const articles = await getEntity(base44, 'ObjectHandbookArticle').filter({ customer_id: object.customer_id, object_id: object.id, status: 'active' }, '+title', 5000);
+  const inbound = articles.find((article: LooseRecord) => [
+    ...(Array.isArray(article.managed_blocks) ? article.managed_blocks : []),
+    ...(Array.isArray(article.supplement_blocks) ? article.supplement_blocks : []),
+  ].some((block: LooseRecord) => block.type === 'link' && block.target_type === targetType && block.target_id === targetId));
+  if (inbound) throw new ApiError(409, `Dit onderdeel wordt nog genoemd in “${inbound.title}”. Verwijder die verwijzing eerst`);
+}
+
+function handbookLogicalTargetKey(targetType: string, record: LooseRecord) {
+  if (targetType === 'article' && record.origin === 'installation_template' && record.source_installation_id && record.source_procedure_key) {
+    return `installation/${record.source_installation_id}/article/${record.source_procedure_key}`;
+  }
+  if (targetType === 'category' && record.system_key) return `category-system/${record.system_key}`;
+  return `${targetType}/${record.id}`;
+}
+
+async function normalizedHandbookBlocks(
+  base44: LooseRecord,
+  object: LooseRecord,
+  value: unknown,
+  { allowOfficialAssets = false }: { allowOfficialAssets?: boolean } = {},
+) {
+  if (!Array.isArray(value)) throw new ApiError(400, 'De artikelonderdelen hebben een ongeldig formaat');
+  if (value.length > HANDBOOK_MAX_BLOCKS) throw new ApiError(400, `Een handboekartikel kan maximaal ${HANDBOOK_MAX_BLOCKS} onderdelen bevatten`);
+  const ids = new Set<string>();
+  const result: LooseRecord[] = [];
+  for (const [index, raw] of value.entries()) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, `Artikelonderdeel ${index + 1} is ongeldig`);
+    const id = handbookString(raw.id, `ID van artikelonderdeel ${index + 1}`, 100, true) as string;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/.test(id) || ids.has(id)) throw new ApiError(400, 'Artikelonderdeel-ID’s moeten uniek en veilig zijn');
+    ids.add(id);
+    const type = asString(raw.type);
+    if (!HANDBOOK_BLOCK_TYPES.has(type)) throw new ApiError(400, `Artikelonderdeel ${index + 1} heeft een onbekend type`);
+    if (['paragraph', 'heading', 'callout'].includes(type)) {
+      const text = handbookString(raw.text, type === 'heading' ? 'Tussenkop' : 'Artikeltekst', 6000, true);
+      if (type === 'heading') {
+        const level = Number(raw.level || 2);
+        if (![2, 3, 4].includes(level)) throw new ApiError(400, 'Kies een geldig kopniveau');
+        result.push({ id, type, text, level });
+      } else if (type === 'callout') {
+        const tone = asString(raw.tone) || 'info';
+        if (!HANDBOOK_CALLOUT_TONES.has(tone)) throw new ApiError(400, 'Kies een geldig soort aandachtspunt');
+        result.push({ id, type, text, tone });
+      } else result.push({ id, type, text });
+      continue;
+    }
+    if (type === 'steps') {
+      if (!Array.isArray(raw.items) || !raw.items.length || raw.items.length > 40) throw new ApiError(400, 'Een stappenplan bevat 1 tot 40 stappen');
+      result.push({ id, type, items: raw.items.map((item: unknown, itemIndex: number) => handbookString(item, `Stap ${itemIndex + 1}`, 1200, true)) });
+      continue;
+    }
+    if (type === 'image') {
+      const assetKey = handbookString(raw.asset_key, 'Afbeeldingssleutel', 200, false);
+      const managedFileId = handbookString(raw.managed_file_id, 'Bestands-ID', 200, false);
+      if (Boolean(assetKey) === Boolean(managedFileId)) throw new ApiError(400, 'Kies precies één gecontroleerde of geüploade afbeelding');
+      if (assetKey && (!allowOfficialAssets || !AJAX_HANDBOOK_IMAGE_KEYS.has(assetKey))) throw new ApiError(400, 'Deze gecontroleerde handboekafbeelding is niet toegestaan');
+      if (managedFileId) await requireHandbookManagedImage(base44, object, managedFileId);
+      const alt = handbookString(raw.alt, 'Alternatieve tekst', 300, true);
+      const caption = handbookString(raw.caption, 'Afbeeldingsbijschrift', 500, false);
+      const layout = asString(raw.layout) || 'wide';
+      if (!HANDBOOK_IMAGE_LAYOUTS.has(layout)) throw new ApiError(400, 'Kies een geldige afbeeldingsweergave');
+      result.push({ id, type, asset_key: assetKey, managed_file_id: managedFileId, alt, caption, layout });
+      continue;
+    }
+    if (type === 'button_sequence') {
+      if (!Array.isArray(raw.sequence) || !raw.sequence.length || raw.sequence.length > 20) throw new ApiError(400, 'Een toetsvolgorde bevat 1 tot 20 onderdelen');
+      const sequence = raw.sequence.map((item: LooseRecord, itemIndex: number) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ApiError(400, `Toetsonderdeel ${itemIndex + 1} is ongeldig`);
+        const itemType = asString(item.type);
+        if (!['text', 'icon'].includes(itemType)) throw new ApiError(400, 'Een toetsonderdeel heeft een onbekend type');
+        const itemValue = handbookString(item.value, `Toetsonderdeel ${itemIndex + 1}`, 200, true) as string;
+        if (itemType === 'icon' && !AJAX_HANDBOOK_ICON_KEYS.has(itemValue)) throw new ApiError(400, 'Dit toetspictogram is niet toegestaan');
+        return { type: itemType, value: itemValue, label: handbookString(item.label, 'Toetslabel', 200, false) };
+      });
+      result.push({ id, type, sequence });
+      continue;
+    }
+    if (type === 'link') {
+      const targetType = asString(raw.target_type);
+      const targetId = handbookString(raw.target_id, 'Verwijzingsdoel', 200, true) as string;
+      if (!HANDBOOK_LINK_TYPES.has(targetType)) throw new ApiError(400, 'Kies een geldig soort handboekverwijzing');
+      const targetRecord = await requireHandbookLinkTarget(base44, object, targetType, targetId);
+      result.push({ id, type, target_type: targetType, target_id: targetId, target_key: handbookLogicalTargetKey(targetType, targetRecord), label: handbookString(raw.label, 'Linktekst', 240, true), description: handbookString(raw.description, 'Linktoelichting', 500, false) });
+      continue;
+    }
+    result.push({ id, type: 'divider' });
+  }
+  return result;
+}
+
+async function requireScopedHandbookCategory(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  const category = await requireRecord(base44, 'ObjectHandbookCategory', requireString(body, 'category_id'), 'Handboekcategorie');
+  if (category.customer_id !== customer.id || category.object_id !== object.id || category.status !== 'active') throw new ApiError(409, 'Handboekcategorie hoort niet bij dit object');
+  return { customer, object, category };
+}
+
+async function requireScopedHandbookArticle(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  const article = await requireRecord(base44, 'ObjectHandbookArticle', requireString(body, 'article_id'), 'Handboekartikel');
+  if (article.customer_id !== customer.id || article.object_id !== object.id || article.status !== 'active') throw new ApiError(409, 'Handboekartikel hoort niet bij dit object');
+  return { customer, object, article };
+}
+
+async function requireHandbookParent(base44: LooseRecord, object: LooseRecord, parentId: string | null, categoryId: string | null = null) {
+  if (!parentId) return null;
+  if (parentId === categoryId) throw new ApiError(409, 'Een categorie kan niet onder zichzelf vallen');
+  const parent = await requireRecord(base44, 'ObjectHandbookCategory', parentId, 'Bovenliggende categorie');
+  if (parent.customer_id !== object.customer_id || parent.object_id !== object.id || parent.status !== 'active') throw new ApiError(409, 'De bovenliggende categorie hoort niet bij dit object');
+  if (parent.protected === true || parent.origin === 'installation_template') throw new ApiError(409, 'Automatische installatiecategorieën worden uitsluitend via de gekoppelde installatie beheerd; gebruik een objectspecifieke aanvulling op het artikel');
+  if (categoryId) {
+    const seen = new Set<string>();
+    let current: LooseRecord | null = parent;
+    while (current) {
+      if (current.id === categoryId) throw new ApiError(409, 'Deze verplaatsing zou een cirkel in het handboek maken');
+      if (seen.has(current.id)) throw new ApiError(409, 'De categorieboom bevat al een cirkel en vereist handmatige controle');
+      if (seen.size >= 100) throw new ApiError(409, 'De categorieboom is te diep en vereist handmatige controle');
+      seen.add(current.id);
+      if (!current.parent_category_id) break;
+      current = await requireRecord(base44, 'ObjectHandbookCategory', current.parent_category_id, 'Bovenliggende categorie');
+      if (current.customer_id !== object.customer_id || current.object_id !== object.id || current.status !== 'active') throw new ApiError(409, 'De categorieboom verwijst naar een ongeldige bovenliggende categorie');
+    }
+  }
+  return parent;
+}
+
+async function ensureGeneratedHandbookCategory(
+  base44: LooseRecord,
+  object: LooseRecord,
+  input: LooseRecord,
+  counters: LooseRecord,
+) {
+  const matches = await getEntity(base44, 'ObjectHandbookCategory').filter({ object_id: object.id, system_key: input.system_key }, '-updated_date', 5);
+  if (matches.length > 1) throw new ApiError(409, `Handboekcategorie ${input.system_key} is niet eenduidig; reconciliatie vereist`);
+  if (!matches.length) {
+    const created = await getEntity(base44, 'ObjectHandbookCategory').create({
+      customer_id: object.customer_id, object_id: object.id, name: input.name,
+      parent_category_id: input.parent_category_id || null, system_key: input.system_key,
+      origin: 'installation_template', source_installation_id: input.source_installation_id || null,
+      protected: true, sort_order: input.sort_order, status: 'active', version: 1,
+    });
+    counters.created_categories += 1;
+    return created;
+  }
+  const current = matches[0];
+  const patch = {
+    name: input.name,
+    parent_category_id: input.parent_category_id || null,
+    origin: 'installation_template',
+    source_installation_id: input.source_installation_id || null,
+    protected: true,
+    sort_order: input.sort_order,
+    status: 'active',
+  };
+  const changed = Object.entries(patch).some(([field, value]) => canonicalMutationValue(current[field]) !== canonicalMutationValue(value));
+  if (!changed) return current;
+  counters.updated_categories += 1;
+  return casUpdate(base44, 'ObjectHandbookCategory', current, versionOf(current), patch);
+}
+
+async function ensureGeneratedHandbookArticle(
+  base44: LooseRecord,
+  object: LooseRecord,
+  installation: LooseRecord,
+  category: LooseRecord,
+  definition: LooseRecord,
+  previousArticles: LooseRecord[],
+  counters: LooseRecord,
+) {
+  const articleKey = `installation/${installation.id}/${installation.manual_key}/${AJAX_INSTALLATION_MANUAL_VERSION}/${definition.key}`;
+  const matches = await getEntity(base44, 'ObjectHandbookArticle').filter({ object_id: object.id, article_key: articleKey }, '-updated_date', 5);
+  if (matches.length > 1) throw new ApiError(409, `Handboekartikel ${articleKey} is niet eenduidig; reconciliatie vereist`);
+  const managedBlocks = await normalizedHandbookBlocks(base44, object, definition.blocks, { allowOfficialAssets: true });
+  const checksum = await sha256(JSON.stringify(canonicalMutationValue(managedBlocks)));
+  if (!matches.length) {
+    const prior = previousArticles
+      .filter(article => article.source_installation_id === installation.id && article.source_procedure_key === definition.key)
+      .sort((left, right) => String(right.updated_date || right.created_date || '').localeCompare(String(left.updated_date || left.created_date || '')))[0];
+    const supplementBlocks = prior?.content_format === HANDBOOK_CONTENT_FORMAT && Array.isArray(prior.supplement_blocks)
+      ? await normalizedHandbookBlocks(base44, object, prior.supplement_blocks)
+      : [];
+    assertHandbookArticleBlocks(managedBlocks, supplementBlocks);
+    const created = await getEntity(base44, 'ObjectHandbookArticle').create({
+      customer_id: object.customer_id, object_id: object.id, category_id: category.id,
+      title: definition.title, summary: definition.summary, content_format: HANDBOOK_CONTENT_FORMAT,
+      managed_blocks: managedBlocks, supplement_blocks: supplementBlocks,
+      content: handbookBlocksPlainText([...managedBlocks, ...supplementBlocks]), article_key: articleKey,
+      origin: 'installation_template', source_installation_id: installation.id,
+      source_manual_key: installation.manual_key, source_manual_version: AJAX_INSTALLATION_MANUAL_VERSION,
+      source_procedure_key: definition.key, source_urls: definition.sources || [],
+      generated_checksum: checksum, read_only: true, sort_order: definition.sortOrder,
+      status: 'active', version: 1,
+    });
+    counters.created_articles += 1;
+    return created;
+  }
+  const current = matches[0];
+  const supplements = current.content_format === HANDBOOK_CONTENT_FORMAT && Array.isArray(current.supplement_blocks)
+    ? await normalizedHandbookBlocks(base44, object, current.supplement_blocks)
+    : [];
+  assertHandbookArticleBlocks(managedBlocks, supplements);
+  const patch = {
+    category_id: category.id, title: definition.title, summary: definition.summary,
+    content_format: HANDBOOK_CONTENT_FORMAT, managed_blocks: managedBlocks, supplement_blocks: supplements,
+    content: handbookBlocksPlainText([...managedBlocks, ...supplements]), origin: 'installation_template',
+    source_installation_id: installation.id, source_manual_key: installation.manual_key,
+    source_manual_version: AJAX_INSTALLATION_MANUAL_VERSION, source_procedure_key: definition.key,
+    source_urls: definition.sources || [], generated_checksum: checksum, read_only: true,
+    sort_order: definition.sortOrder, status: 'active',
+  };
+  const changed = Object.entries(patch).some(([field, value]) => JSON.stringify(canonicalMutationValue(current[field])) !== JSON.stringify(canonicalMutationValue(value)));
+  if (!changed) return current;
+  counters.updated_articles += 1;
+  return casUpdate(base44, 'ObjectHandbookArticle', current, versionOf(current), patch);
+}
+
+function installationHandbookSystemKey(installationId: string) {
+  return `installation/${installationId}`;
+}
+
+function effectiveAjaxHandbookInstallation(installation: LooseRecord) {
+  if (legacyInstallationLifecycle(installation) === 'archived' || !isAjaxAlarmRecord(installation)) return null;
+  const controlDevice = AJAX_CONTROL_DEVICES[asString(installation.control_device_key)];
+  if (!controlDevice) return null;
+  return {
+    ...installation,
+    control_device_name: controlDevice.name,
+    manual_key: controlDevice.manualKey,
+    manual_version: AJAX_INSTALLATION_MANUAL_VERSION,
+  };
+}
+
+async function requireNoRetiringInstallationHandbookLinks(
+  base44: LooseRecord,
+  object: LooseRecord,
+  installation: LooseRecord,
+  projectedInstallation: LooseRecord,
+) {
+  const [categories, articles] = await Promise.all([
+    getEntity(base44, 'ObjectHandbookCategory').filter({ customer_id: object.customer_id, object_id: object.id, status: 'active' }, '+name', 2000),
+    getEntity(base44, 'ObjectHandbookArticle').filter({ customer_id: object.customer_id, object_id: object.id, status: 'active' }, '+title', 5000),
+  ]);
+  const effectiveProjection = effectiveAjaxHandbookInstallation(projectedInstallation);
+  const retainedProcedures = new Set<string>(effectiveProjection
+    ? ajaxManualArticleDefinitions(effectiveProjection).map((definition: LooseRecord) => asString(definition.key))
+    : []);
+  const retiringTargets: Array<{ type: string; record: LooseRecord; logicalKey: string }> = [];
+
+  for (const article of articles) {
+    if (
+      article.origin === 'installation_template'
+      && article.source_installation_id === installation.id
+      && !retainedProcedures.has(asString(article.source_procedure_key))
+    ) {
+      retiringTargets.push({ type: 'article', record: article, logicalKey: handbookLogicalTargetKey('article', article) });
+    }
+  }
+  if (!effectiveProjection) {
+    for (const category of categories) {
+      if (category.origin === 'installation_template' && category.source_installation_id === installation.id) {
+        retiringTargets.push({ type: 'category', record: category, logicalKey: handbookLogicalTargetKey('category', category) });
+      }
+    }
+  }
+  if (!retiringTargets.length) return;
+
+  const targetByIdentity = new Map<string, { type: string; record: LooseRecord; logicalKey: string }>();
+  const targetByLogicalKey = new Map<string, { type: string; record: LooseRecord; logicalKey: string }>();
+  for (const target of retiringTargets) {
+    targetByIdentity.set(`${target.type}/${target.record.id}`, target);
+    if (target.logicalKey) targetByLogicalKey.set(target.logicalKey, target);
+  }
+  const inbound: Array<{ source: LooseRecord; target: { type: string; record: LooseRecord; logicalKey: string } }> = [];
+  for (const source of articles) {
+    const sourceDisappears = source.origin === 'installation_template'
+      && source.source_installation_id === installation.id
+      && !retainedProcedures.has(asString(source.source_procedure_key));
+    if (sourceDisappears) continue;
+    const blocks = [
+      ...(Array.isArray(source.managed_blocks) ? source.managed_blocks : []),
+      ...(Array.isArray(source.supplement_blocks) ? source.supplement_blocks : []),
+    ];
+    for (const block of blocks) {
+      if (block.type !== 'link') continue;
+      const targetType = asString(block.target_type);
+      const target = targetByIdentity.get(`${targetType}/${asString(block.target_id)}`)
+        || targetByLogicalKey.get(asString(block.target_key));
+      if (target) inbound.push({ source, target });
+    }
+  }
+  if (!inbound.length) return;
+
+  const sourceArticles = [...new Map(inbound.map(item => [item.source.id, item.source])).values()];
+  const targets = [...new Map(inbound.map(item => [`${item.target.type}/${item.target.record.id}`, item.target.record])).values()];
+  const sourceNames = sourceArticles.slice(0, 3).map(article => `“${article.title || 'Naamloos artikel'}”`).join(', ');
+  const targetNames = targets.slice(0, 3).map(record => `“${record.title || record.name || 'Naamloos onderdeel'}”`).join(', ');
+  const operation = legacyInstallationLifecycle(projectedInstallation) === 'archived' ? 'gearchiveerd' : 'gewijzigd';
+  throw new ApiError(
+    409,
+    `De installatie kan niet worden ${operation}, omdat ${sourceNames} nog verwijst naar automatisch handboekonderdeel ${targetNames}. Verwijder of wijzig eerst deze handboekverwijzing.`,
+    {
+      code: 'installation_handbook_inbound_links',
+      source_article_ids: sourceArticles.map(article => article.id),
+      retiring_target_ids: targets.map(record => record.id),
+    },
+  );
+}
+
+async function remapHandbookSupplementLinks(base44: LooseRecord, object: LooseRecord, counters: LooseRecord) {
+  const [categories, articles] = await Promise.all([
+    getEntity(base44, 'ObjectHandbookCategory').filter({ customer_id: object.customer_id, object_id: object.id, status: 'active' }, '+name', 2000),
+    getEntity(base44, 'ObjectHandbookArticle').filter({ customer_id: object.customer_id, object_id: object.id, status: 'active' }, '-updated_date', 5000),
+  ]);
+  const recordsById = new Map<string, LooseRecord>();
+  const targets = new Map<string, { record: LooseRecord; score: number }>();
+  for (const category of categories) {
+    recordsById.set(category.id, category);
+    targets.set(handbookLogicalTargetKey('category', category), { record: category, score: 1 });
+  }
+  for (const article of articles) {
+    recordsById.set(article.id, article);
+    const key = handbookLogicalTargetKey('article', article);
+    const score = article.origin === 'installation_template' && article.source_manual_version === AJAX_INSTALLATION_MANUAL_VERSION ? 2 : 1;
+    if (!targets.has(key) || (targets.get(key)?.score || 0) < score) targets.set(key, { record: article, score });
+  }
+  for (const article of articles) {
+    if (article.content_format !== HANDBOOK_CONTENT_FORMAT || !Array.isArray(article.supplement_blocks)) continue;
+    let changed = false;
+    const supplements = article.supplement_blocks.map((block: LooseRecord) => {
+      if (block.type !== 'link') return block;
+      const existingTarget = recordsById.get(asString(block.target_id));
+      const logicalKey = asString(block.target_key) || (existingTarget ? handbookLogicalTargetKey(asString(block.target_type), existingTarget) : '');
+      const preferred = logicalKey ? targets.get(logicalKey)?.record : null;
+      if (!preferred || (preferred.id === block.target_id && logicalKey === block.target_key)) return block;
+      changed = true;
+      return { ...block, target_id: preferred.id, target_key: logicalKey };
+    });
+    if (!changed) continue;
+    const managed = Array.isArray(article.managed_blocks) ? article.managed_blocks : [];
+    assertHandbookArticleBlocks(managed, supplements);
+    await casUpdate(base44, 'ObjectHandbookArticle', article, versionOf(article), {
+      supplement_blocks: supplements,
+      content: handbookBlocksPlainText([...managed, ...supplements]),
+    });
+    counters.updated_articles += 1;
+  }
+}
+
+async function reconcileInstallationHandbooks(base44: LooseRecord, object: LooseRecord) {
+  const counters = { created_categories: 0, updated_categories: 0, archived_categories: 0, created_articles: 0, updated_articles: 0, archived_articles: 0, upgraded_installations: 0 };
+  const allInstallations = await getEntity(base44, 'ObjectInstallation').filter({ customer_id: object.customer_id, object_id: object.id }, '-updated_date', 1000);
+  const activeAjax = allInstallations.filter((installation: LooseRecord) => legacyInstallationLifecycle(installation) !== 'archived' && isAjaxAlarmRecord(installation));
+  const existingCategories = await getEntity(base44, 'ObjectHandbookCategory').filter({ customer_id: object.customer_id, object_id: object.id }, '+name', 2000);
+  const existingArticles = await getEntity(base44, 'ObjectHandbookArticle').filter({ customer_id: object.customer_id, object_id: object.id }, '-updated_date', 5000);
+  const activeInstallationIds = new Set(activeAjax.map((installation: LooseRecord) => installation.id));
+  let root: LooseRecord | null = null;
+  let alarmRoot: LooseRecord | null = null;
+  if (activeAjax.length || existingCategories.some((category: LooseRecord) => category.origin === 'installation_template')) {
+    root = await ensureGeneratedHandbookCategory(base44, object, { system_key: 'system/installations', name: 'Installaties', parent_category_id: null, source_installation_id: null, sort_order: 100 }, counters);
+    alarmRoot = await ensureGeneratedHandbookCategory(base44, object, { system_key: 'system/installations/alarm', name: 'Alarminstallatie', parent_category_id: root.id, source_installation_id: null, sort_order: 100 }, counters);
+  }
+  const currentArticleKeys = new Set<string>();
+  const currentCategoryKeys = new Set(['system/installations', 'system/installations/alarm']);
+  for (const storedInstallation of activeAjax) {
+    const installation = effectiveAjaxHandbookInstallation(storedInstallation);
+    if (!installation) continue;
+    const categoryKey = installationHandbookSystemKey(installation.id);
+    currentCategoryKeys.add(categoryKey);
+    const installationCategory = await ensureGeneratedHandbookCategory(base44, object, {
+      system_key: categoryKey, name: installation.name, parent_category_id: alarmRoot?.id,
+      source_installation_id: installation.id, sort_order: 1000,
+    }, counters);
+    const definitions = ajaxManualArticleDefinitions(installation);
+    for (const definition of definitions) {
+      const key = `installation/${installation.id}/${installation.manual_key}/${AJAX_INSTALLATION_MANUAL_VERSION}/${definition.key}`;
+      currentArticleKeys.add(key);
+      await ensureGeneratedHandbookArticle(base44, object, installation, installationCategory, definition, existingArticles, counters);
+    }
+  }
+  await remapHandbookSupplementLinks(base44, object, counters);
+  for (const article of existingArticles) {
+    if (article.origin !== 'installation_template' || !article.source_installation_id || article.status !== 'active') continue;
+    if (activeInstallationIds.has(article.source_installation_id) && currentArticleKeys.has(article.article_key)) continue;
+    await casUpdate(base44, 'ObjectHandbookArticle', article, versionOf(article), {
+      status: activeInstallationIds.has(article.source_installation_id) ? 'superseded' : 'archived',
+    });
+    counters.archived_articles += 1;
+  }
+  for (const category of existingCategories) {
+    if (category.origin !== 'installation_template' || !category.source_installation_id || category.status !== 'active') continue;
+    if (activeInstallationIds.has(category.source_installation_id) && currentCategoryKeys.has(category.system_key)) continue;
+    await casUpdate(base44, 'ObjectHandbookCategory', category, versionOf(category), { status: 'archived' });
+    counters.archived_categories += 1;
+  }
+  return counters;
+}
+
+function isAjaxAlarmRecord(installation: LooseRecord) {
+  return installation.installation_type === 'alarm_system'
+    && ['ajax', 'ajax systems'].includes(normalizeName(installation.brand));
+}
+
+async function objectHandbookState(base44: LooseRecord, customer: LooseRecord, object: LooseRecord) {
+  const [categoryRecords, articleRecords, installations] = await Promise.all([
+    getEntity(base44, 'ObjectHandbookCategory').filter({ customer_id: customer.id, object_id: object.id }, '+name', 2000),
+    getEntity(base44, 'ObjectHandbookArticle').filter({ customer_id: customer.id, object_id: object.id }, '-updated_date', 5000),
+    getEntity(base44, 'ObjectInstallation').filter({ customer_id: customer.id, object_id: object.id }, '-updated_date', 1000),
+  ]);
+  const activeInstallations = installations.filter((installation: LooseRecord) => legacyInstallationLifecycle(installation) !== 'archived' && isAjaxAlarmRecord(installation));
+  const migrationIssues = activeInstallations
+    .filter((installation: LooseRecord) => !AJAX_CONTROL_DEVICES[asString(installation.control_device_key)])
+    .map((installation: LooseRecord) => ({ installation_id: installation.id, name: installation.name, issue: 'missing_control_device' }));
+  const activeCategories = categoryRecords.filter((category: LooseRecord) => category.status !== 'archived');
+  const activeArticles = articleRecords.filter((article: LooseRecord) => article.status === 'active');
+  const categoryKeys = new Set(activeCategories.map((category: LooseRecord) => category.system_key).filter(Boolean));
+  const articleKeys = new Set(activeArticles.map((article: LooseRecord) => article.article_key).filter(Boolean));
+  let syncRequired = activeInstallations.some((installation: LooseRecord) => {
+    const effectiveInstallation = effectiveAjaxHandbookInstallation(installation);
+    if (!effectiveInstallation) return true;
+    if (!categoryKeys.has(installationHandbookSystemKey(installation.id))) return true;
+    return ajaxManualArticleDefinitions(effectiveInstallation).some(definition => !articleKeys.has(`installation/${installation.id}/${effectiveInstallation.manual_key}/${AJAX_INSTALLATION_MANUAL_VERSION}/${definition.key}`));
+  });
+  const activeIds = new Set(activeInstallations.map((installation: LooseRecord) => installation.id));
+  if (!syncRequired) syncRequired = activeCategories.some((category: LooseRecord) => category.origin === 'installation_template' && category.source_installation_id && !activeIds.has(category.source_installation_id));
+  if (!syncRequired) syncRequired = activeArticles.some((article: LooseRecord) => article.origin === 'installation_template' && article.source_installation_id && (!activeIds.has(article.source_installation_id) || article.source_manual_version !== AJAX_INSTALLATION_MANUAL_VERSION));
+  const syncToken = await sha256(JSON.stringify(canonicalMutationValue({
+    release: AJAX_INSTALLATION_MANUAL_VERSION,
+    installations: activeInstallations.map((installation: LooseRecord) => ({ id: installation.id, version: versionOf(installation), control_device_key: installation.control_device_key, manual_key: installation.manual_key, manual_version: installation.manual_version, name: installation.name })).sort((left: LooseRecord, right: LooseRecord) => left.id.localeCompare(right.id)),
+    generated_categories: activeCategories.filter((category: LooseRecord) => category.origin === 'installation_template').map((category: LooseRecord) => [category.system_key, category.version, category.status]).sort(),
+    generated_articles: activeArticles.filter((article: LooseRecord) => article.origin === 'installation_template').map((article: LooseRecord) => [article.article_key, article.version, article.status]).sort(),
+  })));
+  return { categoryRecords, articleRecords, activeCategories, activeArticles, syncRequired, syncToken, migrationIssues };
+}
+
+async function handleListObjectHandbook(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const state = await objectHandbookState(base44, customer, object);
+  return {
+    customer_id: customer.id,
+    object_id: object.id,
+    categories: state.activeCategories.map(safeHandbookCategory),
+    articles: state.activeArticles.map(safeHandbookArticle),
+    sync_required: state.syncRequired,
+    sync_token: state.syncToken,
+    migration_issues: state.migrationIssues,
+    template_version: AJAX_INSTALLATION_MANUAL_VERSION,
+  };
+}
+
+async function handleCreateHandbookCategory(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe categorie verwacht expected_version 0');
+  const data = requireObject(body);
+  const name = handbookString(data.name, 'Categorienaam', 160, true);
+  const parentId = handbookString(data.parent_category_id, 'Bovenliggende categorie', 200, false);
+  await requireHandbookParent(base44, object, parentId);
+  const replay = await getEntity(base44, 'ObjectHandbookCategory').filter({ creation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (replay.length > 1) throw new ApiError(409, 'Categorie-idempotency is niet eenduidig; handmatige controle vereist');
+  let category = replay[0] || null;
+  if (category) {
+    if (category.customer_id !== customer.id || category.object_id !== object.id || category.name !== name || (category.parent_category_id || null) !== parentId || category.creation_request_fingerprint !== requestFingerprint || category.creation_actor_user_id !== user.id || category.creation_mutation_target !== target) rejectIdempotencyReuse();
+  } else {
+    category = await getEntity(base44, 'ObjectHandbookCategory').create({
+      customer_id: customer.id, object_id: object.id, name, parent_category_id: parentId,
+      system_key: null, origin: 'user', source_installation_id: null, protected: false,
+      sort_order: 1000, status: 'active', creation_idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint, creation_actor_user_id: user.id,
+      creation_mutation_target: target, version: 1,
+    });
+  }
+  return { handbook_category: safeHandbookCategory(category), customer_id: customer.id, object_id: object.id, summary: `Handboekcategorie ${name} toegevoegd`, resource_type: 'ObjectHandbookCategory', resource_id: category.id, category: 'operations' };
+}
+
+async function handleUpdateHandbookCategory(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object, category } = await requireScopedHandbookCategory(base44, body);
+  if (category.protected === true || category.origin === 'installation_template') throw new ApiError(409, 'Deze installatiecategorie wordt automatisch beheerd');
+  const data = requireObject(body);
+  const name = handbookString(data.name, 'Categorienaam', 160, true);
+  const parentId = handbookString(data.parent_category_id, 'Bovenliggende categorie', 200, false);
+  await requireHandbookParent(base44, object, parentId, category.id);
+  if (versionOf(category) !== expectedVersion) throw new ApiError(409, 'Categorie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  if (category.name === name && (category.parent_category_id || null) === parentId) return { handbook_category: safeHandbookCategory(category), customer_id: customer.id, object_id: object.id, unchanged: true, summary: 'Handboekcategorie opgeslagen', resource_type: 'ObjectHandbookCategory', resource_id: category.id, category: 'operations' };
+  const projected = safeHandbookCategory({ ...category, name, parent_category_id: parentId, version: expectedVersion + 1 });
+  const recoveryResult = { handbook_category: projected, customer_id: customer.id, object_id: object.id, changes: [{ field: 'handbook_category', label: 'Handboekcategorie', before: category.name, after: name }], summary: `Handboekcategorie ${name} gewijzigd`, resource_type: 'ObjectHandbookCategory', resource_id: category.id, category: 'operations' };
+  const recoveryPatch = await mutationRecoveryPatch(category, 'update_object_handbook_category', user, idempotencyKey, requestFingerprint, target, handbookRecoveryReceipt(recoveryResult));
+  const updated = await casUpdate(base44, 'ObjectHandbookCategory', category, expectedVersion, { name, parent_category_id: parentId, ...recoveryPatch });
+  return { ...recoveryResult, handbook_category: safeHandbookCategory(updated) };
+}
+
+async function handleArchiveHandbookCategory(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object, category } = await requireScopedHandbookCategory(base44, body);
+  if (category.protected === true || category.origin === 'installation_template') throw new ApiError(409, 'Deze installatiecategorie wordt automatisch beheerd');
+  if (versionOf(category) !== expectedVersion) throw new ApiError(409, 'Categorie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  const [children, articles] = await Promise.all([
+    getEntity(base44, 'ObjectHandbookCategory').filter({ object_id: object.id, parent_category_id: category.id, status: 'active' }, '+name', 1),
+    getEntity(base44, 'ObjectHandbookArticle').filter({ object_id: object.id, category_id: category.id, status: 'active' }, '+title', 1),
+  ]);
+  if (children.length || articles.length) throw new ApiError(409, 'Verplaats of archiveer eerst de onderliggende categorieën en artikelen');
+  await requireNoInboundHandbookLinks(base44, object, 'category', category.id);
+  const recoveryResult = { handbook_category: safeHandbookCategory({ ...category, status: 'archived', version: expectedVersion + 1 }), customer_id: customer.id, object_id: object.id, changes: [{ field: 'status', label: 'Handboekcategorie', before: 'Actief', after: 'Gearchiveerd' }], summary: `Handboekcategorie ${category.name} gearchiveerd`, resource_type: 'ObjectHandbookCategory', resource_id: category.id, category: 'operations' };
+  const recoveryPatch = await mutationRecoveryPatch(category, 'archive_object_handbook_category', user, idempotencyKey, requestFingerprint, target, handbookRecoveryReceipt(recoveryResult));
+  await casUpdate(base44, 'ObjectHandbookCategory', category, expectedVersion, { status: 'archived', ...recoveryPatch });
+  return recoveryResult;
+}
+
+async function normalizedHandbookArticleInput(base44: LooseRecord, object: LooseRecord, data: LooseRecord) {
+  const categoryId = handbookString(data.category_id, 'Categorie-ID', 200, false);
+  if (categoryId) await requireHandbookParent(base44, object, categoryId);
+  const title = handbookString(data.title, 'Artikeltitel', 200, true);
+  const summary = handbookString(data.summary, 'Artikelsamenvatting', 500, false);
+  const supplementBlocks = await normalizedHandbookBlocks(base44, object, data.supplement_blocks || []);
+  if (!supplementBlocks.length) throw new ApiError(400, 'Voeg minimaal één artikelonderdeel toe');
+  assertHandbookArticleBlocks([], supplementBlocks);
+  return { category_id: categoryId, title, summary, content_format: HANDBOOK_CONTENT_FORMAT, managed_blocks: [], supplement_blocks: supplementBlocks, content: handbookBlocksPlainText(supplementBlocks) };
+}
+
+async function handleCreateHandbookArticle(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw artikel verwacht expected_version 0');
+  const normalized = await normalizedHandbookArticleInput(base44, object, requireObject(body));
+  const replay = await getEntity(base44, 'ObjectHandbookArticle').filter({ creation_idempotency_key: idempotencyKey }, '-created_date', 2);
+  if (replay.length > 1) throw new ApiError(409, 'Artikel-idempotency is niet eenduidig; handmatige controle vereist');
+  let article = replay[0] || null;
+  if (article) {
+    if (article.customer_id !== customer.id || article.object_id !== object.id || article.creation_request_fingerprint !== requestFingerprint || article.creation_actor_user_id !== user.id || article.creation_mutation_target !== target) rejectIdempotencyReuse();
+  } else {
+    article = await getEntity(base44, 'ObjectHandbookArticle').create({
+      customer_id: customer.id, object_id: object.id, ...normalized, article_key: null,
+      origin: 'user', source_installation_id: null, source_manual_key: null,
+      source_manual_version: null, source_procedure_key: null, source_urls: [],
+      generated_checksum: null, read_only: false, sort_order: 1000, status: 'active',
+      creation_idempotency_key: idempotencyKey, creation_request_fingerprint: requestFingerprint,
+      creation_actor_user_id: user.id, creation_mutation_target: target, version: 1,
+    });
+  }
+  return { article: safeHandbookArticle(article), customer_id: customer.id, object_id: object.id, changes: [{ field: 'handbook_article', label: 'Handboekartikel', before: null, after: normalized.title }], summary: `Handboekartikel ${normalized.title} toegevoegd`, resource_type: 'ObjectHandbookArticle', resource_id: article.id, category: 'operations' };
+}
+
+async function handleUpdateHandbookArticle(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object, article } = await requireScopedHandbookArticle(base44, body);
+  if (versionOf(article) !== expectedVersion) throw new ApiError(409, 'Artikel is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  const data = requireObject(body);
+  let patch: LooseRecord;
+  if (article.origin === 'installation_template' || article.read_only === true) {
+    const supplements = await normalizedHandbookBlocks(base44, object, data.supplement_blocks || []);
+    const managed = Array.isArray(article.managed_blocks) ? article.managed_blocks : [];
+    assertHandbookArticleBlocks(managed, supplements);
+    patch = { supplement_blocks: supplements, content_format: HANDBOOK_CONTENT_FORMAT, content: handbookBlocksPlainText([...managed, ...supplements]) };
+  } else patch = await normalizedHandbookArticleInput(base44, object, data);
+  const unchanged = Object.entries(patch).every(([field, value]) => JSON.stringify(canonicalMutationValue(article[field])) === JSON.stringify(canonicalMutationValue(value)));
+  if (unchanged) return { article: safeHandbookArticle(article), customer_id: customer.id, object_id: object.id, unchanged: true, summary: 'Handboekartikel opgeslagen', resource_type: 'ObjectHandbookArticle', resource_id: article.id, category: 'operations' };
+  const title = article.origin === 'installation_template' ? article.title : patch.title;
+  const projected = safeHandbookArticle({ ...article, ...patch, version: expectedVersion + 1 });
+  const beforeBlockCount = (Array.isArray(article.managed_blocks) ? article.managed_blocks.length : 0) + (Array.isArray(article.supplement_blocks) ? article.supplement_blocks.length : 0);
+  const afterBlockCount = projected.managed_blocks.length + projected.supplement_blocks.length;
+  const changes = [
+    ...(article.title !== title ? [{ field: 'title', label: 'Artikeltitel', before: article.title, after: title }] : []),
+    ...((article.category_id || null) !== (projected.category_id || null) ? [{ field: 'category_id', label: 'Categorie', before: article.category_id || null, after: projected.category_id || null }] : []),
+    ...(canonicalMutationValue(article.summary || null) !== canonicalMutationValue(projected.summary || null) ? [{ field: 'summary', label: 'Samenvatting', before: article.summary ? 'Ingevuld' : 'Leeg', after: projected.summary ? 'Ingevuld' : 'Leeg' }] : []),
+    { field: 'article_blocks', label: article.origin === 'installation_template' ? 'Objectspecifieke aanvulling' : 'Artikelonderdelen', before: `${beforeBlockCount} onderdelen`, after: `${afterBlockCount} onderdelen` },
+  ];
+  const recoveryResult = { article: projected, customer_id: customer.id, object_id: object.id, changes, summary: `Handboekartikel ${title} gewijzigd`, resource_type: 'ObjectHandbookArticle', resource_id: article.id, category: 'operations' };
+  const recoveryPatch = await mutationRecoveryPatch(article, 'update_object_handbook_article', user, idempotencyKey, requestFingerprint, target, handbookRecoveryReceipt(recoveryResult));
+  const updated = await casUpdate(base44, 'ObjectHandbookArticle', article, expectedVersion, { ...patch, ...recoveryPatch });
+  return { ...recoveryResult, article: safeHandbookArticle(updated) };
+}
+
+async function handleArchiveHandbookArticle(base44: LooseRecord, user: LooseRecord, body: LooseRecord, expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string) {
+  const { customer, object, article } = await requireScopedHandbookArticle(base44, body);
+  if (article.read_only === true || article.origin === 'installation_template') throw new ApiError(409, 'Een automatisch installatieartikel wordt via de installatie beheerd');
+  if (versionOf(article) !== expectedVersion) throw new ApiError(409, 'Artikel is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  await requireNoInboundHandbookLinks(base44, object, 'article', article.id);
+  const recoveryResult = { article: safeHandbookArticle({ ...article, status: 'archived', version: expectedVersion + 1 }), customer_id: customer.id, object_id: object.id, changes: [{ field: 'status', label: 'Handboekartikel', before: 'Actief', after: 'Gearchiveerd' }], summary: `Handboekartikel ${article.title} gearchiveerd`, resource_type: 'ObjectHandbookArticle', resource_id: article.id, category: 'operations' };
+  const recoveryPatch = await mutationRecoveryPatch(article, 'archive_object_handbook_article', user, idempotencyKey, requestFingerprint, target, handbookRecoveryReceipt(recoveryResult));
+  await casUpdate(base44, 'ObjectHandbookArticle', article, expectedVersion, { status: 'archived', ...recoveryPatch });
+  return recoveryResult;
+}
+
+async function handleSyncInstallationHandbooks(base44: LooseRecord, body: LooseRecord) {
+  const { customer, object } = await requireCustomerObjectForMutation(base44, body);
+  if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  const before = await objectHandbookState(base44, customer, object);
+  const suppliedToken = requireString(body, 'sync_token');
+  // Reconciliatie is deterministisch en draait onder dezelfde objectlock als
+  // installatiemutaties. Bij een eerdere partiele write is het token veranderd,
+  // maar moet exact dezelfde retry de resterende onderdelen veilig kunnen
+  // afmaken. Als alles al actueel is, is de retry een succesvolle no-op.
+  if (suppliedToken !== before.syncToken && !before.syncRequired) {
+    return {
+      created_categories: 0, updated_categories: 0, archived_categories: 0,
+      created_articles: 0, updated_articles: 0, archived_articles: 0,
+      upgraded_installations: 0, customer_id: customer.id, object_id: object.id,
+      unchanged: true,
+      changes: [{ field: 'installation_handbook', label: 'Installatiehandleidingen', before: 'Actueel', after: `Actueel · ${AJAX_INSTALLATION_MANUAL_VERSION}` }],
+      summary: 'Installatiehandleidingen zijn al actueel', resource_type: 'SurveillanceObject', resource_id: object.id, category: 'operations',
+    };
+  }
+  const counters = await reconcileInstallationHandbooks(base44, object);
+  return {
+    ...counters, customer_id: customer.id, object_id: object.id,
+    changes: [{ field: 'installation_handbook', label: 'Installatiehandleidingen', before: before.syncRequired ? 'Bijwerken vereist' : 'Actueel', after: `Actueel · ${AJAX_INSTALLATION_MANUAL_VERSION}` }],
+    summary: 'Installatiehandleidingen bijgewerkt', resource_type: 'SurveillanceObject', resource_id: object.id, category: 'operations',
+  };
+}
+
+async function handleObjectHandbookMutation(
+  base44: LooseRecord, user: LooseRecord, action: string, body: LooseRecord,
+  expectedVersion: number, idempotencyKey: string, requestFingerprint: string, target: string,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  const reservation = await reserveObjectInstallationMutation(base44, user, object.id, idempotencyKey, requestFingerprint, target);
+  try {
+    if (action === 'create_object_handbook_category') return handleCreateHandbookCategory(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'update_object_handbook_category') return handleUpdateHandbookCategory(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'archive_object_handbook_category') return handleArchiveHandbookCategory(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'create_object_handbook_article') return handleCreateHandbookArticle(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'update_object_handbook_article') return handleUpdateHandbookArticle(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'archive_object_handbook_article') return handleArchiveHandbookArticle(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    if (action === 'sync_object_installation_handbooks') return handleSyncInstallationHandbooks(base44, body);
+    throw new ApiError(400, 'Onbekende handboekmutatie');
+  } finally {
+    await releaseObjectInstallationMutation(base44, reservation);
+  }
+}
+
 async function handleListObjectInstallations(base44: LooseRecord, body: LooseRecord) {
   const { customer, object } = await requireCustomerObjectScope(base44, body);
   const records = await getEntity(base44, 'ObjectInstallation').filter({ customer_id: customer.id, object_id: object.id }, '-updated_date', 500);
@@ -6760,6 +7863,8 @@ async function handleCreateObjectInstallation(
         await bestEffortReconcileInstallationCredentials(base44, installation.id);
       }
     }
+    await reconcileInstallationHandbooks(base44, object);
+    installation = await requireRecord(base44, 'ObjectInstallation', installation.id, 'Installatie');
     const safe = safeObjectInstallation(installation);
     return { installation: safe, customer_id: customer.id, object_id: object.id, replayed: true, summary: `Installatie ${safe.name} toegevoegd`, resource_type: 'ObjectInstallation', resource_id: safe.id, category: 'operations' };
   }
@@ -6788,8 +7893,10 @@ async function handleCreateObjectInstallation(
       await bestEffortReconcileInstallationCredentials(base44, installation.id);
     }
   }
+  const handbookSync = await reconcileInstallationHandbooks(base44, object);
+  installation = await requireRecord(base44, 'ObjectInstallation', installation.id, 'Installatie');
   const safe = safeObjectInstallation(installation);
-  return { installation: safe, customer_id: customer.id, object_id: object.id, changes: installationChanges(null, safe), summary: `Installatie ${safe.name} toegevoegd`, resource_type: 'ObjectInstallation', resource_id: safe.id, category: 'operations' };
+  return { installation: safe, customer_id: customer.id, object_id: object.id, changes: [...installationChanges(null, safe), { field: 'installation_handbook', label: 'Handboek', before: null, after: `${handbookSync.created_articles} artikelen gekoppeld` }], handbook_sync: handbookSync, summary: `Installatie ${safe.name} toegevoegd`, resource_type: 'ObjectInstallation', resource_id: safe.id, category: 'operations' };
 }
 
 async function handleUpdateObjectInstallation(
@@ -6810,6 +7917,8 @@ async function handleUpdateObjectInstallation(
   const credentials = normalizedInstallationCredentials(data, patch.installation_type);
   const revokedTypes = normalizedInstallationCredentialRevocations(data);
   if (versionOf(installation) !== expectedVersion) throw new ApiError(409, 'Installatie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
+  const handbookProjection = { ...installation, ...patch, version: expectedVersion + 1 };
+  await requireNoRetiringInstallationHandbookLinks(base44, object, installation, handbookProjection);
   const currentCredentials = await installationCredentialState(base44, installation);
   const allowedTypes = INSTALLATION_CREDENTIAL_TYPES_BY_INSTALLATION[patch.installation_type] || new Set<string>();
   const desiredValues = Object.fromEntries(Object.entries(currentCredentials.values).filter(([type]) => allowedTypes.has(type))) as Record<string, string>;
@@ -6838,8 +7947,7 @@ async function handleUpdateObjectInstallation(
     return { installation: unchanged, customer_id: customer.id, object_id: object.id, unchanged: true, summary: 'Installatie opgeslagen', resource_type: 'ObjectInstallation', resource_id: installation.id, category: 'operations' };
   }
   const projected = {
-    ...installation,
-    ...patch,
+    ...handbookProjection,
     active_credential_id: credentialsChanged ? bundle?.id || null : installation.active_credential_id || null,
     credential_storage_version: 1,
     credential_types: credentialTypes,
@@ -6867,7 +7975,9 @@ async function handleUpdateObjectInstallation(
   } finally {
     await bestEffortReconcileInstallationCredentials(base44, installation.id);
   }
-  return { ...recoveryResult, installation: safeObjectInstallation(updated, credentialTypes) };
+  const handbookSync = await reconcileInstallationHandbooks(base44, object);
+  updated = await requireRecord(base44, 'ObjectInstallation', updated.id, 'Installatie');
+  return { ...recoveryResult, installation: safeObjectInstallation(updated, credentialTypes), changes: [...changes, { field: 'installation_handbook', label: 'Handboek', before: 'Vorige installatiehandleiding', after: `Actueel · ${AJAX_INSTALLATION_MANUAL_VERSION}` }], handbook_sync: handbookSync };
 }
 
 async function handleArchiveObjectInstallation(
@@ -6883,9 +7993,11 @@ async function handleArchiveObjectInstallation(
   if (object.status === 'archived') throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
   const installation = await requireRecord(base44, 'ObjectInstallation', requireString(body, 'installation_id'), 'Installatie');
   if (installation.customer_id !== customer.id || installation.object_id !== object.id || legacyInstallationLifecycle(installation) === 'archived') throw new ApiError(409, 'Installatie hoort niet bij dit object');
+  if (versionOf(installation) !== expectedVersion) throw new ApiError(409, 'Installatie is intussen gewijzigd; vernieuw en controleer de wijzigingen');
   const credentialState = await installationCredentialState(base44, installation);
   const before = safeObjectInstallation(installation, credentialState.types);
   const projected = { ...installation, lifecycle_status: 'archived', status: 'archived', archived_at: nowIso(), archived_by_user_id: user.id, version: expectedVersion + 1 };
+  await requireNoRetiringInstallationHandbookLinks(base44, object, installation, projected);
   const after = safeObjectInstallation(projected, credentialState.types);
   const recoveryResult = { installation: after, customer_id: customer.id, object_id: object.id, archived: true, changes: installationChanges(before, after), summary: `Installatie ${before.name} gearchiveerd`, resource_type: 'ObjectInstallation', resource_id: installation.id, category: 'operations' };
   const recoveryPatch = await mutationRecoveryPatch(installation, 'archive_object_installation', user, idempotencyKey, requestFingerprint, target, recoveryResult);
@@ -6896,7 +8008,8 @@ async function handleArchiveObjectInstallation(
     archived_by_user_id: user.id,
     ...recoveryPatch,
   });
-  return { ...recoveryResult, installation: safeObjectInstallation(updated) };
+  const handbookSync = await reconcileInstallationHandbooks(base44, object);
+  return { ...recoveryResult, installation: safeObjectInstallation(await requireRecord(base44, 'ObjectInstallation', updated.id, 'Installatie')), changes: [...recoveryResult.changes, { field: 'installation_handbook', label: 'Handboek', before: 'Installatiehandleidingen actief', after: `${handbookSync.archived_articles} artikelen gearchiveerd` }], handbook_sync: handbookSync };
 }
 
 function objectInstallationMutationLockVersion(object: LooseRecord) {
@@ -13813,6 +14926,14 @@ async function executeMutation(
     case 'update_object_installation':
     case 'archive_object_installation':
       return handleObjectInstallationMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+    case 'create_object_handbook_category':
+    case 'update_object_handbook_category':
+    case 'archive_object_handbook_category':
+    case 'create_object_handbook_article':
+    case 'update_object_handbook_article':
+    case 'archive_object_handbook_article':
+    case 'sync_object_installation_handbooks':
+      return handleObjectHandbookMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
     case 'create_object_relationship':
     case 'update_object_relationship':
     case 'archive_object_relationship':
@@ -13972,6 +15093,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
       if (action === 'list_object_logbook') return json(await handleListObjectLogbook(base44, body));
       if (action === 'list_object_keys') return json(await handleListObjectKeys(base44, body));
       if (action === 'list_object_installations') return json(await handleListObjectInstallations(base44, body));
+      if (action === 'list_object_handbook') return json(await handleListObjectHandbook(base44, body));
       if (action === 'list_object_relationships') return json(await handleListObjectRelationships(base44, body));
       if (action === 'list_object_modules') return json(await handleListObjectModules(base44, body));
       if (action === 'get_object_module') return json(await handleGetObjectModule(base44, body));
@@ -14025,6 +15147,14 @@ export async function handleCustomerPlatformRequest(req: Request) {
       requestFingerprint,
       target,
     ) || await installationMutationMarkerReplay(
+      base44,
+      user,
+      action,
+      body,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+    ) || await handbookMutationMarkerReplay(
       base44,
       user,
       action,
