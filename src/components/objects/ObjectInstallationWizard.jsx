@@ -12,7 +12,6 @@ import {
   ImageOff,
   Loader2,
   LockKeyhole,
-  RadioTower,
   RotateCcw,
   Search,
   ShieldX,
@@ -46,7 +45,7 @@ import {
 const DEFAULT_STEPS = [
   { key: "type", label: "Soort" },
   { key: "brand", label: "Merk" },
-  { key: "operation", label: "Doormelding & codes" },
+  { key: "operation", label: "Schakelcodes" },
   { key: "management", label: "Beheer & controle" },
 ];
 
@@ -54,7 +53,7 @@ const AJAX_STEPS = [
   { key: "type", label: "Soort" },
   { key: "brand", label: "Merk" },
   { key: "control-device", label: "Bediening" },
-  { key: "operation", label: "Doormelding & codes" },
+  { key: "operation", label: "Schakelcodes" },
   { key: "management", label: "Beheer & controle" },
 ];
 
@@ -72,9 +71,6 @@ function initialForm(value) {
     serial_number: value?.serial_number || "",
     external_reference: value?.external_reference || "",
     control_panel_location: value?.control_panel_location || "",
-    monitoring_connected: value?.monitoring_connected === true,
-    monitoring_provider_name: value?.monitoring_provider_name || "",
-    monitoring_connection_reference: value?.monitoring_connection_reference || "",
     installer_name: value?.installer_name || "",
     installer_phone: value?.installer_phone || "",
     commissioned_on: value?.commissioned_on || "",
@@ -176,7 +172,7 @@ function CredentialField({ definition, value, onChange, alreadySet, revoked, onT
   const [visible, setVisible] = useState(false);
   return (
     <Field label={definition.label} htmlFor={`installation-${definition.key}`} hint={revoked ? "Deze code wordt na opslaan veilig ingetrokken en als wijziging gelogd." : alreadySet && !value ? "Er is al een code ingesteld. Laat leeg om deze ongewijzigd te bewaren." : definition.description}>
-      <div className={`space-y-2 rounded-xl border p-3 shadow-sm backdrop-blur-xl ${revoked ? "border-destructive/35 bg-destructive/5" : "border-border/70 bg-card/35"}`}>
+      <div className="space-y-2">
         <div className="relative">
           <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input id={`installation-${definition.key}`} type={visible ? "text" : "password"} value={value || ""} onChange={event => onChange(event.target.value)} disabled={revoked} className="pl-9 pr-10" autoComplete="new-password" placeholder={revoked ? "Code wordt ingetrokken" : alreadySet ? "Bestaande code behouden" : "Optioneel"} maxLength={128} />
@@ -217,7 +213,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
     type: Boolean(form.installation_type && (form.installation_type !== "other" || form.custom_type.trim())),
     brand: Boolean(form.brand.trim() && !customBrandMatch),
     "control-device": Boolean(selectedControlDevice),
-    operation: !form.monitoring_connected || Boolean(form.monitoring_provider_name.trim()),
+    operation: true,
     management: datesValid,
   }[currentStep.key];
   const finalStep = stepIndex === steps.length - 1;
@@ -350,10 +346,8 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
               </>}
 
               {currentStep.key === "operation" && <>
-                <StepHeading icon={RadioTower} title="Is de installatie doorgemeld en hoe wordt deze bediend?" description="De aansluitreferentie is gewone objectmetadata. Bedieningscodes worden afzonderlijk versleuteld en verschijnen nooit in tabellen, zoekresultaten of het logboek." />
-                <div className="grid grid-cols-1 gap-2"><ChoiceCard selected={!form.monitoring_connected} onClick={() => set("monitoring_connected", false)} title="Niet doorgemeld" description="Geen PAC, meldkamer of externe monitoring gekoppeld." /><ChoiceCard selected={form.monitoring_connected} onClick={() => set("monitoring_connected", true)} title="Wel doorgemeld" description="Leg provider en aansluitreferentie vast." /></div>
-                {form.monitoring_connected && <div className="grid gap-4 md:grid-cols-2"><Field label="Meldkamer of provider" htmlFor="installation-provider" required><Input id="installation-provider" value={form.monitoring_provider_name} onChange={event => set("monitoring_provider_name", event.target.value)} placeholder="Bijv. PAC / alarmcentrale" autoFocus /></Field><Field label="Aansluitreferentie" htmlFor="installation-monitoring-reference"><Input id="installation-monitoring-reference" value={form.monitoring_connection_reference} onChange={event => set("monitoring_connection_reference", event.target.value)} placeholder="Geen schakel- of verificatiecode" /></Field></div>}
-                {credentialFields.length > 0 && <div className="space-y-4 rounded-xl border border-amber-300/70 bg-amber-50/60 p-4 shadow-sm backdrop-blur-xl dark:border-amber-900/70 dark:bg-amber-950/25"><div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" /><div><p className="text-sm font-semibold">Beveiligde bedieningscodes</p><p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Leg alleen codes vast die operationeel noodzakelijk zijn. Bestaande codes worden niet teruggelezen in deze wizard.</p></div></div><div className="grid gap-4 md:grid-cols-2">{credentialFields.map(definition => <CredentialField key={definition.key} definition={definition} value={form.credentials[definition.key]} onChange={value => setCredential(definition.key, value)} alreadySet={existingCredentialTypes.includes(definition.key)} revoked={revokedCredentialTypes.includes(definition.key)} onToggleRevoke={() => toggleCredentialRevocation(definition.key)} />)}</div></div>}
+                <StepHeading title="Schakelcodes" description="Voer de in- en uitschakelcode in. Bestaande codes worden niet teruggelezen in deze wizard." />
+                <div className="grid gap-4 md:grid-cols-2">{credentialFields.map(definition => <CredentialField key={definition.key} definition={definition} value={form.credentials[definition.key]} onChange={value => setCredential(definition.key, value)} alreadySet={existingCredentialTypes.includes(definition.key)} revoked={revokedCredentialTypes.includes(definition.key)} onToggleRevoke={() => toggleCredentialRevocation(definition.key)} />)}</div>
               </>}
 
               {currentStep.key === "management" && <>
@@ -361,7 +355,7 @@ export default function ObjectInstallationWizard({ installation = null, onCancel
                 <div className="grid gap-4 md:grid-cols-2"><Field label="Installateur / onderhoudspartij" htmlFor="installation-installer"><Input id="installation-installer" value={form.installer_name} onChange={event => set("installer_name", event.target.value)} /></Field><Field label="Telefoon onderhoudspartij" htmlFor="installation-installer-phone"><Input id="installation-installer-phone" type="tel" value={form.installer_phone} onChange={event => set("installer_phone", event.target.value)} /></Field></div>
                 <div className="grid gap-4 md:grid-cols-3"><Field label="In bedrijf sinds" htmlFor="installation-commissioned"><Input id="installation-commissioned" type="date" value={form.commissioned_on} onChange={event => set("commissioned_on", event.target.value)} /></Field><Field label="Laatst getest" htmlFor="installation-tested"><Input id="installation-tested" type="date" value={form.last_tested_on} onChange={event => set("last_tested_on", event.target.value)} /></Field><Field label="Volgend onderhoud" htmlFor="installation-maintenance" hint={!datesValid ? "De datums moeten in de volgorde inbedrijfstelling, test en onderhoud liggen." : null}><Input id="installation-maintenance" type="date" value={form.next_maintenance_on} onChange={event => set("next_maintenance_on", event.target.value)} aria-invalid={!datesValid} className={!datesValid ? "border-destructive" : ""} /></Field></div>
                 <div className="grid gap-4 md:grid-cols-2"><Field label="Levenscyclus" htmlFor="installation-lifecycle"><Select value={form.lifecycle_status} onValueChange={value => set("lifecycle_status", value)}><SelectTrigger id="installation-lifecycle"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_LIFECYCLE_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field><Field label="Operationele toestand" htmlFor="installation-operational"><Select value={form.operational_status} onValueChange={value => set("operational_status", value)}><SelectTrigger id="installation-operational"><SelectValue /></SelectTrigger><SelectContent>{INSTALLATION_OPERATIONAL_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></Field></div>
-                <div className="grid gap-3 md:grid-cols-2"><Summary label="Installatie"><p className="font-medium">{form.name || "Naam ontbreekt"}</p><p className="mt-0.5 text-xs text-muted-foreground">{installationTypeLabel(form)}{form.brand ? ` · ${form.brand}` : ""}{form.model ? ` ${form.model}` : ""}</p>{selectedControlDevice && <p className="mt-1 text-xs text-primary">Handleiding: {selectedControlDevice.label} · v{selectedControlDevice.manualVersion}</p>}</Summary><Summary label="Doormelding en codes"><p>{form.monitoring_connected ? form.monitoring_provider_name : "Niet doorgemeld"}</p><p className="mt-0.5 text-xs text-muted-foreground">{effectiveCredentialTypes.length ? effectiveCredentialTypes.map(installationCredentialLabel).join(", ") : "Geen bedieningscodes ingesteld"}{revokedCredentialTypes.length ? ` · ${revokedCredentialTypes.map(installationCredentialLabel).join(", ")} wordt ingetrokken` : ""}</p></Summary></div>
+                <div className="grid gap-3 md:grid-cols-2"><Summary label="Installatie"><p className="font-medium">{form.name || "Naam ontbreekt"}</p><p className="mt-0.5 text-xs text-muted-foreground">{installationTypeLabel(form)}{form.brand ? ` · ${form.brand}` : ""}{form.model ? ` ${form.model}` : ""}</p>{selectedControlDevice && <p className="mt-1 text-xs text-primary">Handleiding: {selectedControlDevice.label} · v{selectedControlDevice.manualVersion}</p>}</Summary><Summary label="Schakelcodes"><p>{effectiveCredentialTypes.length ? effectiveCredentialTypes.map(installationCredentialLabel).join(", ") : "Geen schakelcodes ingesteld"}{revokedCredentialTypes.length ? ` · ${revokedCredentialTypes.map(installationCredentialLabel).join(", ")} wordt ingetrokken` : ""}</p></Summary></div>
                 <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-card/45 p-4 text-xs text-muted-foreground shadow-sm backdrop-blur-xl"><ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0" /><p>Na opslaan staat alleen veilige metadata in de tabel. Codes worden versleuteld opgeslagen en wijzigingen verschijnen in het objectlogboek zonder codewaarde.</p></div>
               </>}
             </motion.div>

@@ -2,68 +2,282 @@
   "name": "ObjectInstallation",
   "type": "object",
   "properties": {
-    "customer_id": { "type": "string" },
-    "object_id": { "type": "string" },
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
     "installation_type": {
       "type": "string",
-      "enum": ["alarm_system", "fire_alarm_system", "camera_system", "access_control", "intercom", "evacuation_alarm", "other"]
+      "enum": [
+        "alarm_system",
+        "fire_alarm_system",
+        "camera_system",
+        "access_control",
+        "intercom",
+        "evacuation_alarm",
+        "other"
+      ]
     },
-    "custom_type": { "type": ["string", "null"] },
-    "name": { "type": "string" },
-    "brand": { "type": ["string", "null"] },
-    "model": { "type": ["string", "null"] },
-    "control_device_key": { "type": ["string", "null"], "description": "Canonieke sleutel van het geselecteerde bedienpaneel" },
-    "control_device_name": { "type": ["string", "null"], "description": "Onveranderlijke weergavenaam bij de gekozen bedienpaneelsleutel" },
-    "manual_key": { "type": ["string", "null"], "description": "Door LOQ beheerde handleidingssleutel; nooit door de client bepaald" },
-    "manual_version": { "type": ["string", "null"], "description": "Gekoppelde append-only handleidingversie" },
-    "serial_number": { "type": ["string", "null"] },
-    "external_reference": { "type": ["string", "null"] },
-    "location": { "type": ["string", "null"], "description": "Legacy mirror van control_panel_location" },
-    "control_panel_location": { "type": ["string", "null"] },
-    "monitoring_connected": { "type": "boolean", "default": false },
-    "monitoring_provider_name": { "type": ["string", "null"] },
-    "monitoring_connection_reference": { "type": ["string", "null"] },
-    "installer_name": { "type": ["string", "null"] },
-    "installer_phone": { "type": ["string", "null"] },
-    "commissioned_on": { "type": ["string", "null"], "format": "date" },
-    "last_tested_on": { "type": ["string", "null"], "format": "date" },
-    "next_maintenance_on": { "type": ["string", "null"], "format": "date" },
-    "active_credential_id": { "type": ["string", "null"] },
-    "credential_storage_version": { "type": "number", "default": 1 },
+    "custom_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "brand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "control_device_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke sleutel van het geselecteerde bedienpaneel"
+    },
+    "control_device_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Onveranderlijke weergavenaam bij de gekozen bedienpaneelsleutel"
+    },
+    "manual_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Door LOQ beheerde handleidingssleutel; nooit door de client bepaald"
+    },
+    "manual_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekoppelde append-only handleidingversie"
+    },
+    "serial_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "external_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "location": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Legacy mirror van control_panel_location"
+    },
+    "control_panel_location": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "monitoring_connected": {
+      "type": "boolean",
+      "default": false
+    },
+    "monitoring_provider_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "monitoring_connection_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "installer_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "installer_phone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commissioned_on": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "last_tested_on": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "next_maintenance_on": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "active_credential_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "credential_storage_version": {
+      "type": "number",
+      "default": 1
+    },
     "credential_types": {
       "type": "array",
-      "items": { "type": "string", "enum": ["switching_code", "reset_code", "operator_code", "service_code"] },
+      "items": {
+        "type": "string",
+        "enum": [
+          "arming_code",
+          "disarming_code",
+          "switching_code",
+          "reset_code",
+          "operator_code",
+          "service_code"
+        ]
+      },
       "default": []
     },
     "lifecycle_status": {
       "type": "string",
-      "enum": ["active", "inactive", "decommissioned", "archived"],
+      "enum": [
+        "active",
+        "inactive",
+        "decommissioned",
+        "archived"
+      ],
       "default": "active"
     },
     "operational_status": {
       "type": "string",
-      "enum": ["unknown", "operational", "fault", "maintenance"],
+      "enum": [
+        "unknown",
+        "operational",
+        "fault",
+        "maintenance"
+      ],
       "default": "unknown"
     },
     "status": {
       "type": "string",
-      "enum": ["active", "inactive", "maintenance", "decommissioned", "archived"],
+      "enum": [
+        "active",
+        "inactive",
+        "maintenance",
+        "decommissioned",
+        "archived"
+      ],
       "default": "active",
       "description": "Tijdelijke compatibiliteitsmirror; lifecycle_status is leidend"
     },
-    "creation_idempotency_key": { "type": ["string", "null"] },
-    "creation_request_fingerprint": { "type": ["string", "null"] },
-    "creation_actor_user_id": { "type": ["string", "null"] },
-    "creation_mutation_target": { "type": ["string", "null"] },
-    "customer_platform_last_mutation_key_hash": { "type": ["string", "null"] },
-    "customer_platform_last_mutation_recovery": { "type": ["object", "null"], "additionalProperties": true },
-    "customer_platform_mutation_key_hashes": { "type": "array", "items": { "type": "string" }, "default": [] },
-    "customer_platform_mutation_recoveries": { "type": ["object", "null"], "additionalProperties": true },
-    "archived_at": { "type": ["string", "null"], "format": "date-time" },
-    "archived_by_user_id": { "type": ["string", "null"] },
-    "version": { "type": "number", "default": 1 }
+    "creation_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "creation_mutation_target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_platform_last_mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_platform_last_mutation_recovery": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "customer_platform_mutation_key_hashes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "customer_platform_mutation_recoveries": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "archived_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
   },
-  "required": ["customer_id", "object_id", "installation_type", "name", "lifecycle_status", "operational_status", "status"],
+  "required": [
+    "customer_id",
+    "object_id",
+    "installation_type",
+    "name",
+    "lifecycle_status",
+    "operational_status",
+    "status"
+  ],
   "rls": {
     "create": false,
     "read": false,

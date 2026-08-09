@@ -112,28 +112,14 @@ export const filterInstallationBrandOptions = (type, query) => {
   ].some(candidate => normalizeBrandValue(candidate).includes(normalized)));
 };
 
-export const INSTALLATION_CREDENTIAL_FIELDS = {
-  alarm_system: [
-    { key: "switching_code", label: "Schakelcode", description: "Code voor regulier in- en uitschakelen." },
-    { key: "reset_code", label: "Resetcode", description: "Alleen vastleggen wanneer deze operationeel nodig is." },
-  ],
-  fire_alarm_system: [
-    { key: "operator_code", label: "Bediencode", description: "Code voor bevoegde bediening van de centrale." },
-    { key: "reset_code", label: "Resetcode", description: "Code voor herstel na verificatie volgens instructie." },
-    { key: "service_code", label: "Servicecode", description: "Alleen als de beveiligingsorganisatie deze nodig heeft." },
-  ],
-  evacuation_alarm: [
-    { key: "operator_code", label: "Bediencode", description: "Code voor bevoegde bediening." },
-    { key: "service_code", label: "Servicecode", description: "Alleen vastleggen als deze operationeel nodig is." },
-  ],
-  access_control: [{ key: "service_code", label: "Beheer- of servicecode", description: "Geen persoonlijke pas-PIN of gebruikerscode." }],
-  camera_system: [{ key: "service_code", label: "Servicecode", description: "Geen persoonlijk accountwachtwoord vastleggen." }],
-  intercom: [{ key: "service_code", label: "Programmeer- of servicecode", description: "Alleen voor bevoegde operationele ondersteuning." }],
-  other: [
-    { key: "switching_code", label: "Schakelcode", description: "Optionele bediencode." },
-    { key: "service_code", label: "Servicecode", description: "Optionele servicecode." },
-  ],
-};
+const SWITCHING_CODE_FIELDS = [
+  { key: "arming_code", label: "Inschakelcode", description: "Code om de installatie in te schakelen." },
+  { key: "disarming_code", label: "Uitschakelcode", description: "Code om de installatie uit te schakelen." },
+];
+
+export const INSTALLATION_CREDENTIAL_FIELDS = Object.fromEntries(
+  INSTALLATION_TYPES.map(type => [type.value, SWITCHING_CODE_FIELDS]),
+);
 
 export const INSTALLATION_LIFECYCLE_OPTIONS = [
   { value: "active", label: "Actief" },

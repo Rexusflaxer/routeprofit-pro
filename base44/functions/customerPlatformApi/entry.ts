@@ -6229,20 +6229,19 @@ async function handleObjectKeyMutation(
   }
 }
 
+const SWITCHING_CREDENTIAL_TYPES = ['arming_code', 'disarming_code'];
+const installationCredentialTypeSet = (...legacy: string[]) => new Set([...SWITCHING_CREDENTIAL_TYPES, ...legacy]);
 const INSTALLATION_CREDENTIAL_TYPES_BY_INSTALLATION: Record<string, Set<string>> = {
-  alarm_system: new Set(['switching_code', 'reset_code']),
-  fire_alarm_system: new Set(['operator_code', 'reset_code', 'service_code']),
-  evacuation_alarm: new Set(['operator_code', 'service_code']),
-  camera_system: new Set(['service_code']),
-  access_control: new Set(['service_code']),
-  intercom: new Set(['service_code']),
-  other: new Set(['switching_code', 'reset_code', 'operator_code', 'service_code']),
+  alarm_system: installationCredentialTypeSet('switching_code', 'reset_code'),
+  fire_alarm_system: installationCredentialTypeSet('operator_code', 'reset_code', 'service_code'),
+  evacuation_alarm: installationCredentialTypeSet('operator_code', 'service_code'),
+  camera_system: installationCredentialTypeSet('service_code'), access_control: installationCredentialTypeSet('service_code'),
+  intercom: installationCredentialTypeSet('service_code'), other: installationCredentialTypeSet('switching_code', 'reset_code', 'operator_code', 'service_code'),
 };
 const INSTALLATION_CREDENTIAL_LABELS: Record<string, string> = {
-  switching_code: 'Schakelcode',
-  reset_code: 'Resetcode',
-  operator_code: 'Bediencode',
-  service_code: 'Servicecode',
+  arming_code: 'Inschakelcode', disarming_code: 'Uitschakelcode',
+  switching_code: 'Schakelcode', reset_code: 'Resetcode',
+  operator_code: 'Bediencode', service_code: 'Servicecode',
 };
 const installationCredentialTypeLabel = (type: string) => INSTALLATION_CREDENTIAL_LABELS[type] || 'Beveiligde code';
 
@@ -6303,9 +6302,6 @@ function normalizedInstallationData(data: LooseRecord) {
     ? 'Ajax Systems'
     : submittedBrand;
   const manualData = normalizedInstallationManualData(data, installationType, brand);
-  const monitoringConnected = data.monitoring_connected === true;
-  const monitoringProviderName = objectText(data.monitoring_provider_name, 'Meldkamer of provider', 160, true);
-  if (monitoringConnected && !monitoringProviderName) throw new ApiError(400, 'Vul de meldkamer of monitoringprovider in');
   const installerPhone = objectText(data.installer_phone, 'Telefoon onderhoudspartij', 40, true);
   if (installerPhone) {
     const normalizedPhone = normalizePhone(installerPhone);
@@ -6339,9 +6335,9 @@ function normalizedInstallationData(data: LooseRecord) {
     external_reference: objectText(data.external_reference, 'Externe referentie', 160, true),
     location: controlPanelLocation,
     control_panel_location: controlPanelLocation,
-    monitoring_connected: monitoringConnected,
-    monitoring_provider_name: monitoringConnected ? monitoringProviderName : null,
-    monitoring_connection_reference: monitoringConnected ? objectText(data.monitoring_connection_reference, 'Aansluitreferentie', 160, true) : null,
+    monitoring_connected: false,
+    monitoring_provider_name: null,
+    monitoring_connection_reference: null,
     installer_name: objectText(data.installer_name, 'Installateur of onderhoudspartij', 160, true),
     installer_phone: installerPhone,
     commissioned_on: commissionedOn,
@@ -6436,7 +6432,7 @@ function safeCredentialValues(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {} as Record<string, string>;
   return Object.fromEntries(Object.entries(value as LooseRecord).flatMap(([credentialType, rawValue]) => {
     const normalized = typeof rawValue === 'string' ? rawValue.trim() : '';
-    if (!normalized || !['switching_code', 'reset_code', 'operator_code', 'service_code'].includes(credentialType)) return [];
+    if (!normalized || ![...SWITCHING_CREDENTIAL_TYPES, 'switching_code', 'reset_code', 'operator_code', 'service_code'].includes(credentialType)) return [];
     return [[credentialType, normalized]];
   })) as Record<string, string>;
 }
@@ -6476,7 +6472,7 @@ async function installationCredentialState(base44: LooseRecord, installation: Lo
   for (const record of legacy) {
     const credentialType = asString(record.credential_type);
     if (credentialType === 'bundle' || values[credentialType]) continue;
-    if (!['switching_code', 'reset_code', 'operator_code', 'service_code'].includes(credentialType)) continue;
+    if (![...SWITCHING_CREDENTIAL_TYPES, 'switching_code', 'reset_code', 'operator_code', 'service_code'].includes(credentialType)) continue;
     values[credentialType] = await decryptInstallationCredential(
       record,
       installationCredentialContext(installation, credentialType),
@@ -6703,7 +6699,6 @@ function installationChanges(before: LooseRecord | null, after: LooseRecord, cre
     installation_type: 'Type', custom_type: 'Ander type', name: 'Naam', brand: 'Merk', model: 'Model',
     control_device_key: 'Bedienpaneelsleutel', control_device_name: 'Bedienpaneel', manual_key: 'Handleiding', manual_version: 'Handleidingversie',
     serial_number: 'Serienummer', external_reference: 'Externe referentie', control_panel_location: 'Locatie centrale',
-    monitoring_connected: 'Doormelding', monitoring_provider_name: 'Meldkamer of provider', monitoring_connection_reference: 'Aansluitreferentie',
     installer_name: 'Onderhoudspartij', installer_phone: 'Telefoon onderhoudspartij', commissioned_on: 'In bedrijf sinds',
     last_tested_on: 'Laatst getest', next_maintenance_on: 'Volgend onderhoud', lifecycle_status: 'Levenscyclus',
     operational_status: 'Operationele toestand', credential_types: 'Ingestelde codes',
