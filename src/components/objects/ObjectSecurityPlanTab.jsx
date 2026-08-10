@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BookOpenText,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Layers3,
@@ -24,7 +25,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/use-toast";
 import SecurityPlanWizard from "./SecurityPlanWizard";
 import SecurityPlanWorkspace from "./SecurityPlanWorkspace";
-import SecurityPlanCategorySidebar from "./SecurityPlanCategorySidebar";
 import {
   SECURITY_PLAN_TASK_TYPES,
   getSecurityPlanTaskType,
@@ -95,12 +95,46 @@ function LegacyMigrationBanner({ count, pending, onPreview }) {
   return <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300/60 bg-amber-500/10 p-4 text-amber-950 backdrop-blur-xl dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="text-sm font-semibold">{count} bestaand{count === 1 ? " plan" : "e plannen"} voorbereiden</p><p className="mt-1 max-w-2xl text-xs leading-relaxed opacity-80">Deze plannen komen uit de eerdere opzet. Een beheerder kan eerst veilig bekijken wat wordt omgezet en daarna expliciet conceptrevisies laten maken. Er wordt niets gepubliceerd.</p></div></div><Button type="button" variant="outline" size="sm" className="shrink-0 border-amber-400/60 bg-background/70" onClick={onPreview} disabled={pending}>{pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldAlert className="h-3.5 w-3.5" />} Voorbereiding controleren</Button></div>;
 }
 
-function CategoryWelcome({ migrationCount, migrationPending, archivedObject, onPreviewMigration }) {
-  return <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
-    <div className="border-b border-border/70 bg-card/25 px-5 py-4 backdrop-blur-xl"><h2 className="text-sm font-semibold text-foreground">Beveiligingsplan</h2><p className="mt-1 text-xs text-muted-foreground">Kies links een categorie om de bijbehorende planvarianten te beheren.</p></div>
-    {migrationCount > 0 && !archivedObject && <LegacyMigrationBanner count={migrationCount} pending={migrationPending} onPreview={onPreviewMigration} />}
-    <div className="flex flex-1 items-center justify-center p-8 text-center"><div className="max-w-md"><BookOpenText className="mx-auto h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Kies een categorie</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Daarna ziet u hier de planvarianten, instructies, secties, routes en publicatiehistorie.</p></div></div>
-  </div>;
+function CategoryChoice({ category, summary, loading, unavailable, onClick }) {
+  const total = Number(summary?.total || 0);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${category.label} openen`}
+      className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-card/45 px-4 py-3 text-left shadow-sm backdrop-blur-xl transition-all hover:border-primary hover:bg-accent/50 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-foreground">{category.label}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{category.description}</span>
+      </span>
+      <span className="ml-4 shrink-0 whitespace-nowrap text-right text-xs text-muted-foreground">{loading ? "Laden..." : unavailable ? "Niet beschikbaar" : `${total} plan${total === 1 ? "" : "nen"}`}</span>
+      <ChevronRight className="ml-3 h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+function CategoryLanding({ summaries, loading, countError, migrationCount, migrationPending, archivedObject, onSelect, onRetryCounts, onPreviewMigration }) {
+  const summaryByType = new Map(summaries.map(summary => [summary.task_type, summary]));
+  return (
+    <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
+      <div className="border-b border-border/70 bg-card/25 px-5 py-4 backdrop-blur-xl">
+        <h2 className="text-sm font-semibold text-foreground">Beveiligingsplan</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Kies eerst een categorie. Daarna beheert en ontwerpt u alleen de plannen voor dat soort werkzaamheden.</p>
+      </div>
+      {migrationCount > 0 && !archivedObject && <LegacyMigrationBanner count={migrationCount} pending={migrationPending} onPreview={onPreviewMigration} />}
+      <div className="space-y-3 p-5">
+        <div>
+          <p className="text-sm font-medium text-foreground">Kies het soort beveiligingsplan</p>
+          <p className="mt-1 text-xs text-muted-foreground">Iedere categorie bevat zijn eigen varianten, instructies, secties, routes en publicatiehistorie.</p>
+        </div>
+        {countError && <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"><span>De aantallen zijn tijdelijk niet beschikbaar. U kunt de categorieën wel openen.</span><Button type="button" variant="ghost" size="sm" className="h-7 shrink-0" onClick={onRetryCounts}><RefreshCw className="h-3.5 w-3.5" /> Opnieuw</Button></div>}
+        <div className="grid grid-cols-1 gap-2">
+          {SECURITY_PLAN_TASK_TYPES.map(category => <CategoryChoice key={category.key} category={category} summary={summaryByType.get(category.key)} loading={loading} unavailable={countError} onClick={() => onSelect(category.key)} />)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PlanRows({ rows, category, onOpen }) {
@@ -196,26 +230,42 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
     CATEGORY_RESET_PARAMS.forEach(param => next.delete(param));
     setSearchParams(next);
   };
+  const closeCategory = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("plan_type");
+    CATEGORY_RESET_PARAMS.forEach(param => next.delete(param));
+    setSearchParams(next);
+  };
   const detailOpen = view === "edit"
     && searchParams.get("view") === "edit"
     && selectedRow
     && searchParams.get("row") === selectedRow
     && (!selectedType || selectedCategory);
-  const categorySidebar = <SecurityPlanCategorySidebar summaries={categorySummaries} selectedType={selectedType} loading={facetQuery.isLoading} error={facetQuery.isError} onSelect={openCategory} onRetry={() => facetQuery.refetch()} />;
-  if (detailOpen) return <div className="flex min-h-[620px] flex-col sm:flex-row">{categorySidebar}<main className="min-w-0 flex-1"><SecurityPlanWorkspace object={object} securityPlanId={selectedRow} onBack={onCloseView} onOpenPlan={onOpenEdit} /></main></div>;
+  if (detailOpen) return <SecurityPlanWorkspace object={object} securityPlanId={selectedRow} onBack={onCloseView} onOpenPlan={onOpenEdit} />;
   if (!selectedCategory) return <>
-    <div className="flex min-h-[620px] flex-col sm:flex-row">{categorySidebar}<main className="min-w-0 flex-1"><CategoryWelcome migrationCount={migrationRequiredCount} migrationPending={migrationPreview.isPending} archivedObject={archivedObject} onPreviewMigration={() => migrationPreview.mutate()} /></main></div>
+    <CategoryLanding
+      summaries={categorySummaries}
+      loading={facetQuery.isLoading}
+      countError={facetQuery.isError}
+      migrationCount={migrationRequiredCount}
+      migrationPending={migrationPreview.isPending}
+      archivedObject={archivedObject}
+      onSelect={openCategory}
+      onRetryCounts={() => facetQuery.refetch()}
+      onPreviewMigration={() => migrationPreview.mutate()}
+    />
     <MigrationDialog open={migrationDialogOpen} onOpenChange={open => { if (migrationExecute.isPending) return; setMigrationDialogOpen(open); if (!open) migrationPreview.reset(); }} preview={migrationPreview.data} execute={migrationExecute} />
   </>;
 
-  return <div className="flex min-h-[620px] flex-col sm:flex-row">
-    {categorySidebar}
-    <main className="min-w-0 flex-1 bg-card/35 backdrop-blur-xl">
+  return <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
     {wizardOpen && <SecurityPlanWizard key={`new-${selectedCategory.key}`} initialTaskType={selectedCategory.key} categoryLabel={selectedCategory.label} saving={create.isPending} error={create.error} onCancel={onCloseView} onSave={data => create.mutate(data)} />}
     <div className="flex flex-col gap-3 border-b border-border/70 bg-card/35 px-4 py-3 backdrop-blur-2xl xl:flex-row xl:items-center xl:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">{selectedCategory.label}</h2></div>
-        <p className="mt-1 text-xs text-muted-foreground">{selectedCategory.description}</p>
+      <div className="flex min-w-0 items-start gap-2">
+        <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-muted-foreground hover:text-foreground" onClick={closeCategory}><ChevronLeft className="mr-1 h-4 w-4" /> Alle categorieën</Button>
+        <div className="min-w-0 border-l border-border/70 pl-3">
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">{selectedCategory.label}</h2></div>
+          <p className="mt-1 text-xs text-muted-foreground">{selectedCategory.description}</p>
+        </div>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative min-w-0 sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchTerm} onChange={event => onSearchChange(event.target.value)} placeholder="Zoek planvariant..." aria-label={`${selectedCategory.label} doorzoeken`} className="h-9 pl-9 pr-9" />{searchTerm && <button type="button" onClick={() => onSearchChange("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Zoekopdracht wissen"><X className="h-4 w-4" /></button>}</div>
@@ -224,7 +274,6 @@ export default function ObjectSecurityPlanTab({ object, view, selectedRow, searc
     </div>
     <div className="min-h-0 flex-1">{listQuery.isLoading ? <LibraryLoading /> : listQuery.isError ? <LibraryError error={listQuery.error} onRetry={() => listQuery.refetch()} /> : rows.length ? <PlanRows rows={rows} category={selectedCategory} onOpen={onOpenEdit} /> : <EmptyCategory category={selectedCategory} searching={Boolean(searchTerm.trim())} archivedObject={archivedObject} onCreate={onOpenCreate} />}</div>
     {(page > 1 || hasNext) && <div className="flex items-center justify-between border-t border-border/70 px-4 py-3"><p className="text-xs text-muted-foreground">Pagina {page} · {total} planvariant{total === 1 ? "" : "en"}</p><div className="flex gap-2"><Button type="button" variant="outline" size="sm" disabled={page === 1 || listQuery.isFetching} onClick={() => onPageChange(page - 1)}>Vorige</Button><Button type="button" variant="outline" size="sm" disabled={!hasNext || listQuery.isFetching} onClick={() => onPageChange(page + 1)}>Volgende</Button></div></div>}
-    </main>
   </div>;
 }
 
