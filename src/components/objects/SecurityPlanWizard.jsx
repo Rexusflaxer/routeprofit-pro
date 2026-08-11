@@ -4,74 +4,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { wizardStepMotion } from "@/components/ui-custom/wizardMotion";
 import { Field, StepHeading, WizardPanel, WizardSteps } from "./ObjectWizardUi";
-import { securityPlanExecutionModeForTaskType } from "./securityPlanConfig";
+import { SECURITY_PLAN_TASK_TYPES, securityPlanExecutionModeForTaskType } from "./securityPlanConfig";
 
-const STEPS = [{ key: "name", label: "Plannaam" }];
+const STEPS = [{ key: "category", label: "Categorie" }, { key: "name", label: "Plannaam" }];
 
-function PlanNameStep({ value, onChange }) {
-  return (
-    <div className="space-y-5">
-      <StepHeading title="Geef het plan een duidelijke naam" description="Gebruik een korte, herkenbare naam." />
-      <Field label="Plannaam" htmlFor="security-plan-name" required>
-        <Input id="security-plan-name" value={value} onChange={event => onChange(event.target.value)} placeholder="Bijvoorbeeld Avondronde" maxLength={200} autoFocus />
-      </Field>
-    </div>
-  );
+function CategoryStep({ value, onChange }) {
+  return <div className="space-y-4"><StepHeading title="Wat betreft het plan?" description="Kies het soort werkzaamheden waarvoor u een plan toevoegt." /><div className="grid grid-cols-1 gap-2">{SECURITY_PLAN_TASK_TYPES.map(category => <button key={category.key} type="button" onClick={() => onChange(category.key)} className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${value === category.key ? "border-primary bg-primary/5" : "border-border/70 bg-card/35 hover:bg-muted/30"}`}><span className="block text-sm font-semibold">{category.label}</span><span className="mt-0.5 block text-xs text-muted-foreground">{category.description}</span></button>)}</div></div>;
 }
 
-function initialSecurityPlanForm(initialTaskType, categoryLabel) {
-  const taskType = initialTaskType || "other";
-  const executionMode = securityPlanExecutionModeForTaskType(taskType);
-  return {
-    task_type: taskType,
-    custom_task_type: taskType === "other" ? categoryLabel || "Anders" : "",
-    variant_name: "",
-    execution_mode: executionMode,
-    duration_mode: executionMode === "continuous_post" ? "schedule_defined" : "fixed",
-    duration_minutes: null,
-    section_policy: "not_applicable",
-    default_section_ids: [],
-    allowed_section_ids: [],
-    instruction_blocks: [],
-    floorplan_id: null,
-    floorplan_revision: null,
-    route_overlay: null,
-  };
+function NameStep({ value, onChange }) {
+  return <div className="space-y-5"><StepHeading title="Geef het plan een naam" description="Gebruik een korte, herkenbare naam." /><Field label="Plannaam" htmlFor="security-plan-name" required><Input id="security-plan-name" value={value} onChange={event => onChange(event.target.value)} placeholder="Bijvoorbeeld Avondronde" maxLength={200} autoFocus /></Field></div>;
 }
 
-export default function SecurityPlanWizard({ initialTaskType = "", categoryLabel = "", onCancel, onSave, saving, error }) {
-  const [step] = useState(0);
-  const [form, setForm] = useState(() => initialSecurityPlanForm(initialTaskType, categoryLabel));
-  const steps = STEPS;
-  const current = steps[step].key;
-  const valid = useMemo(() => Boolean(form.variant_name.trim()), [form.variant_name]);
-  const submit = () => onSave({
-    ...form,
-    custom_task_type: form.task_type === "other" ? form.custom_task_type.trim() : null,
-    variant_name: form.variant_name.trim(),
-    duration_mode: form.duration_mode,
-    duration_minutes: null,
-  });
-  const content = <PlanNameStep value={form.variant_name} onChange={variant_name => setForm(currentForm => ({ ...currentForm, variant_name }))} />;
+export default function SecurityPlanWizard({ onCancel, onSave, saving, error }) {
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState({ task_type: "", variant_name: "" });
+  const current = STEPS[step].key;
+  const valid = useMemo(() => current === "category" ? Boolean(form.task_type) : Boolean(form.variant_name.trim()), [current, form]);
+  const submit = () => { const executionMode = securityPlanExecutionModeForTaskType(form.task_type); onSave({ ...form, custom_task_type: form.task_type === "other" ? "Anders" : null, variant_name: form.variant_name.trim(), execution_mode: executionMode, duration_mode: executionMode === "continuous_post" ? "schedule_defined" : "fixed", duration_minutes: null, section_policy: "not_applicable", default_section_ids: [], allowed_section_ids: [], instruction_blocks: [], module_assignments: [], floorplan_id: null, floorplan_revision: null, route_overlay: null }); };
 
-  return (
-    <WizardPanel className="bg-card/55 backdrop-blur-2xl">
-      <WizardSteps stepIndex={step} steps={steps} label={categoryLabel ? `${categoryLabel} toevoegen` : "Beveiligingsplan toevoegen"} />
-      <motion.div key={current} {...wizardStepMotion}>{content}</motion.div>
-      {error && (
-        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <p>{error.message || "Het beveiligingsplan kon niet worden aangemaakt."}</p>
-          {(error.status || error.requestId) && <p className="mt-1 text-[11px] opacity-80">{[error.status && `Status ${error.status}`, error.requestId && `Referentie ${error.requestId}`].filter(Boolean).join(" · ")}</p>}
-        </div>
-      )}
-      <div className="mt-6 flex items-center justify-between gap-3">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={saving}>Annuleren</Button>
-        <div className="flex gap-2">
-          <Button type="button" size="sm" onClick={submit} disabled={!valid || saving}>
-            {saving ? "Aanmaken..." : "Concept aanmaken"}
-          </Button>
-        </div>
-      </div>
-    </WizardPanel>
-  );
+  return <WizardPanel className="bg-card/55 backdrop-blur-2xl"><WizardSteps stepIndex={step} steps={STEPS} label="Beveiligingsplan toevoegen" /><motion.div key={current} {...wizardStepMotion}>{current === "category" ? <CategoryStep value={form.task_type} onChange={task_type => setForm(currentForm => ({ ...currentForm, task_type }))} /> : <NameStep value={form.variant_name} onChange={variant_name => setForm(currentForm => ({ ...currentForm, variant_name }))} />}</motion.div>{error && <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error.message || "Het beveiligingsplan kon niet worden aangemaakt."}</div>}<div className="mt-6 flex items-center justify-between gap-3"><Button type="button" variant="ghost" size="sm" onClick={step ? () => setStep(0) : onCancel} disabled={saving}>{step ? "Vorige" : "Annuleren"}</Button><Button type="button" size="sm" onClick={step ? submit : () => setStep(1)} disabled={!valid || saving}>{step ? saving ? "Opslaan..." : "Opslaan" : "Volgende"}</Button></div></WizardPanel>;
 }
