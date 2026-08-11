@@ -7,7 +7,6 @@ import {
   BookOpenText,
   Boxes,
   CheckCircle2,
-  Clock3,
   Copy,
   FileCheck2,
   Loader2,
@@ -37,7 +36,6 @@ import SecurityPlanModulesEditor from "./SecurityPlanModulesEditor";
 import SecurityPlanRouteEditor from "./SecurityPlanRouteEditor";
 import {
   SECURITY_PLAN_SECTION_POLICIES,
-  SECURITY_PLAN_DURATION_MODES,
   buildSecurityPlanReadiness,
   normalizeInstructionBlocks,
   normalizeRouteOverlay,
@@ -75,8 +73,8 @@ function formFromDetail(detail) {
     variant_name: plan.variant_name || "",
     execution_mode: securityPlanExecutionModeForTaskType(plan.task_type),
     summary: revision.summary || "",
-    duration_mode: revision.duration_mode || (revision.duration_minutes == null ? "none" : "fixed"),
-    duration_minutes: revision.duration_minutes == null ? "" : String(revision.duration_minutes),
+    duration_mode: "schedule_defined",
+    duration_minutes: "",
     section_policy: revision.section_policy || "not_applicable",
     default_section_ids: revision.default_section_ids || [],
     allowed_section_ids: revision.allowed_section_ids || [],
@@ -93,8 +91,8 @@ function mutationData(form) {
     ...form,
     custom_task_type: form.task_type === "other" ? form.custom_task_type.trim() : null,
     variant_name: form.variant_name.trim(),
-    duration_mode: form.duration_mode || "none",
-    duration_minutes: form.duration_mode === "fixed" ? Number(form.duration_minutes) : null,
+    duration_mode: "schedule_defined",
+    duration_minutes: null,
   };
 }
 
@@ -130,11 +128,6 @@ function WorkspaceTabs({ active, onChange }) {
 
 function OverviewTab({ form, onChange, revisionNumber }) {
   const custom = form.task_type === "other";
-  const setDurationMode = durationMode => onChange({
-    ...form,
-    duration_mode: durationMode,
-    duration_minutes: durationMode === "fixed" ? form.duration_minutes : "",
-  });
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
@@ -158,22 +151,7 @@ function OverviewTab({ form, onChange, revisionNumber }) {
             <Label htmlFor="plan-summary" className="text-xs font-semibold">Doel en context</Label>
             <Textarea id="plan-summary" value={form.summary} onChange={event => onChange({ ...form, summary: event.target.value })} placeholder="Beschrijf kort wanneer en met welk doel deze variant wordt gebruikt." rows={3} maxLength={2000} />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Duurwijze</Label>
-            <Select value={form.duration_mode} onValueChange={setDurationMode}>
-              <SelectTrigger aria-label="Duurwijze"><SelectValue /></SelectTrigger>
-              <SelectContent>{SECURITY_PLAN_DURATION_MODES.map(mode => <SelectItem key={mode.key} value={mode.key}>{mode.label}</SelectItem>)}</SelectContent>
-            </Select>
-            <p className="text-[11px] text-muted-foreground">{SECURITY_PLAN_DURATION_MODES.find(mode => mode.key === form.duration_mode)?.description}</p>
-          </div>
-          {form.duration_mode === "fixed" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="plan-duration" className="text-xs font-semibold">Duur in minuten</Label>
-              <div className="relative"><Clock3 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="plan-duration" type="number" min="1" max="10080" value={form.duration_minutes} onChange={event => onChange({ ...form, duration_minutes: event.target.value })} className="pl-9 pr-16" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">min.</span></div>
-              <p className="text-[11px] text-muted-foreground">De bekende of geschatte tijd die deze taak ongeveer duurt.</p>
-            </div>
-          )}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 md:col-span-2">
             <Label className="text-xs font-semibold">Sectiebeleid</Label>
             <Select value={form.section_policy} onValueChange={value => onChange({ ...form, section_policy: value, default_section_ids: value === "not_applicable" ? [] : form.default_section_ids, allowed_section_ids: value === "not_applicable" ? [] : form.allowed_section_ids })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SECURITY_PLAN_SECTION_POLICIES.map(policy => <SelectItem key={policy.key} value={policy.key}>{policy.label}</SelectItem>)}</SelectContent></Select>
           </div>
@@ -182,7 +160,7 @@ function OverviewTab({ form, onChange, revisionNumber }) {
       <aside className="space-y-3">
         <div className="rounded-xl border border-border/70 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
           <p className="text-xs font-semibold text-muted-foreground">Operationele samenvatting</p>
-          <dl className="mt-3 space-y-3 text-sm"><div><dt className="text-[11px] text-muted-foreground">Uitvoeringsvorm</dt><dd className="mt-0.5 font-medium">{securityPlanExecutionModeLabel(form.execution_mode)}</dd></div><div><dt className="text-[11px] text-muted-foreground">Duur</dt><dd className="mt-0.5 font-medium">{securityPlanDurationLabel(form)}</dd></div><div><dt className="text-[11px] text-muted-foreground">Werkrevisie</dt><dd className="mt-0.5 font-medium">Revisie {revisionNumber}</dd></div></dl>
+          <dl className="mt-3 space-y-3 text-sm"><div><dt className="text-[11px] text-muted-foreground">Uitvoeringsvorm</dt><dd className="mt-0.5 font-medium">{securityPlanExecutionModeLabel(form.execution_mode)}</dd></div><div><dt className="text-[11px] text-muted-foreground">Werkrevisie</dt><dd className="mt-0.5 font-medium">Revisie {revisionNumber}</dd></div></dl>
         </div>
         <div className="rounded-xl border border-sky-300/50 bg-sky-500/10 p-4 text-xs text-sky-900 dark:text-sky-100"><p className="font-semibold">Plan en rooster blijven gescheiden</p><p className="mt-1 leading-relaxed opacity-80">Hier beschrijft u hoe de taak wordt uitgevoerd. Werkdagen en tijden legt u later vast in Taken.</p></div>
       </aside>
@@ -279,8 +257,7 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
   const setSubtab = key => { const next = new URLSearchParams(searchParams); next.set("plan_tab", key); setSearchParams(next); };
   const status = securityPlanStatus(plan.status);
   const busy = save.isPending || publish.isPending || duplicate.isPending || archive.isPending;
-  const durationValid = form.duration_mode !== "fixed" || Number(form.duration_minutes) > 0;
-  const draftShapeValid = Boolean(form.variant_name.trim() && form.task_type && form.execution_mode && (form.task_type !== "other" || form.custom_task_type.trim()) && durationValid && form.instruction_blocks.every(block => block.title.trim() && block.steps.every(step => step.title.trim() && step.instruction.trim())));
+  const draftShapeValid = Boolean(form.variant_name.trim() && form.task_type && form.execution_mode && (form.task_type !== "other" || form.custom_task_type.trim()) && form.instruction_blocks.every(block => block.title.trim() && block.steps.every(step => step.title.trim() && step.instruction.trim())));
   const revisionNumber = detail.draft_revision?.revision_number || (detail.published_revision?.revision_number || 0) + 1 || 1;
 
   return <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
