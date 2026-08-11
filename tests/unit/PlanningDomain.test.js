@@ -227,6 +227,45 @@ describe("toewijzingswaarschuwingen", () => {
     expect(warningCodes(idTakesPrecedence)).not.toContain(PLANNING_WARNING_CODES.RESTRICTION_BLOCKED);
   });
 
+  it("past klant- en objectrestricties toe op alle onderdelen van een samengestelde dienst", () => {
+    const compositeShift = {
+      ...targetShift,
+      customer_id: null,
+      customer_ids: ["customer-1", "customer-2"],
+      object_id: null,
+      object_ids: ["object-1", "object-2"],
+    };
+    const restrictions = [
+      {
+        personnel_id: person.id,
+        scope_type: "object",
+        scope_id: "object-2",
+        may_work: false,
+        status: "active",
+        reason: "Geen toegang tot object 2",
+      },
+      {
+        personnel_id: person.id,
+        scope_type: "customer",
+        scope_id: "customer-2",
+        may_work: false,
+        status: "active",
+        reason: "Niet inzetbaar voor klant 2",
+      },
+    ];
+
+    const warnings = getAssignmentWarnings(warningContext({
+      shift: compositeShift,
+      restrictions,
+    }));
+
+    expect(warnings.filter(item => item.code === PLANNING_WARNING_CODES.RESTRICTION_BLOCKED)).toHaveLength(1);
+    expect(warnings.find(item => item.code === PLANNING_WARNING_CODES.RESTRICTION_BLOCKED)?.detail)
+      .toContain("Geen toegang tot object 2");
+    expect(warnings.find(item => item.code === PLANNING_WARNING_CODES.RESTRICTION_BLOCKED)?.detail)
+      .toContain("Niet inzetbaar voor klant 2");
+  });
+
   it("signaleert dubbele inzet en te korte rust", () => {
     const shifts = [
       {

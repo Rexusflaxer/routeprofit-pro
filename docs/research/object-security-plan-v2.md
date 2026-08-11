@@ -340,10 +340,12 @@ Een gegenereerde occurrence bewaart minimaal:
 - afwijkingsreden indien relevant;
 - status en serie-/uitzonderingscontext.
 
-`PlanningShift` kan meerdere occurrence-IDs bevatten, ook van verschillende
-objecten. De volgorde in de dienst staat los van de volgorde van instructiestappen
-binnen één taak. Een occurrence mag maar één keer actief aan een dienst worden
-toegewezen.
+`PlanningShift` kan via geordende taaksegmenten meerdere occurrences bevatten,
+ook van verschillende objecten. De volgorde in de dienst staat los van de
+volgorde van instructiestappen binnen één taak. Eén occurrence mag over meerdere
+niet-overlappende segmenten en diensten worden verdeeld. De gezamenlijke actieve
+dekking mag de vereiste duur nooit overschrijden; aansluitende overdrachten zijn
+wel toegestaan. Eén segment hoort altijd bij exact één dienst.
 
 `TaskExecution` krijgt dezelfde plan-/revisiereferenties en de immutable
 plansnapshot die bij uitvoering gold. Dit is de bron voor latere rapportage,

@@ -82,6 +82,17 @@
         "null"
       ]
     },
+    "task_occurrence_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Concrete objecttaakuitvoeringen in deze dienst. task_id blijft uitsluitend de legacy Task-relatie."
+    },
+    "task_segment_count": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0
+    },
     "customer_contract_line_id": {
       "type": [
         "string",

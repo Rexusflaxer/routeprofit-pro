@@ -7,6 +7,9 @@
       "type": "string",
       "enum": [
         "bootstrap_range",
+        "compose_shift",
+        "update_shift_composition",
+        "cancel_task_shift",
         "assign",
         "unassign",
         "move",
@@ -26,6 +29,8 @@
         "PlanningAssignment",
         "PlanningPublication",
         "PlanningRange",
+        "PlanningTaskOccurrence",
+        "PlanningShiftTaskSegment",
         null
       ]
     },

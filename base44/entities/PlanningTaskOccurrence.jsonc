@@ -1,0 +1,103 @@
+{
+  "name": "PlanningTaskOccurrence",
+  "type": "object",
+  "description": "Concrete, gedateerde planningsvraag uit een ObjectTaskDefinition. Dekking wordt afgeleid uit actieve PlanningShiftTaskSegment-records.",
+  "properties": {
+    "source_key": {
+      "type": "string",
+      "description": "Logisch unieke sleutel object-task:<definition>:<period-key>:<datum>."
+    },
+    "object_task_definition_id": { "type": "string" },
+    "definition_version": { "type": "number", "minimum": 1 },
+    "schedule_period_key": { "type": "string" },
+    "company_id": { "type": ["string", "null"] },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "security_plan_id": { "type": ["string", "null"] },
+    "security_plan_revision_id": { "type": ["string", "null"] },
+    "security_plan_snapshot": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "security_plan_checksum": { "type": ["string", "null"] },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "object_security",
+        "fire_closing_round",
+        "external_closing_round",
+        "external_control_round",
+        "opening_round",
+        "mobile_control_round",
+        "reception",
+        "closing_assistance",
+        "access_control",
+        "fire_watch",
+        "concierge",
+        "other"
+      ]
+    },
+    "custom_task_type": { "type": ["string", "null"] },
+    "execution_mode": {
+      "type": "string",
+      "enum": ["continuous", "time_window"]
+    },
+    "service_date": { "type": "string", "format": "date" },
+    "end_date": { "type": "string", "format": "date" },
+    "window_start_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "window_end_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "timezone": { "type": "string", "default": "Europe/Amsterdam" },
+    "required_minutes": { "type": "number", "minimum": 1 },
+    "lifecycle_status": {
+      "type": "string",
+      "enum": ["active", "cancelled", "superseded"],
+      "default": "active"
+    },
+    "task_name_snapshot": { "type": "string" },
+    "customer_name_snapshot": { "type": ["string", "null"] },
+    "object_name_snapshot": { "type": ["string", "null"] },
+    "instructions_snapshot": { "type": ["string", "null"] },
+    "revision": { "type": "number", "default": 1 },
+    "published_revision": { "type": "number", "default": 0 },
+    "last_published_correlation_id": { "type": ["string", "null"] },
+    "last_modified_by_user_id": { "type": ["string", "null"] },
+    "last_modified_at": { "type": ["string", "null"], "format": "date-time" },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "source_key",
+    "object_task_definition_id",
+    "definition_version",
+    "schedule_period_key",
+    "company_id",
+    "customer_id",
+    "object_id",
+    "task_type",
+    "execution_mode",
+    "service_date",
+    "end_date",
+    "window_start_time",
+    "window_end_time",
+    "timezone",
+    "required_minutes",
+    "lifecycle_status",
+    "task_name_snapshot",
+    "revision",
+    "published_revision"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}

@@ -151,7 +151,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 113, "De verwachte 113 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 115, "De verwachte 115 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -171,12 +171,19 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectSection.jsonc",
   "ThirdPartyOrganization.jsonc",
 ]);
+const serviceWritePlanningEntities = new Set([
+  "PlanningTaskOccurrence.jsonc",
+  "PlanningShiftTaskSegment.jsonc",
+]);
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
   for (const permission of ["create", "read", "update", "delete"]) {
     const immutableEvent = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission);
     const serviceOnlyObjectEntity = serviceOnlyObjectEntities.has(file);
-    const expectedRule = immutableEvent || serviceOnlyObjectEntity
+    const serviceWritePlanningEntity = serviceWritePlanningEntities.has(file);
+    const expectedRule = serviceOnlyObjectEntity
+      || immutableEvent
+      || (serviceWritePlanningEntity && permission !== "read")
       ? false
       : adminOnlyRule;
     assert.deepEqual(

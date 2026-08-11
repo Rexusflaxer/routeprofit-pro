@@ -184,6 +184,30 @@ async function getRecord(base44: LooseRecord, entityName: string, id: string) {
   return base44.asServiceRole.entities[entityName].get(id).catch(() => null);
 }
 
+async function listAllRecords(entity: LooseRecord, sort?: string) {
+  const records = new Map<string, LooseRecord>();
+  const pageSize = 5000;
+  const stableSort = sort || 'created_date';
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await entity.list(stableSort, pageSize, pageIndex * pageSize);
+    page.forEach((record: LooseRecord) => records.set(String(record.id), record));
+    if (page.length < pageSize) return [...records.values()];
+  }
+  throw new ApiError(503, 'De dataset is te groot om veilig in één planningactie te verwerken');
+}
+
+async function filterAllRecords(entity: LooseRecord, query: LooseRecord, sort?: string) {
+  const records = new Map<string, LooseRecord>();
+  const pageSize = 5000;
+  const stableSort = sort || 'created_date';
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await entity.filter(query, stableSort, pageSize, pageIndex * pageSize);
+    page.forEach((record: LooseRecord) => records.set(String(record.id), record));
+    if (page.length < pageSize) return [...records.values()];
+  }
+  throw new ApiError(503, 'De dataset is te groot om veilig in één planningactie te verwerken');
+}
+
 async function requireRecord(base44: LooseRecord, entityName: string, id: string, label: string) {
   const record = await getRecord(base44, entityName, id);
   if (!record) throw new ApiError(404, `${label} niet gevonden`);
@@ -323,12 +347,233 @@ function dedupeWarnings(warnings: LooseRecord[]) {
 function parseClockMinutes(value: unknown) {
   const match = compact(value).match(/^(\d{2}):(\d{2})$/);
   if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return hours * 60 + minutes;
 }
 
 function dateOrdinal(value: string) {
   const [year, month, day] = value.split('-').map(Number);
   return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function dateFromOrdinal(value: number) {
+  return new Date(value * 86400000).toISOString().slice(0, 10);
+}
+
+function addDateDays(value: string, days: number) {
+  return dateFromOrdinal(dateOrdinal(value) + days);
+}
+
+function weekdayKey(value: string) {
+  const day = new Date(`${value}T12:00:00.000Z`).getUTCDay();
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][day];
+}
+
+function dateKeysBetween(start: string, end: string) {
+  const first = dateOrdinal(start);
+  const last = dateOrdinal(end);
+  return Array.from({ length: last - first + 1 }, (_, index) => dateFromOrdinal(first + index));
+}
+
+function intervalFromParts(startDate: string, startTime: string, endDate: string, endTime: string) {
+  const startMinutes = parseClockMinutes(startTime);
+  const endMinutes = parseClockMinutes(endTime);
+  if (startMinutes == null || endMinutes == null) return null;
+  const start = dateOrdinal(startDate) * 1440 + startMinutes;
+  const end = dateOrdinal(endDate) * 1440 + endMinutes;
+  return end > start ? { start, end, duration: end - start } : null;
+}
+
+function normalizedPeriodInterval(serviceDate: string, startValue: unknown, endValue: unknown) {
+  const rawStart = compact(startValue);
+  const rawEnd = compact(endValue);
+  const startMinutes = parseClockMinutes(rawStart);
+  const endMinutes = parseClockMinutes(rawEnd);
+  if (startMinutes == null || startMinutes >= 1440 || endMinutes == null) return null;
+  const endDayOffset = endMinutes === 1440 || endMinutes <= startMinutes ? 1 : 0;
+  const endDate = addDateDays(serviceDate, endDayOffset);
+  const endTime = endMinutes === 1440 ? '00:00' : rawEnd;
+  return {
+    service_date: serviceDate,
+    end_date: endDate,
+    window_start_time: rawStart,
+    window_end_time: endTime,
+    interval: intervalFromParts(serviceDate, rawStart, endDate, endTime),
+  };
+}
+
+function taskDefinitionPeriods(definition: LooseRecord) {
+  const periods = normalizeArray<LooseRecord>(definition.schedule_periods)
+    .filter(period => period?.start_time && period?.end_time && normalizeArray(period.days).length);
+  if (periods.length) return periods;
+  return uniqueStrings(definition.weekdays)
+    .map(value => Number(value))
+    .filter(value => Number.isInteger(value) && value >= 1 && value <= 7)
+    .map(value => ({
+      days: [['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][value - 1]],
+      start_time: definition.start_time,
+      end_time: definition.end_time,
+      period_key: null,
+    }));
+}
+
+function taskDefinitionAppliesOnDate(definition: LooseRecord, serviceDate: string) {
+  if (definition.status !== 'active') return false;
+  if (definition.recurrence_type === 'one_time') return definition.specific_date === serviceDate;
+  if (definition.recurrence_type === 'date_range') {
+    return !!definition.valid_from
+      && !!definition.valid_until
+      && definition.valid_from <= serviceDate
+      && serviceDate <= definition.valid_until;
+  }
+  return definition.recurrence_type === 'weekly';
+}
+
+function taskOccurrenceName(definition: LooseRecord) {
+  const labels: Record<string, string> = {
+    object_security: 'Objectbeveiliging',
+    fire_closing_round: 'Brand- & sluitronde',
+    external_closing_round: 'Externe sluitronde',
+    external_control_round: 'Externe controleronde',
+    opening_round: 'Openingsronde',
+    mobile_control_round: 'Mobiele controleronde',
+    reception: 'Receptiedienst',
+    closing_assistance: 'Sluitbegeleiding',
+    access_control: 'Toegangscontrole',
+    fire_watch: 'Brandwacht',
+    concierge: 'Portier / concierge',
+    other: 'Andere taak',
+  };
+  return compact(definition.custom_task_type) || labels[definition.task_type] || 'Taak';
+}
+
+function occurrenceBlueprints(definition: LooseRecord, periodStart: string, periodEnd: string) {
+  const results: LooseRecord[] = [];
+  const periods = taskDefinitionPeriods(definition);
+  for (const serviceDate of dateKeysBetween(periodStart, periodEnd)) {
+    if (!taskDefinitionAppliesOnDate(definition, serviceDate)) continue;
+    const dayKey = weekdayKey(serviceDate);
+    periods.forEach((period, periodIndex) => {
+      if (!normalizeArray(period.days).includes(dayKey)) return;
+      const normalized = normalizedPeriodInterval(serviceDate, period.start_time, period.end_time);
+      if (!normalized?.interval) return;
+      const requiredMinutes = definition.execution_mode === 'continuous'
+        ? normalized.interval.duration
+        : Number(definition.duration_minutes || 0);
+      if (!Number.isInteger(requiredMinutes) || requiredMinutes < 1 || requiredMinutes > normalized.interval.duration) return;
+      const periodKey = compact(period.period_key)
+        || `legacy:${dayKey}:${period.start_time}:${period.end_time}:${periodIndex}`;
+      results.push({
+        source_key: `object-task:${definition.id}:${periodKey}:${serviceDate}`,
+        object_task_definition_id: definition.id,
+        definition_version: positiveInteger(definition.version || 1, 'definition_version'),
+        schedule_period_key: periodKey,
+        task_type: definition.task_type,
+        custom_task_type: compact(definition.custom_task_type) || null,
+        execution_mode: definition.execution_mode,
+        service_date: serviceDate,
+        end_date: normalized.end_date,
+        window_start_time: normalized.window_start_time,
+        window_end_time: normalized.window_end_time,
+        timezone: 'Europe/Amsterdam',
+        required_minutes: requiredMinutes,
+        task_name_snapshot: taskOccurrenceName(definition),
+        instructions_snapshot: compact(definition.instructions) || null,
+      });
+    });
+  }
+  return results;
+}
+
+function taskOccurrenceIdentityKey(occurrence: LooseRecord) {
+  return [
+    occurrence.object_task_definition_id,
+    occurrence.service_date,
+    occurrence.end_date,
+    occurrence.window_start_time,
+    occurrence.window_end_time,
+  ].map(value => compact(value)).join('|');
+}
+
+function hasActivePlanningCompositionReservation(occurrence: LooseRecord) {
+  const reservation = occurrence?.metadata?.planning_composition_reservation;
+  return reservation?.status === 'pending' && Date.parse(reservation.expires_at || '') > Date.now();
+}
+
+async function reconcileTaskOccurrenceSourceKey(
+  base44: LooseRecord,
+  user: LooseRecord,
+  sourceKey: string,
+  occurrenceIdsWithSegments: Set<string>,
+) {
+  const candidates = (await filterAllRecords(
+    base44.asServiceRole.entities.PlanningTaskOccurrence,
+    { source_key: sourceKey },
+    'created_date',
+  )).filter(item => item.lifecycle_status === 'active');
+  if (candidates.length <= 1) return candidates[0] || null;
+  const linked = candidates.filter(item => occurrenceIdsWithSegments.has(String(item.id)));
+  if (linked.length > 1) {
+    throw new ApiError(409, 'Dubbele taakuitvoeringen hebben al planning en vereisen handmatige controle', {
+      source_key: sourceKey,
+      task_occurrence_ids: linked.map(item => item.id),
+    });
+  }
+  const canonical = (linked[0] ? [linked[0]] : candidates)
+    .sort((left, right) => String(left.created_date || left.id).localeCompare(String(right.created_date || right.id)))[0];
+  for (const duplicate of candidates) {
+    if (String(duplicate.id) === String(canonical.id)) continue;
+    try {
+      await casUpdate(base44, 'PlanningTaskOccurrence', duplicate, revisionOf(duplicate), {
+        lifecycle_status: 'superseded',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(duplicate.metadata || {}),
+          duplicate_of_task_occurrence_id: canonical.id,
+          duplicate_reconciled_at: nowIso(),
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409) throw error;
+    }
+  }
+  return requireRecord(base44, 'PlanningTaskOccurrence', canonical.id, 'Taakuitvoering');
+}
+
+function segmentInterval(segment: LooseRecord) {
+  return intervalFromParts(segment.start_date, segment.start_time, segment.end_date, segment.end_time);
+}
+
+function mergeMinuteIntervals(intervals: { start: number; end: number }[]) {
+  const sorted = intervals
+    .filter(item => item.end > item.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: { start: number; end: number }[] = [];
+  for (const item of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || item.start > previous.end) merged.push({ ...item });
+    else previous.end = Math.max(previous.end, item.end);
+  }
+  return merged;
+}
+
+function occurrenceCoverage(occurrence: LooseRecord, segments: LooseRecord[]) {
+  const active = segments.filter(segment =>
+    segment.status !== 'removed' && String(segment.task_occurrence_id) === String(occurrence.id)
+  );
+  const intervals = mergeMinuteIntervals(active.map(segmentInterval).filter(Boolean));
+  const allocatedMinutes = intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0);
+  const requiredMinutes = Number(occurrence.required_minutes || 0);
+  return {
+    allocated_minutes: allocatedMinutes,
+    required_minutes: requiredMinutes,
+    remaining_minutes: Math.max(0, requiredMinutes - allocatedMinutes),
+    coverage_status: allocatedMinutes <= 0 ? 'open' : allocatedMinutes >= requiredMinutes ? 'full' : 'partial',
+    segment_count: active.length,
+  };
 }
 
 function shiftInterval(shift: LooseRecord) {
@@ -365,9 +610,14 @@ function serviceContextFromShift(shift: LooseRecord, personnelId?: string) {
     company_id: shift.company_id || null,
     operating_company_id: shift.company_id || null,
     customer_id: shift.customer_id || null,
+    customer_ids: shift.customer_ids || [],
     object_id: shift.object_id || null,
+    object_ids: shift.object_ids || [],
     route_id: shift.route_id || null,
     task_id: shift.task_id || null,
+    task_occurrence_ids: shift.task_occurrence_ids || [],
+    task_segment_count: Number(shift.task_segment_count || 0),
+    composition_warnings: normalizeArray(shift.service_context_snapshot?.composition_warnings),
     cao_key: shift.cao_key || null,
     function_type: shift.service_function_type || null,
     service_function_type: shift.service_function_type || null,
@@ -393,11 +643,20 @@ function restrictionMatches(restriction: LooseRecord, shift: LooseRecord) {
   if (!dateInRange(shift.service_date, restriction.valid_from || '0000-01-01', restriction.valid_until || '9999-12-31')) {
     return false;
   }
+  const scopeId = compact(restriction.scope_id);
+  const idsByScope: Record<string, string[]> = {
+    customer: uniqueStrings([shift.customer_id, ...(shift.customer_ids || [])]),
+    object: uniqueStrings([shift.object_id, ...(shift.object_ids || [])]),
+    route: uniqueStrings([shift.route_id]),
+  };
+  if (scopeId && (idsByScope[restriction.scope_type] || []).includes(scopeId)) return true;
+  if (scopeId && ['customer', 'object', 'route'].includes(restriction.scope_type)) return false;
   const label = normalizeToken(restriction.scope_label);
   if (!label) return false;
+  const segmentContexts = normalizeArray<LooseRecord>(shift.service_context_snapshot?.segment_contexts);
   const valuesByScope: Record<string, unknown[]> = {
-    customer: [shift.customer_id, shift.customer_name_snapshot],
-    object: [shift.object_id, shift.object_name_snapshot],
+    customer: [shift.customer_id, ...(shift.customer_ids || []), shift.customer_name_snapshot, ...segmentContexts.map(item => item.customer_name)],
+    object: [shift.object_id, ...(shift.object_ids || []), shift.object_name_snapshot, ...segmentContexts.map(item => item.object_name)],
     route: [shift.route_id, shift.route_name_snapshot],
     function_group: [shift.required_cao_function_group, shift.service_function_type],
     other: [
@@ -438,9 +697,9 @@ async function evaluateAssignmentWarnings(
   }
 
   const [personnelAssignments, absences, restrictions] = await Promise.all([
-    base44.asServiceRole.entities.PlanningAssignment.filter({ personnel_id: personnel.id }).catch(() => []),
-    base44.asServiceRole.entities.PersonnelAbsence.filter({ personnel_id: personnel.id }).catch(() => []),
-    base44.asServiceRole.entities.PersonnelRestriction.filter({ personnel_id: personnel.id }).catch(() => []),
+    filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { personnel_id: personnel.id }).catch(() => []),
+    filterAllRecords(base44.asServiceRole.entities.PersonnelAbsence, { personnel_id: personnel.id }).catch(() => []),
+    filterAllRecords(base44.asServiceRole.entities.PersonnelRestriction, { personnel_id: personnel.id }).catch(() => []),
   ]);
   const comparisonAssignments = personnelAssignments.filter((assignment: LooseRecord) =>
     assignment.id !== currentAssignmentId && assignment.status !== 'removed'
@@ -631,20 +890,43 @@ async function bootstrapRange(
   const periodStart = asDate(body.period_start, 'period_start');
   const periodEnd = asDate(body.period_end, 'period_end');
   if (periodEnd < periodStart) throw new ApiError(400, 'period_end ligt voor period_start');
+  if (dateOrdinal(periodEnd) - dateOrdinal(periodStart) > 62) {
+    throw new ApiError(400, 'Een planningsrange mag maximaal 63 dagen bevatten');
+  }
 
-  const [executions, routes, tasks, objects, customers, existingShifts, existingAssignments] = await Promise.all([
-    base44.asServiceRole.entities.RouteExecution.list('-service_date'),
-    base44.asServiceRole.entities.Route.list(),
-    base44.asServiceRole.entities.Task.list(),
-    base44.asServiceRole.entities.SurveillanceObject.list(),
-    base44.asServiceRole.entities.Customer.list(),
-    base44.asServiceRole.entities.PlanningShift.list(),
-    base44.asServiceRole.entities.PlanningAssignment.list(),
+  const [
+    executions,
+    routes,
+    tasks,
+    objects,
+    customers,
+    existingShifts,
+    existingAssignments,
+    objectTaskDefinitions,
+    securityPlans,
+    securityPlanRevisions,
+    existingOccurrences,
+    existingTaskSegments,
+  ] = await Promise.all([
+    listAllRecords(base44.asServiceRole.entities.RouteExecution, '-service_date'),
+    listAllRecords(base44.asServiceRole.entities.Route),
+    listAllRecords(base44.asServiceRole.entities.Task),
+    listAllRecords(base44.asServiceRole.entities.SurveillanceObject),
+    listAllRecords(base44.asServiceRole.entities.Customer),
+    listAllRecords(base44.asServiceRole.entities.PlanningShift),
+    listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
+    listAllRecords(base44.asServiceRole.entities.ObjectTaskDefinition, '-updated_date'),
+    listAllRecords(base44.asServiceRole.entities.ObjectSecurityPlan, '-updated_date'),
+    listAllRecords(base44.asServiceRole.entities.ObjectSecurityPlanRevision, '-revision_number'),
+    listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+    listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
   ]) as LooseRecord[][];
   const routeById = new Map<string, LooseRecord>(routes.map((item: LooseRecord) => [String(item.id), item]));
   const taskById = new Map<string, LooseRecord>(tasks.map((item: LooseRecord) => [String(item.id), item]));
   const objectById = new Map<string, LooseRecord>(objects.map((item: LooseRecord) => [String(item.id), item]));
   const customerById = new Map<string, LooseRecord>(customers.map((item: LooseRecord) => [String(item.id), item]));
+  const securityPlanById = new Map<string, LooseRecord>(securityPlans.map((item: LooseRecord) => [String(item.id), item]));
+  const securityPlanRevisionById = new Map<string, LooseRecord>(securityPlanRevisions.map((item: LooseRecord) => [String(item.id), item]));
   const shiftBySourceKey = new Map<string, LooseRecord>(
     existingShifts.map((item: LooseRecord) => [String(item.source_key), item]),
   );
@@ -667,6 +949,10 @@ async function bootstrapRange(
   const createdShiftIds: string[] = [];
   const existingShiftIds: string[] = [];
   const createdAssignmentIds: string[] = [];
+  const createdOccurrenceIds: string[] = [];
+  const refreshedOccurrenceIds: string[] = [];
+  const supersededOccurrenceIds: string[] = [];
+  const invalidTaskDefinitionIds: string[] = [];
   const duplicateSourceKeys: string[] = [];
   const seenSourceKeys = new Set<string>();
 
@@ -805,6 +1091,229 @@ async function bootstrapRange(
     }
   }
 
+  const occurrenceHasActiveSegment = new Set(
+    existingTaskSegments
+      .filter((item: LooseRecord) => item.status !== 'removed')
+      .map((item: LooseRecord) => String(item.task_occurrence_id)),
+  );
+  let reconciledOccurrences = existingOccurrences;
+  const occurrenceSourceCounts = new Map<string, number>();
+  for (const occurrence of existingOccurrences) {
+    if (occurrence.lifecycle_status !== 'active') continue;
+    const key = String(occurrence.source_key);
+    occurrenceSourceCounts.set(key, Number(occurrenceSourceCounts.get(key) || 0) + 1);
+  }
+  for (const [sourceKey, count] of occurrenceSourceCounts) {
+    if (count <= 1) continue;
+    duplicateSourceKeys.push(sourceKey);
+    await reconcileTaskOccurrenceSourceKey(base44, user, sourceKey, occurrenceHasActiveSegment);
+  }
+  if (duplicateSourceKeys.length) {
+    reconciledOccurrences = await listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date');
+  }
+  const occurrenceBySourceKey = new Map<string, LooseRecord>(
+    reconciledOccurrences
+      .filter((item: LooseRecord) => item.lifecycle_status === 'active')
+      .map((item: LooseRecord) => [String(item.source_key), item]),
+  );
+  const occurrenceByIdentityKey = new Map<string, LooseRecord>(
+    reconciledOccurrences
+      .filter((item: LooseRecord) => item.lifecycle_status === 'active')
+      .map((item: LooseRecord) => [taskOccurrenceIdentityKey(item), item]),
+  );
+  const desiredOccurrenceSourceKeys = new Set<string>();
+  const desiredOccurrenceIds = new Set<string>();
+
+  for (const definition of objectTaskDefinitions.filter((item: LooseRecord) => item.status === 'active')) {
+    const object = objectById.get(String(definition.object_id));
+    const customer = customerById.get(String(definition.customer_id || object?.customer_id));
+    if (!definition.id || !object || !customer) {
+      invalidTaskDefinitionIds.push(String(definition.id || 'unknown'));
+      continue;
+    }
+    let blueprints: LooseRecord[] = [];
+    try {
+      blueprints = occurrenceBlueprints(definition, periodStart, periodEnd);
+    } catch {
+      invalidTaskDefinitionIds.push(String(definition.id));
+      continue;
+    }
+    const securityPlan = definition.security_plan_id
+      ? securityPlanById.get(String(definition.security_plan_id)) || null
+      : null;
+    const publishedSecurityPlanRevision = securityPlan?.current_published_revision_id
+      ? securityPlanRevisionById.get(String(securityPlan.current_published_revision_id)) || null
+      : null;
+    const validPublishedSecurityPlanRevision = publishedSecurityPlanRevision?.status === 'published'
+      && String(publishedSecurityPlanRevision.security_plan_id) === String(securityPlan?.id)
+      ? publishedSecurityPlanRevision
+      : null;
+    const securityPlanSnapshot = securityPlan ? {
+      plan: {
+        id: securityPlan.id,
+        task_type: securityPlan.task_type || securityPlan.category || null,
+        variant_name: securityPlan.variant_name || securityPlan.title || null,
+        current_published_revision_id: securityPlan.current_published_revision_id || null,
+        latest_revision_number: Number(securityPlan.latest_revision_number || 0),
+        status: securityPlan.status || null,
+      },
+      published_revision: validPublishedSecurityPlanRevision ? pick(validPublishedSecurityPlanRevision, [
+        'id',
+        'security_plan_id',
+        'customer_id',
+        'object_id',
+        'revision_number',
+        'status',
+        'summary',
+        'duration_mode',
+        'duration_minutes',
+        'section_policy',
+        'default_section_ids',
+        'allowed_section_ids',
+        'instruction_blocks',
+        'module_assignments',
+        'floorplan_id',
+        'floorplan_revision',
+        'route_overlay',
+        'readiness_snapshot',
+        'content_checksum',
+        'published_at',
+        'published_by_user_id',
+        'version',
+      ]) : null,
+    } : null;
+    const securityPlanChecksum = securityPlanSnapshot
+      ? await sha256(stableStringify(securityPlanSnapshot))
+      : null;
+
+    for (const blueprint of blueprints) {
+      desiredOccurrenceSourceKeys.add(blueprint.source_key);
+      const payload = {
+        ...blueprint,
+        company_id: object.default_operating_company_id || null,
+        customer_id: customer.id,
+        object_id: object.id,
+        security_plan_id: securityPlan?.id || definition.security_plan_id || null,
+        security_plan_revision_id: validPublishedSecurityPlanRevision?.id || null,
+        security_plan_snapshot: securityPlanSnapshot,
+        security_plan_checksum: securityPlanChecksum,
+        customer_name_snapshot: customerDisplayName(customer),
+        object_name_snapshot: object.name || 'Onbekend object',
+        lifecycle_status: 'active',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          bootstrap_source: 'ObjectTaskDefinition',
+          security_plan_review_required: Boolean(securityPlan && !validPublishedSecurityPlanRevision),
+        },
+      };
+      let existing = occurrenceBySourceKey.get(blueprint.source_key)
+        || occurrenceByIdentityKey.get(taskOccurrenceIdentityKey(blueprint));
+      if (!existing) {
+        const createdOccurrence = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({
+          ...payload,
+          revision: 1,
+          published_revision: 0,
+          last_published_correlation_id: null,
+        });
+        const occurrence = await reconcileTaskOccurrenceSourceKey(
+          base44,
+          user,
+          blueprint.source_key,
+          occurrenceHasActiveSegment,
+        ) || createdOccurrence;
+        if (String(occurrence.id) !== String(createdOccurrence.id)) duplicateSourceKeys.push(blueprint.source_key);
+        occurrenceBySourceKey.set(blueprint.source_key, occurrence);
+        occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(occurrence), occurrence);
+        desiredOccurrenceIds.add(String(occurrence.id));
+        createdOccurrenceIds.push(createdOccurrence.id);
+        continue;
+      }
+      desiredOccurrenceIds.add(String(existing.id));
+      if (hasActivePlanningCompositionReservation(existing)) continue;
+      if (String(existing.source_key) !== String(blueprint.source_key)) {
+        existing = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          existing,
+          revisionOf(existing),
+          {
+            source_key: blueprint.source_key,
+            schedule_period_key: blueprint.schedule_period_key,
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(existing.metadata || {}),
+              migrated_from_source_key: existing.source_key,
+              period_key_reconciled_at: nowIso(),
+            },
+          },
+        );
+        occurrenceBySourceKey.set(blueprint.source_key, existing);
+        occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(existing), existing);
+        refreshedOccurrenceIds.push(existing.id);
+      }
+      if (occurrenceHasActiveSegment.has(String(existing.id))) continue;
+      const comparableFields = [
+        'definition_version',
+        'company_id',
+        'security_plan_id',
+        'security_plan_revision_id',
+        'security_plan_checksum',
+        'task_type',
+        'custom_task_type',
+        'execution_mode',
+        'service_date',
+        'end_date',
+        'window_start_time',
+        'window_end_time',
+        'required_minutes',
+        'task_name_snapshot',
+        'customer_name_snapshot',
+        'object_name_snapshot',
+        'instructions_snapshot',
+        'lifecycle_status',
+      ];
+      if (stableStringify(pick(existing, comparableFields)) !== stableStringify(pick(payload, comparableFields))) {
+        const refreshed = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          existing,
+          revisionOf(existing),
+          payload,
+        );
+        occurrenceBySourceKey.set(blueprint.source_key, refreshed);
+        occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(refreshed), refreshed);
+        refreshedOccurrenceIds.push(existing.id);
+      }
+    }
+  }
+
+  for (const occurrence of reconciledOccurrences) {
+    if (
+      occurrence.service_date < periodStart
+      || occurrence.service_date > periodEnd
+      || occurrence.lifecycle_status !== 'active'
+      || desiredOccurrenceSourceKeys.has(String(occurrence.source_key))
+      || desiredOccurrenceIds.has(String(occurrence.id))
+      || occurrenceHasActiveSegment.has(String(occurrence.id))
+      || hasActivePlanningCompositionReservation(occurrence)
+    ) continue;
+    await casUpdate(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrence,
+      revisionOf(occurrence),
+      {
+        lifecycle_status: 'superseded',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: { ...(occurrence.metadata || {}), superseded_by_bootstrap: true },
+      },
+    );
+    supersededOccurrenceIds.push(occurrence.id);
+  }
+
   const result = {
     period_start: periodStart,
     period_end: periodEnd,
@@ -812,10 +1321,17 @@ async function bootstrapRange(
     created_shift_count: createdShiftIds.length,
     existing_shift_count: existingShiftIds.length,
     created_assignment_count: createdAssignmentIds.length,
+    created_task_occurrence_count: createdOccurrenceIds.length,
+    refreshed_task_occurrence_count: refreshedOccurrenceIds.length,
+    superseded_task_occurrence_count: supersededOccurrenceIds.length,
+    invalid_task_definition_ids: [...new Set(invalidTaskDefinitionIds)],
     duplicate_source_keys: [...new Set(duplicateSourceKeys)],
     created_shift_ids: createdShiftIds,
     existing_shift_ids: existingShiftIds,
     created_assignment_ids: createdAssignmentIds,
+    created_task_occurrence_ids: createdOccurrenceIds,
+    refreshed_task_occurrence_ids: refreshedOccurrenceIds,
+    superseded_task_occurrence_ids: supersededOccurrenceIds,
   };
   await appendAudit(base44, user, {
     action: 'bootstrap_range',
@@ -829,8 +1345,619 @@ async function bootstrapRange(
   return { ok: true, ...result, undoable: false, undo_token: null };
 }
 
+function commonBoolean(values: unknown[]) {
+  const present = values.filter(value => typeof value === 'boolean') as boolean[];
+  return present.length && present.every(value => value === present[0]) ? present[0] : null;
+}
+
+function normalizedCompositionSegment(input: LooseRecord, occurrence: LooseRecord) {
+  const startDate = input.start_date ? asDate(input.start_date, 'segments.start_date') : occurrence.service_date;
+  const startTime = asTime(input.start_time, 'segments.start_time');
+  const endTime = asTime(input.end_time, 'segments.end_time');
+  let endDate = input.end_date ? asDate(input.end_date, 'segments.end_date') : startDate;
+  const startMinutes = parseClockMinutes(startTime) as number;
+  const endMinutes = parseClockMinutes(endTime) as number;
+  if (!input.end_date && endMinutes <= startMinutes) endDate = addDateDays(startDate, 1);
+  const interval = intervalFromParts(startDate, startTime, endDate, endTime);
+  if (!interval) throw new ApiError(400, 'Ieder taaksegment moet een positieve duur hebben');
+  const occurrenceInterval = intervalFromParts(
+    occurrence.service_date,
+    occurrence.window_start_time,
+    occurrence.end_date,
+    occurrence.window_end_time,
+  );
+  if (!occurrenceInterval || interval.start < occurrenceInterval.start || interval.end > occurrenceInterval.end) {
+    throw new ApiError(409, 'Taaksegment valt buiten het toegestane taakvenster', {
+      task_occurrence_id: occurrence.id,
+      occurrence_start: `${occurrence.service_date} ${occurrence.window_start_time}`,
+      occurrence_end: `${occurrence.end_date} ${occurrence.window_end_time}`,
+    });
+  }
+  return {
+    task_occurrence_id: occurrence.id,
+    object_task_definition_id: occurrence.object_task_definition_id,
+    start_date: startDate,
+    end_date: endDate,
+    start_time: startTime,
+    end_time: endTime,
+    timezone: occurrence.timezone || 'Europe/Amsterdam',
+    duration_minutes: interval.duration,
+    company_id: occurrence.company_id || null,
+    customer_id: occurrence.customer_id,
+    object_id: occurrence.object_id,
+    task_type: occurrence.task_type,
+    task_name_snapshot: occurrence.task_name_snapshot,
+    customer_name_snapshot: occurrence.customer_name_snapshot || null,
+    object_name_snapshot: occurrence.object_name_snapshot || null,
+    instructions_snapshot: occurrence.instructions_snapshot || null,
+    _interval: interval,
+  };
+}
+
+function compositionWarnings(segments: LooseRecord[]) {
+  const warnings: LooseRecord[] = [];
+  for (let index = 1; index < segments.length; index += 1) {
+    const previous = segments[index - 1];
+    const current = segments[index];
+    const gapMinutes = current._interval.start - previous._interval.end;
+    if (gapMinutes > 0) {
+      warnings.push(warning(
+        `composition_gap_${index}`,
+        'info',
+        `${gapMinutes} minuten zonder taak tussen ${previous.task_name_snapshot} en ${current.task_name_snapshot}.`,
+        'PlanningShiftTaskSegment',
+        { gap_minutes: gapMinutes, after_occurrence_id: previous.task_occurrence_id },
+      ));
+    }
+    if (String(previous.object_id) !== String(current.object_id) && gapMinutes < 5) {
+      warnings.push(warning(
+        `object_transition_review_${index}`,
+        'warning',
+        'Overgang tussen twee objecten heeft minder dan 5 minuten reistijd. Controleer of dit uitvoerbaar is.',
+        'PlanningShiftTaskSegment',
+        { gap_minutes: gapMinutes, from_object_id: previous.object_id, to_object_id: current.object_id },
+      ));
+    }
+  }
+  return warnings;
+}
+
+async function composeShift(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  if (!context.idempotencyKey) throw new ApiError(400, 'idempotency_key is verplicht voor dienstsamenstelling');
+  const requestedShiftId = compact(body.shift_id);
+  const action = requestedShiftId ? 'update_shift_composition' : 'compose_shift';
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  if (replay) return replayResult(replay);
+
+  const requestedSegments = normalizeArray<LooseRecord>(body.segments);
+  if (!requestedSegments.length) throw new ApiError(400, 'Voeg minimaal één taaksegment toe');
+  if (requestedSegments.length > 50) throw new ApiError(400, 'Een dienst mag maximaal 50 taaksegmenten bevatten');
+  const occurrenceIds = uniqueStrings(requestedSegments.map(item => item.task_occurrence_id));
+  if (occurrenceIds.length > 50) throw new ApiError(400, 'Te veel verschillende taakuitvoeringen in één dienst');
+  const occurrences = await Promise.all(
+    occurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
+  );
+  const occurrenceById = new Map<string, LooseRecord>(occurrences.map(item => [String(item.id), item]));
+  occurrences.forEach(occurrence => {
+    if (occurrence.lifecycle_status !== 'active') {
+      throw new ApiError(409, 'Een vervallen taakuitvoering kan niet worden ingepland', {
+        task_occurrence_id: occurrence.id,
+        lifecycle_status: occurrence.lifecycle_status,
+      });
+    }
+  });
+
+  const expectedOccurrenceRevisions = body.expected_occurrence_revisions || {};
+  const expectedOccurrenceRevisionById = new Map<string, number>();
+  for (const occurrence of occurrences) {
+    const expected = expectedOccurrenceRevisions[occurrence.id] == null
+      ? revisionOf(occurrence)
+      : positiveInteger(
+          expectedOccurrenceRevisions[occurrence.id],
+          `expected_occurrence_revisions.${occurrence.id}`,
+        );
+    expectedOccurrenceRevisionById.set(String(occurrence.id), expected);
+    const reservation = occurrence.metadata?.planning_composition_reservation;
+    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey;
+    const reservationActive = reservation?.status === 'pending'
+      && Date.parse(reservation.expires_at || '') > Date.now();
+    if (reservationActive && !ownsReservation) {
+      throw new ApiError(409, 'Deze taakdekking wordt op dit moment door een andere planner gewijzigd', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+        reservation_expires_at: reservation.expires_at,
+      });
+    }
+    if (revisionOf(occurrence) !== expected && !ownsReservation) {
+      throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+        expected_revision: expected,
+        current_revision: revisionOf(occurrence),
+      });
+    }
+  }
+
+  const serviceDates = uniqueStrings(occurrences.map(item => item.service_date));
+  if (serviceDates.length !== 1) {
+    throw new ApiError(409, 'Eén dienst kan alleen taakuitvoeringen met dezelfde startdatum bevatten');
+  }
+  const normalizedSegments = requestedSegments
+    .map(item => {
+      const occurrence = occurrenceById.get(String(item.task_occurrence_id));
+      if (!occurrence) throw new ApiError(404, 'Taakuitvoering niet gevonden');
+      return normalizedCompositionSegment(item, occurrence);
+    })
+    .sort((a, b) => a._interval.start - b._interval.start || a._interval.end - b._interval.end)
+    .map((segment, sequenceIndex) => ({ ...segment, sequence_index: sequenceIndex }));
+
+  for (let index = 1; index < normalizedSegments.length; index += 1) {
+    if (normalizedSegments[index]._interval.start < normalizedSegments[index - 1]._interval.end) {
+      throw new ApiError(409, 'Taaksegmenten binnen één dienst mogen elkaar niet overlappen', {
+        first_occurrence_id: normalizedSegments[index - 1].task_occurrence_id,
+        second_occurrence_id: normalizedSegments[index].task_occurrence_id,
+      });
+    }
+  }
+
+  const sourceKey = `task-composition:${context.idempotencyKey}`;
+  let shift = requestedShiftId
+    ? await requireRecord(base44, 'PlanningShift', requestedShiftId, 'Dienst')
+    : (await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { source_key: sourceKey }))[0] || null;
+  const recovering = Boolean(
+    shift
+    && shift.metadata?.last_composition_idempotency_key === context.idempotencyKey
+  );
+  if (shift?.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden samengesteld');
+  if (requestedShiftId && shift.source_type !== 'task' && !recovering) {
+    throw new ApiError(409, 'Alleen een vanuit objecttaken samengestelde dienst kan hier worden bewerkt');
+  }
+  if (requestedShiftId && !recovering) {
+    const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
+    if (revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+  }
+
+  const allSegments = await listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date');
+  const otherActiveSegments = allSegments.filter((item: LooseRecord) =>
+    item.status !== 'removed'
+    && (!shift || String(item.shift_id) !== String(shift.id))
+    && occurrenceById.has(String(item.task_occurrence_id))
+  );
+  for (const occurrence of occurrences) {
+    const proposed = normalizedSegments.filter(item => String(item.task_occurrence_id) === String(occurrence.id));
+    const external = otherActiveSegments.filter((item: LooseRecord) =>
+      String(item.task_occurrence_id) === String(occurrence.id)
+    );
+    const intervals = [...external, ...proposed]
+      .map(segmentInterval)
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+    for (let index = 1; index < intervals.length; index += 1) {
+      if (intervals[index].start < intervals[index - 1].end) {
+        throw new ApiError(409, 'Dezelfde taakuitvoering is al op een overlappend moment ingepland', {
+          task_occurrence_id: occurrence.id,
+        });
+      }
+    }
+    const allocatedMinutes = mergeMinuteIntervals(intervals)
+      .reduce((sum, interval) => sum + interval.end - interval.start, 0);
+    if (allocatedMinutes > Number(occurrence.required_minutes || 0)) {
+      throw new ApiError(409, 'De taakuitvoering zou meer minuten krijgen dan vereist', {
+        task_occurrence_id: occurrence.id,
+        allocated_minutes: allocatedMinutes,
+        required_minutes: Number(occurrence.required_minutes || 0),
+      });
+    }
+  }
+
+  const objectIds = uniqueStrings(occurrences.map(item => item.object_id));
+  const customerIds = uniqueStrings(occurrences.map(item => item.customer_id));
+  const [objects, customers] = await Promise.all([
+    Promise.all(objectIds.map(id => requireRecord(base44, 'SurveillanceObject', id, 'Object'))),
+    Promise.all(customerIds.map(id => requireRecord(base44, 'Customer', id, 'Klant'))),
+  ]);
+  const objectsWithoutOperatingCompany = objects.filter(item => !compact(item.default_operating_company_id));
+  if (objectsWithoutOperatingCompany.length) {
+    throw new ApiError(409, 'Configureer voor ieder object eerst het uitvoerende bedrijf', {
+      object_ids: objectsWithoutOperatingCompany.map(item => item.id),
+    });
+  }
+  const companyIds = uniqueStrings(objects.map(item => item.default_operating_company_id));
+  if (companyIds.length > 1) {
+    throw new ApiError(409, 'Taken van verschillende uitvoerende bedrijven kunnen niet in één dienst', {
+      company_ids: companyIds,
+    });
+  }
+  const firstSegment = normalizedSegments[0];
+  const lastSegment = normalizedSegments.at(-1) as LooseRecord;
+  const warnings = compositionWarnings(normalizedSegments);
+  const requestedName = compact(body.service_name || body.name);
+  const serviceName = requestedName.slice(0, 160) || (
+    normalizedSegments.length === 1
+      ? `${firstSegment.task_name_snapshot} · ${firstSegment.object_name_snapshot || 'Object'}`
+      : `Samengestelde dienst · ${normalizedSegments.length} taken`
+  );
+  const strictPolicies = objects.map(item => item.contract_assignment_policy).filter(Boolean);
+  const shiftPayload = {
+    source_type: 'task',
+    source_id: occurrences.length === 1 ? occurrences[0].object_task_definition_id : null,
+    source_shift_id: null,
+    source_route_execution_id: null,
+    company_id: companyIds[0] || null,
+    customer_id: customerIds.length === 1 ? customerIds[0] : null,
+    customer_ids: customerIds,
+    object_id: objectIds.length === 1 ? objectIds[0] : null,
+    object_ids: objectIds,
+    route_id: null,
+    task_id: null,
+    task_occurrence_ids: occurrenceIds,
+    task_segment_count: normalizedSegments.length,
+    customer_contract_line_id: null,
+    customer_name_snapshot: customers.length === 1 ? customerDisplayName(customers[0]) : null,
+    object_name_snapshot: objects.length === 1 ? objects[0].name || null : null,
+    route_name_snapshot: null,
+    service_name_snapshot: serviceName,
+    service_date: firstSegment.start_date,
+    end_date: lastSegment.end_date === firstSegment.start_date ? null : lastSegment.end_date,
+    start_time: firstSegment.start_time,
+    end_time: lastSegment.end_time,
+    timezone: 'Europe/Amsterdam',
+    duration_minutes: lastSegment._interval.end - firstSegment._interval.start,
+    required_count: positiveInteger(body.required_count || shift?.required_count || 1, 'required_count'),
+    cao_key: consistentValue(objects.map(item => item.cao_key)),
+    service_function_type: consistentValue(objects.map(item => item.default_service_function_type)),
+    required_cao_function_group: consistentValue(objects.map(item => item.default_cao_function_group)),
+    required_cao_function_level: consistentValue(objects.map(item => item.default_cao_function_level)),
+    required_security_role_status: consistentValue(objects.map(item => item.default_security_role_status)),
+    required_qualification_types: uniqueStrings(objects.flatMap(item => item.default_required_qualification_types || [])),
+    required_qualification_groups: uniqueStrings(objects.flatMap(item => item.default_required_qualification_groups || [])),
+    contract_assignment_policy: strictPolicies.length === objects.length
+      && strictPolicies.every(item => item === 'strict_contract_match')
+      ? 'strict_contract_match'
+      : 'allow_manual_review',
+    performs_security_work: commonBoolean(objects.map(item => item.default_performs_security_work)),
+    security_work_percentage: objects.length === 1 ? objects[0].default_security_work_percentage ?? null : null,
+    works_event_or_hospitality_security: commonBoolean(objects.map(item => item.default_works_event_or_hospitality_security)),
+    event_hospitality_cao_applies: commonBoolean(objects.map(item => item.default_event_hospitality_cao_applies)),
+    works_airport_schiphol: commonBoolean(objects.map(item => item.default_works_airport_schiphol)),
+    works_cash_value_logistics: commonBoolean(objects.map(item => item.default_works_cash_value_logistics)),
+    customer_billable: commonBoolean(objects.map(item => item.default_customer_billable)),
+    counts_toward_required_staffing: commonBoolean(objects.map(item => item.default_counts_toward_required_staffing)),
+    service_context_snapshot: {
+      composition_source: 'ObjectTaskDefinition',
+      task_occurrence_ids: occurrenceIds,
+      object_task_definition_ids: uniqueStrings(occurrences.map(item => item.object_task_definition_id)),
+      object_ids: objectIds,
+      customer_ids: customerIds,
+      segment_contexts: normalizedSegments.map(item => ({
+        task_occurrence_id: item.task_occurrence_id,
+        customer_id: item.customer_id,
+        customer_name: item.customer_name_snapshot,
+        object_id: item.object_id,
+        object_name: item.object_name_snapshot,
+        task_type: item.task_type,
+        task_name: item.task_name_snapshot,
+      })),
+      composition_warnings: warnings,
+    },
+    status: 'draft',
+    last_modified_by_user_id: user.id || null,
+    last_modified_at: nowIso(),
+    metadata: {
+      ...(shift?.metadata || {}),
+      last_composition_idempotency_key: context.idempotencyKey,
+      last_composition_correlation_id: context.correlationId,
+    },
+  };
+
+  const reservedOccurrences: LooseRecord[] = [];
+  const reservationExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+  for (const occurrence of [...occurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+    const reservation = occurrence.metadata?.planning_composition_reservation;
+    if (reservation?.idempotency_key === context.idempotencyKey) {
+      reservedOccurrences.push(occurrence);
+      continue;
+    }
+    const expectedRevision = expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
+    reservedOccurrences.push(await casUpdate(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrence,
+      expectedRevision,
+      {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(occurrence.metadata || {}),
+          planning_composition_reservation: {
+            idempotency_key: context.idempotencyKey,
+            correlation_id: context.correlationId,
+            status: 'pending',
+            acquired_at: nowIso(),
+            expires_at: reservationExpiresAt,
+          },
+        },
+      },
+    ));
+  }
+
+  const beforeShift = shift;
+  if (shift) {
+    shift = await markShiftDraft(base44, shift, revisionOf(shift), user, shiftPayload);
+  } else {
+    shift = await base44.asServiceRole.entities.PlanningShift.create({
+      ...shiftPayload,
+      source_key: sourceKey,
+      revision: 1,
+      published_revision: 0,
+      last_published_correlation_id: null,
+    });
+  }
+
+  const previousSegments = allSegments.filter((item: LooseRecord) =>
+    String(item.shift_id) === String(shift.id) && item.status !== 'removed'
+  );
+  for (const segment of previousSegments) {
+    await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
+      status: 'removed',
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: { ...(segment.metadata || {}), removed_by_composition_key: context.idempotencyKey },
+    });
+  }
+
+  const createdSegments: LooseRecord[] = [];
+  for (const segment of normalizedSegments) {
+    const { _interval, ...safeSegment } = segment;
+    createdSegments.push(await base44.asServiceRole.entities.PlanningShiftTaskSegment.create({
+      ...safeSegment,
+      shift_id: shift.id,
+      status: 'draft',
+      revision: 1,
+      published_revision: 0,
+      last_published_correlation_id: null,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: {
+        composition_idempotency_key: context.idempotencyKey,
+        composition_correlation_id: context.correlationId,
+      },
+    }));
+  }
+
+  const assignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
+  const updatedAssignments: LooseRecord[] = [];
+  for (const assignment of assignments.filter((item: LooseRecord) => item.status !== 'removed')) {
+    const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+    const supplied = normalizeArray(assignment.warning_snapshot)
+      .filter((item: LooseRecord) => item.source === 'planner');
+    if (objectIds.length > 1) supplied.push(warning(
+      'multi_object_shift_review',
+      'warning',
+      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
+      'planner',
+      { object_ids: objectIds },
+    ));
+    const eligibility = await evaluateAssignmentWarnings(base44, shift, personnel, assignment.id, supplied);
+    updatedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+      status: 'draft',
+      warning_codes: eligibility.warning_codes,
+      warning_snapshot: eligibility.warning_snapshot,
+      has_critical_warnings: eligibility.has_critical_warnings,
+      contract_routing_snapshot: eligibility.contract_routing_snapshot,
+      personnel_contract_id: eligibility.personnel_contract_id,
+    }));
+  }
+
+  const finalizedOccurrences: LooseRecord[] = [];
+  for (const occurrence of reservedOccurrences) {
+    const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+    finalizedOccurrences.push(await casUpdate(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrence,
+      revisionOf(occurrence),
+      {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...metadata,
+          last_composition_idempotency_key: context.idempotencyKey,
+          last_composition_correlation_id: context.correlationId,
+          last_composition_completed_at: nowIso(),
+        },
+      },
+    ));
+  }
+
+  const result = {
+    shift,
+    segments: createdSegments,
+    assignments: updatedAssignments,
+    task_occurrences: finalizedOccurrences,
+    composition_warnings: warnings,
+  };
+  const audit = await appendAudit(base44, user, {
+    action,
+    resource_type: 'PlanningShift',
+    resource_id: shift.id,
+    shift_id: shift.id,
+    before_state: { shift: beforeShift, segments: previousSegments, assignments },
+    after_state: result,
+    correlation_id: context.correlationId,
+    idempotency_key: context.idempotencyKey,
+    undoable: false,
+  });
+  return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+}
+
+async function cancelTaskShift(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  if (!context.idempotencyKey) throw new ApiError(400, 'idempotency_key is verplicht om een conceptdienst te verwijderen');
+  const replay = await findReplay(base44, 'cancel_task_shift', context.idempotencyKey);
+  if (replay) return replayResult(replay);
+
+  const shiftId = requireId(body, 'shift_id');
+  let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  const recovering = shift.metadata?.last_task_shift_cancellation_key === context.idempotencyKey;
+  if (shift.source_type !== 'task') throw new ApiError(409, 'Alleen een dienst uit objecttaken kan hier worden verwijderd');
+  if (Number(shift.published_revision || 0) > 0 || shift.status === 'published') {
+    throw new ApiError(409, 'Een eerder gepubliceerde dienst moet via een formele annulering worden afgehandeld');
+  }
+  if (shift.status === 'cancelled' && !recovering) throw new ApiError(409, 'Deze dienst is al verwijderd');
+  if (!recovering) {
+    const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
+    if (revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+  }
+
+  const [segments, assignments] = await Promise.all([
+    filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: shift.id }),
+    filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id }),
+  ]);
+  const occurrenceIds = uniqueStrings(segments.map(item => item.task_occurrence_id));
+  const occurrences = await Promise.all(
+    occurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
+  );
+  const expectedOccurrenceRevisions = body.expected_occurrence_revisions || {};
+  const reservedOccurrences: LooseRecord[] = [];
+  const reservationExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+  for (const occurrence of [...occurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+    const reservation = occurrence.metadata?.planning_composition_reservation;
+    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey;
+    const completedByThisRequest = occurrence.metadata?.last_task_shift_cancellation_key === context.idempotencyKey;
+    const reservationActive = reservation?.status === 'pending'
+      && Date.parse(reservation.expires_at || '') > Date.now();
+    if (reservationActive && !ownsReservation) {
+      throw new ApiError(409, 'Deze taakdekking wordt op dit moment door een andere planner gewijzigd', {
+        task_occurrence_id: occurrence.id,
+      });
+    }
+    const expected = expectedOccurrenceRevisions[occurrence.id] == null
+      ? revisionOf(occurrence)
+      : positiveInteger(expectedOccurrenceRevisions[occurrence.id], `expected_occurrence_revisions.${occurrence.id}`);
+    if (revisionOf(occurrence) !== expected && !ownsReservation && !completedByThisRequest) {
+      throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+        expected_revision: expected,
+        current_revision: revisionOf(occurrence),
+      });
+    }
+    if (ownsReservation || completedByThisRequest) {
+      reservedOccurrences.push(occurrence);
+      continue;
+    }
+    reservedOccurrences.push(await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, expected, {
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: {
+        ...(occurrence.metadata || {}),
+        planning_composition_reservation: {
+          idempotency_key: context.idempotencyKey,
+          correlation_id: context.correlationId,
+          action: 'cancel_task_shift',
+          status: 'pending',
+          acquired_at: nowIso(),
+          expires_at: reservationExpiresAt,
+        },
+      },
+    }));
+  }
+
+  const beforeState = { shift, segments, assignments };
+  if (!recovering) {
+    shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+      status: 'cancelled',
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: {
+        ...(shift.metadata || {}),
+        last_task_shift_cancellation_key: context.idempotencyKey,
+        last_task_shift_cancellation_correlation_id: context.correlationId,
+      },
+    });
+  }
+  const removedSegments: LooseRecord[] = [];
+  for (const segment of segments.filter(item => item.status !== 'removed')) {
+    removedSegments.push(await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
+      status: 'removed',
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: { ...(segment.metadata || {}), removed_by_cancellation_key: context.idempotencyKey },
+    }));
+  }
+  const removedAssignments: LooseRecord[] = [];
+  for (const assignment of assignments.filter(item => item.status !== 'removed')) {
+    removedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+      status: 'removed',
+      removed_by_user_id: user.id || null,
+      removed_at: nowIso(),
+    }));
+  }
+  const updatedOccurrences: LooseRecord[] = [];
+  for (const occurrence of reservedOccurrences) {
+    if (occurrence.metadata?.last_task_shift_cancellation_key === context.idempotencyKey
+      && !occurrence.metadata?.planning_composition_reservation) {
+      updatedOccurrences.push(occurrence);
+      continue;
+    }
+    const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+    updatedOccurrences.push(await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: {
+        ...metadata,
+        last_task_shift_cancellation_key: context.idempotencyKey,
+        last_task_shift_cancellation_correlation_id: context.correlationId,
+        last_task_shift_cancellation_completed_at: nowIso(),
+      },
+    }));
+  }
+  const result = {
+    shift,
+    removed_segment_ids: segments.map(item => item.id),
+    removed_assignment_ids: assignments.map(item => item.id),
+    task_occurrences: updatedOccurrences,
+  };
+  const audit = await appendAudit(base44, user, {
+    action: 'cancel_task_shift',
+    resource_type: 'PlanningShift',
+    resource_id: shift.id,
+    shift_id: shift.id,
+    before_state: beforeState,
+    after_state: result,
+    correlation_id: context.correlationId,
+    idempotency_key: context.idempotencyKey,
+    undoable: false,
+  });
+  return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+}
+
 async function uniqueSlotAssignment(base44: LooseRecord, shiftId: string, slotIndex: number) {
-  const records = await base44.asServiceRole.entities.PlanningAssignment.filter({
+  const records = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
     shift_id: shiftId,
     slot_index: slotIndex,
   });
@@ -882,7 +2009,7 @@ async function assignPersonnel(
   }
 
   const existing = await uniqueSlotAssignment(base44, shiftId, slotIndex);
-  const sameShiftAssignments = await base44.asServiceRole.entities.PlanningAssignment.filter({
+  const sameShiftAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
     shift_id: shiftId,
     personnel_id: personnelId,
   });
@@ -1116,6 +2243,10 @@ async function moveShift(
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
   const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
   if (shift.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden verplaatst');
+  const composedSegments = await filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: shift.id });
+  if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
+    throw new ApiError(409, 'Pas tijden van een samengestelde dienst aan via Dienstinhoud; zo blijft taakdekking correct');
+  }
   const serviceDate = body.service_date ? asDate(body.service_date, 'service_date') : shift.service_date;
   const startTime = body.start_time ? asTime(body.start_time, 'start_time') : shift.start_time;
   const endTime = body.end_time ? asTime(body.end_time, 'end_time') : shift.end_time;
@@ -1130,7 +2261,7 @@ async function moveShift(
     end_time: endTime,
   });
 
-  const assignments = await base44.asServiceRole.entities.PlanningAssignment.filter({ shift_id: shift.id });
+  const assignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
   const updatedAssignments: LooseRecord[] = [];
   for (const assignment of assignments.filter((item: LooseRecord) => item.status !== 'removed')) {
     const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
@@ -1253,9 +2384,9 @@ async function undoPlanning(
   if (!sourceEvent.undo_token || sourceEvent.undo_token !== undoToken) {
     throw new ApiError(409, 'Undo-token is ongeldig of verlopen');
   }
-  const earlierUndo = await base44.asServiceRole.entities.PlanningAuditEvent.filter({
+  const earlierUndo = await filterAllRecords(base44.asServiceRole.entities.PlanningAuditEvent, {
     undo_of_event_id: sourceEvent.id,
-  }, '-occurred_at', 20);
+  }, '-occurred_at');
   const completedUndo = earlierUndo.find((event: LooseRecord) => event.action === 'undo');
   if (completedUndo) {
     return {
@@ -1342,7 +2473,7 @@ async function undoPlanning(
   } else {
     const previousAssignments = normalizeArray<LooseRecord>(undoPayload.previous_assignments)
       .filter(item => item?.id && item.status !== 'removed');
-    const currentAssignments = await base44.asServiceRole.entities.PlanningAssignment.filter({ shift_id: shift.id });
+    const currentAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
     beforeState.assignments = currentAssignments;
     updatedShift = await restoreShiftForUndo(
       base44,
@@ -1417,9 +2548,13 @@ async function copyShift(
     });
   }
   if (source.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden gekopieerd');
+  const composedSegments = await filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: source.id });
+  if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
+    throw new ApiError(409, 'Een samengestelde dienst kan niet los worden gekopieerd; maak een nieuwe dienst uit de taakwerkvoorraad');
+  }
 
   const sourceKey = `copy:${source.id}:${context.idempotencyKey || context.correlationId}`;
-  const existing = await base44.asServiceRole.entities.PlanningShift.filter({ source_key: sourceKey });
+  const existing = await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { source_key: sourceKey });
   if (existing[0]) {
     return { ok: true, idempotent: true, shift: existing[0], assignments: [], undoable: false };
   }
@@ -1470,8 +2605,8 @@ function shiftMatchesPublicationScope(shift: LooseRecord, body: LooseRecord, shi
   if (shift.status === 'cancelled') return false;
   if (shiftIds.size && !shiftIds.has(String(shift.id))) return false;
   if (body.company_id && shift.company_id !== body.company_id) return false;
-  if (body.customer_id && shift.customer_id !== body.customer_id) return false;
-  if (body.object_id && shift.object_id !== body.object_id) return false;
+  if (body.customer_id && !uniqueStrings([shift.customer_id, ...(shift.customer_ids || [])]).includes(String(body.customer_id))) return false;
+  if (body.object_id && !uniqueStrings([shift.object_id, ...(shift.object_ids || [])]).includes(String(body.object_id))) return false;
   if (body.route_id && shift.route_id !== body.route_id) return false;
   if (body.period_start && shift.service_date < body.period_start) return false;
   if (body.period_end && shift.service_date > body.period_end) return false;
@@ -1491,6 +2626,8 @@ function publicationShiftSnapshot(shift: LooseRecord) {
     object_ids: shift.object_ids || [],
     route_id: shift.route_id || null,
     task_id: shift.task_id || null,
+    task_occurrence_ids: shift.task_occurrence_ids || [],
+    task_segment_count: Number(shift.task_segment_count || 0),
     customer_name: shift.customer_name_snapshot || null,
     object_name: shift.object_name_snapshot || null,
     route_name: shift.route_name_snapshot || null,
@@ -1533,6 +2670,62 @@ function publicationAssignmentSnapshot(assignment: LooseRecord) {
   };
 }
 
+function publicationOccurrenceSnapshot(occurrence: LooseRecord, segments: LooseRecord[]) {
+  return {
+    id: occurrence.id,
+    source_key: occurrence.source_key,
+    object_task_definition_id: occurrence.object_task_definition_id,
+    definition_version: occurrence.definition_version,
+    schedule_period_key: occurrence.schedule_period_key,
+    company_id: occurrence.company_id || null,
+    customer_id: occurrence.customer_id,
+    object_id: occurrence.object_id,
+    security_plan_id: occurrence.security_plan_id || null,
+    security_plan_revision_id: occurrence.security_plan_revision_id || null,
+    security_plan_snapshot: occurrence.security_plan_snapshot || null,
+    security_plan_checksum: occurrence.security_plan_checksum || null,
+    task_type: occurrence.task_type,
+    task_name: occurrence.task_name_snapshot,
+    execution_mode: occurrence.execution_mode,
+    service_date: occurrence.service_date,
+    end_date: occurrence.end_date,
+    window_start_time: occurrence.window_start_time,
+    window_end_time: occurrence.window_end_time,
+    required_minutes: occurrence.required_minutes,
+    lifecycle_status: occurrence.lifecycle_status,
+    coverage: occurrenceCoverage(occurrence, segments),
+    revision: revisionOf(occurrence),
+    published_revision: Number(occurrence.published_revision || 0),
+  };
+}
+
+function publicationTaskSegmentSnapshot(segment: LooseRecord) {
+  return {
+    id: segment.id,
+    shift_id: segment.shift_id,
+    task_occurrence_id: segment.task_occurrence_id,
+    object_task_definition_id: segment.object_task_definition_id,
+    sequence_index: segment.sequence_index,
+    start_date: segment.start_date,
+    end_date: segment.end_date,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    timezone: segment.timezone || 'Europe/Amsterdam',
+    duration_minutes: segment.duration_minutes,
+    company_id: segment.company_id || null,
+    customer_id: segment.customer_id,
+    object_id: segment.object_id,
+    task_type: segment.task_type,
+    task_name: segment.task_name_snapshot,
+    customer_name: segment.customer_name_snapshot || null,
+    object_name: segment.object_name_snapshot || null,
+    instructions: segment.instructions_snapshot || null,
+    status: segment.status,
+    revision: revisionOf(segment),
+    published_revision: Number(segment.published_revision || 0),
+  };
+}
+
 async function publishPlanning(
   base44: LooseRecord,
   user: LooseRecord,
@@ -1562,7 +2755,7 @@ async function publishPlanning(
     asDate(body.period_start, 'period_start');
     asDate(body.period_end, 'period_end');
   }
-  const allShifts = await base44.asServiceRole.entities.PlanningShift.list();
+  const allShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
   const shifts = allShifts.filter((shift: LooseRecord) =>
     shiftMatchesPublicationScope(shift, body, requestedShiftIds)
   );
@@ -1587,7 +2780,9 @@ async function publishPlanning(
       : expectedRevisions[shift.id] != null
       ? positiveInteger(expectedRevisions[shift.id], `expected_shift_revisions.${shift.id}`)
       : revisionOf(shift);
-    if (revisionOf(shift) !== expected) {
+    const recoveringPublication = shift.status === 'published'
+      && shift.last_published_correlation_id === context.correlationId;
+    if (revisionOf(shift) !== expected && !recoveringPublication) {
       throw new ApiError(409, 'Planning is intussen gewijzigd', {
         entity: 'PlanningShift',
         id: shift.id,
@@ -1598,11 +2793,80 @@ async function publishPlanning(
   }
 
   const shiftIdSet = new Set(shifts.map((item: LooseRecord) => String(item.id)));
-  const allAssignments = await base44.asServiceRole.entities.PlanningAssignment.list();
+  const periodStart = body.period_start
+    ? asDate(body.period_start, 'period_start')
+    : shifts.map(item => item.service_date).sort()[0];
+  const periodEnd = body.period_end
+    ? asDate(body.period_end, 'period_end')
+    : shifts.map(item => item.service_date).sort().at(-1);
+  const [allAssignments, allTaskSegments, allOccurrences] = await Promise.all([
+    listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
+    listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
+    listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+  ]);
   const assignments = allAssignments.filter((assignment: LooseRecord) =>
     shiftIdSet.has(String(assignment.shift_id)) && assignment.status !== 'removed'
   );
-  const criticalWarnings: LooseRecord[] = assignments.flatMap((assignment: LooseRecord) => {
+  const taskSegments = allTaskSegments.filter((segment: LooseRecord) =>
+    shiftIdSet.has(String(segment.shift_id)) && segment.status !== 'removed'
+  );
+  const occurrences = allOccurrences.filter((occurrence: LooseRecord) =>
+    occurrence.lifecycle_status === 'active'
+    && occurrence.service_date >= periodStart
+    && occurrence.service_date <= periodEnd
+    && (!body.company_id || occurrence.company_id === body.company_id)
+    && (!body.customer_id || occurrence.customer_id === body.customer_id)
+    && (!body.object_id || occurrence.object_id === body.object_id)
+  );
+  const occurrenceIdsBySourceKey = occurrences.reduce((groups: Map<string, string[]>, occurrence: LooseRecord) => {
+    const key = String(occurrence.source_key);
+    groups.set(key, [...(groups.get(key) || []), String(occurrence.id)]);
+    return groups;
+  }, new Map<string, string[]>());
+  const duplicateOccurrenceGroups = [...occurrenceIdsBySourceKey.entries()]
+    .filter(([, ids]) => ids.length > 1);
+  if (duplicateOccurrenceGroups.length) {
+    throw new ApiError(409, 'Dubbele taakuitvoeringen moeten vóór publicatie worden hersteld', {
+      duplicate_source_keys: duplicateOccurrenceGroups.map(([sourceKey, ids]) => ({ source_key: sourceKey, task_occurrence_ids: ids })),
+    });
+  }
+  const reservedOccurrences = occurrences.filter(hasActivePlanningCompositionReservation);
+  if (reservedOccurrences.length) {
+    throw new ApiError(409, 'Wacht tot alle openstaande dienstbewerkingen zijn opgeslagen', {
+      task_occurrence_ids: reservedOccurrences.map(item => item.id),
+    });
+  }
+  const taskCoverageWarnings = occurrences.flatMap((occurrence: LooseRecord) => {
+    const coverage = occurrenceCoverage(occurrence, taskSegments);
+    if (coverage.allocated_minutes > coverage.required_minutes) {
+      throw new ApiError(409, 'Taakdekking bevat een overallocatie en kan niet worden gepubliceerd', {
+        task_occurrence_id: occurrence.id,
+        ...coverage,
+      });
+    }
+    const warnings: LooseRecord[] = [];
+    if (coverage.coverage_status !== 'full') warnings.push({
+      task_occurrence_id: occurrence.id,
+      code: coverage.coverage_status === 'open' ? 'task_occurrence_unplanned' : 'task_occurrence_partially_planned',
+      severity: 'critical',
+      message: coverage.coverage_status === 'open'
+        ? `${occurrence.task_name_snapshot} bij ${occurrence.object_name_snapshot || 'object'} is nog niet ingepland.`
+        : `${occurrence.task_name_snapshot} bij ${occurrence.object_name_snapshot || 'object'} mist nog ${coverage.remaining_minutes} minuten.`,
+      source: 'PlanningTaskOccurrence',
+      details: coverage,
+    });
+    if (!occurrence.security_plan_revision_id || !occurrence.security_plan_snapshot?.published_revision) {
+      warnings.push({
+        task_occurrence_id: occurrence.id,
+        code: 'task_security_plan_revision_missing',
+        severity: 'critical',
+        message: `${occurrence.task_name_snapshot} bij ${occurrence.object_name_snapshot || 'object'} heeft geen gepubliceerde beveiligingsplanrevisie.`,
+        source: 'PlanningTaskOccurrence',
+      });
+    }
+    return warnings;
+  });
+  const assignmentCriticalWarnings: LooseRecord[] = assignments.flatMap((assignment: LooseRecord) => {
     const items: LooseRecord[] = normalizeArray<LooseRecord>(assignment.warning_snapshot)
       .filter(item => item.severity === 'critical')
       .map(item => ({ assignment_id: assignment.id, shift_id: assignment.shift_id, ...item }));
@@ -1618,6 +2882,15 @@ async function publishPlanning(
     }
     return items;
   });
+  const compositionWarnings: LooseRecord[] = shifts.flatMap((shift: LooseRecord) => (
+    normalizeArray<LooseRecord>(shift.service_context_snapshot?.composition_warnings)
+      .map(item => ({ shift_id: shift.id, source: 'PlanningShiftTaskSegment', ...item }))
+  ));
+  const criticalWarnings: LooseRecord[] = [
+    ...assignmentCriticalWarnings,
+    ...taskCoverageWarnings,
+    ...compositionWarnings.filter(item => item.severity === 'critical'),
+  ];
   const acknowledgementReason = compact(body.critical_warning_acknowledgement_reason);
   if (criticalWarnings.length > 0 && (
     body.acknowledge_critical_warnings !== true || !acknowledgementReason
@@ -1673,12 +2946,56 @@ async function publishPlanning(
     ));
   }
 
-  const periodStart = body.period_start
-    ? asDate(body.period_start, 'period_start')
-    : publishedShifts.map(item => item.service_date).sort()[0];
-  const periodEnd = body.period_end
-    ? asDate(body.period_end, 'period_end')
-    : publishedShifts.map(item => item.service_date).sort().at(-1);
+  const publishedTaskSegments: LooseRecord[] = [];
+  for (const segment of taskSegments) {
+    if (
+      segment.status === 'published'
+      && segment.last_published_correlation_id === context.correlationId
+      && Number(segment.published_revision || 0) === revisionOf(segment)
+    ) {
+      publishedTaskSegments.push(segment);
+      continue;
+    }
+    const currentRevision = revisionOf(segment);
+    publishedTaskSegments.push(await casUpdate(
+      base44,
+      'PlanningShiftTaskSegment',
+      segment,
+      currentRevision,
+      {
+        status: 'published',
+        published_revision: currentRevision + 1,
+        last_published_correlation_id: context.correlationId,
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      },
+    ));
+  }
+
+  const publishedOccurrences: LooseRecord[] = [];
+  for (const occurrence of occurrences) {
+    if (
+      occurrence.last_published_correlation_id === context.correlationId
+      && Number(occurrence.published_revision || 0) === revisionOf(occurrence)
+    ) {
+      publishedOccurrences.push(occurrence);
+      continue;
+    }
+    const currentRevision = revisionOf(occurrence);
+    publishedOccurrences.push(await casUpdate(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrence,
+      currentRevision,
+      {
+        published_revision: currentRevision + 1,
+        last_published_correlation_id: context.correlationId,
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      },
+    ));
+  }
+
   const scopeType = ['day', 'week', 'selection', 'range'].includes(body.scope_type)
     ? body.scope_type
     : requestedShiftIds.size
@@ -1699,7 +3016,7 @@ async function publishPlanning(
           periodEnd,
         ].join(':')
   );
-  const previous = await base44.asServiceRole.entities.PlanningPublication.filter(
+  const previous = await filterAllRecords(base44.asServiceRole.entities.PlanningPublication,
     { scope_key: scopeKey },
     '-version',
   );
@@ -1709,9 +3026,9 @@ async function publishPlanning(
   const warningCount = publishedAssignments.reduce(
     (sum, assignment) => sum + normalizeArray(assignment.warning_snapshot).length,
     0,
-  );
+  ) + taskCoverageWarnings.length + compositionWarnings.length;
   const snapshot = {
-    schema_version: 1,
+    schema_version: 2,
     scope: {
       scope_type: scopeType,
       scope_key: scopeKey,
@@ -1723,6 +3040,8 @@ async function publishPlanning(
     },
     shifts: publishedShifts.map(publicationShiftSnapshot),
     assignments: publishedAssignments.map(publicationAssignmentSnapshot),
+    task_occurrences: publishedOccurrences.map(item => publicationOccurrenceSnapshot(item, publishedTaskSegments)),
+    task_segments: publishedTaskSegments.map(publicationTaskSegmentSnapshot),
     warning_summary: {
       warning_count: warningCount,
       critical_warning_count: criticalWarnings.length,
@@ -1750,10 +3069,14 @@ async function publishPlanning(
     acknowledged_critical_warning_codes: [...new Set(criticalWarnings.map((item: LooseRecord) => item.code))],
     shift_count: publishedShifts.length,
     assignment_count: publishedAssignments.length,
+    task_occurrence_count: publishedOccurrences.length,
+    task_segment_count: publishedTaskSegments.length,
     warning_count: warningCount,
     critical_warning_count: criticalWarnings.length,
     shift_ids: publishedShifts.map(item => item.id),
     assignment_ids: publishedAssignments.map(item => item.id),
+    task_occurrence_ids: publishedOccurrences.map(item => item.id),
+    task_segment_ids: publishedTaskSegments.map(item => item.id),
     snapshot,
     checksum,
     published_by_user_id: user.id || null,
@@ -1766,7 +3089,13 @@ async function publishPlanning(
       publication_source: body.publication_source || 'planning_ui',
     },
   });
-  const result = { publication, shifts: publishedShifts, assignments: publishedAssignments };
+  const result = {
+    publication,
+    shifts: publishedShifts,
+    assignments: publishedAssignments,
+    task_occurrences: publishedOccurrences,
+    task_segments: publishedTaskSegments,
+  };
   const audit = await appendAudit(base44, user, {
     action: 'publish',
     resource_type: 'PlanningPublication',
@@ -1783,6 +3112,16 @@ async function publishPlanning(
         revision: revisionOf(item),
         status: item.status,
       })),
+      task_occurrence_revisions: occurrences.map((item: LooseRecord) => ({
+        id: item.id,
+        revision: revisionOf(item),
+        lifecycle_status: item.lifecycle_status,
+      })),
+      task_segment_revisions: taskSegments.map((item: LooseRecord) => ({
+        id: item.id,
+        revision: revisionOf(item),
+        status: item.status,
+      })),
     },
     after_state: result,
     correlation_id: context.correlationId,
@@ -1795,10 +3134,20 @@ async function publishPlanning(
 export {
   asDate,
   asTime,
+  bootstrapRange,
+  cancelTaskShift,
+  composeShift,
   dedupeWarnings,
   intervalsOverlap,
+  mergeMinuteIntervals,
+  normalizedPeriodInterval,
+  occurrenceBlueprints,
+  occurrenceCoverage,
+  publishPlanning,
   publicationAssignmentSnapshot,
+  publicationOccurrenceSnapshot,
   publicationShiftSnapshot,
+  publicationTaskSegmentSnapshot,
   revisionOf,
   serviceContextFromShift,
   stableStringify,
@@ -1816,6 +3165,10 @@ Deno.serve(async (req) => {
     const context = mutationContext(body);
 
     if (action === 'bootstrap_range') return json(await bootstrapRange(base44, user, body, context));
+    if (action === 'compose_shift' || action === 'update_shift_composition') {
+      return json(await composeShift(base44, user, body, context), action === 'compose_shift' ? 201 : 200);
+    }
+    if (action === 'cancel_task_shift') return json(await cancelTaskShift(base44, user, body, context));
     if (action === 'assign') return json(await assignPersonnel(base44, user, body, context));
     if (action === 'unassign') return json(await unassignPersonnel(base44, user, body, context));
     if (action === 'restore_assignment') return json(await restoreAssignment(base44, user, body, context));
