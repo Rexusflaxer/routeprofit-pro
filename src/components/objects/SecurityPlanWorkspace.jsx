@@ -26,7 +26,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,7 +34,6 @@ import SecurityPlanInstructionBuilder from "./SecurityPlanInstructionBuilder";
 import SecurityPlanModulesEditor from "./SecurityPlanModulesEditor";
 import SecurityPlanRouteEditor from "./SecurityPlanRouteEditor";
 import {
-  SECURITY_PLAN_SECTION_POLICIES,
   buildSecurityPlanReadiness,
   normalizeInstructionBlocks,
   normalizeRouteOverlay,
@@ -150,10 +148,6 @@ function OverviewTab({ form, onChange, revisionNumber }) {
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="plan-summary" className="text-xs font-semibold">Doel en context</Label>
             <Textarea id="plan-summary" value={form.summary} onChange={event => onChange({ ...form, summary: event.target.value })} placeholder="Beschrijf kort wanneer en met welk doel deze variant wordt gebruikt." rows={3} maxLength={2000} />
-          </div>
-          <div className="space-y-1.5 md:col-span-2">
-            <Label className="text-xs font-semibold">Sectiebeleid</Label>
-            <Select value={form.section_policy} onValueChange={value => onChange({ ...form, section_policy: value, default_section_ids: value === "not_applicable" ? [] : form.default_section_ids, allowed_section_ids: value === "not_applicable" ? [] : form.allowed_section_ids })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{SECURITY_PLAN_SECTION_POLICIES.map(policy => <SelectItem key={policy.key} value={policy.key}>{policy.label}</SelectItem>)}</SelectContent></Select>
           </div>
         </div>
       </section>
