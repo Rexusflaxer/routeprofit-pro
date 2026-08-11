@@ -12982,9 +12982,6 @@ export function securityPlanStructuralReadiness(
   if (revision.duration_mode === 'fixed' && !Number.isInteger(revision.duration_minutes)) {
     blockingIssues.push(securityPlanIssue('fixed_duration_missing', 'Vul de geschatte duur in minuten in.'));
   }
-  if (securityPlanInstructionStepCount(revision) < 1) {
-    blockingIssues.push(securityPlanIssue('instructions_missing', 'Voeg minimaal één uitvoeringsstap toe.'));
-  }
   const sectionById = new Map(sections.map(section => [section.id, section]));
   const defaultIds = Array.isArray(revision.default_section_ids) ? revision.default_section_ids : [];
   const allowedIds = Array.isArray(revision.allowed_section_ids) ? revision.allowed_section_ids : [];

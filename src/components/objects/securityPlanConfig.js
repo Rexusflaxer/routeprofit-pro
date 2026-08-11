@@ -186,8 +186,6 @@ export function buildSecurityPlanReadiness({ plan, revision, sections = [], floo
   if (plan?.task_type === "other" && !String(plan?.custom_task_type || "").trim()) blocking.push("Vul het eigen taaktype in.");
   if (!plan?.execution_mode) blocking.push("Kies een uitvoeringsvorm.");
   if (revision?.duration_mode === "fixed" && Number(revision?.duration_minutes || 0) <= 0) blocking.push("Vul een geldige geplande duur in.");
-  const blocks = normalizeInstructionBlocks(revision?.instruction_blocks);
-  if (!blocks.some(block => block.steps.some(step => step.title.trim() && step.instruction.trim()))) blocking.push("Voeg minimaal één concrete instructiestap toe.");
   const sectionIds = new Set(sections.map(section => section.id));
   const selectedSectionIds = [...(revision?.default_section_ids || []), ...(revision?.allowed_section_ids || [])];
   if (selectedSectionIds.some(id => !sectionIds.has(id))) blocking.push("Een geselecteerde objectsectie is niet meer beschikbaar.");

@@ -166,7 +166,7 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
   const publishedFloorplans = detail.floorplans.filter(floorplan => floorplan.status === "published");
   const localReadiness = buildSecurityPlanReadiness({ plan: { ...plan, ...form }, revision: form, sections: activeSections, floorplans: publishedFloorplans, modules: detail.modules });
   const serverReadiness = remoteReadiness(detail.readiness);
-  const readiness = { blocking: [...new Set([...localReadiness.blocking, ...serverReadiness.blocking])], warnings: [...new Set([...localReadiness.warnings, ...serverReadiness.warnings])] };
+  const readiness = { blocking: [...new Set([...localReadiness.blocking, ...serverReadiness.blocking])].filter(message => !/minimaal één.*(?:instructie|uitvoeringsstap)/i.test(message)), warnings: [...new Set([...localReadiness.warnings, ...serverReadiness.warnings])] };
 
   useEffect(() => {
     if (remoteKeyRef.current === remoteKey) return;
