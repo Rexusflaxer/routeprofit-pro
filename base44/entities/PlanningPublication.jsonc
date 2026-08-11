@@ -74,6 +74,14 @@
     "assignment_count": {
       "type": "number"
     },
+    "task_occurrence_count": {
+      "type": "number",
+      "default": 0
+    },
+    "task_segment_count": {
+      "type": "number",
+      "default": 0
+    },
     "warning_count": {
       "type": "number"
     },
@@ -91,6 +99,16 @@
       "items": {
         "type": "string"
       }
+    },
+    "task_occurrence_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "task_segment_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
     },
     "snapshot": {
       "type": "object",

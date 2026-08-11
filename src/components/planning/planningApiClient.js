@@ -8,7 +8,11 @@ export function unwrapPlanningResponse(response) {
 
 export async function invokePlanningApi(payload) {
   try {
-    const response = await base44.functions.invoke("planningApi", payload);
+    const request = {
+      ...payload,
+      idempotency_key: payload.idempotency_key || globalThis.crypto?.randomUUID?.() || `planning-${Date.now()}-${Math.random()}`,
+    };
+    const response = await base44.functions.invoke("planningApi", request);
     const data = unwrapPlanningResponse(response);
     if (data?.error) {
       throw Object.assign(new Error(data.error), {

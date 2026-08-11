@@ -5,8 +5,10 @@ import {
   Check,
   Clock3,
   Copy,
+  Layers3,
   MoreHorizontal,
   MoveRight,
+  Trash2,
   UserMinus,
   UserRoundPlus,
 } from "lucide-react";
@@ -36,6 +38,11 @@ function warningCount(assignment) {
     : Array.isArray(assignment?.warning_snapshot)
     ? assignment.warning_snapshot.length
     : Number(assignment?.warning_count || 0);
+}
+
+function compositionWarnings(shift) {
+  const warnings = shift?.service_context_snapshot?.composition_warnings;
+  return Array.isArray(warnings) ? warnings : [];
 }
 
 function Slot({
@@ -122,11 +129,14 @@ function Slot({
 export default function PlanningShiftCard({
   shift,
   assignments = [],
+  segments = [],
   selected,
   onSelect,
   onUnassign,
   onMove,
   onCopy,
+  onEditComposition,
+  onCancelComposition,
   compact = false,
   className,
   style,
@@ -134,7 +144,17 @@ export default function PlanningShiftCard({
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const activeAssignments = assignments.filter(item => item.status !== "removed");
   const openCount = Math.max(0, requiredCount - activeAssignments.length);
-  const warningTotal = activeAssignments.reduce((sum, item) => sum + warningCount(item), 0);
+  const assignmentWarningTotal = activeAssignments.reduce((sum, item) => sum + warningCount(item), 0);
+  const shiftCompositionWarnings = compositionWarnings(shift);
+  const warningTotal = assignmentWarningTotal + shiftCompositionWarnings.length;
+  const compositionWarningDetails = shiftCompositionWarnings
+    .map(item => item.message || item.detail || item.title || item.code)
+    .filter(Boolean)
+    .join("\n");
+  const activeSegments = segments
+    .filter(item => item.status !== "removed")
+    .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
+  const objectCount = new Set(activeSegments.map(item => String(item.object_id)).filter(Boolean)).size;
   const slots = Array.from({ length: requiredCount }, (_, slotIndex) => ({
     slotIndex,
     assignment: activeAssignments.find(item => Number(item.slot_index || 0) === slotIndex)
@@ -144,16 +164,7 @@ export default function PlanningShiftCard({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
       aria-label={`${shift.name || "Dienst"}, ${shift.start_time || "--:--"} tot ${shift.end_time || "--:--"}, ${openCount} open plaatsen`}
-      onClick={onSelect}
-      onKeyDown={event => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
       className={cn(
         "group relative min-w-0 rounded-md border bg-card p-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:border-primary/45 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         shift.status === "draft" ? "border-dashed border-primary/45" : "border-border",
@@ -163,7 +174,7 @@ export default function PlanningShiftCard({
       style={style}
     >
       <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1">
+        <button type="button" onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-[11px] font-semibold leading-tight text-foreground">
               {shift.name || shift.route_name || "Naamloze dienst"}
@@ -177,7 +188,7 @@ export default function PlanningShiftCard({
             {shift.start_time || "--:--"}–{shift.end_time || "--:--"}
             {Number(shift.required_count || 1) > 1 && <span>· {activeAssignments.length}/{requiredCount}</span>}
           </p>
-        </div>
+        </button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -192,14 +203,31 @@ export default function PlanningShiftCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onSelect={() => onMove(shift)}>
-              <MoveRight className="h-3.5 w-3.5" />
-              Verplaatsen
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onCopy(shift)}>
-              <Copy className="h-3.5 w-3.5" />
-              Kopiëren
-            </DropdownMenuItem>
+            {activeSegments.length > 0 ? (
+              <>
+                <DropdownMenuItem onSelect={() => onEditComposition(shift)}>
+                  <Layers3 className="h-3.5 w-3.5" />
+                  Dienstinhoud bewerken
+                </DropdownMenuItem>
+                {shift.status === "draft" && Number(shift.published_revision || 0) === 0 && (
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => onCancelComposition(shift)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Conceptdienst verwijderen
+                  </DropdownMenuItem>
+                )}
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem onSelect={() => onMove(shift)}>
+                  <MoveRight className="h-3.5 w-3.5" />
+                  Verplaatsen
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onCopy(shift)}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Kopiëren
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onSelect}>
               <UserRoundPlus className="h-3.5 w-3.5" />
@@ -208,6 +236,21 @@ export default function PlanningShiftCard({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {activeSegments.length > 0 && (
+        <button type="button" onClick={onSelect} className="mt-1.5 w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <span className="flex h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+            {activeSegments.map((segment, index) => (
+              <span key={segment.id || `${segment.task_occurrence_id}-${index}`} className={cn("h-full flex-1", index % 3 === 0 ? "bg-primary" : index % 3 === 1 ? "bg-sky-500" : "bg-violet-500")} />
+            ))}
+          </span>
+          <span className="mt-1 flex items-center gap-1 text-[9px] font-medium text-muted-foreground">
+            <Layers3 className="h-2.5 w-2.5" />
+            {activeSegments.length} {activeSegments.length === 1 ? "taak" : "taken"}
+            {objectCount > 1 && ` · ${objectCount} objecten`}
+          </span>
+        </button>
+      )}
 
       <div className={cn("mt-1.5 space-y-1", compact && "mt-1")}>
         {slots.map(slot => (
@@ -231,9 +274,14 @@ export default function PlanningShiftCard({
             </span>
           )}
           {warningTotal > 0 && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+            <span
+              className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+              aria-label={`${warningTotal} waarschuwingen${shiftCompositionWarnings.length ? `, waarvan ${shiftCompositionWarnings.length} dienstcontroles` : ""}`}
+              title={compositionWarningDetails || `${warningTotal} waarschuwingen`}
+            >
               <AlertTriangle className="h-2.5 w-2.5" />
               {warningTotal}
+              {shiftCompositionWarnings.length > 0 && <span>controle</span>}
             </span>
           )}
         </div>

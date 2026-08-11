@@ -1,6 +1,5 @@
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const CLOCK_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set([
@@ -366,6 +365,190 @@ export function rangesOverlap(first, second, third, fourth) {
   return left.start < right.end && right.start < left.end;
 }
 
+function activeTaskSegments(segments) {
+  return asArray(segments).filter(segment => segment.status !== "removed");
+}
+
+function taskSegmentInterval(segment) {
+  return getShiftInterval({
+    service_date: segment.start_date || segment.service_date,
+    end_date: segment.end_date || null,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    overnight: true,
+  });
+}
+
+function occurrenceInterval(occurrence) {
+  return getShiftInterval({
+    service_date: occurrence.service_date,
+    end_date: occurrence.end_date || null,
+    start_time: occurrence.window_start_time,
+    end_time: occurrence.window_end_time,
+    overnight: true,
+  });
+}
+
+function mergedDateIntervals(intervals) {
+  const sorted = intervals
+    .filter(interval => interval?.valid)
+    .map(interval => ({ start: interval.start.getTime(), end: interval.end.getTime() }))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const merged = [];
+  for (const interval of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || interval.start > previous.end) merged.push({ ...interval });
+    else previous.end = Math.max(previous.end, interval.end);
+  }
+  return merged;
+}
+
+export function getTaskOccurrenceCoverage(occurrence, segments = []) {
+  const relevant = activeTaskSegments(segments).filter(segment => (
+    String(segment.task_occurrence_id) === String(occurrence?.id)
+  ));
+  const merged = mergedDateIntervals(relevant.map(taskSegmentInterval));
+  const allocatedMinutes = merged.reduce(
+    (sum, interval) => sum + Math.round((interval.end - interval.start) / MINUTE_MS),
+    0,
+  );
+  const requiredMinutes = Math.max(0, Number(occurrence?.required_minutes || 0));
+  return {
+    allocatedMinutes,
+    requiredMinutes,
+    remainingMinutes: Math.max(0, requiredMinutes - allocatedMinutes),
+    status: allocatedMinutes <= 0 ? "open" : allocatedMinutes >= requiredMinutes ? "full" : "partial",
+    segmentCount: relevant.length,
+  };
+}
+
+export function getOccurrenceRemainingRanges(occurrence, segments = []) {
+  const demand = occurrenceInterval(occurrence);
+  if (!demand.valid) return [];
+  const used = mergedDateIntervals(
+    activeTaskSegments(segments)
+      .filter(segment => String(segment.task_occurrence_id) === String(occurrence.id))
+      .map(taskSegmentInterval),
+  );
+  const ranges = [];
+  let cursor = demand.start.getTime();
+  for (const interval of used) {
+    if (interval.end <= cursor || interval.start >= demand.end.getTime()) continue;
+    if (interval.start > cursor) ranges.push({
+      start: new Date(cursor),
+      end: new Date(Math.min(interval.start, demand.end.getTime())),
+    });
+    cursor = Math.max(cursor, interval.end);
+  }
+  if (cursor < demand.end.getTime()) ranges.push({ start: new Date(cursor), end: new Date(demand.end) });
+  return ranges.filter(range => range.end > range.start);
+}
+
+export function taskCoverageSummary(occurrences = [], segments = []) {
+  return asArray(occurrences).reduce((summary, occurrence) => {
+    if (occurrence.lifecycle_status && occurrence.lifecycle_status !== "active") return summary;
+    const coverage = getTaskOccurrenceCoverage(occurrence, segments);
+    summary[coverage.status] += 1;
+    summary.requiredMinutes += coverage.requiredMinutes;
+    summary.allocatedMinutes += coverage.allocatedMinutes;
+    summary.remainingMinutes += coverage.remainingMinutes;
+    return summary;
+  }, { open: 0, partial: 0, full: 0, requiredMinutes: 0, allocatedMinutes: 0, remainingMinutes: 0 });
+}
+
+export function sortTaskSegments(segments = []) {
+  return [...activeTaskSegments(segments)].sort((left, right) => {
+    const first = taskSegmentInterval(left);
+    const second = taskSegmentInterval(right);
+    return (first.valid && second.valid ? first.start - second.start || first.end - second.end : 0)
+      || Number(left.sequence_index || 0) - Number(right.sequence_index || 0);
+  });
+}
+
+export function validateTaskComposition(segments = []) {
+  const ordered = sortTaskSegments(segments).map(segment => ({ segment, interval: taskSegmentInterval(segment) }));
+  const errors = ordered.filter(item => !item.interval.valid).map(item => ({
+    code: "invalid_segment_time",
+    message: `Ongeldige tijd voor ${item.segment.task_name_snapshot || "taak"}.`,
+  }));
+  const warnings = [];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    if (!previous.interval.valid || !current.interval.valid) continue;
+    const gap = Math.round((current.interval.start - previous.interval.end) / MINUTE_MS);
+    if (gap < 0) errors.push({ code: "segment_overlap", message: "Taaksegmenten mogen elkaar niet overlappen." });
+    else if (gap > 0) warnings.push({ code: "composition_gap", message: `${gap} minuten zonder taak tussen twee segmenten.` });
+    if (String(previous.segment.object_id) !== String(current.segment.object_id) && gap < 5) {
+      warnings.push({ code: "object_transition_review", message: "Controleer de reistijd tussen de twee objecten." });
+    }
+  }
+  return { valid: ordered.length > 0 && errors.length === 0, errors, warnings };
+}
+
+/**
+ * Validate task allocations against the immutable occurrence window and
+ * segments that already belong to another shift. This mirrors the two
+ * server-side composition guards so the planner gets feedback before save.
+ */
+export function validateTaskSegmentAllocations({
+  segments = [],
+  occurrences = [],
+  externalSegments = [],
+} = {}) {
+  const occurrenceById = new Map(asArray(occurrences).map(item => [String(item.id), item]));
+  const external = activeTaskSegments(externalSegments);
+  const errors = [];
+
+  activeTaskSegments(segments).forEach((segment, index) => {
+    const segmentId = String(segment.local_id || segment.id || `${segment.task_occurrence_id || "segment"}-${index}`);
+    const occurrence = occurrenceById.get(String(segment.task_occurrence_id));
+    if (!occurrence) {
+      errors.push({
+        code: `occurrence_missing_${segmentId}`,
+        segmentId,
+        message: "Een taakuitvoering bestaat niet meer.",
+      });
+      return;
+    }
+
+    const interval = taskSegmentInterval(segment);
+    const demand = occurrenceInterval(occurrence);
+    if (!demand.valid) {
+      errors.push({
+        code: `occurrence_window_invalid_${segmentId}`,
+        segmentId,
+        message: `Het tijdvenster van ${occurrence.task_name_snapshot || "de taak"} is ongeldig.`,
+      });
+      return;
+    }
+    // Invalid segment clocks are already reported by validateTaskComposition.
+    if (!interval.valid) return;
+
+    if (interval.start < demand.start || interval.end > demand.end) {
+      errors.push({
+        code: `segment_outside_occurrence_window_${segmentId}`,
+        segmentId,
+        message: `${occurrence.task_name_snapshot || "Taak"}: het segment valt buiten het taakvenster ${occurrence.window_start_time}–${occurrence.window_end_time}.`,
+      });
+    }
+
+    const overlapsExternal = external.some(item => (
+      String(item.task_occurrence_id) === String(occurrence.id)
+      && rangesOverlap(interval, taskSegmentInterval(item))
+    ));
+    if (overlapsExternal) {
+      errors.push({
+        code: `segment_overlaps_existing_${segmentId}`,
+        segmentId,
+        message: `${occurrence.task_name_snapshot || "Taak"}: dit tijdvak overlapt met een segment in een andere dienst.`,
+      });
+    }
+  });
+
+  return { valid: errors.length === 0, errors };
+}
+
 function warning(code, severity, title, detail) {
   return { code, severity, title, detail };
 }
@@ -700,16 +883,39 @@ function scopeTarget(shift, scopeType) {
   return values[scopeType] || values.other;
 }
 
+function scopeTargets(shift, scopeType) {
+  const target = scopeTarget(shift, scopeType);
+  const arrayPaths = {
+    customer: {
+      ids: ["customer_ids", "service_context_snapshot.customer_ids"],
+      labels: ["customer_names", "customer_name_snapshots", "service_context_snapshot.customer_names"],
+    },
+    object: {
+      ids: ["object_ids", "service_context_snapshot.object_ids"],
+      labels: ["object_names", "object_name_snapshots", "service_context_snapshot.object_names"],
+    },
+  }[scopeType] || { ids: [], labels: [] };
+  const ids = [target.id, ...arrayPaths.ids.flatMap(path => asArray(valueAt(shift, path)))]
+    .filter(Boolean)
+    .map(String);
+  const labels = [target.label, ...arrayPaths.labels.flatMap(path => asArray(valueAt(shift, path)))]
+    .map(normalizedText)
+    .filter(Boolean);
+  return {
+    ids: [...new Set(ids)],
+    labels: [...new Set(labels)],
+  };
+}
+
 function restrictionMatchesShift(restriction, shift) {
   const scopeType = restriction.scope_type || "object";
-  const target = scopeTarget(shift, scopeType);
+  const targets = scopeTargets(shift, scopeType);
   const restrictionScopeId = firstValue(restriction, ["scope_id"]);
   if (restrictionScopeId) {
-    return Boolean(target.id) && String(restrictionScopeId) === String(target.id);
+    return targets.ids.includes(String(restrictionScopeId));
   }
   const restrictionLabel = normalizedText(restriction.scope_label);
-  return Boolean(restrictionLabel && target.label)
-    && restrictionLabel === normalizedText(target.label);
+  return Boolean(restrictionLabel) && targets.labels.includes(restrictionLabel);
 }
 
 function getRestrictionWarnings({ personnel, shift, restrictions }) {

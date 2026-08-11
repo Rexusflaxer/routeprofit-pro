@@ -1,0 +1,70 @@
+{
+  "name": "PlanningShiftTaskSegment",
+  "type": "object",
+  "description": "Geordende taakallocatie binnen een dienst. Meerdere segmenten mogen samen één taakuitvoering dekken; één dienst mag meerdere taakuitvoeringen bevatten.",
+  "properties": {
+    "shift_id": { "type": "string" },
+    "task_occurrence_id": { "type": "string" },
+    "object_task_definition_id": { "type": "string" },
+    "sequence_index": { "type": "number", "minimum": 0 },
+    "start_date": { "type": "string", "format": "date" },
+    "end_date": { "type": "string", "format": "date" },
+    "start_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "end_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "timezone": { "type": "string", "default": "Europe/Amsterdam" },
+    "duration_minutes": { "type": "number", "minimum": 1 },
+    "company_id": { "type": ["string", "null"] },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "task_type": { "type": "string" },
+    "task_name_snapshot": { "type": "string" },
+    "customer_name_snapshot": { "type": ["string", "null"] },
+    "object_name_snapshot": { "type": ["string", "null"] },
+    "instructions_snapshot": { "type": ["string", "null"] },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "published", "removed"],
+      "default": "draft"
+    },
+    "revision": { "type": "number", "default": 1 },
+    "published_revision": { "type": "number", "default": 0 },
+    "last_published_correlation_id": { "type": ["string", "null"] },
+    "last_modified_by_user_id": { "type": ["string", "null"] },
+    "last_modified_at": { "type": ["string", "null"], "format": "date-time" },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "shift_id",
+    "task_occurrence_id",
+    "object_task_definition_id",
+    "sequence_index",
+    "start_date",
+    "end_date",
+    "start_time",
+    "end_time",
+    "timezone",
+    "duration_minutes",
+    "customer_id",
+    "object_id",
+    "task_type",
+    "task_name_snapshot",
+    "status",
+    "revision",
+    "published_revision"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}

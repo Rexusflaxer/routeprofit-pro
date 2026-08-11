@@ -10,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
   Save,
+  ListTodo,
   Users,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
@@ -23,8 +24,10 @@ import {
 } from "@/components/ui/resizable";
 import PlanningToolbar from "@/components/planning/PlanningToolbar";
 import PlanningBoard from "@/components/planning/PlanningBoard";
-import PlanningEmployeePanel from "@/components/planning/PlanningEmployeePanel";
+import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
+import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
 import {
+  CancelTaskShiftDialog,
   PublishPlanningDialog,
   ShiftActionDialog,
 } from "@/components/planning/PlanningDialogs";
@@ -36,6 +39,7 @@ import {
   getPlanningRange,
   parseDateKey,
   splitIntoWeeks,
+  taskCoverageSummary,
   toDateKey,
 } from "@/components/planning/planningDomain";
 
@@ -105,6 +109,34 @@ function mutationMessage(error) {
   return error?.message || "De planningactie kon niet worden uitgevoerd.";
 }
 
+function planningMutationKey(prefix) {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+}
+
+async function listAllEntityRecords(entity, sort) {
+  const records = new Map();
+  const pageSize = 5000;
+  const stableSort = sort || "created_date";
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await entity.list(stableSort, pageSize, pageIndex * pageSize);
+    page.forEach(record => records.set(String(record.id), record));
+    if (page.length < pageSize) return [...records.values()];
+  }
+  throw new Error("De dataset is te groot om veilig in één planningsoverzicht te laden.");
+}
+
+async function filterAllEntityRecords(entity, query, sort) {
+  const records = new Map();
+  const pageSize = 5000;
+  const stableSort = sort || "created_date";
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await entity.filter(query, stableSort, pageSize, pageIndex * pageSize);
+    page.forEach(record => records.set(String(record.id), record));
+    if (page.length < pageSize) return [...records.values()];
+  }
+  throw new Error("De dataset is te groot om veilig in één planningsoverzicht te laden.");
+}
+
 export default function Planning() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -124,9 +156,13 @@ export default function Planning() {
   const [selectedShiftId, setSelectedShiftId] = useState(null);
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [sidePanelMode, setSidePanelMode] = useState("tasks");
+  const [composer, setComposer] = useState(null);
+  const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [liveMessage, setLiveMessage] = useState("");
   const lastBootstrapKey = useRef("");
+  const publicationKey = useRef("");
 
   const range = useMemo(() => getPlanningRange(anchorDate, view), [anchorDate, view]);
   const weeks = useMemo(() => splitIntoWeeks(range.days), [range.days]);
@@ -141,62 +177,75 @@ export default function Planning() {
     next.set("perspective", perspective);
     setSearchParams(next, { replace: true });
     // searchParams changes after this synchronized update; it must not retrigger the state update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorDate, perspective, setSearchParams, view]);
 
   const shiftsQuery = useQuery({
-    queryKey: ["planning-shifts"],
-    queryFn: () => base44.entities.PlanningShift.list("-service_date"),
+    queryKey: ["planning-shifts", periodStart, periodEnd],
+    queryFn: () => filterAllEntityRecords(base44.entities.PlanningShift, {
+      service_date: { $gte: periodStart, $lte: periodEnd },
+    }, "-service_date"),
     staleTime: 15_000,
   });
   const assignmentsQuery = useQuery({
     queryKey: ["planning-assignments"],
-    queryFn: () => base44.entities.PlanningAssignment.list("-updated_date"),
+    queryFn: () => listAllEntityRecords(base44.entities.PlanningAssignment, "-updated_date"),
+    staleTime: 10_000,
+  });
+  const taskOccurrencesQuery = useQuery({
+    queryKey: ["planning-task-occurrences", periodStart, periodEnd],
+    queryFn: () => filterAllEntityRecords(base44.entities.PlanningTaskOccurrence, {
+      service_date: { $gte: periodStart, $lte: periodEnd },
+    }, "-service_date"),
+    staleTime: 10_000,
+  });
+  const taskSegmentsQuery = useQuery({
+    queryKey: ["planning-task-segments"],
+    queryFn: () => listAllEntityRecords(base44.entities.PlanningShiftTaskSegment, "-start_date"),
     staleTime: 10_000,
   });
   const personnelQuery = useQuery({
     queryKey: ["personnel"],
-    queryFn: () => base44.entities.Personnel.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.Personnel),
     staleTime: 60_000,
   });
   const qualificationsQuery = useQuery({
     queryKey: ["personnel-qualifications"],
-    queryFn: () => base44.entities.PersonnelQualification.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.PersonnelQualification),
     staleTime: 60_000,
   });
   const absencesQuery = useQuery({
     queryKey: ["personnel-absences"],
-    queryFn: () => base44.entities.PersonnelAbsence.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.PersonnelAbsence),
     staleTime: 30_000,
   });
   const passesQuery = useQuery({
     queryKey: ["personnel-security-passes"],
-    queryFn: () => base44.entities.PersonnelSecurityPass.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.PersonnelSecurityPass),
     staleTime: 60_000,
   });
   const restrictionsQuery = useQuery({
     queryKey: ["personnel-restrictions"],
-    queryFn: () => base44.entities.PersonnelRestriction.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.PersonnelRestriction),
     staleTime: 60_000,
   });
   const contractsQuery = useQuery({
     queryKey: ["personnel-contracts"],
-    queryFn: () => base44.entities.PersonnelContract.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.PersonnelContract),
     staleTime: 60_000,
   });
   const objectsQuery = useQuery({
     queryKey: ["objects"],
-    queryFn: () => base44.entities.SurveillanceObject.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.SurveillanceObject),
     staleTime: 60_000,
   });
   const customersQuery = useQuery({
     queryKey: ["customers"],
-    queryFn: () => base44.entities.Customer.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.Customer),
     staleTime: 60_000,
   });
   const routesQuery = useQuery({
     queryKey: ["routes"],
-    queryFn: () => base44.entities.Route.list(),
+    queryFn: () => listAllEntityRecords(base44.entities.Route),
     staleTime: 60_000,
   });
 
@@ -204,6 +253,8 @@ export default function Planning() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["planning-shifts"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-assignments"] }),
+      queryClient.invalidateQueries({ queryKey: ["planning-task-occurrences"] }),
+      queryClient.invalidateQueries({ queryKey: ["planning-task-segments"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-publications"] }),
     ]);
   };
@@ -226,7 +277,6 @@ export default function Planning() {
     lastBootstrapKey.current = key;
     bootstrapMutation.mutate({ period_start: periodStart, period_end: periodEnd });
     // The mutation identity changes between renders; the range key is the intended trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodEnd, periodStart]);
 
   const allShifts = useMemo(
@@ -237,6 +287,8 @@ export default function Planning() {
     () => (assignmentsQuery.data || []).map(normalizePlanningAssignment),
     [assignmentsQuery.data],
   );
+  const taskOccurrences = taskOccurrencesQuery.data || [];
+  const taskSegments = taskSegmentsQuery.data || [];
   const personnel = personnelQuery.data || [];
   const qualifications = qualificationsQuery.data || [];
   const absences = absencesQuery.data || [];
@@ -255,22 +307,39 @@ export default function Planning() {
   )), [allShifts, periodEnd, periodStart]);
   const shiftIdsInRange = useMemo(() => new Set(shiftsInRange.map(shift => String(shift.id))), [shiftsInRange]);
   const assignmentsInRange = useMemo(() => assignments.filter(item => shiftIdsInRange.has(String(item.planning_shift_id))), [assignments, shiftIdsInRange]);
+  const taskOccurrencesInRange = useMemo(() => taskOccurrences.filter(item => (
+    item.lifecycle_status === "active"
+    && item.service_date >= periodStart
+    && item.service_date <= periodEnd
+  )), [periodEnd, periodStart, taskOccurrences]);
+  const visibleTaskOccurrences = useMemo(() => taskOccurrencesInRange.filter(item => (
+    customerFilter === "all" || String(item.customer_id) === String(customerFilter)
+  )), [customerFilter, taskOccurrencesInRange]);
 
   const filteredShifts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
     const active = activeAssignments(assignmentsInRange);
     return shiftsInRange.filter(shift => {
       const object = objectsById.get(String(shift.object_id || ""));
+      const shiftSegments = taskSegments.filter(item => item.status !== "removed" && String(item.shift_id) === String(shift.id));
       if (customerFilter !== "all") {
-        const shiftCustomerId = String(shift.customer_id || object?.customer_id || "");
-        if (shiftCustomerId !== String(customerFilter)) return false;
+        const shiftCustomerIds = new Set([
+          shift.customer_id,
+          object?.customer_id,
+          ...(shift.customer_ids || []),
+          ...shiftSegments.map(item => item.customer_id),
+        ].filter(Boolean).map(String));
+        if (!shiftCustomerIds.has(String(customerFilter))) return false;
       }
       const shiftAssignments = active.filter(item => String(item.planning_shift_id) === String(shift.id));
       const required = Math.max(1, Number(shift.required_count || 1));
       const warnings = shiftAssignments.flatMap(assignmentWarnings);
+      const compositionWarnings = Array.isArray(shift.service_context_snapshot?.composition_warnings)
+        ? shift.service_context_snapshot.composition_warnings
+        : [];
       if (statusFilter === "vacant" && shiftAssignments.length >= required) return false;
       if (statusFilter === "draft" && shift.status !== "draft" && !shiftAssignments.some(item => item.status === "draft")) return false;
-      if (statusFilter === "warnings" && warnings.length === 0) return false;
+      if (statusFilter === "warnings" && warnings.length + compositionWarnings.length === 0) return false;
       if (statusFilter === "published" && shift.status !== "published") return false;
       if (!query) return true;
       return [
@@ -280,6 +349,7 @@ export default function Planning() {
         shift.group_label,
         object?.name,
         object?.address,
+        ...shiftSegments.flatMap(item => [item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot]),
         ...shiftAssignments.map(item => item.personnel_name),
       ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
     });
@@ -290,12 +360,18 @@ export default function Planning() {
     search,
     shiftsInRange,
     statusFilter,
+    taskSegments,
   ]);
 
   const selectedShift = useMemo(
     () => allShifts.find(shift => String(shift.id) === String(selectedShiftId)) || null,
     [allShifts, selectedShiftId],
   );
+  useEffect(() => {
+    if (!selectedShiftId) return;
+    const remainsVisible = filteredShifts.some(shift => String(shift.id) === String(selectedShiftId));
+    if (!remainsVisible) setSelectedShiftId(null);
+  }, [filteredShifts, selectedShiftId]);
   const activePersonnel = useMemo(() => personnel.filter(item => (
     item.status === "active" || item.is_active === true
   )), [personnel]);
@@ -478,21 +554,78 @@ export default function Planning() {
     setShiftAction(null);
   };
 
+  const openTaskComposer = ({ shift = null, occurrence = null } = {}) => {
+    setComposer({ shift, occurrence });
+    setSidePanelMode("tasks");
+  };
+
+  const handleCompositionSave = async payload => {
+    const result = await runActionMutation.mutateAsync(payload);
+    await refreshPlanning();
+    const description = `${result.shift?.service_name_snapshot || result.shift?.name || "Dienst"} is als concept opgeslagen met ${result.segments?.length || 0} taaksegmenten.`;
+    toast({
+      title: composer?.shift ? "Dienstinhoud bijgewerkt" : "Conceptdienst samengesteld",
+      description,
+    });
+    setSelectedShiftId(null);
+    setComposer(null);
+    setSidePanelMode("tasks");
+    setLiveMessage(description);
+  };
+
+  const handleCancelTaskShift = async shift => {
+    const occurrenceIds = [...new Set(taskSegments
+      .filter(segment => segment.status !== "removed" && String(segment.shift_id) === String(shift.id))
+      .map(segment => String(segment.task_occurrence_id)))];
+    const result = await runActionMutation.mutateAsync({
+      action: "cancel_task_shift",
+      idempotency_key: cancelTaskShift?.idempotencyKey,
+      shift_id: shift.id,
+      expected_shift_revision: Number(shift.revision || 1),
+      expected_occurrence_revisions: Object.fromEntries(occurrenceIds.map(id => [
+        id,
+        Number(taskOccurrences.find(occurrence => String(occurrence.id) === id)?.revision || 1),
+      ])),
+    });
+    await refreshPlanning();
+    const description = `${shift.name || "Conceptdienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
+    toast({ title: "Conceptdienst verwijderd", description });
+    setSelectedShiftId(null);
+    setCancelTaskShift(null);
+    setSidePanelMode("tasks");
+    setLiveMessage(description);
+  };
+
   const planningStats = useMemo(() => {
     const active = activeAssignments(assignmentsInRange);
     const warnings = active.flatMap(assignmentWarnings);
+    const compositionWarnings = shiftsInRange.flatMap(shift => (
+      Array.isArray(shift.service_context_snapshot?.composition_warnings)
+        ? shift.service_context_snapshot.composition_warnings
+        : []
+    ));
     const vacantCount = shiftsInRange.reduce((count, shift) => {
       const assigned = active.filter(item => String(item.planning_shift_id) === String(shift.id)).length;
       return count + Math.max(0, Math.max(1, Number(shift.required_count || 1)) - assigned);
     }, 0);
+    const coverage = taskCoverageSummary(taskOccurrencesInRange, taskSegments);
+    const securityPlanWarningCount = taskOccurrencesInRange.filter(occurrence => (
+      !occurrence.security_plan_revision_id || !occurrence.security_plan_snapshot?.published_revision
+    )).length;
     return {
       draftShiftCount: shiftsInRange.filter(shift => shift.status === "draft" || Number(shift.revision || 0) > Number(shift.published_revision || 0)).length,
       draftAssignmentCount: active.filter(item => item.status === "draft" || Number(item.revision || 0) > Number(item.published_revision || 0)).length,
-      warningCount: warnings.length,
-      criticalCount: warnings.filter(warning => warning.severity === "critical").length,
+      warningCount: warnings.length + compositionWarnings.length + coverage.open + coverage.partial + securityPlanWarningCount,
+      criticalCount: warnings.filter(warning => warning.severity === "critical").length
+        + compositionWarnings.filter(warning => warning.severity === "critical").length
+        + coverage.open
+        + coverage.partial
+        + securityPlanWarningCount,
       vacantCount,
+      taskCoverage: coverage,
+      securityPlanWarningCount,
     };
-  }, [assignmentsInRange, shiftsInRange]);
+  }, [assignmentsInRange, shiftsInRange, taskOccurrencesInRange, taskSegments]);
 
   const publishMutation = useMutation({
     mutationFn: payload => invokePlanningApi({
@@ -505,11 +638,13 @@ export default function Planning() {
         shiftsInRange.map(shift => [shift.id, Number(shift.revision || 1)]),
       ),
       publication_reason: `Planning gepubliceerd voor ${rangeLabel}`,
+      idempotency_key: publicationKey.current || (publicationKey.current = planningMutationKey("planning-publication")),
       ...payload,
     }),
     onSuccess: async result => {
       await refreshPlanning();
       setPublishOpen(false);
+      publicationKey.current = "";
       setUndoStack([]);
       const message = `Versie ${result?.publication?.version || result?.version || ""} is gepubliceerd voor ${rangeLabel}.`;
       setLiveMessage(message);
@@ -533,6 +668,8 @@ export default function Planning() {
   const isLoading = [
     shiftsQuery,
     assignmentsQuery,
+    taskOccurrencesQuery,
+    taskSegmentsQuery,
     personnelQuery,
     objectsQuery,
     routesQuery,
@@ -540,14 +677,19 @@ export default function Planning() {
   const loadError = [
     shiftsQuery.error,
     assignmentsQuery.error,
+    taskOccurrencesQuery.error,
+    taskSegmentsQuery.error,
     personnelQuery.error,
   ].find(Boolean);
 
   return (
-    <div className="flex h-full min-h-0 min-w-[880px] flex-col overflow-hidden bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       <PlanningToolbar
         perspective={perspective}
-        onPerspectiveChange={setPerspective}
+        onPerspectiveChange={nextPerspective => {
+          setPerspective(nextPerspective);
+          setSelectedShiftId(null);
+        }}
         view={view}
         onViewChange={nextView => {
           setView(nextView);
@@ -568,8 +710,11 @@ export default function Planning() {
         onCustomerFilterChange={setCustomerFilter}
         customers={customers}
         warningCount={planningStats.warningCount}
-        onPublish={() => setPublishOpen(true)}
-        publishDisabled={shiftsInRange.length === 0 || planningStats.draftShiftCount + planningStats.draftAssignmentCount === 0}
+        onPublish={() => {
+          publicationKey.current = planningMutationKey("planning-publication");
+          setPublishOpen(true);
+        }}
+        publishDisabled={shiftsInRange.length === 0 || planningStats.draftShiftCount + planningStats.draftAssignmentCount + planningStats.taskCoverage.open + planningStats.taskCoverage.partial === 0}
         isPublishing={publishMutation.isPending}
       />
 
@@ -590,28 +735,52 @@ export default function Planning() {
               weeks={weeks}
               shifts={filteredShifts}
               assignments={assignmentsInRange}
+              segments={taskSegments}
               personnel={activePersonnel}
               objects={objects}
               routes={routes}
               customers={customers}
               selectedShiftId={selectedShiftId}
-              onSelectShift={shift => setSelectedShiftId(shift.id)}
+              onSelectShift={shift => {
+                setSelectedShiftId(shift.id);
+                setSidePanelMode("employees");
+              }}
               onUnassign={(shift, assignment) => handleUnassign(shift, assignment).catch(() => undefined)}
               onMove={shift => setShiftAction({ action: "move", shift })}
               onCopy={shift => setShiftAction({ action: "copy", shift })}
+              onEditComposition={shift => openTaskComposer({ shift })}
+              onCancelComposition={shift => setCancelTaskShift({
+                shift,
+                idempotencyKey: planningMutationKey("cancel-task-shift"),
+              })}
+              taskOccurrenceCount={visibleTaskOccurrences.length}
               isLoading={isLoading}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={24} minSize={19} maxSize={38}>
-            <PlanningEmployeePanel
-              selectedShift={selectedShift}
-              candidates={candidates}
-              onAssign={candidate => handleCandidateAssign(candidate).catch(() => undefined)}
-              onCloseShift={() => setSelectedShiftId(null)}
-              personnelCount={activePersonnel.length}
-              qualifications={qualifications}
-              securityPasses={securityPasses}
+            <PlanningSidePanel
+              mode={sidePanelMode}
+              onModeChange={setSidePanelMode}
+              taskCount={planningStats.taskCoverage.open + planningStats.taskCoverage.partial}
+              taskProps={{
+                occurrences: visibleTaskOccurrences,
+                segments: taskSegments,
+                selectedShift,
+                onCreateShift: occurrence => openTaskComposer({ occurrence }),
+                onAddToShift: occurrence => openTaskComposer({ shift: selectedShift, occurrence }),
+                onEditShift: shift => openTaskComposer({ shift }),
+                onClearShift: () => setSelectedShiftId(null),
+              }}
+              employeeProps={{
+                selectedShift,
+                candidates,
+                onAssign: candidate => handleCandidateAssign(candidate).catch(() => undefined),
+                onCloseShift: () => setSelectedShiftId(null),
+                personnelCount: activePersonnel.length,
+                qualifications,
+                securityPasses,
+              }}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -635,6 +804,11 @@ export default function Planning() {
           <Users className="h-3 w-3" />
           {planningStats.vacantCount} open plaatsen
         </div>
+        <span className="h-3 w-px bg-border" />
+        <button type="button" onClick={() => setSidePanelMode("tasks")} className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground">
+          <ListTodo className="h-3 w-3" />
+          {planningStats.taskCoverage.open} open · {planningStats.taskCoverage.partial} deels geplande taken
+        </button>
         {planningStats.warningCount > 0 && (
           <>
             <span className="h-3 w-px bg-border" />
@@ -665,9 +839,29 @@ export default function Planning() {
         onConfirm={payload => handleShiftActionConfirm(payload).catch(() => undefined)}
         isPending={runActionMutation.isPending}
       />
+      <CancelTaskShiftDialog
+        shift={cancelTaskShift?.shift || null}
+        open={Boolean(cancelTaskShift)}
+        onOpenChange={open => { if (!open && !runActionMutation.isPending) setCancelTaskShift(null); }}
+        onConfirm={shift => handleCancelTaskShift(shift).catch(() => undefined)}
+        isPending={runActionMutation.isPending}
+      />
+      <PlanningShiftComposer
+        open={Boolean(composer)}
+        onOpenChange={open => { if (!open) setComposer(null); }}
+        shift={composer?.shift || null}
+        initialOccurrence={composer?.occurrence || null}
+        occurrences={taskOccurrencesInRange}
+        segments={taskSegments}
+        onSave={payload => handleCompositionSave(payload).catch(() => undefined)}
+        isPending={runActionMutation.isPending}
+      />
       <PublishPlanningDialog
         open={publishOpen}
-        onOpenChange={setPublishOpen}
+        onOpenChange={open => {
+          setPublishOpen(open);
+          if (!open && !publishMutation.isPending) publicationKey.current = "";
+        }}
         rangeLabel={rangeLabel}
         {...planningStats}
         onConfirm={payload => publishMutation.mutate(payload)}

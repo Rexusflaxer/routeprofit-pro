@@ -1,10 +1,9 @@
 import React, { useMemo } from "react";
-import { AlertTriangle, CalendarX2, MapPin, Route, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarX2, Layers3, MapPin, Route, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import PlanningShiftCard from "./PlanningShiftCard";
 
 const dateFormatter = new Intl.DateTimeFormat("nl-NL", { weekday: "short", day: "numeric", month: "short" });
-const shortDateFormatter = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
 const weekFormatter = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
 
 function dateKey(date) {
@@ -68,11 +67,14 @@ function DayHeader({ day, today }) {
 function ShiftCell({
   shifts,
   assignmentsByShift,
+  segmentsByShift,
   selectedShiftId,
   onSelectShift,
   onUnassign,
   onMove,
   onCopy,
+  onEditComposition,
+  onCancelComposition,
   compact,
 }) {
   return (
@@ -82,11 +84,14 @@ function ShiftCell({
           key={shift.id}
           shift={shift}
           assignments={assignmentsByShift.get(String(shift.id)) || []}
+          segments={segmentsByShift.get(String(shift.id)) || []}
           selected={String(selectedShiftId || "") === String(shift.id)}
           onSelect={() => onSelectShift(shift)}
           onUnassign={assignment => onUnassign(shift, assignment)}
           onMove={onMove}
           onCopy={onCopy}
+          onEditComposition={onEditComposition}
+          onCancelComposition={onCancelComposition}
           compact={compact}
         />
       ))}
@@ -98,11 +103,14 @@ function WeekBand({
   week,
   groups,
   assignmentsByShift,
+  segmentsByShift,
   selectedShiftId,
   onSelectShift,
   onUnassign,
   onMove,
   onCopy,
+  onEditComposition,
+  onCancelComposition,
   perspective,
   showWeekLabel,
   today,
@@ -138,11 +146,14 @@ function WeekBand({
                 key={`${group.key}-${dateKey(day)}`}
                 shifts={dayShifts}
                 assignmentsByShift={assignmentsByShift}
+                segmentsByShift={segmentsByShift}
                 selectedShiftId={selectedShiftId}
                 onSelectShift={onSelectShift}
                 onUnassign={onUnassign}
                 onMove={onMove}
                 onCopy={onCopy}
+                onEditComposition={onEditComposition}
+                onCancelComposition={onCancelComposition}
                 compact={showWeekLabel}
               />
             );
@@ -166,15 +177,31 @@ function timeToMinutes(time) {
   return Math.max(0, Math.min(1440, (Number(hours) || 0) * 60 + (Number(minutes) || 0)));
 }
 
+function timelineLaneHeight(shift, assignments, segments) {
+  const requiredCount = Math.max(1, Number(shift.required_count || 1));
+  const activeAssignments = assignments.filter(item => item.status !== "removed");
+  const warningTotal = activeAssignments.reduce((sum, assignment) => (
+    sum + assignmentWarnings(assignment).length
+  ), 0);
+  const hasSegments = segments.some(item => item.status !== "removed");
+  return 66
+    + requiredCount * 32
+    + (hasSegments ? 24 : 0)
+    + (activeAssignments.length < requiredCount || warningTotal > 0 ? 21 : 0);
+}
+
 function DayTimeline({
   day,
   groups,
   assignmentsByShift,
+  segmentsByShift,
   selectedShiftId,
   onSelectShift,
   onUnassign,
   onMove,
   onCopy,
+  onEditComposition,
+  onCancelComposition,
   perspective,
 }) {
   const hours = Array.from({ length: 25 }, (_, index) => index);
@@ -203,7 +230,15 @@ function DayTimeline({
         const shifts = group.shifts
           .filter(shift => shift.service_date === dayKey)
           .sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
-        const rowHeight = Math.max(86, shifts.length * 76 + 8);
+        const laneHeights = shifts.map(shift => timelineLaneHeight(
+          shift,
+          assignmentsByShift.get(String(shift.id)) || [],
+          segmentsByShift.get(String(shift.id)) || [],
+        ));
+        const laneTops = laneHeights.map((_, index) => (
+          5 + laneHeights.slice(0, index).reduce((sum, height) => sum + height, 0)
+        ));
+        const rowHeight = Math.max(92, laneHeights.reduce((sum, height) => sum + height, 0) + 10);
         return (
           <div key={group.key} className="grid grid-cols-[190px_1fr] border-b border-border/80" style={{ minHeight: rowHeight }}>
             <GroupLabel group={group} perspective={perspective} />
@@ -225,14 +260,17 @@ function DayTimeline({
                     key={shift.id}
                     shift={shift}
                     assignments={assignmentsByShift.get(String(shift.id)) || []}
+                    segments={segmentsByShift.get(String(shift.id)) || []}
                     selected={String(selectedShiftId || "") === String(shift.id)}
                     onSelect={() => onSelectShift(shift)}
                     onUnassign={assignment => onUnassign(shift, assignment)}
                     onMove={onMove}
                     onCopy={onCopy}
+                    onEditComposition={onEditComposition}
+                    onCancelComposition={onCancelComposition}
                     compact
                     className="absolute w-auto min-w-[170px] max-w-[320px]"
-                    style={{ left: `${(start / 1440) * 100}%`, width: `${width}%`, top: index * 76 + 5 }}
+                    style={{ left: `${(start / 1440) * 100}%`, width: `${width}%`, top: laneTops[index] }}
                   />
                 );
               })}
@@ -250,7 +288,10 @@ function buildObjectGroups(shifts, objectsById, routesById, customersById) {
     const object = objectsById.get(String(shift.object_id || ""));
     const route = routesById.get(String(shift.route_id || ""));
     const customer = customersById.get(String(shift.customer_id || object?.customer_id || ""));
-    const key = shift.object_id
+    const composite = shift.source_type === "task" && (shift.object_ids || []).length > 1;
+    const key = composite
+      ? "composite"
+      : shift.object_id
       ? `object:${shift.object_id}`
       : shift.route_id
       ? `route:${shift.route_id}`
@@ -258,21 +299,25 @@ function buildObjectGroups(shifts, objectsById, routesById, customersById) {
       ? `customer:${shift.customer_id}`
       : `service:${shift.group_label || shift.name || "overig"}`;
     if (!groups.has(key)) {
-      const label = shift.object_name
+      const label = composite
+        ? "Samengestelde diensten"
+        : shift.object_name
         || object?.name
         || shift.group_label
         || route?.name
         || customer?.trade_name
         || customer?.name
         || "Overige diensten";
-      const subtitle = shift.object_address
+      const subtitle = composite
+        ? `${shift.task_segment_count || shift.task_occurrence_ids?.length || 0} taken · ${(shift.object_ids || []).length} objecten`
+        : shift.object_address
         || object?.address
         || (route ? "Mobiele surveillance" : customer?.trade_name || customer?.name || "Geen object gekoppeld");
       groups.set(key, {
         key,
         label,
         subtitle,
-        icon: shift.object_id ? MapPin : shift.route_id ? Route : CalendarX2,
+        icon: composite ? Layers3 : shift.object_id ? MapPin : shift.route_id ? Route : CalendarX2,
         shifts: [],
       });
     }
@@ -282,7 +327,6 @@ function buildObjectGroups(shifts, objectsById, routesById, customersById) {
 }
 
 function buildEmployeeGroups(shifts, assignments, personnel, assignmentsByShift) {
-  const personnelById = new Map(personnel.map(item => [String(item.id), item]));
   const shiftsById = new Map(shifts.map(item => [String(item.id), item]));
   const assignedShiftIds = new Set();
   const groups = [];
@@ -330,6 +374,7 @@ export default function PlanningBoard({
   weeks,
   shifts,
   assignments,
+  segments,
   personnel,
   objects,
   routes,
@@ -339,6 +384,9 @@ export default function PlanningBoard({
   onUnassign,
   onMove,
   onCopy,
+  onEditComposition,
+  onCancelComposition,
+  taskOccurrenceCount = 0,
   isLoading,
 }) {
   const assignmentsByShift = useMemo(() => {
@@ -350,6 +398,15 @@ export default function PlanningBoard({
     });
     return map;
   }, [assignments]);
+  const segmentsByShift = useMemo(() => {
+    const map = new Map();
+    segments.filter(item => item.status !== "removed").forEach(item => {
+      const key = String(item.shift_id);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(item);
+    });
+    return map;
+  }, [segments]);
   const objectsById = useMemo(() => new Map(objects.map(item => [String(item.id), item])), [objects]);
   const routesById = useMemo(() => new Map(routes.map(item => [String(item.id), item])), [routes]);
   const customersById = useMemo(() => new Map(customers.map(item => [String(item.id), item])), [customers]);
@@ -376,7 +433,9 @@ export default function PlanningBoard({
           <CalendarX2 className="mx-auto h-8 w-8 text-muted-foreground" />
           <h2 className="mt-3 text-[14px] font-semibold">Geen diensten in deze periode</h2>
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Diensten worden vanuit routes en later vanuit het klantdossier klaargezet. Kies een andere periode of maak de dienst bij de klant.
+            {taskOccurrenceCount > 0
+              ? "Open rechts de taakwerkvoorraad en stel vanuit een of meer taken een conceptdienst samen."
+              : "Er zijn ook geen uitvoerbare objecttaken in deze periode. Kies een andere periode of maak een taak bij het object."}
           </p>
         </div>
       </div>
@@ -390,11 +449,14 @@ export default function PlanningBoard({
           day={days[0]}
           groups={groups}
           assignmentsByShift={assignmentsByShift}
+          segmentsByShift={segmentsByShift}
           selectedShiftId={selectedShiftId}
           onSelectShift={onSelectShift}
           onUnassign={onUnassign}
           onMove={onMove}
           onCopy={onCopy}
+          onEditComposition={onEditComposition}
+          onCancelComposition={onCancelComposition}
           perspective={perspective}
         />
       ) : (
@@ -404,11 +466,14 @@ export default function PlanningBoard({
             week={week}
             groups={groups}
             assignmentsByShift={assignmentsByShift}
+            segmentsByShift={segmentsByShift}
             selectedShiftId={selectedShiftId}
             onSelectShift={onSelectShift}
             onUnassign={onUnassign}
             onMove={onMove}
             onCopy={onCopy}
+            onEditComposition={onEditComposition}
+            onCancelComposition={onCancelComposition}
             perspective={perspective}
             showWeekLabel={view === "four_weeks"}
             today={new Date()}

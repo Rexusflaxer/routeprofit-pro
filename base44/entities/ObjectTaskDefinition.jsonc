@@ -62,6 +62,10 @@
       "items": {
         "type": "object",
         "properties": {
+          "period_key": {
+            "type": ["string", "null"],
+            "description": "Stabiele sleutel voor occurrence-reconciliatie; legacyperioden krijgen een deterministische fallback."
+          },
           "days": {
             "type": "array",
             "items": {

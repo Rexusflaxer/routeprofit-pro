@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Copy,
   MoveRight,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -130,6 +131,7 @@ export function PublishPlanningDialog({
   warningCount,
   criticalCount,
   vacantCount,
+  taskCoverage,
   onConfirm,
   isPending,
 }) {
@@ -169,6 +171,20 @@ export function PublishPlanningDialog({
             </div>
           ))}
         </div>
+
+        {(Number(taskCoverage?.open || 0) > 0 || Number(taskCoverage?.partial || 0) > 0) && (
+          <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-rose-900 dark:border-rose-800 dark:bg-rose-950/35 dark:text-rose-200">
+            <div className="flex items-start gap-2">
+              <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="text-[11px] font-semibold">Taakdekking is nog niet volledig</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed opacity-85">
+                  {Number(taskCoverage?.open || 0)} open en {Number(taskCoverage?.partial || 0)} gedeeltelijk geplande taken. Publiceren vereist een vastgelegde reden.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {criticalCount > 0 ? (
           <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-rose-900 dark:border-rose-800 dark:bg-rose-950/35 dark:text-rose-200">
@@ -220,6 +236,34 @@ export function PublishPlanningDialog({
             })}
           >
             {isPending ? "Publiceren…" : "Planning publiceren"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function CancelTaskShiftDialog({ shift, open, onOpenChange, onConfirm, isPending }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-[16px]">
+            <Trash2 className="h-4 w-4 text-destructive" />
+            Conceptdienst verwijderen
+          </DialogTitle>
+          <DialogDescription className="text-[12px]">
+            De dienst en eventuele conceptbezetting verdwijnen uit het rooster. De taaksegmenten keren direct terug naar de werkvoorraad; de auditgeschiedenis blijft bewaard.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-md border border-border bg-muted/35 p-3">
+          <p className="text-[12px] font-semibold">{shift?.name || "Conceptdienst"}</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">{shift?.service_date} · {shift?.start_time}–{shift?.end_time}</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" disabled={isPending} onClick={() => onOpenChange(false)}>Behouden</Button>
+          <Button variant="destructive" disabled={isPending} onClick={() => onConfirm(shift)}>
+            {isPending ? "Verwijderen…" : "Verwijderen en taken vrijgeven"}
           </Button>
         </DialogFooter>
       </DialogContent>
