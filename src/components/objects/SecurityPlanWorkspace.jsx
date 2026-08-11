@@ -6,13 +6,10 @@ import {
   ArrowLeft,
   BookOpenText,
   Boxes,
-  CheckCircle2,
   Copy,
-  FileCheck2,
   Loader2,
   MoreHorizontal,
   RefreshCw,
-  Route,
   Save,
   Send,
   ShieldCheck,
@@ -27,39 +24,32 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import SecurityPlanInstructionBuilder from "./SecurityPlanInstructionBuilder";
 import SecurityPlanModulesEditor from "./SecurityPlanModulesEditor";
-import SecurityPlanRouteEditor from "./SecurityPlanRouteEditor";
 import {
   buildSecurityPlanReadiness,
   normalizeInstructionBlocks,
   normalizeRouteOverlay,
-  securityPlanDurationLabel,
   securityPlanExecutionModeForTaskType,
   securityPlanExecutionModeLabel,
   securityPlanStatus,
   securityPlanTaskTypeLabel,
 } from "./securityPlanConfig";
 import {
-  archiveObjectSection,
   archiveObjectSecurityPlan,
   createSecurityPlanMutationKey,
   duplicateObjectSecurityPlan,
   getObjectSecurityPlan,
   publishObjectSecurityPlan,
   saveObjectSecurityPlanDraft,
-  upsertObjectSection,
 } from "./securityPlanWorkflow";
 
 const WORKSPACE_TABS = [
   { key: "overview", label: "Overzicht", icon: ShieldCheck },
   { key: "instructions", label: "Instructies", icon: BookOpenText },
   { key: "modules", label: "Modules", icon: Boxes },
-  { key: "route", label: "Secties & route", icon: Route },
-  { key: "review", label: "Controle & versies", icon: FileCheck2 },
 ];
 
 function formFromDetail(detail) {
@@ -104,13 +94,6 @@ function remoteReadiness(value) {
   };
 }
 
-function formatDateTime(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("nl-NL", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Amsterdam" }).format(date);
-}
-
 function DetailLoading() {
   return <div className="space-y-4 p-5" aria-label="Beveiligingsplan laden" aria-busy="true"><div className="flex items-center gap-3"><Skeleton className="h-9 w-9" /><div className="space-y-2"><Skeleton className="h-5 w-64" /><Skeleton className="h-3 w-40" /></div></div><Skeleton className="h-11 w-full" /><Skeleton className="h-[420px] w-full" /></div>;
 }
@@ -153,14 +136,6 @@ function OverviewTab({ form, onChange }) {
       </section>
     </div>
   );
-}
-
-function ReadinessPanel({ readiness, published, dirty }) {
-  return <section className="rounded-xl border border-border/70 bg-card/45 p-4 shadow-sm backdrop-blur-xl"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">Publicatiecontrole</h3><p className="mt-1 text-xs text-muted-foreground">Alle blokkades moeten zijn opgelost. Waarschuwingen zijn aandachtspunten en blokkeren publicatie niet.</p></div><Badge variant="outline" className={readiness.blocking.length ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-emerald-300/70 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"}>{readiness.blocking.length ? `${readiness.blocking.length} blokkade${readiness.blocking.length === 1 ? "" : "s"}` : "Gereed voor publicatie"}</Badge></div>{dirty && <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-300/60 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-100"><Save className="mt-0.5 h-4 w-4 shrink-0" /><span>Sla de lokale wijzigingen eerst als concept op voordat u publiceert.</span></div>}<div className="mt-4 grid gap-3 lg:grid-cols-2"><div className="space-y-2"><p className="text-xs font-semibold">Blokkades</p>{readiness.blocking.length ? readiness.blocking.map((item, index) => <div key={`${item}-${index}`} className="flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-xs"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" /><span>{item}</span></div>) : <div className="flex items-start gap-2 rounded-lg border border-emerald-300/50 bg-emerald-500/5 p-3 text-xs"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" /><span>Alle verplichte plangegevens zijn aanwezig.</span></div>}</div><div className="space-y-2"><p className="text-xs font-semibold">Aandachtspunten</p>{readiness.warnings.length ? readiness.warnings.map((item, index) => <div key={`${item}-${index}`} className="flex items-start gap-2 rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-xs"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" /><span>{item}</span></div>) : <div className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/10 p-3 text-xs text-muted-foreground"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>Geen aanvullende aandachtspunten.</span></div>}</div></div>{published && <p className="mt-4 text-[11px] text-muted-foreground">De gepubliceerde revisie blijft onveranderlijk. Nieuwe wijzigingen worden als volgende conceptrevisie opgeslagen.</p>}</section>;
-}
-
-function RevisionHistory({ revisions, plan }) {
-  return <section className="overflow-hidden rounded-xl border border-border/70 bg-card/45 shadow-sm backdrop-blur-xl"><div className="border-b border-border/70 px-4 py-3"><h3 className="text-sm font-semibold">Versiehistorie</h3><p className="mt-1 text-xs text-muted-foreground">Gepubliceerde en vervangen revisies blijven beschikbaar voor herleidbare uitvoering.</p></div>{revisions.length ? <Table><TableHeader><TableRow className="bg-muted/20 hover:bg-muted/20"><TableHead className="pl-4 text-xs">Revisie</TableHead><TableHead className="text-xs">Status</TableHead><TableHead className="text-xs">Duur</TableHead><TableHead className="text-xs">Instructies</TableHead><TableHead className="pr-4 text-right text-xs">Gepubliceerd</TableHead></TableRow></TableHeader><TableBody>{revisions.map(revision => { const status = securityPlanStatus(revision.status); const steps = Number(revision.instruction_step_count ?? revision.instruction_blocks?.reduce((total, block) => total + (block.steps?.length || 0), 0) ?? 0); return <TableRow key={revision.id}><TableCell className="pl-4 font-medium">{revision.revision_number}{revision.id === plan.current_published_revision_id && <span className="ml-2 text-[11px] font-normal text-primary">Actueel</span>}</TableCell><TableCell><Badge variant="outline" className={status.className}>{status.label}</Badge></TableCell><TableCell className="text-muted-foreground">{securityPlanDurationLabel(null, revision)}</TableCell><TableCell className="text-muted-foreground">{steps} stappen</TableCell><TableCell className="pr-4 text-right text-muted-foreground">{formatDateTime(revision.published_at)}</TableCell></TableRow>; })}</TableBody></Table> : <div className="px-4 py-8 text-center text-xs text-muted-foreground">Nog geen gepubliceerde revisies.</div>}</section>;
 }
 
 function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
@@ -230,17 +205,6 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
     onSuccess: async () => { delete mutationKeys.current.archive; await invalidate(); setArchiveOpen(false); toast({ title: "Planvariant gearchiveerd" }); onBack(); },
     onError: conflictRefresh,
   });
-  const sectionUpsert = useMutation({
-    mutationFn: ({ section, data }) => upsertObjectSection({ customerId: object.customer_id, objectId: object.id, section, data, idempotencyKey: createSecurityPlanMutationKey(section ? "update-section" : "create-section") }),
-    onSuccess: async () => { await invalidate(); await refetch(); toast({ title: "Objectsectie opgeslagen" }); },
-    onError: async error => { await conflictRefresh(error); toast({ title: "Objectsectie opslaan mislukt", description: error.message, variant: "destructive" }); },
-  });
-  const sectionArchive = useMutation({
-    mutationFn: section => archiveObjectSection({ customerId: object.customer_id, objectId: object.id, section, idempotencyKey: createSecurityPlanMutationKey("archive-section") }),
-    onSuccess: async () => { await invalidate(); await refetch(); toast({ title: "Objectsectie gearchiveerd" }); },
-    onError: async error => { await conflictRefresh(error); toast({ title: "Objectsectie archiveren mislukt", description: error.message, variant: "destructive" }); },
-  });
-
   const setSubtab = key => { const next = new URLSearchParams(searchParams); next.set("plan_tab", key); setSearchParams(next); };
   const status = securityPlanStatus(plan.status);
   const busy = save.isPending || publish.isPending || duplicate.isPending || archive.isPending;
@@ -262,7 +226,7 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
     </header>
     <WorkspaceTabs active={activeSubtab} onChange={setSubtab} />
     <div className={`min-h-0 flex-1 ${activeSubtab === "modules" ? "p-0" : "p-4"} ${archived || migrationBlocked ? "pointer-events-none opacity-75" : ""}`}>
-      {activeSubtab === "overview" ? <OverviewTab form={form} onChange={setForm} /> : activeSubtab === "instructions" ? <SecurityPlanInstructionBuilder value={form.instruction_blocks} sections={activeSections} installations={detail.installations} routeOverlay={form.route_overlay} onChange={instruction_blocks => setForm(current => ({ ...current, instruction_blocks }))} /> : activeSubtab === "modules" ? <SecurityPlanModulesEditor modules={detail.modules} value={form.module_assignments} onChange={module_assignments => setForm(current => ({ ...current, module_assignments }))} /> : activeSubtab === "route" ? <SecurityPlanRouteEditor revision={form} floorplans={publishedFloorplans} sections={activeSections} instructionBlocks={form.instruction_blocks} onChange={setForm} onUpsertSection={(section, data) => sectionUpsert.mutateAsync({ section, data })} onArchiveSection={section => sectionArchive.mutateAsync(section)} sectionPending={sectionUpsert.isPending || sectionArchive.isPending} /> : <div className="space-y-4"><ReadinessPanel readiness={readiness} published={Boolean(detail.published_revision)} dirty={dirty} /><RevisionHistory revisions={detail.revision_history} plan={plan} /></div>}
+      {activeSubtab === "overview" ? <OverviewTab form={form} onChange={setForm} /> : activeSubtab === "instructions" ? <SecurityPlanInstructionBuilder value={form.instruction_blocks} sections={activeSections} installations={detail.installations} routeOverlay={form.route_overlay} onChange={instruction_blocks => setForm(current => ({ ...current, instruction_blocks }))} /> : <SecurityPlanModulesEditor modules={detail.modules} value={form.module_assignments} onChange={module_assignments => setForm(current => ({ ...current, module_assignments }))} />}
     </div>
     <Dialog open={duplicateOpen} onOpenChange={open => !duplicate.isPending && setDuplicateOpen(open)}><DialogContent><DialogHeader><DialogTitle>Planvariant dupliceren</DialogTitle><DialogDescription>Instructies, sectiekeuze en route worden gekopieerd naar een onafhankelijk concept. Geef de kopie een herkenbare naam.</DialogDescription></DialogHeader><div className="space-y-1.5"><Label htmlFor="duplicate-plan-name" className="text-xs font-semibold">Variantnaam</Label><Input id="duplicate-plan-name" value={duplicateName} onChange={event => setDuplicateName(event.target.value)} autoFocus /></div>{duplicate.error && <p className="text-xs text-destructive">{duplicate.error.message}</p>}<DialogFooter><Button type="button" variant="outline" onClick={() => setDuplicateOpen(false)} disabled={duplicate.isPending}>Annuleren</Button><Button type="button" onClick={() => duplicate.mutate()} disabled={!duplicateName.trim() || duplicate.isPending}>{duplicate.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Dupliceren</Button></DialogFooter></DialogContent></Dialog>
     <AlertDialog open={archiveOpen} onOpenChange={open => !archive.isPending && setArchiveOpen(open)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Planvariant archiveren?</AlertDialogTitle><AlertDialogDescription>{plan.variant_name} verdwijnt uit de actieve planbibliotheek. Gepubliceerde revisies, uitvoeringshistorie en het objectlogboek blijven behouden.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={archive.isPending}>Annuleren</AlertDialogCancel><AlertDialogAction disabled={archive.isPending} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={event => { event.preventDefault(); archive.mutate(); }}>{archive.isPending ? "Archiveren..." : "Archiveren"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
