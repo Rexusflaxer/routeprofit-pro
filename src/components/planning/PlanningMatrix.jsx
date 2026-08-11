@@ -773,62 +773,97 @@ export default function PlanningMatrix({
       data-testid="planning-matrix-scroll"
     >
       <table className="min-w-max table-fixed border-separate border-spacing-0" aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}>
-        <thead>
-          <tr>
-            <th scope="col" className="sticky left-0 top-0 z-50 w-[138px] min-w-[138px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
-              <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Dag</span>
-            </th>
-            {resources.map(resource => (
-              <th key={resource.key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top backdrop-blur last:border-r-0">
-                <ResourceHeader resource={resource} perspective={perspective} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {days.map(day => {
-            const key = dateKey(day);
-            return (
-              <tr key={key}>
-                <th scope="row" className="sticky left-0 z-30 w-[138px] min-w-[138px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
-                  <DayHeader day={day} />
+        {perspective === "employee" ? (
+          <>
+            <thead>
+              <tr>
+                <th scope="col" className="sticky left-0 top-0 z-50 w-[138px] min-w-[138px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
+                  <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Dag</span>
                 </th>
                 {resources.map(resource => (
-                  <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
-                    {perspective === "employee" ? (
-                      <EmployeeDayCell
-                        resource={resource}
-                        dayKey={key}
-                        placements={placementsByEmployeeCell.get(`${resource.id}:${key}`) || []}
-                        segmentsByShift={segmentsByShift}
-                        onSelectShift={onSelectShift}
-                        onUnassign={onUnassign}
-                      />
-                    ) : (
-                      <ObjectDayCell
-                        resource={resource}
-                        dayKey={key}
-                        occurrences={occurrencesByCell.get(`${resource.key}:${key}`) || []}
-                        shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
-                        assignmentsByShift={assignmentsByShift}
-                        segmentsByShift={segmentsByShift}
-                        selectedShiftId={selectedShiftId}
-                        onSelectOccurrence={onSelectOccurrence}
-                        onFillStaffing={onFillStaffing}
-                        onSelectShift={onSelectShift}
-                        onUnassign={onUnassign}
-                        onMove={onMove}
-                        onCopy={onCopy}
-                        onEditComposition={onEditComposition}
-                        onCancelComposition={onCancelComposition}
-                      />
-                    )}
-                  </td>
+                  <th key={resource.key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top backdrop-blur last:border-r-0">
+                    <ResourceHeader resource={resource} perspective={perspective} />
+                  </th>
                 ))}
               </tr>
-            );
-          })}
-        </tbody>
+            </thead>
+            <tbody>
+              {days.map(day => {
+                const key = dateKey(day);
+                return (
+                  <tr key={key}>
+                    <th scope="row" className="sticky left-0 z-30 w-[138px] min-w-[138px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
+                      <DayHeader day={day} />
+                    </th>
+                    {resources.map(resource => (
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                        <EmployeeDayCell
+                          resource={resource}
+                          dayKey={key}
+                          placements={placementsByEmployeeCell.get(`${resource.id}:${key}`) || []}
+                          segmentsByShift={segmentsByShift}
+                          onSelectShift={onSelectShift}
+                          onUnassign={onUnassign}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </>
+        ) : (
+          <>
+            <thead>
+              <tr>
+                <th scope="col" className="sticky left-0 top-0 z-50 w-[220px] min-w-[220px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
+                  <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Object</span>
+                </th>
+                {days.map(day => {
+                  const key = dateKey(day);
+                  return (
+                    <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top text-left backdrop-blur last:border-r-0">
+                      <DayHeader day={day} />
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {resources.map(resource => (
+                <tr key={resource.key}>
+                  <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
+                    <ResourceHeader resource={resource} perspective={perspective} />
+                  </th>
+                  {days.map(day => {
+                    const key = dateKey(day);
+                    return (
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                        <ObjectDayCell
+                          resource={resource}
+                          dayKey={key}
+                          occurrences={occurrencesByCell.get(`${resource.key}:${key}`) || []}
+                          shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
+                          assignmentsByShift={assignmentsByShift}
+                          segmentsByShift={segmentsByShift}
+                          selectedShiftId={selectedShiftId}
+                          onSelectOccurrence={onSelectOccurrence}
+                          onFillStaffing={onFillStaffing}
+                          onSelectShift={onSelectShift}
+                          onUnassign={onUnassign}
+                          onMove={onMove}
+                          onCopy={onCopy}
+                          onEditComposition={onEditComposition}
+                          onCancelComposition={onCancelComposition}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </>
+        )}
       </table>
       {resources.length === 0 && (
         <div className="sticky left-0 flex min-h-48 w-[min(100vw,680px)] items-center justify-center p-6 text-center">
