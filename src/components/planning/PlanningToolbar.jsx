@@ -22,14 +22,13 @@ import {
 import { cn } from "@/lib/utils";
 
 const PERSPECTIVES = [
-  { value: "object", label: "Object & dienst", icon: Rows3 },
-  { value: "employee", label: "Medewerker", icon: Users },
+  { value: "object", label: "Objectweergave", icon: Rows3 },
+  { value: "employee", label: "Medewerkerweergave", icon: Users },
 ];
 
 const VIEWS = [
-  { value: "day", label: "Dag" },
   { value: "week", label: "Week" },
-  { value: "four_weeks", label: "4 weken" },
+  { value: "period", label: "Periode" },
 ];
 
 function Segment({ options, value, onChange, ariaLabel }) {
@@ -42,6 +41,7 @@ function Segment({ options, value, onChange, ariaLabel }) {
           <button
             key={option.value}
             type="button"
+            aria-label={option.label}
             aria-pressed={active}
             onClick={() => onChange(option.value)}
             className={cn(
@@ -66,6 +66,15 @@ export default function PlanningToolbar({
   view,
   onViewChange,
   rangeLabel,
+  periodStart,
+  periodEnd,
+  periodDayCount,
+  onPeriodStartChange,
+  onPeriodEndChange,
+  customStart,
+  customEnd,
+  onCustomStartChange,
+  onCustomEndChange,
   onPrevious,
   onToday,
   onNext,
@@ -81,6 +90,12 @@ export default function PlanningToolbar({
   publishDisabled,
   isPublishing,
 }) {
+  const normalizedView = view === "period" || view === "custom" ? "period" : "week";
+  const selectedPeriodStart = periodStart || customStart || "";
+  const selectedPeriodEnd = periodEnd || customEnd || "";
+  const changePeriodStart = onPeriodStartChange || onCustomStartChange;
+  const changePeriodEnd = onPeriodEndChange || onCustomEndChange;
+
   return (
     <header className="shrink-0 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85">
       <div className="flex min-w-0 items-center gap-2">
@@ -90,7 +105,7 @@ export default function PlanningToolbar({
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-[15px] font-semibold leading-tight">Planning</h1>
-            <p className="truncate text-[11px] leading-tight text-muted-foreground">Diensten & bezetting</p>
+            <p className="truncate text-[11px] leading-tight text-muted-foreground">Week- en periodeplanning</p>
           </div>
         </div>
 
@@ -102,7 +117,7 @@ export default function PlanningToolbar({
         />
         <Segment
           options={VIEWS}
-          value={view}
+          value={normalizedView}
           onChange={onViewChange}
           ariaLabel="Periodeweergave"
         />
@@ -142,6 +157,34 @@ export default function PlanningToolbar({
       </div>
 
       <div className="mt-2 flex min-w-0 items-center gap-2">
+        {normalizedView === "period" && (
+          <div className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-card p-1" aria-label="Aangepaste periode">
+            <label className="flex items-center gap-1">
+              <span className="pl-1 text-[10px] font-medium text-muted-foreground">Van</span>
+              <Input
+                type="date"
+                value={selectedPeriodStart}
+                max={selectedPeriodEnd || undefined}
+                onChange={event => changePeriodStart?.(event.target.value)}
+                className="h-7 w-[132px] border-0 bg-background px-2 text-[11px] shadow-none"
+                aria-label="Begindatum periode"
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              <span className="pl-1 text-[10px] font-medium text-muted-foreground">Tot</span>
+              <Input
+                type="date"
+                value={selectedPeriodEnd}
+                min={selectedPeriodStart || undefined}
+                onChange={event => changePeriodEnd?.(event.target.value)}
+                className="h-7 w-[132px] border-0 bg-background px-2 text-[11px] shadow-none"
+                aria-label="Einddatum periode"
+              />
+            </label>
+            {Number(periodDayCount) > 0 && <span className="pr-1 text-[9px] tabular-nums text-muted-foreground">{periodDayCount} dagen</span>}
+          </div>
+        )}
+
         <div className="relative min-w-[220px] max-w-[440px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
@@ -173,8 +216,8 @@ export default function PlanningToolbar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Alle diensten</SelectItem>
-            <SelectItem value="vacant">Nog te bezetten</SelectItem>
+            <SelectItem value="all">Alle planning</SelectItem>
+            <SelectItem value="vacant">Open werk</SelectItem>
             <SelectItem value="draft">Conceptwijzigingen</SelectItem>
             <SelectItem value="warnings">Met waarschuwing</SelectItem>
             <SelectItem value="published">Gepubliceerd</SelectItem>

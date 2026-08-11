@@ -138,7 +138,8 @@ export function startOfWeek(value, weekStartsOn = 1) {
   return addDays(date, -offset);
 }
 
-export function getPlanningRange(anchor, view = "week") {
+export function getPlanningRange(anchor, view = "week", options = {}) {
+  const isCustomPeriod = view === "period" || view === "range" || view === "custom";
   const normalizedView = view === "four_weeks" || view === "four-weeks" || view === "4_weeks"
     ? "four_weeks"
     : view === "day"
@@ -146,6 +147,22 @@ export function getPlanningRange(anchor, view = "week") {
       : "week";
   const parsedAnchor = parseDateKey(anchor);
   if (!parsedAnchor) return { start: null, end: null, days: [] };
+
+  if (isCustomPeriod) {
+    const maxDays = Math.max(1, Math.min(63, Math.trunc(finiteNumber(options.maxDays) || 63)));
+    const start = parseDateKey(options.periodStart) || startOfWeek(parsedAnchor);
+    const requestedEnd = parseDateKey(options.periodEnd) || addDays(start, 27);
+    const safeEnd = requestedEnd < start ? start : requestedEnd;
+    const requestedDayCount = Math.round((safeEnd.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    const dayCount = Math.max(1, Math.min(maxDays, requestedDayCount));
+    const days = Array.from({ length: dayCount }, (_, index) => addDays(start, index));
+    return {
+      start,
+      end: days.at(-1) || start,
+      days,
+      truncated: requestedDayCount > maxDays,
+    };
+  }
 
   const start = normalizedView === "day" ? parsedAnchor : startOfWeek(parsedAnchor);
   const dayCount = normalizedView === "day" ? 1 : normalizedView === "four_weeks" ? 28 : 7;
@@ -156,6 +173,61 @@ export function getPlanningRange(anchor, view = "week") {
     end: days.at(-1) || start,
     days,
   };
+}
+
+/**
+ * Base44 query used by the planning page to include both shifts that start in
+ * the selected period and shifts that run into it. The one-day lookback covers
+ * implicit overnight shifts without an end_date; the second branch covers
+ * explicitly multi-day shifts that started earlier.
+ */
+function getPlanningCarryInRangeQuery(periodStart, periodEnd) {
+  const start = parseDateKey(periodStart);
+  const end = parseDateKey(periodEnd);
+  if (!start || !end) return {};
+  const safeEnd = end < start ? start : end;
+  const startKey = toDateKey(start);
+  const endKey = toDateKey(safeEnd);
+  const lookbackKey = toDateKey(addDays(start, -1));
+  return {
+    $or: [
+      { service_date: { $gte: lookbackKey, $lte: endKey } },
+      { service_date: { $lte: endKey }, end_date: { $gte: startKey } },
+    ],
+  };
+}
+
+export function getPlanningShiftRangeQuery(periodStart, periodEnd) {
+  return getPlanningCarryInRangeQuery(periodStart, periodEnd);
+}
+
+export function getPlanningTaskOccurrenceRangeQuery(periodStart, periodEnd) {
+  return getPlanningCarryInRangeQuery(periodStart, periodEnd);
+}
+
+export function getPlanningTaskOccurrenceBootstrapStart(periodStart) {
+  const start = parseDateKey(periodStart);
+  return start ? toDateKey(addDays(start, -1)) : "";
+}
+
+export function isPlanningPersonnelActive(personnel) {
+  const status = String(personnel?.status || "").trim().toLowerCase();
+  if (status) return status === "active";
+  return personnel?.is_active === true;
+}
+
+export function isPlanningObjectActive(object) {
+  const status = String(object?.status || "").trim().toLowerCase();
+  return !["concept", "inactive", "archived"].includes(status)
+    && object?.is_active_customer_object !== false
+    && object?.is_active !== false;
+}
+
+export function planningShiftOwnedByRange(shift, periodStart, periodEnd) {
+  const start = toDateKey(periodStart);
+  const end = toDateKey(periodEnd);
+  const serviceDate = toDateKey(shift?.service_date);
+  return Boolean(start && end && serviceDate && serviceDate >= start && serviceDate <= end);
 }
 
 export function splitIntoWeeks(value) {
@@ -331,6 +403,40 @@ export function getShiftDurationMinutes(shift) {
   return Math.max(0, Math.round((interval.end.getTime() - interval.start.getTime()) / MINUTE_MS));
 }
 
+/**
+ * Calendar-day overlap for a half-open shift interval and an inclusive date
+ * range. A shift ending exactly at 00:00 on the first day does not overlap;
+ * any work after 00:00 does.
+ */
+function intervalOverlapsPlanningRange(interval, periodStart, periodEnd) {
+  const start = parseDateKey(periodStart);
+  const end = parseDateKey(periodEnd);
+  if (!interval.valid || !start || !end || end < start) return false;
+  start.setHours(0, 0, 0, 0);
+  const exclusiveEnd = addDays(end, 1);
+  exclusiveEnd.setHours(0, 0, 0, 0);
+  return interval.start < exclusiveEnd && interval.end > start;
+}
+
+export function planningShiftOverlapsRange(shift, periodStart, periodEnd) {
+  return intervalOverlapsPlanningRange(getShiftInterval(shift), periodStart, periodEnd);
+}
+
+/**
+ * Direct slot assignment from a projected calendar cell is safe only when the
+ * complete shift is visible inside that one half-open calendar day. Overnight
+ * and multi-day shifts must be opened and confirmed as a full shift instead.
+ */
+export function planningShiftContainedInDate(shift, serviceDate) {
+  const interval = getShiftInterval(shift);
+  const dayStart = parseDateKey(serviceDate);
+  if (!interval.valid || !dayStart) return false;
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = addDays(dayStart, 1);
+  dayEnd.setHours(0, 0, 0, 0);
+  return interval.start >= dayStart && interval.end <= dayEnd;
+}
+
 function normalizeInterval(value) {
   if (!value) return null;
   if (Array.isArray(value) && value.length >= 2) {
@@ -389,6 +495,48 @@ function occurrenceInterval(occurrence) {
   });
 }
 
+export function planningTaskOccurrenceOverlapsRange(occurrence, periodStart, periodEnd) {
+  return intervalOverlapsPlanningRange(occurrenceInterval(occurrence), periodStart, periodEnd);
+}
+
+export function getTaskOccurrenceDayProjection(occurrence, serviceDate) {
+  const interval = occurrenceInterval(occurrence);
+  const dayStart = parseDateKey(serviceDate);
+  if (!interval.valid || !dayStart) return null;
+  dayStart.setHours(0, 0, 0, 0);
+  const nextDay = addDays(dayStart, 1);
+  nextDay.setHours(0, 0, 0, 0);
+  const start = new Date(Math.max(interval.start.getTime(), dayStart.getTime()));
+  const end = new Date(Math.min(interval.end.getTime(), nextDay.getTime()));
+  if (end <= start) return null;
+  const formatTime = value => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  return {
+    date: toDateKey(dayStart),
+    startTime: formatTime(start),
+    endTime: end.getTime() === nextDay.getTime() ? "24:00" : formatTime(end),
+    continuesBefore: interval.start < dayStart,
+    continuesAfter: interval.end > nextDay,
+  };
+}
+
+export function taskOccurrenceOverlapsDate(occurrence, serviceDate) {
+  return Boolean(getTaskOccurrenceDayProjection(occurrence, serviceDate));
+}
+
+/**
+ * A dated drop is always authoritative. Legacy undated occurrence drops are
+ * safe only when the complete occurrence fits on its service date; otherwise
+ * inferring the date could silently allocate an overnight slice off-screen.
+ */
+export function getSafeOccurrenceDropServiceDate(occurrence, requestedServiceDate = null) {
+  const requested = toDateKey(requestedServiceDate);
+  if (requested) return taskOccurrenceOverlapsDate(occurrence, requested) ? requested : "";
+  const serviceDate = toDateKey(occurrence?.service_date);
+  const projection = getTaskOccurrenceDayProjection(occurrence, serviceDate);
+  if (!projection || projection.continuesBefore || projection.continuesAfter) return "";
+  return projection.date;
+}
+
 function mergedDateIntervals(intervals) {
   const sorted = intervals
     .filter(interval => interval?.valid)
@@ -422,12 +570,186 @@ export function getTaskOccurrenceCoverage(occurrence, segments = []) {
   };
 }
 
-export function getOccurrenceRemainingRanges(occurrence, segments = []) {
+export function getOccurrencePlanningState({
+  occurrence,
+  segments = [],
+  shifts = [],
+  assignments = [],
+} = {}) {
+  const activeShifts = asArray(shifts).filter(shift => shift.status !== "cancelled");
+  const shiftsById = new Map(activeShifts.map(shift => [String(shift.id), shift]));
+  const linkedSegments = activeTaskSegments(segments).filter(segment => (
+    String(segment.task_occurrence_id) === String(occurrence?.id)
+    && shiftsById.has(String(segment.shift_id))
+  ));
+  const linkedShiftIds = [...new Set(linkedSegments.map(segment => String(segment.shift_id)))];
+  const activeLinkedAssignments = asArray(assignments).filter(assignment => (
+    assignment.status !== "removed"
+    && linkedShiftIds.includes(String(assignment.planning_shift_id || assignment.shift_id))
+  ));
+  const requiredSlots = linkedShiftIds.reduce((total, shiftId) => (
+    total + Math.max(1, Number(shiftsById.get(shiftId)?.required_count || 1))
+  ), 0);
+  const assignedSlots = activeLinkedAssignments.length;
+  const openSlots = Math.max(0, requiredSlots - assignedSlots);
+  const coverage = getTaskOccurrenceCoverage(occurrence, linkedSegments);
+  const readiness = coverage.status === "open"
+    ? "unplanned"
+    : coverage.status === "full" && linkedShiftIds.length > 0 && openSlots === 0
+      ? "ready"
+      : "needs_staffing";
+
+  return {
+    coverage,
+    linkedShiftIds,
+    requiredSlots,
+    assignedSlots,
+    openSlots,
+    readiness,
+  };
+}
+
+export function getOccurrenceStaffingTarget({
+  occurrence,
+  planningState,
+  personnelId,
+  serviceDate = null,
+  shifts = [],
+  assignments = [],
+  segments = [],
+} = {}) {
+  const state = planningState || getOccurrencePlanningState({ occurrence, shifts, assignments, segments });
+  if (state.coverage.status !== "full" || !personnelId) return null;
+
+  const shiftsById = new Map(asArray(shifts).map(shift => [String(shift.id), shift]));
+  const targetDayStart = serviceDate ? parseDateKey(serviceDate) : null;
+  if (serviceDate && !targetDayStart) return null;
+  if (targetDayStart) targetDayStart.setHours(0, 0, 0, 0);
+  const targetDayEnd = targetDayStart ? addDays(targetDayStart, 1) : null;
+  if (targetDayEnd) targetDayEnd.setHours(0, 0, 0, 0);
+  const orderedShifts = state.linkedShiftIds
+    .map(shiftId => shiftsById.get(String(shiftId)))
+    .filter(shift => shift && shift.status !== "cancelled")
+    .filter(shift => {
+      if (!targetDayStart) return true;
+      const interval = getShiftInterval(shift);
+      return interval.valid && interval.start >= targetDayStart && interval.end <= targetDayEnd;
+    })
+    .sort((left, right) => (
+      String(left.service_date || "").localeCompare(String(right.service_date || ""))
+      || String(left.start_time || "").localeCompare(String(right.start_time || ""))
+      || String(left.id).localeCompare(String(right.id))
+    ));
+
+  for (const shift of orderedShifts) {
+    const current = asArray(assignments).filter(assignment => (
+      assignmentIsActive(assignment)
+      && String(assignment.planning_shift_id || assignment.shift_id) === String(shift.id)
+    ));
+    if (current.some(assignment => String(assignment.personnel_id) === String(personnelId))) continue;
+    const occupied = new Set(current.map(assignment => Number(assignment.slot_index || 0)));
+    const slotIndex = Array.from(
+      { length: Math.max(1, Number(shift.required_count || 1)) },
+      (_, index) => index,
+    ).find(index => !occupied.has(index));
+    if (slotIndex != null) return { shiftId: String(shift.id), slotIndex };
+  }
+  return null;
+}
+
+export function getOccurrenceOpenStaffingShift({
+  occurrence,
+  planningState,
+  shifts = [],
+  assignments = [],
+  segments = [],
+} = {}) {
+  const state = planningState || getOccurrencePlanningState({ occurrence, shifts, assignments, segments });
+  if (state.coverage.status !== "full" || state.openSlots <= 0) return null;
+  const shiftsById = new Map(asArray(shifts).map(shift => [String(shift.id), shift]));
+  return state.linkedShiftIds
+    .map(shiftId => shiftsById.get(String(shiftId)))
+    .filter(shift => shift && shift.status !== "cancelled")
+    .sort((left, right) => (
+      String(left.service_date || "").localeCompare(String(right.service_date || ""))
+      || String(left.start_time || "").localeCompare(String(right.start_time || ""))
+      || String(left.id).localeCompare(String(right.id))
+    ))
+    .find(shift => {
+      const occupied = new Set(asArray(assignments)
+        .filter(assignment => (
+          assignmentIsActive(assignment)
+          && String(assignment.planning_shift_id || assignment.shift_id) === String(shift.id)
+        ))
+        .map(assignment => Number(assignment.slot_index || 0)));
+      return occupied.size < Math.max(1, Number(shift.required_count || 1));
+    }) || null;
+}
+
+export function resolvePlanningDrop(result) {
+  const draggableId = String(result?.draggableId || "");
+  const droppableId = String(result?.destination?.droppableId || "");
+  if (!draggableId || !droppableId) return null;
+
+  if (draggableId.startsWith("personnel:") && droppableId.startsWith("slot:")) {
+    const personnelId = draggableId.slice("personnel:".length);
+    const [, shiftId, slotValue, projectionValue] = droppableId.split(":");
+    const slotIndex = Number(slotValue);
+    const projectionLooksDated = DATE_KEY_PATTERN.test(String(projectionValue || ""));
+    const serviceDate = projectionLooksDated ? toDateKey(projectionValue) : "";
+    if (projectionLooksDated && !serviceDate) return null;
+    if (!personnelId || !shiftId || !Number.isInteger(slotIndex) || slotIndex < 0) return null;
+    return {
+      kind: "assign_personnel_to_shift",
+      personnelId,
+      shiftId,
+      slotIndex,
+      ...(serviceDate ? { serviceDate } : {}),
+    };
+  }
+
+  if (draggableId.startsWith("personnel:") && droppableId.startsWith("occurrence:")) {
+    const personnelId = draggableId.slice("personnel:".length);
+    const remainder = droppableId.slice("occurrence:".length);
+    const dateMatch = remainder.match(/^(.*):(\d{4}-\d{2}-\d{2})$/);
+    const occurrenceId = dateMatch?.[1] || remainder;
+    const serviceDate = dateMatch?.[2] || null;
+    if (serviceDate && !parseDateKey(serviceDate)) return null;
+    if (!personnelId || !occurrenceId) return null;
+    return {
+      kind: "compose_occurrence_for_personnel",
+      personnelId,
+      occurrenceId,
+      ...(serviceDate ? { serviceDate } : {}),
+    };
+  }
+
+  if (draggableId.startsWith("task:") && droppableId.startsWith("employee-day:")) {
+    const occurrenceId = draggableId.slice("task:".length);
+    const remainder = droppableId.slice("employee-day:".length);
+    const dateMatch = remainder.match(/^(.*):(\d{4}-\d{2}-\d{2})$/);
+    if (!occurrenceId || !dateMatch?.[1] || !parseDateKey(dateMatch[2])) return null;
+    return {
+      kind: "assign_task_to_employee_day",
+      occurrenceId,
+      personnelId: dateMatch[1],
+      serviceDate: dateMatch[2],
+    };
+  }
+
+  return null;
+}
+
+export function getOccurrenceRemainingRanges(occurrence, segments = [], shifts = null) {
   const demand = occurrenceInterval(occurrence);
   if (!demand.valid) return [];
+  const activeShiftIds = Array.isArray(shifts)
+    ? new Set(shifts.filter(shift => shift.status !== "cancelled").map(shift => String(shift.id)))
+    : null;
   const used = mergedDateIntervals(
     activeTaskSegments(segments)
       .filter(segment => String(segment.task_occurrence_id) === String(occurrence.id))
+      .filter(segment => !activeShiftIds || activeShiftIds.has(String(segment.shift_id)))
       .map(taskSegmentInterval),
   );
   const ranges = [];
@@ -444,10 +766,51 @@ export function getOccurrenceRemainingRanges(occurrence, segments = []) {
   return ranges.filter(range => range.end > range.start);
 }
 
-export function taskCoverageSummary(occurrences = [], segments = []) {
+export function getOccurrenceRemainingAllocationRanges(occurrence, segments = [], shifts = null, serviceDate = null) {
+  const activeShiftIds = Array.isArray(shifts)
+    ? new Set(shifts.filter(shift => shift.status !== "cancelled").map(shift => String(shift.id)))
+    : null;
+  const coverageSegments = activeShiftIds
+    ? activeTaskSegments(segments).filter(segment => activeShiftIds.has(String(segment.shift_id)))
+    : segments;
+  let remainingMinutes = getTaskOccurrenceCoverage(occurrence, coverageSegments).remainingMinutes;
+  let remainingRanges = getOccurrenceRemainingRanges(occurrence, segments, shifts);
+  if (serviceDate) {
+    const dayStart = parseDateKey(serviceDate);
+    if (!dayStart) return [];
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = addDays(dayStart, 1);
+    dayEnd.setHours(0, 0, 0, 0);
+    remainingRanges = remainingRanges.map(range => ({
+      start: new Date(Math.max(range.start.getTime(), dayStart.getTime())),
+      end: new Date(Math.min(range.end.getTime(), dayEnd.getTime())),
+    })).filter(range => range.end > range.start);
+  }
+  const allocations = [];
+  for (const range of remainingRanges) {
+    if (remainingMinutes <= 0) break;
+    const rangeMinutes = Math.max(0, Math.round((range.end - range.start) / MINUTE_MS));
+    const allocatedMinutes = Math.min(remainingMinutes, rangeMinutes);
+    if (allocatedMinutes <= 0) continue;
+    allocations.push({
+      start: new Date(range.start),
+      end: new Date(range.start.getTime() + allocatedMinutes * MINUTE_MS),
+    });
+    remainingMinutes -= allocatedMinutes;
+  }
+  return allocations;
+}
+
+export function taskCoverageSummary(occurrences = [], segments = [], shifts = null) {
+  const activeShiftIds = Array.isArray(shifts)
+    ? new Set(shifts.filter(shift => shift.status !== "cancelled").map(shift => String(shift.id)))
+    : null;
+  const coverageSegments = activeShiftIds
+    ? asArray(segments).filter(segment => activeShiftIds.has(String(segment.shift_id)))
+    : segments;
   return asArray(occurrences).reduce((summary, occurrence) => {
     if (occurrence.lifecycle_status && occurrence.lifecycle_status !== "active") return summary;
-    const coverage = getTaskOccurrenceCoverage(occurrence, segments);
+    const coverage = getTaskOccurrenceCoverage(occurrence, coverageSegments);
     summary[coverage.status] += 1;
     summary.requiredMinutes += coverage.requiredMinutes;
     summary.allocatedMinutes += coverage.allocatedMinutes;

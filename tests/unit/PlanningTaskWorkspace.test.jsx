@@ -1,6 +1,6 @@
 import React from "react";
 import { DragDropContext } from "@hello-pangea/dnd";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
 import PlanningShiftCard from "@/components/planning/PlanningShiftCard";
@@ -93,8 +93,8 @@ describe("Planning taakwerkvoorraad", () => {
 });
 
 describe("Planning dienstcomposer", () => {
-  it("vult het resterende taakvenster voor en bewaart pas na bevestiging", () => {
-    const onSave = vi.fn();
+  it("vult het resterende taakvenster voor en bewaart een key alleen voor exact dezelfde retry", async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error("response verloren"));
     render(
       <PlanningShiftComposer
         open
@@ -114,7 +114,7 @@ describe("Planning dienstcomposer", () => {
     expect(onSave).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       action: "compose_shift",
       idempotency_key: expect.any(String),
       expected_occurrence_revisions: { [occurrence.id]: 1 },
@@ -123,11 +123,41 @@ describe("Planning dienstcomposer", () => {
         start_time: "08:00",
         end_time: "16:00",
       })],
-    }));
+    })));
 
     const firstKey = onSave.mock.calls[0][0].idempotency_key;
     fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
     expect(onSave.mock.calls[1][0].idempotency_key).toBe(firstKey);
+
+    fireEvent.change(screen.getByLabelText("Einde"), { target: { value: "15:00" } });
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(3));
+    expect(onSave.mock.calls[2][0].idempotency_key).not.toBe(firstKey);
+  });
+
+  it("wist de composer-intent na een bevestigde succesvolle save", async () => {
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <PlanningShiftComposer
+        open
+        onOpenChange={vi.fn()}
+        shift={null}
+        initialOccurrence={occurrence}
+        occurrences={[occurrence]}
+        segments={[]}
+        onSave={onSave}
+        isPending={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const completedKey = onSave.mock.calls[0][0].idempotency_key;
+
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave.mock.calls[1][0].idempotency_key).not.toBe(completedKey);
   });
 
   it("toont exact welk taakdeel na een gesplitste dienst resteert", () => {
@@ -197,6 +227,89 @@ describe("Planning dienstcomposer", () => {
     fireEvent.change(screen.getByLabelText("Begin"), { target: { value: "11:00" } });
     expect(screen.getByText(/overlapt met een segment in een andere dienst/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /conceptdienst opslaan/i })).toBeDisabled();
+  });
+
+  it("voegt een chronologisch aansluitende taak van de volgende dag aan dezelfde dienst toe", () => {
+    const onSave = vi.fn();
+    const overnightOccurrence = {
+      ...occurrence,
+      id: "occurrence-overnight",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      window_start_time: "22:00",
+      window_end_time: "02:00",
+      required_minutes: 240,
+      task_name_snapshot: "Nachtbalie",
+    };
+    const nextOccurrence = {
+      ...occurrence,
+      id: "occurrence-next-day",
+      service_date: "2026-08-18",
+      end_date: "2026-08-18",
+      window_start_time: "02:00",
+      window_end_time: "04:00",
+      required_minutes: 120,
+      task_name_snapshot: "Openingsronde",
+    };
+    render(
+      <PlanningShiftComposer
+        open
+        onOpenChange={vi.fn()}
+        shift={null}
+        initialOccurrence={overnightOccurrence}
+        occurrences={[overnightOccurrence, nextOccurrence]}
+        segments={[]}
+        shifts={[]}
+        onSave={onSave}
+        isPending={false}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/taak toevoegen vanaf/i), { target: { value: nextOccurrence.id } });
+    fireEvent.click(screen.getByRole("button", { name: /toevoegen/i }));
+    expect(screen.getAllByLabelText("Begin").map(input => input.value)).toEqual(["22:00", "02:00"]);
+    expect(screen.getAllByLabelText("Einde").map(input => input.value)).toEqual(["02:00", "04:00"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      segments: [
+        expect.objectContaining({ task_occurrence_id: overnightOccurrence.id, start_date: "2026-08-17", end_date: "2026-08-18" }),
+        expect.objectContaining({ task_occurrence_id: nextOccurrence.id, start_date: "2026-08-18", end_date: "2026-08-18" }),
+      ],
+    }));
+  });
+
+  it.each([
+    ["geannuleerde", [{ id: "shift-stale", status: "cancelled" }]],
+    ["ontbrekende", []],
+  ])("laat een segment uit een %s dienst de taak niet blokkeren", (_label, shifts) => {
+    const staleSegment = {
+      id: "segment-stale",
+      shift_id: "shift-stale",
+      task_occurrence_id: occurrence.id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    render(
+      <PlanningShiftComposer
+        open
+        onOpenChange={vi.fn()}
+        shift={null}
+        initialOccurrence={occurrence}
+        occurrences={[occurrence]}
+        segments={[staleSegment]}
+        shifts={shifts}
+        onSave={vi.fn()}
+        isPending={false}
+      />,
+    );
+
+    expect(screen.getByLabelText("Begin")).toHaveValue("08:00");
+    expect(screen.getByLabelText("Einde")).toHaveValue("16:00");
+    expect(screen.getByRole("button", { name: /conceptdienst opslaan/i })).toBeEnabled();
   });
 });
 

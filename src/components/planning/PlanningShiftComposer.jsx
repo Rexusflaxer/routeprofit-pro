@@ -23,12 +23,14 @@ import {
   formatMinutesAsHours,
   getOccurrenceRemainingRanges,
   getShiftDurationMinutes,
+  getShiftInterval,
   getTaskOccurrenceCoverage,
   sortTaskSegments,
   toDateKey,
   validateTaskComposition,
   validateTaskSegmentAllocations,
 } from "@/components/planning/planningDomain";
+import { createPlanningMutationIntentRegistry } from "@/components/planning/planningMutationIntent";
 import { cn } from "@/lib/utils";
 
 function timeKey(date) {
@@ -37,10 +39,6 @@ function timeKey(date) {
 
 function nextDateForTimes(startDate, startTime, endTime) {
   return endTime <= startTime ? toDateKey(addDays(startDate, 1)) : startDate;
-}
-
-function createIdempotencyKey() {
-  return globalThis.crypto?.randomUUID?.() || `planning-composition-${Date.now()}-${Math.random()}`;
 }
 
 function remainingRangeLabel(range, occurrence) {
@@ -76,6 +74,22 @@ function createDraftSegment(occurrence, allSegments) {
     start_time: timeKey(range.start),
     end_time: timeKey(end),
   };
+}
+
+function occurrenceFitsComposition(occurrence, serviceDate, draftSegments, coverageSegments) {
+  if (!serviceDate || occurrence.service_date === serviceDate) return true;
+  const nextServiceDate = toDateKey(addDays(serviceDate, 1));
+  if (occurrence.service_date !== nextServiceDate || draftSegments.length === 0) return false;
+  const ordered = sortTaskSegments(draftSegments);
+  const last = ordered.at(-1);
+  const lastInterval = getShiftInterval({
+    service_date: last.start_date,
+    end_date: last.end_date,
+    start_time: last.start_time,
+    end_time: last.end_time,
+  });
+  const nextRange = getOccurrenceRemainingRanges(occurrence, coverageSegments)[0];
+  return Boolean(lastInterval.valid && nextRange && nextRange.start >= lastInterval.end);
 }
 
 function fromStoredSegment(segment) {
@@ -130,47 +144,55 @@ export default function PlanningShiftComposer({
   initialOccurrence,
   occurrences,
   segments,
+  shifts = null,
   onSave,
   isPending,
 }) {
   const [name, setName] = useState("");
   const [draftSegments, setDraftSegments] = useState([]);
   const [addOccurrenceId, setAddOccurrenceId] = useState("");
-  const idempotencyKeyRef = useRef("");
+  const mutationIntents = useRef(null);
+  if (!mutationIntents.current) mutationIntents.current = createPlanningMutationIntentRegistry();
+  const externalSegments = useMemo(() => {
+    const outsideCurrentShift = shift
+      ? segments.filter(segment => String(segment.shift_id) !== String(shift.id))
+      : segments;
+    if (!Array.isArray(shifts)) return outsideCurrentShift;
+    const activeShiftIds = new Set(shifts
+      .filter(item => item.status !== "cancelled")
+      .map(item => String(item.id)));
+    return outsideCurrentShift.filter(segment => activeShiftIds.has(String(segment.shift_id)));
+  }, [segments, shift, shifts]);
 
   useEffect(() => {
     if (!open) {
-      idempotencyKeyRef.current = "";
+      mutationIntents.current.clear("composition");
       return;
     }
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = createIdempotencyKey();
     const stored = shift
       ? sortTaskSegments(segments.filter(segment => String(segment.shift_id) === String(shift.id))).map(fromStoredSegment)
       : [];
     if (initialOccurrence && !stored.some(item => String(item.task_occurrence_id) === String(initialOccurrence.id))) {
-      const availableSegments = shift
-        ? segments.filter(segment => String(segment.shift_id) !== String(shift.id))
-        : segments;
-      const created = createDraftSegment(initialOccurrence, availableSegments);
+      const created = createDraftSegment(initialOccurrence, externalSegments);
       if (created) stored.push(created);
     }
     setDraftSegments(stored.map((segment, index) => ({ ...segment, sequence_index: index })));
     setName(shift?.name || shift?.service_name_snapshot || "");
     setAddOccurrenceId("");
-  }, [initialOccurrence, open, segments, shift]);
+  }, [externalSegments, initialOccurrence, open, segments, shift]);
 
   const occurrenceById = useMemo(() => new Map(occurrences.map(item => [String(item.id), item])), [occurrences]);
   const serviceDate = draftSegments[0]?.start_date || initialOccurrence?.service_date || shift?.service_date || "";
-  const externalSegments = shift
-    ? segments.filter(segment => String(segment.shift_id) !== String(shift.id))
-    : segments;
   const availableOccurrences = occurrences.filter(occurrence => (
     occurrence.lifecycle_status === "active"
-    && (!serviceDate || occurrence.service_date === serviceDate)
-    && getTaskOccurrenceCoverage(occurrence, [
-      ...externalSegments,
-      ...draftSegments.filter(segment => String(segment.task_occurrence_id) === String(occurrence.id)),
-    ]).status !== "full"
+    && (() => {
+      const coverageSegments = [
+        ...externalSegments,
+        ...draftSegments.filter(segment => String(segment.task_occurrence_id) === String(occurrence.id)),
+      ];
+      return getTaskOccurrenceCoverage(occurrence, coverageSegments).status !== "full"
+        && occurrenceFitsComposition(occurrence, serviceDate, draftSegments, coverageSegments);
+    })()
   ));
   const composition = validateTaskComposition(draftSegments);
   const allocationValidation = validateTaskSegmentAllocations({
@@ -239,13 +261,11 @@ export default function PlanningShiftComposer({
     if (created) setDraftSegments(current => [...current, { ...created, sequence_index: current.length }]);
     setAddOccurrenceId("");
   };
-  const submit = () => {
+  const submit = async () => {
     if (!draftSegments.length || validationErrors.length) return;
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = createIdempotencyKey();
     const uniqueOccurrenceIds = [...new Set(draftSegments.map(item => String(item.task_occurrence_id)))];
-    onSave({
+    const payload = {
       action: shift ? "update_shift_composition" : "compose_shift",
-      idempotency_key: idempotencyKeyRef.current,
       shift_id: shift?.id || undefined,
       expected_shift_revision: shift ? Number(shift.revision || 1) : undefined,
       service_name: name.trim() || undefined,
@@ -258,11 +278,24 @@ export default function PlanningShiftComposer({
         start_time: segment.start_time,
         end_time: segment.end_time,
       })),
-    });
+    };
+    const request = mutationIntents.current.prepare("composition", payload, { prefix: "planning-composition" });
+    try {
+      await onSave(request);
+      mutationIntents.current.clear("composition", request.idempotency_key);
+    } catch {
+      // The exact request keeps its key so an explicit retry can recover a
+      // response that was lost after the server committed it.
+    }
+  };
+
+  const changeOpen = nextOpen => {
+    if (!nextOpen) mutationIntents.current.clear("composition");
+    onOpenChange(nextOpen);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4 text-left">
           <DialogTitle className="flex items-center gap-2 text-[16px]"><Layers3 className="h-4 w-4 text-primary" /> {shift ? "Dienstinhoud bewerken" : "Nieuwe dienst samenstellen"}</DialogTitle>
@@ -278,10 +311,10 @@ export default function PlanningShiftComposer({
               </div>
               <div className="flex items-end gap-2 rounded-lg border border-dashed border-border bg-muted/25 p-2.5">
                 <div className="min-w-0 flex-1">
-                  <Label htmlFor="composition-add-task" className="text-[10px]">Taak toevoegen op {serviceDate || "gekozen datum"}</Label>
+                  <Label htmlFor="composition-add-task" className="text-[10px]">Taak toevoegen vanaf {serviceDate || "gekozen datum"}</Label>
                   <select id="composition-add-task" value={addOccurrenceId} onChange={event => setAddOccurrenceId(event.target.value)} className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-[11px]">
                     <option value="">Kies een open of gedeeltelijke taak…</option>
-                    {availableOccurrences.map(occurrence => <option key={occurrence.id} value={occurrence.id}>{occurrence.window_start_time} · {occurrence.task_name_snapshot} · {occurrence.object_name_snapshot}</option>)}
+                    {availableOccurrences.map(occurrence => <option key={occurrence.id} value={occurrence.id}>{occurrence.service_date} · {occurrence.window_start_time} · {occurrence.task_name_snapshot} · {occurrence.object_name_snapshot}</option>)}
                   </select>
                 </div>
                 <Button type="button" variant="outline" size="sm" className="h-8" disabled={!addOccurrenceId} onClick={addOccurrence}><Plus className="h-3.5 w-3.5" /> Toevoegen</Button>
@@ -342,7 +375,7 @@ export default function PlanningShiftComposer({
         </div>
 
         <DialogFooter className="shrink-0 border-t border-border bg-card px-5 py-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Annuleren</Button>
+          <Button variant="outline" onClick={() => changeOpen(false)}>Annuleren</Button>
           <Button disabled={isPending || !draftSegments.length || validationErrors.length > 0} onClick={submit}><Save className={cn("h-4 w-4", isPending && "animate-pulse")} /> {isPending ? "Opslaan…" : "Conceptdienst opslaan"}</Button>
         </DialogFooter>
       </DialogContent>

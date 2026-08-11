@@ -1,0 +1,57 @@
+{
+  "name": "PlanningMutationCoordinator",
+  "type": "object",
+  "description": "Interne, fijnmazige CAS-coordinator voor idempotencyclaims en medewerker/dag-reserveringen.",
+  "properties": {
+    "coordinator_key": {
+      "type": "string",
+      "description": "Logisch unieke, gehashte resourcesleutel. Concurrente lazy-create wordt deterministisch gecanonicaliseerd."
+    },
+    "resource_type": {
+      "type": "string",
+      "enum": [
+        "bootstrap_source",
+        "copy_source",
+        "idempotency_registry",
+        "personnel_day",
+        "publication_scope",
+        "shift_composition",
+        "task_occurrence"
+      ]
+    },
+    "resource_id": {
+      "type": "string"
+    },
+    "lease": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "revision": {
+      "type": "number",
+      "default": 1
+    },
+    "last_modified_by_user_id": {
+      "type": ["string", "null"]
+    },
+    "last_modified_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "coordinator_key",
+    "resource_type",
+    "resource_id",
+    "revision"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}
