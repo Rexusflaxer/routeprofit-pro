@@ -41,7 +41,7 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
     const active = activeAtPointer(event, dayIndex, slot);
     setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), dayIndex, slot, day: WEEKDAY_OPTIONS[dayIndex].label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
   };
-  const startPointer = (event, dayIndex, slot) => { const active = activeAtPointer(event, dayIndex, slot); pointerStart.current = { dayIndex, slot, active, moved: false }; showHover(event, dayIndex, slot); if (!(active && tool === active.kind && onIntervalClick)) onPaint(dayIndex, slot, true); };
+  const startPointer = (event, dayIndex, slot) => { const active = activeAtPointer(event, dayIndex, slot); pointerStart.current = { dayIndex, slot, active, moved: false }; showHover(event, dayIndex, slot); if (!(active && tool === active.kind && onIntervalClick)) onPaint(dayIndex, slot, true, active); };
   const enterPointer = (event, dayIndex, slot) => { showHover(event, dayIndex, slot); if (painting) { if (pointerStart.current && pointerStart.current.slot !== slot) pointerStart.current.moved = true; onPaint(dayIndex, slot, false); } };
   const finishPointer = event => { const start = pointerStart.current; pointerStart.current = null; if (!start?.moved && start.active && tool === start.active.kind && onIntervalClick) { setHover(null); onIntervalClick({ dayIndex: start.dayIndex, ...start.active.interval, x: Math.min(event.clientX + 12, window.innerWidth - 272), y: Math.min(event.clientY + 12, window.innerHeight - 210) }); } };
   return <div className="overflow-auto">
