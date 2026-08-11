@@ -8,6 +8,7 @@
       "enum": [
         "bootstrap_range",
         "compose_shift",
+        "compose_and_assign",
         "update_shift_composition",
         "cancel_task_shift",
         "assign",
@@ -142,25 +143,13 @@
     "undoable"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
+    "create": false,
     "read": {
       "user_condition": {
         "role": "admin"
       }
     },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "update": false,
+    "delete": false
   }
 }

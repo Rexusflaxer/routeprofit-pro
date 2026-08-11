@@ -4,7 +4,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PlanningEmployeePanel from "@/components/planning/PlanningEmployeePanel";
 import PlanningTaskBacklog from "@/components/planning/PlanningTaskBacklog";
 
-export default function PlanningSidePanel({ mode, onModeChange, taskCount, taskProps, employeeProps }) {
+export default function PlanningSidePanel({ perspective, mode, onModeChange, taskCount, taskProps, employeeProps }) {
+  const fixedMode = perspective === "object"
+    ? "employees"
+    : perspective === "employee"
+      ? "tasks"
+      : null;
+
+  if (fixedMode) {
+    return (
+      <aside
+        className="flex h-full min-h-0 flex-col border-l border-border bg-muted/20"
+        data-panel-mode={fixedMode}
+        aria-label={fixedMode === "tasks" ? "Taken om in te plannen" : "Beschikbare medewerkers"}
+      >
+        {fixedMode === "tasks"
+          ? <PlanningTaskBacklog {...taskProps} enableTaskDrag />
+          : <PlanningEmployeePanel {...employeeProps} embedded />}
+      </aside>
+    );
+  }
+
   return (
     <Tabs value={mode} onValueChange={onModeChange} className="flex h-full min-h-0 flex-col border-l border-border bg-muted/20">
       <div className="shrink-0 border-b border-border bg-card px-2 py-2">

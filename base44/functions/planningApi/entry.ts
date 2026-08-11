@@ -163,6 +163,118 @@ function mutationContext(body: LooseRecord) {
   return { idempotencyKey, correlationId };
 }
 
+function requireMutationIdempotency(
+  context: ReturnType<typeof mutationContext>,
+  action: string,
+) {
+  if (!context.idempotencyKey) {
+    throw new ApiError(400, `idempotency_key is verplicht voor planningactie ${action}`);
+  }
+}
+
+async function mutationRequestHash(action: string, body: LooseRecord) {
+  const {
+    action: _action,
+    idempotency_key: _idempotencyKey,
+    correlation_id: _correlationId,
+    ...payload
+  } = body || {};
+  return sha256(stableStringify({ action, payload }));
+}
+
+function assertReplayFingerprint(
+  event: LooseRecord,
+  user: LooseRecord,
+  requestHash: string,
+  action: string,
+) {
+  if (
+    event.actor_user_id !== (user.id || null)
+    || event.metadata?.request_hash !== requestHash
+  ) {
+    throw new ApiError(409, `idempotency_key hoort bij een andere ${action}-opdracht`);
+  }
+}
+
+function matchingPlanningMutationMarker(
+  shift: LooseRecord,
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const marker = shift?.metadata?.planning_mutation;
+  if (!marker || marker.idempotency_key !== context.idempotencyKey) return null;
+  if (
+    marker.action !== action
+    || marker.request_hash !== requestHash
+    || marker.actor_user_id !== (user.id || null)
+  ) {
+    throw new ApiError(409, `idempotency_key hoort bij een andere ${action}-opdracht`);
+  }
+  return marker;
+}
+
+function planningMutationMetadata(
+  shift: LooseRecord,
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const existing = matchingPlanningMutationMarker(shift, action, context, user, requestHash);
+  return {
+    ...(shift.metadata || {}),
+    planning_mutation: {
+      ...(existing || {}),
+      action,
+      idempotency_key: context.idempotencyKey,
+      correlation_id: context.correlationId,
+      actor_user_id: user.id || null,
+      request_hash: requestHash,
+      phase: 'state_written_audit_pending',
+      started_at: existing?.started_at || nowIso(),
+      updated_at: nowIso(),
+    },
+  };
+}
+
+async function assertNoForeignPendingMutation(
+  base44: LooseRecord,
+  shift: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  expectedAction: string,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const marker = shift?.metadata?.planning_mutation;
+  if (!marker || marker.phase !== 'state_written_audit_pending') return;
+  const ownedByThisExactMutation = (
+    marker.idempotency_key === context.idempotencyKey
+    && marker.action === expectedAction
+    && marker.actor_user_id === (user.id || null)
+    && marker.request_hash === requestHash
+  );
+  if (ownedByThisExactMutation) return;
+  const audits = await base44.asServiceRole.entities.PlanningAuditEvent.filter(
+    { idempotency_key: marker.idempotency_key },
+    '-occurred_at',
+    20,
+  );
+  const completed = audits.some((event: LooseRecord) => (
+    event.action === marker.action
+    && event.actor_user_id === marker.actor_user_id
+    && event.metadata?.request_hash === marker.request_hash
+  ));
+  if (!completed) {
+    throw new ApiError(409, 'Een eerdere planningactie op deze dienst moet eerst worden hersteld', {
+      shift_id: shift.id,
+      pending_action: marker.action,
+      pending_idempotency_key: marker.idempotency_key,
+    });
+  }
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -244,6 +356,681 @@ async function casUpdate(
     });
   }
   return requireRecord(base44, entityName, record.id, entityName);
+}
+
+const PLANNING_RESOURCE_LEASE_MS = 2 * 60 * 1000;
+const PLANNING_IDEMPOTENCY_CLAIM_MS = 2 * 60 * 1000;
+const IDEMPOTENCY_REGISTRY_KEY = 'idempotency_registry:v2';
+const MAX_COMPOSED_SHIFT_MINUTES = 24 * 60;
+
+function coordinatorOrder(left: LooseRecord, right: LooseRecord) {
+  const createdOrder = String(left.created_date || '').localeCompare(String(right.created_date || ''));
+  return createdOrder || String(left.id).localeCompare(String(right.id));
+}
+
+async function planningCoordinatorRecords(base44: LooseRecord, coordinatorKey: string) {
+  return filterAllRecords(
+    base44.asServiceRole.entities.PlanningMutationCoordinator,
+    { coordinator_key: coordinatorKey },
+    'created_date',
+  );
+}
+
+async function ensurePlanningCoordinator(
+  base44: LooseRecord,
+  user: LooseRecord,
+  coordinatorKey: string,
+  resourceType: string,
+  resourceId: string,
+) {
+  let coordinators = await planningCoordinatorRecords(base44, coordinatorKey);
+  if (!coordinators.length) {
+    await base44.asServiceRole.entities.PlanningMutationCoordinator.create({
+      coordinator_key: coordinatorKey,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      lease: null,
+      revision: 1,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: { initialized_at: nowIso() },
+    });
+    // Base44 entities have no schema-level unique index. A deterministic
+    // canonical reread makes concurrent lazy creation converge without
+    // mutating a business/occurrence record.
+    coordinators = await planningCoordinatorRecords(base44, coordinatorKey);
+  }
+  const coordinator = [...coordinators].sort(coordinatorOrder)[0];
+  if (!coordinator) throw new ApiError(503, 'Planningcoordinator kon niet worden geïnitialiseerd');
+  return coordinator;
+}
+
+async function resourceCoordinatorDescriptor(type: string, identity: string) {
+  const normalizedIdentity = compact(identity);
+  return {
+    coordinatorKey: `${type}:${await sha256(normalizedIdentity)}`,
+    resourceType: type,
+    resourceId: normalizedIdentity,
+  };
+}
+
+function leaseIsActive(lease: LooseRecord | null | undefined) {
+  return lease?.status === 'pending' && Date.parse(lease.expires_at || '') > Date.now();
+}
+
+async function releasePlanningResourceLeases(
+  base44: LooseRecord,
+  user: LooseRecord,
+  leases: LooseRecord[],
+) {
+  const errors: LooseRecord[] = [];
+  for (const lease of [...leases].reverse()) {
+    let released = false;
+    for (let attempt = 0; attempt < 5 && !released; attempt += 1) {
+      try {
+        const coordinator = await requireRecord(
+          base44,
+          'PlanningMutationCoordinator',
+          lease.coordinatorId,
+          'Planningcoordinator',
+        );
+        if (!coordinator.lease || coordinator.lease.token !== lease.token) {
+          released = true;
+          continue;
+        }
+        await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+          lease: null,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(coordinator.metadata || {}),
+            last_released_at: nowIso(),
+            last_released_idempotency_key: lease.idempotencyKey || null,
+          },
+        });
+        released = true;
+      } catch (error) {
+        if (attempt === 4) errors.push({
+          entity: 'PlanningMutationCoordinator',
+          id: lease.coordinatorId,
+          message: (error as Error)?.message || String(error),
+        });
+      }
+    }
+  }
+  return errors;
+}
+
+async function acquirePlanningResourceLeases(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  descriptors: LooseRecord[],
+) {
+  const uniqueDescriptors = [...new Map(
+    descriptors.map(item => [item.coordinatorKey, item]),
+  ).values()].sort((left, right) => left.coordinatorKey.localeCompare(right.coordinatorKey));
+  const token = crypto.randomUUID();
+  const acquired: LooseRecord[] = [];
+  try {
+    for (const descriptor of uniqueDescriptors) {
+      const ensured = await ensurePlanningCoordinator(
+        base44,
+        user,
+        descriptor.coordinatorKey,
+        descriptor.resourceType,
+        descriptor.resourceId,
+      );
+      let locked: LooseRecord | null = null;
+      for (let attempt = 0; attempt < 5 && !locked; attempt += 1) {
+        const coordinator = await requireRecord(base44, 'PlanningMutationCoordinator', ensured.id, 'Planningcoordinator');
+        const pendingPublicationIntent = coordinator.metadata?.pending_publication_intent;
+        if (pendingPublicationIntent && (
+          pendingPublicationIntent.idempotency_key !== context.idempotencyKey
+          || pendingPublicationIntent.actor_user_id !== (user.id || null)
+          || pendingPublicationIntent.request_hash !== requestHash
+        )) {
+          throw new ApiError(409, 'Deze planningresource wacht op afronding van een publicatie', {
+            resource_type: descriptor.resourceType,
+            resource_id: descriptor.resourceId,
+            publication_id: pendingPublicationIntent.publication_id || null,
+            pending_idempotency_key: pendingPublicationIntent.idempotency_key || null,
+          });
+        }
+        if (leaseIsActive(coordinator.lease)) {
+          throw new ApiError(409, 'Deze planningresource wordt momenteel door een andere planningactie gewijzigd', {
+            resource_type: descriptor.resourceType,
+            resource_id: descriptor.resourceId,
+            reservation_expires_at: coordinator.lease.expires_at,
+          });
+        }
+        try {
+          locked = await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+            lease: {
+              token,
+              status: 'pending',
+              action: 'planning_assignment_mutation',
+              idempotency_key: context.idempotencyKey,
+              correlation_id: context.correlationId,
+              request_hash: requestHash,
+              actor_user_id: user.id || null,
+              acquired_at: nowIso(),
+              expires_at: new Date(Date.now() + PLANNING_RESOURCE_LEASE_MS).toISOString(),
+            },
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+          });
+        } catch (error) {
+          if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
+        }
+      }
+      if (!locked) throw new ApiError(409, 'Planningresource kon niet worden gereserveerd');
+      acquired.push({
+        coordinatorId: locked.id,
+        coordinatorKey: descriptor.coordinatorKey,
+        resourceType: descriptor.resourceType,
+        resourceId: descriptor.resourceId,
+        token,
+        idempotencyKey: context.idempotencyKey,
+        requestHash,
+      });
+    }
+    return acquired;
+  } catch (error) {
+    await releasePlanningResourceLeases(base44, user, acquired);
+    throw error;
+  }
+}
+
+async function setPlanningPublicationIntent(
+  base44: LooseRecord,
+  user: LooseRecord,
+  leases: LooseRecord[],
+  intent: LooseRecord,
+) {
+  const orderedLeases = [
+    ...leases.filter(item => item.resourceType === 'publication_scope'),
+    ...leases.filter(item => item.resourceType !== 'publication_scope'),
+  ];
+  for (const lease of orderedLeases) {
+    await renewPlanningResourceLeases(
+      base44,
+      user,
+      planningPublicationLeasePair(leases, lease.resourceType, lease.resourceId),
+    );
+    const coordinator = await requireRecord(
+      base44,
+      'PlanningMutationCoordinator',
+      lease.coordinatorId,
+      'Planningcoordinator',
+    );
+    const existing = coordinator.metadata?.pending_publication_intent;
+    if (existing && stableStringify(existing) !== stableStringify(intent)) {
+      throw new ApiError(409, 'Planningresource hoort bij een andere pending publicatie', {
+        resource_type: lease.resourceType,
+        resource_id: lease.resourceId,
+      });
+    }
+    if (existing) continue;
+    await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+      metadata: {
+        ...(coordinator.metadata || {}),
+        pending_publication_intent: intent,
+      },
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+    });
+  }
+}
+
+async function clearPlanningPublicationIntent(
+  base44: LooseRecord,
+  user: LooseRecord,
+  leases: LooseRecord[],
+  intent: LooseRecord,
+) {
+  const orderedLeases = [
+    ...leases.filter(item => item.resourceType !== 'publication_scope'),
+    ...leases.filter(item => item.resourceType === 'publication_scope'),
+  ];
+  for (const lease of orderedLeases) {
+    await renewPlanningResourceLeases(
+      base44,
+      user,
+      planningPublicationLeasePair(leases, lease.resourceType, lease.resourceId),
+    );
+    const coordinator = await requireRecord(
+      base44,
+      'PlanningMutationCoordinator',
+      lease.coordinatorId,
+      'Planningcoordinator',
+    );
+    const existing = coordinator.metadata?.pending_publication_intent;
+    if (!existing) continue;
+    if (stableStringify(existing) !== stableStringify(intent)) {
+      throw new ApiError(409, 'Een nieuwere publicatie-intentie blokkeert het vrijgeven van de planningresource', {
+        resource_type: lease.resourceType,
+        resource_id: lease.resourceId,
+      });
+    }
+    const { pending_publication_intent: _pending, ...metadata } = coordinator.metadata || {};
+    await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+      metadata: {
+        ...metadata,
+        last_completed_publication_intent_id: intent.intent_id,
+        last_completed_publication_at: nowIso(),
+      },
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+    });
+  }
+}
+
+const planningPublicationLeaseIndexes = new WeakMap<LooseRecord[], {
+  scopeLease: LooseRecord | undefined;
+  byResource: Map<string, LooseRecord>;
+}>();
+
+function planningPublicationLeasePair(
+  leases: LooseRecord[],
+  resourceType: string,
+  resourceId: string,
+) {
+  let index = planningPublicationLeaseIndexes.get(leases);
+  if (!index) {
+    index = {
+      scopeLease: leases.find(item => item.resourceType === 'publication_scope'),
+      byResource: new Map(leases.map(item => [
+        `${item.resourceType}:${String(item.resourceId)}`,
+        item,
+      ])),
+    };
+    planningPublicationLeaseIndexes.set(leases, index);
+  }
+  const { scopeLease } = index;
+  const resourceLease = index.byResource.get(`${resourceType}:${String(resourceId)}`);
+  if (!scopeLease || !resourceLease) {
+    throw new ApiError(409, 'Publicatiefence ontbreekt voor een target uit het immutable manifest', {
+      resource_type: resourceType,
+      resource_id: resourceId,
+    });
+  }
+  return uniqueRecords([scopeLease, resourceLease], item => String(item.coordinatorId));
+}
+
+async function renewPlanningResourceLeases(
+  base44: LooseRecord,
+  user: LooseRecord,
+  leases: LooseRecord[],
+) {
+  for (const lease of leases) {
+    let renewed = false;
+    for (let attempt = 0; attempt < 5 && !renewed; attempt += 1) {
+      const coordinator = await requireRecord(base44, 'PlanningMutationCoordinator', lease.coordinatorId, 'Planningcoordinator');
+      // An expired lease is fencing state, not a renewable ownership claim.
+      // Rejecting it here prevents a delayed worker from reviving its lease
+      // after a newer worker has legitimately taken over the resource.
+      if (coordinator.lease?.token !== lease.token || !leaseIsActive(coordinator.lease)) {
+        throw new ApiError(409, 'Planningreservering is verlopen; laad het rooster opnieuw', {
+          resource_type: lease.resourceType,
+          resource_id: lease.resourceId,
+        });
+      }
+      try {
+        await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+          lease: {
+            ...coordinator.lease,
+            renewed_at: nowIso(),
+            expires_at: new Date(Date.now() + PLANNING_RESOURCE_LEASE_MS).toISOString(),
+          },
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+        renewed = true;
+      } catch (error) {
+        if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
+      }
+    }
+  }
+}
+
+async function withPlanningResourceLeases<T>(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  descriptors: LooseRecord[],
+  operation: (leases: LooseRecord[]) => Promise<T>,
+) {
+  const leases = await acquirePlanningResourceLeases(base44, user, context, requestHash, descriptors);
+  let operationError: unknown = null;
+  try {
+    return await operation(leases);
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, leases);
+    if (releaseErrors.length) {
+      if (operationError && typeof operationError === 'object') {
+        (operationError as any).details = {
+          ...((operationError as any).details || {}),
+          lease_release_errors: releaseErrors,
+        };
+      } else {
+        throw new ApiError(503, 'Planningreservering kon niet worden vrijgegeven', {
+          release_errors: releaseErrors,
+        });
+      }
+    }
+  }
+}
+
+async function mutateIdempotencyClaim(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  status: 'pending' | 'retryable' | 'completed',
+) {
+  const claimId = await sha256(`${user.id || 'anonymous'}:${context.idempotencyKey}`);
+  const coordinator = await ensurePlanningCoordinator(
+    base44,
+    user,
+    IDEMPOTENCY_REGISTRY_KEY,
+    'idempotency_registry',
+    'compose_and_assign',
+  );
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const current = await requireRecord(base44, 'PlanningMutationCoordinator', coordinator.id, 'Idempotencyregister');
+    const claims = { ...(current.metadata?.claims || {}) };
+    const claimMutationStartedAt = Date.now();
+    for (const [storedClaimId, storedClaim] of Object.entries<LooseRecord>(claims)) {
+      const expiresAt = Date.parse(storedClaim?.expires_at || '');
+      if (!Number.isFinite(expiresAt) || expiresAt <= claimMutationStartedAt) delete claims[storedClaimId];
+    }
+    const existing = claims[claimId];
+    if (existing?.request_hash && existing.request_hash !== requestHash) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere compose_and_assign-opdracht');
+    }
+    if (
+      status === 'pending'
+      && existing?.status === 'pending'
+      && Date.parse(existing.expires_at || '') > Date.now()
+    ) {
+      throw new ApiError(409, 'Deze compose_and_assign-opdracht wordt al verwerkt', {
+        reservation_expires_at: existing.expires_at,
+      });
+    }
+    if (status === 'completed') delete claims[claimId];
+    else claims[claimId] = {
+      idempotency_key: context.idempotencyKey,
+      correlation_id: context.correlationId,
+      actor_user_id: user.id || null,
+      request_hash: requestHash,
+      status,
+      updated_at: nowIso(),
+      expires_at: new Date(Date.now() + PLANNING_IDEMPOTENCY_CLAIM_MS).toISOString(),
+    };
+    try {
+      await casUpdate(base44, 'PlanningMutationCoordinator', current, revisionOf(current), {
+        metadata: { ...(current.metadata || {}), claims },
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      });
+      return { claimId, status };
+    } catch (error) {
+      if (Number((error as any)?.status) !== 409 || attempt === 7) throw error;
+    }
+  }
+  throw new ApiError(409, 'Idempotencyclaim kon niet worden vastgelegd');
+}
+
+async function releaseComposeAndAssignOccurrenceReservations(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  occurrenceIds: string[],
+  leases: LooseRecord[] = [],
+) {
+  const errors: LooseRecord[] = [];
+  for (const occurrenceId of uniqueStrings(occurrenceIds)) {
+    let released = false;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 8 && !released; attempt += 1) {
+      try {
+        const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+        const reservation = occurrence.metadata?.planning_composition_reservation;
+        const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+          && reservation?.request_hash === requestHash;
+        const ownsCompletion = occurrence.metadata?.last_compose_and_assign_idempotency_key === context.idempotencyKey
+          && occurrence.metadata?.last_compose_and_assign_request_hash === requestHash;
+        if (!ownsReservation && !ownsCompletion) {
+          released = true;
+          continue;
+        }
+        const {
+          planning_composition_reservation: _reservation,
+          last_compose_and_assign_idempotency_key: _completedKey,
+          last_compose_and_assign_correlation_id: _completedCorrelation,
+          last_compose_and_assign_request_hash: _completedHash,
+          last_compose_and_assign_completed_at: _completedAt,
+          ...metadata
+        } = occurrence.metadata || {};
+        await renewPlanningResourceLeases(base44, user, leases);
+        await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          metadata: {
+            ...metadata,
+            last_compose_and_assign_recovery_idempotency_key: context.idempotencyKey,
+            last_compose_and_assign_recovery_request_hash: requestHash,
+            last_compose_and_assign_recovery_status: 'compensated',
+            last_compose_and_assign_recovery_at: nowIso(),
+          },
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+        released = true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!released) {
+      errors.push({
+        entity: 'PlanningTaskOccurrence',
+        id: occurrenceId,
+        message: (lastError as Error)?.message || String(lastError),
+      });
+    }
+  }
+  return errors;
+}
+
+async function compensateComposeAndAssign(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  state: LooseRecord,
+  leases: LooseRecord[] = [],
+) {
+  const errors: LooseRecord[] = [];
+  let shiftId = compact(state.shiftId);
+  if (!shiftId) {
+    try {
+      const possibleShifts = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShift,
+        { source_key: `task-compose-and-assign:${context.idempotencyKey}` },
+      );
+      const matchingShifts = possibleShifts.filter((item: LooseRecord) => (
+        item.metadata?.compose_and_assign?.request_hash === requestHash
+      ));
+      if (matchingShifts.length > 1) {
+        errors.push({
+          entity: 'PlanningShift',
+          message: 'Meerdere shifts gevonden tijdens compose_and_assign-compensatie',
+          shift_ids: matchingShifts.map((item: LooseRecord) => item.id),
+        });
+      } else {
+        shiftId = compact(matchingShifts[0]?.id);
+      }
+    } catch (error) {
+      errors.push({ entity: 'PlanningShift', message: (error as Error)?.message || String(error) });
+    }
+  }
+  if (shiftId) {
+    let completedState = false;
+    let shiftCancelled = false;
+    let shiftError: unknown = null;
+    for (let attempt = 0; attempt < 8 && !shiftCancelled && !completedState; attempt += 1) {
+      try {
+        const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+        const recovery = shift.metadata?.compose_and_assign;
+        if (
+          recovery?.idempotency_key !== context.idempotencyKey
+          || recovery?.request_hash !== requestHash
+        ) {
+          throw new ApiError(409, 'Dienst hoort niet bij deze herstelopdracht', { shift_id: shiftId });
+        }
+        if (recovery.phase === 'completed') {
+          completedState = true;
+          continue;
+        }
+        if (shift.status === 'cancelled' && recovery.phase === 'compensated') {
+          shiftCancelled = true;
+          continue;
+        }
+        await renewPlanningResourceLeases(base44, user, leases);
+        await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+          status: 'cancelled',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(shift.metadata || {}),
+            compose_and_assign: {
+              ...recovery,
+              phase: 'compensated',
+              compensated_at: nowIso(),
+            },
+          },
+        });
+        shiftCancelled = true;
+      } catch (error) {
+        shiftError = error;
+      }
+    }
+    if (completedState) return errors;
+    if (!shiftCancelled) errors.push({
+      entity: 'PlanningShift',
+      id: shiftId,
+      message: (shiftError as Error)?.message || String(shiftError),
+    });
+
+    const segments = await filterAllRecords(
+      base44.asServiceRole.entities.PlanningShiftTaskSegment,
+      { shift_id: shiftId },
+    ).catch((error: unknown) => {
+      errors.push({ entity: 'PlanningShiftTaskSegment', message: (error as Error)?.message || String(error) });
+      return [];
+    });
+    for (const segment of segments.filter((item: LooseRecord) => (
+      item.status !== 'removed'
+      && item.metadata?.composition_idempotency_key === context.idempotencyKey
+      && item.metadata?.compose_and_assign_request_hash === requestHash
+    ))) {
+      let removed = false;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 8 && !removed; attempt += 1) {
+        try {
+          const current = await requireRecord(base44, 'PlanningShiftTaskSegment', segment.id, 'Taaksegment');
+          if (current.status === 'removed') {
+            removed = true;
+            continue;
+          }
+          await renewPlanningResourceLeases(base44, user, leases);
+          await casUpdate(base44, 'PlanningShiftTaskSegment', current, revisionOf(current), {
+            status: 'removed',
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(current.metadata || {}),
+              compensated_by_compose_and_assign_key: context.idempotencyKey,
+              compensated_at: nowIso(),
+            },
+          });
+          removed = true;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (!removed) {
+        errors.push({
+          entity: 'PlanningShiftTaskSegment',
+          id: segment.id,
+          message: (lastError as Error)?.message || String(lastError),
+        });
+      }
+    }
+
+    const assignments = await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: shiftId },
+    ).catch((error: unknown) => {
+      errors.push({ entity: 'PlanningAssignment', message: (error as Error)?.message || String(error) });
+      return [];
+    });
+    for (const assignment of assignments.filter((item: LooseRecord) => (
+      item.status !== 'removed'
+      && item.metadata?.compose_and_assign_idempotency_key === context.idempotencyKey
+      && item.metadata?.compose_and_assign_request_hash === requestHash
+    ))) {
+      let removed = false;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 8 && !removed; attempt += 1) {
+        try {
+          const current = await requireRecord(base44, 'PlanningAssignment', assignment.id, 'Toewijzing');
+          if (current.status === 'removed') {
+            removed = true;
+            continue;
+          }
+          await renewPlanningResourceLeases(base44, user, leases);
+          await casUpdate(base44, 'PlanningAssignment', current, revisionOf(current), {
+            status: 'removed',
+            removed_by_user_id: user.id || null,
+            removed_at: nowIso(),
+            metadata: {
+              ...(current.metadata || {}),
+              compensated_by_compose_and_assign_key: context.idempotencyKey,
+              compensated_at: nowIso(),
+            },
+          });
+          removed = true;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (!removed) {
+        errors.push({
+          entity: 'PlanningAssignment',
+          id: assignment.id,
+          message: (lastError as Error)?.message || String(lastError),
+        });
+      }
+    }
+  }
+
+  if (!errors.length) {
+    errors.push(...await releaseComposeAndAssignOccurrenceReservations(
+      base44,
+      user,
+      context,
+      requestHash,
+      normalizeArray<string>(state.requestedOccurrenceIds || state.reservedOccurrenceIds),
+      leases,
+    ));
+  }
+  return errors;
 }
 
 async function findReplay(base44: LooseRecord, action: string, idempotencyKey: string | null) {
@@ -375,6 +1162,28 @@ function dateKeysBetween(start: string, end: string) {
   const first = dateOrdinal(start);
   const last = dateOrdinal(end);
   return Array.from({ length: last - first + 1 }, (_, index) => dateFromOrdinal(first + index));
+}
+
+function planningIntervalDates(shift: LooseRecord) {
+  const startDate = asDate(shift.service_date, 'service_date');
+  const startTime = asTime(shift.start_time, 'start_time');
+  const endTime = asTime(shift.end_time, 'end_time');
+  const endDate = shift.end_date
+    ? asDate(shift.end_date, 'end_date')
+    : parseClockMinutes(endTime)! <= parseClockMinutes(startTime)!
+    ? addDateDays(startDate, 1)
+    : startDate;
+  return dateKeysBetween(startDate, endDate);
+}
+
+async function personnelDayDescriptors(personnelIds: string[], shifts: LooseRecord[]) {
+  const descriptors: LooseRecord[] = [];
+  for (const personnelId of uniqueStrings(personnelIds)) {
+    for (const date of uniqueStrings(shifts.flatMap(planningIntervalDates))) {
+      descriptors.push(await resourceCoordinatorDescriptor('personnel_day', `${personnelId}:${date}`));
+    }
+  }
+  return descriptors;
 }
 
 function intervalFromParts(startDate: string, startTime: string, endDate: string, endTime: string) {
@@ -543,6 +1352,103 @@ async function reconcileTaskOccurrenceSourceKey(
   return requireRecord(base44, 'PlanningTaskOccurrence', canonical.id, 'Taakuitvoering');
 }
 
+async function reconcilePlanningShiftSourceKey(
+  base44: LooseRecord,
+  user: LooseRecord,
+  sourceKey: string,
+  beforeWrite: (() => Promise<void>) | null = null,
+  assertCandidateWritable: ((shift: LooseRecord) => Promise<void>) | null = null,
+) {
+  const candidates = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningShift,
+    { source_key: sourceKey },
+    'created_date',
+  );
+  if (!candidates.length) return null;
+  if (assertCandidateWritable) {
+    for (const candidate of candidates) await assertCandidateWritable(candidate);
+  }
+  const activeCandidates = candidates.filter(item => item.status !== 'cancelled');
+  const canonical = [...(activeCandidates.length ? activeCandidates : candidates)].sort(coordinatorOrder)[0];
+  const candidateIds = new Set(candidates.map(item => String(item.id)));
+  const assignments = (await listAllRecords(base44.asServiceRole.entities.PlanningAssignment))
+    .filter(item => candidateIds.has(String(item.shift_id)));
+
+  // Assignments on a duplicate parent may otherwise remain active after the
+  // parent is cancelled. They are retired under the same source lease; the
+  // RouteExecution bootstrap below will deterministically repopulate an empty
+  // canonical slot from its source of truth.
+  for (const assignment of assignments.filter(item => (
+    String(item.shift_id) !== String(canonical.id) && item.status !== 'removed'
+  ))) {
+    if (beforeWrite) await beforeWrite();
+    await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+      status: 'removed',
+      removed_by_user_id: user.id || null,
+      removed_at: nowIso(),
+      metadata: {
+        ...(assignment.metadata || {}),
+        duplicate_parent_shift_id: assignment.shift_id,
+        duplicate_of_shift_id: canonical.id,
+        duplicate_source_key_reconciled_at: nowIso(),
+      },
+    });
+  }
+
+  const activeCanonicalBySlot = new Map<number, LooseRecord[]>();
+  assignments
+    .filter(item => String(item.shift_id) === String(canonical.id) && item.status !== 'removed')
+    .forEach(item => {
+      const slot = Number(item.slot_index || 0);
+      activeCanonicalBySlot.set(slot, [...(activeCanonicalBySlot.get(slot) || []), item]);
+    });
+  for (const [slotIndex, slotAssignments] of activeCanonicalBySlot) {
+    const [winner, ...duplicates] = [...slotAssignments].sort(coordinatorOrder);
+    for (const duplicate of duplicates) {
+      if (beforeWrite) await beforeWrite();
+      await casUpdate(base44, 'PlanningAssignment', duplicate, revisionOf(duplicate), {
+        status: 'removed',
+        removed_by_user_id: user.id || null,
+        removed_at: nowIso(),
+        metadata: {
+          ...(duplicate.metadata || {}),
+          duplicate_of_assignment_id: winner.id,
+          duplicate_slot_index: slotIndex,
+          duplicate_source_key_reconciled_at: nowIso(),
+        },
+      });
+    }
+  }
+  for (const duplicate of candidates) {
+    if (String(duplicate.id) === String(canonical.id) || duplicate.status === 'cancelled') continue;
+    let reconciled = false;
+    for (let attempt = 0; attempt < 5 && !reconciled; attempt += 1) {
+      const current = await requireRecord(base44, 'PlanningShift', duplicate.id, 'Dubbele dienst');
+      if (current.status === 'cancelled') {
+        reconciled = true;
+        continue;
+      }
+      try {
+        if (beforeWrite) await beforeWrite();
+        await casUpdate(base44, 'PlanningShift', current, revisionOf(current), {
+          status: 'cancelled',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(current.metadata || {}),
+            duplicate_of_shift_id: canonical.id,
+            duplicate_source_key_reconciled_at: nowIso(),
+          },
+        });
+        reconciled = true;
+      } catch (error) {
+        if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
+      }
+    }
+  }
+  return requireRecord(base44, 'PlanningShift', canonical.id, 'Dienst');
+}
+
 function segmentInterval(segment: LooseRecord) {
   return intervalFromParts(segment.start_date, segment.start_time, segment.end_date, segment.end_time);
 }
@@ -560,11 +1466,31 @@ function mergeMinuteIntervals(intervals: { start: number; end: number }[]) {
   return merged;
 }
 
-function occurrenceCoverage(occurrence: LooseRecord, segments: LooseRecord[]) {
-  const active = segments.filter(segment =>
-    segment.status !== 'removed' && String(segment.task_occurrence_id) === String(occurrence.id)
+function shiftAllowsActiveTaskSegments(shift: LooseRecord | null | undefined) {
+  if (!shift || shift.status === 'cancelled') return false;
+  const compositionState = shift.metadata?.planning_composition;
+  if (compositionState && compositionState.phase !== 'completed') return false;
+  const composeAndAssignState = shift.metadata?.compose_and_assign;
+  return !composeAndAssignState || composeAndAssignState.phase === 'completed';
+}
+
+function activeTaskSegments(segments: LooseRecord[], shifts?: LooseRecord[]) {
+  const shiftById = shifts
+    ? new Map<string, LooseRecord>(shifts.map(shift => [String(shift.id), shift]))
+    : null;
+  return segments.filter(segment => (
+    segment.status !== 'removed'
+    && (!shiftById || shiftAllowsActiveTaskSegments(shiftById.get(String(segment.shift_id))))
+  ));
+}
+
+function occurrenceCoverage(occurrence: LooseRecord, segments: LooseRecord[], shifts?: LooseRecord[]) {
+  const active = activeTaskSegments(segments, shifts).filter(segment =>
+    String(segment.task_occurrence_id) === String(occurrence.id)
   );
-  const intervals = mergeMinuteIntervals(active.map(segmentInterval).filter(Boolean));
+  const intervals = mergeMinuteIntervals(
+    active.map(segmentInterval).filter((item): item is NonNullable<typeof item> => item != null),
+  );
   const allocatedMinutes = intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0);
   const requiredMinutes = Number(occurrence.required_minutes || 0);
   return {
@@ -588,6 +1514,37 @@ function shiftInterval(shift: LooseRecord) {
     : dateOrdinal(date) + (endMinutes <= startMinutes ? 1 : 0);
   const end = endDay * 1440 + endMinutes;
   return end > start ? { start, end } : null;
+}
+
+function resolveShiftTiming(source: LooseRecord, body: LooseRecord) {
+  const serviceDate = body.service_date ? asDate(body.service_date, 'service_date') : asDate(source.service_date, 'service_date');
+  const startTime = body.start_time ? asTime(body.start_time, 'start_time') : asTime(source.start_time, 'start_time');
+  const endTime = body.end_time ? asTime(body.end_time, 'end_time') : asTime(source.end_time, 'end_time');
+  let endDate: string | null;
+  if (Object.prototype.hasOwnProperty.call(body, 'end_date')) {
+    endDate = optionalDate(body.end_date, 'end_date');
+  } else if (body.service_date && source.end_date) {
+    const dayDelta = dateOrdinal(serviceDate) - dateOrdinal(asDate(source.service_date, 'service_date'));
+    endDate = addDateDays(asDate(source.end_date, 'end_date'), dayDelta);
+  } else {
+    endDate = source.end_date ? asDate(source.end_date, 'end_date') : null;
+  }
+  const interval = shiftInterval({ service_date: serviceDate, end_date: endDate, start_time: startTime, end_time: endTime });
+  if (!interval) throw new ApiError(400, 'Dienstinterval moet een positieve duur hebben');
+  const durationMinutes = interval.end - interval.start;
+  if (durationMinutes > MAX_COMPOSED_SHIFT_MINUTES) {
+    throw new ApiError(409, 'Een dienst mag maximaal 24 uur beslaan', {
+      duration_minutes: durationMinutes,
+      maximum_duration_minutes: MAX_COMPOSED_SHIFT_MINUTES,
+    });
+  }
+  return {
+    service_date: serviceDate,
+    end_date: endDate,
+    start_time: startTime,
+    end_time: endTime,
+    duration_minutes: durationMinutes,
+  };
 }
 
 function intervalsOverlap(a: LooseRecord, b: LooseRecord) {
@@ -640,7 +1597,10 @@ function serviceContextFromShift(shift: LooseRecord, personnelId?: string) {
 
 function restrictionMatches(restriction: LooseRecord, shift: LooseRecord) {
   if (restriction.status === 'inactive' || restriction.may_work !== false) return false;
-  if (!dateInRange(shift.service_date, restriction.valid_from || '0000-01-01', restriction.valid_until || '9999-12-31')) {
+  const coveredDates = planningIntervalDates(shift);
+  if (!coveredDates.some(date => (
+    dateInRange(date, restriction.valid_from || '0000-01-01', restriction.valid_until || '9999-12-31')
+  ))) {
     return false;
   }
   const scopeId = compact(restriction.scope_id);
@@ -684,6 +1644,7 @@ async function evaluateAssignmentWarnings(
   suppliedWarnings: LooseRecord[],
 ) {
   const warnings: LooseRecord[] = [...suppliedWarnings];
+  const coveredDates = planningIntervalDates(shift);
   let routingSnapshot: LooseRecord | null = null;
   let personnelContractId: string | null = null;
 
@@ -723,16 +1684,17 @@ async function evaluateAssignmentWarnings(
 
   for (const absence of absences) {
     if (absence.status === 'rejected' || absence.status === 'closed') continue;
-    if (!dateInRange(shift.service_date, absence.start_date, absence.end_date)) continue;
+    const matchingDates = coveredDates.filter(date => dateInRange(date, absence.start_date, absence.end_date));
+    if (!matchingDates.length) continue;
     const critical = absence.status === 'approved' || absence.status === 'active';
     warnings.push(warning(
       `personnel_absence_${absence.absence_type || 'unknown'}`,
       critical ? 'critical' : 'warning',
       critical
-        ? `Medewerker is op deze datum afwezig (${absence.absence_type || 'afwezigheid'}).`
+        ? `Medewerker is op ${matchingDates.join(', ')} afwezig (${absence.absence_type || 'afwezigheid'}).`
         : `Er staat een afwezigheidsaanvraag open (${absence.absence_type || 'afwezigheid'}).`,
       'personnel_absence',
-      { absence_id: absence.id, status: absence.status },
+      { absence_id: absence.id, status: absence.status, matching_dates: matchingDates },
     ));
   }
 
@@ -748,56 +1710,87 @@ async function evaluateAssignmentWarnings(
     ));
   }
 
-  try {
-    const response = await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', {
-      personnel_id: personnel.id,
-      company_id: shift.company_id || null,
-      operating_company_id: shift.company_id || null,
-      task_id: shift.task_id || null,
-      object_id: shift.object_id || null,
-      route_id: shift.route_id || null,
-      service_date: shift.service_date,
-      cao_key: shift.cao_key || null,
-      service_context: serviceContextFromShift(shift, personnel.id),
-      require_schedule_validation: false,
-      run_schedule_validation: false,
-      final_validation: false,
-    });
-    const decision = response?.data || response || null;
-    routingSnapshot = decision;
-    personnelContractId = decision?.contract_id || decision?.selected_contract?.id || null;
-    normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
+  const routingDecisions: LooseRecord[] = [];
+  for (const serviceDate of coveredDates) {
+    try {
+      const response = await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', {
+        personnel_id: personnel.id,
+        company_id: shift.company_id || null,
+        operating_company_id: shift.company_id || null,
+        task_id: shift.task_id || null,
+        object_id: shift.object_id || null,
+        route_id: shift.route_id || null,
+        service_date: serviceDate,
+        cao_key: shift.cao_key || null,
+        service_context: {
+          ...serviceContextFromShift(shift, personnel.id),
+          service_date: serviceDate,
+          covered_service_dates: coveredDates,
+        },
+        require_schedule_validation: false,
+        run_schedule_validation: false,
+        final_validation: false,
+      });
+      const decision = response?.data || response || null;
+      routingDecisions.push({ service_date: serviceDate, decision });
+      const dateCode = serviceDate.replaceAll('-', '_');
+      normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
+        warnings.push(warning(
+          `contract_cao_blocking_${dateCode}_${index + 1}`,
+          'critical',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+      normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
+        warnings.push(warning(
+          `contract_cao_review_${dateCode}_${index + 1}`,
+          'warning',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+      normalizeArray(decision?.warnings).forEach((message, index) => {
+        warnings.push(warning(
+          `contract_cao_warning_${dateCode}_${index + 1}`,
+          'info',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+    } catch (error) {
       warnings.push(warning(
-        `contract_cao_blocking_${index + 1}`,
-        'critical',
-        compact(message),
-        'resolveCaoPlanningAssignmentDecision',
-      ));
-    });
-    normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
-      warnings.push(warning(
-        `contract_cao_review_${index + 1}`,
+        `assignment_validation_unavailable_${serviceDate.replaceAll('-', '_')}`,
         'warning',
-        compact(message),
+        `Contract-/CAO-controle voor ${serviceDate} kon niet worden afgerond: ${(error as Error)?.message || String(error)}.`,
         'resolveCaoPlanningAssignmentDecision',
+        { service_date: serviceDate },
       ));
-    });
-    normalizeArray(decision?.warnings).forEach((message, index) => {
-      warnings.push(warning(
-        `contract_cao_warning_${index + 1}`,
-        'info',
-        compact(message),
-        'resolveCaoPlanningAssignmentDecision',
-      ));
-    });
-  } catch (error) {
+    }
+  }
+  const routedContractIds = uniqueStrings(routingDecisions.map(item => (
+    item.decision?.contract_id || item.decision?.selected_contract?.id
+  )));
+  if (routedContractIds.length > 1) {
     warnings.push(warning(
-      'assignment_validation_unavailable',
-      'warning',
-      `Contract-/CAO-controle kon niet worden afgerond: ${(error as Error)?.message || String(error)}.`,
+      'contract_changes_within_shift',
+      'critical',
+      'De contract-/CAO-routering wisselt binnen deze kalenderoverschrijdende dienst.',
       'resolveCaoPlanningAssignmentDecision',
+      { covered_service_dates: coveredDates, contract_ids: routedContractIds },
     ));
   }
+  personnelContractId = routedContractIds.length === 1 ? routedContractIds[0] : null;
+  routingSnapshot = routingDecisions.length === 1
+    ? routingDecisions[0].decision
+    : {
+        covered_service_dates: coveredDates,
+        decisions: routingDecisions,
+        contract_id: personnelContractId,
+      };
 
   const snapshot = dedupeWarnings(warnings);
   return {
@@ -884,8 +1877,13 @@ async function bootstrapRange(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'bootstrap_range');
+  const requestHash = await mutationRequestHash('bootstrap_range', body);
   const replay = await findReplay(base44, 'bootstrap_range', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'bootstrap_range');
+    return replayResult(replay);
+  }
 
   const periodStart = asDate(body.period_start, 'period_start');
   const periodEnd = asDate(body.period_end, 'period_end');
@@ -967,133 +1965,259 @@ async function bootstrapRange(
     seenSourceKeys.add(sourceKey);
     const route: LooseRecord = routeById.get(routeId) || {};
     const sourceContext = routeBootstrapContext(execution, route, taskById, objectById, customerById);
-    let shift: LooseRecord | null = shiftBySourceKey.get(sourceKey) || null;
-
-    if (!shift) {
-      const task = sourceContext.onlyTask;
-      const object = sourceContext.onlyObject;
-      const customer = sourceContext.onlyCustomer;
-      const requiredQualificationTypes = uniqueStrings([
-        ...sourceContext.tasks.flatMap(item => item.required_qualification_types || []),
-        ...sourceContext.objects.flatMap(item => item.default_required_qualification_types || []),
-      ]);
-      const requiredQualificationGroups = uniqueStrings([
-        ...sourceContext.tasks.flatMap(item => item.required_qualification_groups || []),
-        ...sourceContext.objects.flatMap(item => item.default_required_qualification_groups || []),
-      ]);
-      const startTime = asTime(execution.shift_start_time || route.time_window_start, 'shift_start_time');
-      const endTime = asTime(execution.shift_end_time || route.time_window_end, 'shift_end_time');
-      const createdShift: LooseRecord = await base44.asServiceRole.entities.PlanningShift.create({
-        source_key: sourceKey,
-        source_type: 'route',
-        source_id: routeId,
-        source_shift_id: null,
-        source_route_execution_id: execution.id || null,
-        company_id: sourceContext.companyId || null,
-        customer_id: customer?.id || null,
-        customer_ids: sourceContext.customerIds,
-        object_id: object?.id || null,
-        object_ids: sourceContext.objectIds,
-        route_id: routeId,
-        task_id: task?.id || null,
-        customer_contract_line_id: null,
-        customer_name_snapshot: customerDisplayName(customer),
-        object_name_snapshot: object?.name || null,
-        route_name_snapshot: execution.route_name || route.name || null,
-        service_name_snapshot: execution.route_name || route.name || 'Route',
-        service_date: execution.service_date,
-        end_date: null,
-        start_time: startTime,
-        end_time: endTime,
-        timezone: 'Europe/Amsterdam',
-        duration_minutes: execution.total_planned_route_minutes ?? route.total_route_minutes ?? null,
-        required_count: 1,
-        cao_key: execution.contract_cao_key || route.cao_key || task?.cao_key || object?.cao_key || null,
-        service_function_type: execution.contract_function_key
-          || task?.service_function_type
-          || object?.default_service_function_type
-          || null,
-        required_cao_function_group: task?.required_cao_function_group || object?.default_cao_function_group || null,
-        required_cao_function_level: task?.required_cao_function_level || object?.default_cao_function_level || null,
-        required_security_role_status: task?.required_security_role_status || object?.default_security_role_status || null,
-        required_qualification_types: requiredQualificationTypes,
-        required_qualification_groups: requiredQualificationGroups,
-        contract_assignment_policy: task?.contract_assignment_policy
-          || object?.contract_assignment_policy
-          || 'allow_manual_review',
-        performs_security_work: task?.performs_security_work ?? object?.default_performs_security_work ?? null,
-        security_work_percentage: task?.security_work_percentage ?? object?.default_security_work_percentage ?? null,
-        works_event_or_hospitality_security: task?.works_event_or_hospitality_security
-          ?? object?.default_works_event_or_hospitality_security
-          ?? null,
-        event_hospitality_cao_applies: task?.event_hospitality_cao_applies
-          ?? object?.default_event_hospitality_cao_applies
-          ?? null,
-        works_airport_schiphol: task?.works_airport_schiphol ?? object?.default_works_airport_schiphol ?? null,
-        works_cash_value_logistics: task?.works_cash_value_logistics
-          ?? object?.default_works_cash_value_logistics
-          ?? null,
-        customer_billable: task?.customer_billable ?? object?.default_customer_billable ?? null,
-        counts_toward_required_staffing: task?.counts_toward_required_staffing
-          ?? object?.default_counts_toward_required_staffing
-          ?? null,
-        service_context_snapshot: {
-          bootstrap_source: 'RouteExecution',
-          route_execution_id: execution.id || null,
-          route_task_ids: sourceContext.taskIds,
-          object_ids: sourceContext.objectIds,
-          customer_ids: sourceContext.customerIds,
-          original_contract_routing_snapshot: execution.contract_routing_snapshot || null,
-        },
-        status: execution.status === 'cancelled' ? 'cancelled' : 'draft',
-        revision: 1,
-        published_revision: 0,
-        last_published_correlation_id: null,
-        last_modified_by_user_id: user.id || null,
-        last_modified_at: nowIso(),
-        metadata: { bootstrap_source_status: execution.status || null },
-      });
-      shift = createdShift;
-      shiftBySourceKey.set(sourceKey, shift);
-      createdShiftIds.push(shift.id);
-    } else {
-      existingShiftIds.push(shift.id);
+    const bootstrapStartTime = asTime(execution.shift_start_time || route.time_window_start, 'shift_start_time');
+    const bootstrapEndTime = asTime(execution.shift_end_time || route.time_window_end, 'shift_end_time');
+    const bootstrapDescriptor = await resourceCoordinatorDescriptor('bootstrap_source', sourceKey);
+    const bootstrapDescriptors: LooseRecord[] = [bootstrapDescriptor];
+    const existingSourceShifts = existingShifts.filter(item => item.source_key === sourceKey);
+    const existingSourceShiftIds = new Set(existingSourceShifts.map(item => String(item.id)));
+    const existingSourceAssignments = existingAssignments.filter(item => (
+      item.status !== 'removed' && existingSourceShiftIds.has(String(item.shift_id))
+    ));
+    bootstrapDescriptors.push(...await Promise.all(existingSourceShifts.map(item => (
+      resourceCoordinatorDescriptor('shift_composition', item.id)
+    ))));
+    bootstrapDescriptors.push(...await personnelDayDescriptors(
+      existingSourceAssignments.map(item => item.personnel_id),
+      existingSourceShifts,
+    ));
+    if (execution.employee_id) {
+      bootstrapDescriptors.push(...await personnelDayDescriptors(
+        [execution.employee_id],
+        [{
+          service_date: execution.service_date,
+          end_date: execution.end_date || null,
+          start_time: bootstrapStartTime,
+          end_time: bootstrapEndTime,
+        }],
+      ));
     }
+    const bootstrapRequestHash = await sha256(stableStringify({
+      action: 'bootstrap_route_source',
+      source_key: sourceKey,
+      route_execution_id: execution.id || null,
+    }));
+    const bootstrapResult = await withPlanningResourceLeases(
+      base44,
+      user,
+      context,
+      bootstrapRequestHash,
+      bootstrapDescriptors,
+      async leases => {
+        for (const existingSourceShift of existingSourceShifts) {
+          const currentSourceShift = await requireRecord(
+            base44,
+            'PlanningShift',
+            existingSourceShift.id,
+            'Dienst',
+          );
+          await assertNoForeignPendingMutation(
+            base44,
+            currentSourceShift,
+            context,
+            'bootstrap_range',
+            user,
+            bootstrapRequestHash,
+          );
+        }
+        await renewPlanningResourceLeases(base44, user, leases);
+        let shift: LooseRecord | null = await reconcilePlanningShiftSourceKey(
+          base44,
+          user,
+          sourceKey,
+          () => renewPlanningResourceLeases(base44, user, leases),
+          candidate => assertNoForeignPendingMutation(
+            base44,
+            candidate,
+            context,
+            'bootstrap_range',
+            user,
+            bootstrapRequestHash,
+          ),
+        );
+        let createdShiftId: string | null = null;
+        if (!shift) {
+          const task = sourceContext.onlyTask;
+          const object = sourceContext.onlyObject;
+          const customer = sourceContext.onlyCustomer;
+          const requiredQualificationTypes = uniqueStrings([
+            ...sourceContext.tasks.flatMap(item => item.required_qualification_types || []),
+            ...sourceContext.objects.flatMap(item => item.default_required_qualification_types || []),
+          ]);
+          const requiredQualificationGroups = uniqueStrings([
+            ...sourceContext.tasks.flatMap(item => item.required_qualification_groups || []),
+            ...sourceContext.objects.flatMap(item => item.default_required_qualification_groups || []),
+          ]);
+          await renewPlanningResourceLeases(base44, user, leases);
+          const createdShift: LooseRecord = await base44.asServiceRole.entities.PlanningShift.create({
+            source_key: sourceKey,
+            source_type: 'route',
+            source_id: routeId,
+            source_shift_id: null,
+            source_route_execution_id: execution.id || null,
+            company_id: sourceContext.companyId || null,
+            customer_id: customer?.id || null,
+            customer_ids: sourceContext.customerIds,
+            object_id: object?.id || null,
+            object_ids: sourceContext.objectIds,
+            route_id: routeId,
+            task_id: task?.id || null,
+            customer_contract_line_id: null,
+            customer_name_snapshot: customerDisplayName(customer),
+            object_name_snapshot: object?.name || null,
+            route_name_snapshot: execution.route_name || route.name || null,
+            service_name_snapshot: execution.route_name || route.name || 'Route',
+            service_date: execution.service_date,
+            end_date: null,
+            start_time: bootstrapStartTime,
+            end_time: bootstrapEndTime,
+            timezone: 'Europe/Amsterdam',
+            duration_minutes: execution.total_planned_route_minutes ?? route.total_route_minutes ?? null,
+            required_count: 1,
+            cao_key: execution.contract_cao_key || route.cao_key || task?.cao_key || object?.cao_key || null,
+            service_function_type: execution.contract_function_key
+              || task?.service_function_type
+              || object?.default_service_function_type
+              || null,
+            required_cao_function_group: task?.required_cao_function_group || object?.default_cao_function_group || null,
+            required_cao_function_level: task?.required_cao_function_level || object?.default_cao_function_level || null,
+            required_security_role_status: task?.required_security_role_status || object?.default_security_role_status || null,
+            required_qualification_types: requiredQualificationTypes,
+            required_qualification_groups: requiredQualificationGroups,
+            contract_assignment_policy: task?.contract_assignment_policy
+              || object?.contract_assignment_policy
+              || 'allow_manual_review',
+            performs_security_work: task?.performs_security_work ?? object?.default_performs_security_work ?? null,
+            security_work_percentage: task?.security_work_percentage ?? object?.default_security_work_percentage ?? null,
+            works_event_or_hospitality_security: task?.works_event_or_hospitality_security
+              ?? object?.default_works_event_or_hospitality_security
+              ?? null,
+            event_hospitality_cao_applies: task?.event_hospitality_cao_applies
+              ?? object?.default_event_hospitality_cao_applies
+              ?? null,
+            works_airport_schiphol: task?.works_airport_schiphol ?? object?.default_works_airport_schiphol ?? null,
+            works_cash_value_logistics: task?.works_cash_value_logistics
+              ?? object?.default_works_cash_value_logistics
+              ?? null,
+            customer_billable: task?.customer_billable ?? object?.default_customer_billable ?? null,
+            counts_toward_required_staffing: task?.counts_toward_required_staffing
+              ?? object?.default_counts_toward_required_staffing
+              ?? null,
+            service_context_snapshot: {
+              bootstrap_source: 'RouteExecution',
+              route_execution_id: execution.id || null,
+              route_task_ids: sourceContext.taskIds,
+              object_ids: sourceContext.objectIds,
+              customer_ids: sourceContext.customerIds,
+              original_contract_routing_snapshot: execution.contract_routing_snapshot || null,
+            },
+            status: execution.status === 'cancelled' ? 'cancelled' : 'draft',
+            revision: 1,
+            published_revision: 0,
+            last_published_correlation_id: null,
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: { bootstrap_source_status: execution.status || null },
+          });
+          await renewPlanningResourceLeases(base44, user, leases);
+          shift = await reconcilePlanningShiftSourceKey(
+            base44,
+            user,
+            sourceKey,
+            () => renewPlanningResourceLeases(base44, user, leases),
+            candidate => assertNoForeignPendingMutation(
+              base44,
+              candidate,
+              context,
+              'bootstrap_range',
+              user,
+              bootstrapRequestHash,
+            ),
+          ) || createdShift;
+          if (String(shift.id) === String(createdShift.id)) createdShiftId = shift.id;
+        }
 
-    const slotKey = `${shift.id}:0`;
-    if (execution.employee_id && !assignmentBySlot.has(slotKey)) {
-      const warningSnapshot = legacyRoutingWarnings(execution);
-      const assignment = await base44.asServiceRole.entities.PlanningAssignment.create({
-        shift_id: shift.id,
-        slot_index: 0,
-        personnel_id: execution.employee_id,
-        personnel_name_snapshot: execution.employee_name || 'Medewerker',
-        personnel_contract_id: execution.personnel_contract_id || null,
-        status: 'draft',
-        warning_codes: warningSnapshot.map(item => item.code),
-        warning_snapshot: warningSnapshot,
-        has_critical_warnings: warningSnapshot.some(item => item.severity === 'critical'),
-        contract_routing_snapshot: execution.contract_routing_snapshot || null,
-        assigned_by_user_id: user.id || null,
-        assigned_at: nowIso(),
-        removed_by_user_id: null,
-        removed_at: null,
-        revision: 1,
-        published_revision: 0,
-        last_published_correlation_id: null,
-        metadata: {
-          bootstrap_source: 'RouteExecution',
-          route_execution_id: execution.id || null,
-        },
-      });
-      assignmentBySlot.set(slotKey, assignment);
-      createdAssignmentIds.push(assignment.id);
+        const slotKey = `${shift.id}:0`;
+        const slotAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
+          shift_id: shift.id,
+          slot_index: 0,
+        });
+        const activeSlotAssignments = slotAssignments.filter(item => item.status !== 'removed');
+        if (activeSlotAssignments.length > 1) {
+          throw new ApiError(409, 'Meerdere actieve route-toewijzingen delen dezelfde dienstslot', {
+            shift_id: shift.id,
+            assignment_ids: activeSlotAssignments.map(item => item.id),
+          });
+        }
+        let createdAssignment: LooseRecord | null = null;
+        if (execution.employee_id && !activeSlotAssignments[0]) {
+          const legacyWarnings = legacyRoutingWarnings(execution);
+          const finalPersonnel = await getRecord(base44, 'Personnel', execution.employee_id);
+          const eligibility = finalPersonnel
+            ? await evaluateAssignmentWarnings(
+                base44,
+                shift,
+                finalPersonnel,
+                slotAssignments[0]?.id || null,
+                legacyWarnings,
+              )
+            : null;
+          const warningSnapshot = eligibility?.warning_snapshot || legacyWarnings;
+          const assignmentPayload = {
+            personnel_id: execution.employee_id,
+            personnel_name_snapshot: finalPersonnel?.name || execution.employee_name || 'Medewerker',
+            personnel_contract_id: eligibility?.personnel_contract_id || execution.personnel_contract_id || null,
+            status: 'draft',
+            warning_codes: warningSnapshot.map(item => item.code),
+            warning_snapshot: warningSnapshot,
+            has_critical_warnings: warningSnapshot.some(item => item.severity === 'critical'),
+            contract_routing_snapshot: eligibility?.contract_routing_snapshot
+              || execution.contract_routing_snapshot
+              || null,
+            assigned_by_user_id: user.id || null,
+            assigned_at: nowIso(),
+            removed_by_user_id: null,
+            removed_at: null,
+            published_revision: 0,
+            last_published_correlation_id: null,
+            metadata: {
+              ...(slotAssignments[0]?.metadata || {}),
+              bootstrap_source: 'RouteExecution',
+              route_execution_id: execution.id || null,
+              bootstrap_reactivated_at: slotAssignments[0] ? nowIso() : null,
+              final_assignment_validation_at: finalPersonnel ? nowIso() : null,
+            },
+          };
+          await renewPlanningResourceLeases(base44, user, leases);
+          createdAssignment = slotAssignments[0]
+            ? await casUpdate(
+                base44,
+                'PlanningAssignment',
+                slotAssignments[0],
+                revisionOf(slotAssignments[0]),
+                assignmentPayload,
+              )
+            : await base44.asServiceRole.entities.PlanningAssignment.create({
+                shift_id: shift.id,
+                slot_index: 0,
+                ...assignmentPayload,
+                revision: 1,
+              });
+        }
+        return { shift, createdShiftId, createdAssignment, slotKey };
+      },
+    );
+    shiftBySourceKey.set(sourceKey, bootstrapResult.shift);
+    if (bootstrapResult.createdShiftId) createdShiftIds.push(bootstrapResult.createdShiftId);
+    else existingShiftIds.push(bootstrapResult.shift.id);
+    if (bootstrapResult.createdAssignment) {
+      assignmentBySlot.set(bootstrapResult.slotKey, bootstrapResult.createdAssignment);
+      createdAssignmentIds.push(bootstrapResult.createdAssignment.id);
     }
   }
 
   const occurrenceHasActiveSegment = new Set(
-    existingTaskSegments
-      .filter((item: LooseRecord) => item.status !== 'removed')
+    activeTaskSegments(existingTaskSegments, existingShifts)
       .map((item: LooseRecord) => String(item.task_occurrence_id)),
   );
   let reconciledOccurrences = existingOccurrences;
@@ -1229,31 +2353,32 @@ async function bootstrapRange(
         createdOccurrenceIds.push(createdOccurrence.id);
         continue;
       }
-      desiredOccurrenceIds.add(String(existing.id));
-      if (hasActivePlanningCompositionReservation(existing)) continue;
-      if (String(existing.source_key) !== String(blueprint.source_key)) {
-        existing = await casUpdate(
+      let currentOccurrence: LooseRecord = existing;
+      desiredOccurrenceIds.add(String(currentOccurrence.id));
+      if (hasActivePlanningCompositionReservation(currentOccurrence)) continue;
+      if (String(currentOccurrence.source_key) !== String(blueprint.source_key)) {
+        currentOccurrence = await casUpdate(
           base44,
           'PlanningTaskOccurrence',
-          existing,
-          revisionOf(existing),
+          currentOccurrence,
+          revisionOf(currentOccurrence),
           {
             source_key: blueprint.source_key,
             schedule_period_key: blueprint.schedule_period_key,
             last_modified_by_user_id: user.id || null,
             last_modified_at: nowIso(),
             metadata: {
-              ...(existing.metadata || {}),
-              migrated_from_source_key: existing.source_key,
+              ...(currentOccurrence.metadata || {}),
+              migrated_from_source_key: currentOccurrence.source_key,
               period_key_reconciled_at: nowIso(),
             },
           },
         );
-        occurrenceBySourceKey.set(blueprint.source_key, existing);
-        occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(existing), existing);
-        refreshedOccurrenceIds.push(existing.id);
+        occurrenceBySourceKey.set(blueprint.source_key, currentOccurrence);
+        occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(currentOccurrence), currentOccurrence);
+        refreshedOccurrenceIds.push(currentOccurrence.id);
       }
-      if (occurrenceHasActiveSegment.has(String(existing.id))) continue;
+      if (occurrenceHasActiveSegment.has(String(currentOccurrence.id))) continue;
       const comparableFields = [
         'definition_version',
         'company_id',
@@ -1274,17 +2399,17 @@ async function bootstrapRange(
         'instructions_snapshot',
         'lifecycle_status',
       ];
-      if (stableStringify(pick(existing, comparableFields)) !== stableStringify(pick(payload, comparableFields))) {
+      if (stableStringify(pick(currentOccurrence, comparableFields)) !== stableStringify(pick(payload, comparableFields))) {
         const refreshed = await casUpdate(
           base44,
           'PlanningTaskOccurrence',
-          existing,
-          revisionOf(existing),
+          currentOccurrence,
+          revisionOf(currentOccurrence),
           payload,
         );
         occurrenceBySourceKey.set(blueprint.source_key, refreshed);
         occurrenceByIdentityKey.set(taskOccurrenceIdentityKey(refreshed), refreshed);
-        refreshedOccurrenceIds.push(existing.id);
+        refreshedOccurrenceIds.push(currentOccurrence.id);
       }
     }
   }
@@ -1341,6 +2466,7 @@ async function bootstrapRange(
     correlation_id: context.correlationId,
     idempotency_key: context.idempotencyKey,
     undoable: false,
+    metadata: { request_hash: requestHash },
   });
   return { ok: true, ...result, undoable: false, undo_token: null };
 }
@@ -1430,18 +2556,97 @@ async function composeShift(
 ) {
   if (!context.idempotencyKey) throw new ApiError(400, 'idempotency_key is verplicht voor dienstsamenstelling');
   const requestedShiftId = compact(body.shift_id);
-  const action = requestedShiftId ? 'update_shift_composition' : 'compose_shift';
-  const replay = await findReplay(base44, action, context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  const composeAndAssignMode = body.action === 'compose_and_assign';
+  if (composeAndAssignMode && requestedShiftId) {
+    throw new ApiError(400, 'compose_and_assign maakt altijd één nieuwe dienst');
+  }
+  const action = composeAndAssignMode
+    ? 'compose_and_assign'
+    : requestedShiftId
+    ? 'update_shift_composition'
+    : 'compose_shift';
 
   const requestedSegments = normalizeArray<LooseRecord>(body.segments);
+  let requestedPersonnelId: string | null = null;
+  let requestedSlotIndex = 0;
+  let requestedRequiredCount: number | null = null;
+  let compositionRequestHash: string;
+  let composeAndAssignRequestHash: string | null = null;
+  let compositionLeases: LooseRecord[] = [];
+  let composeAndAssignClaimed = false;
+  const composeAndAssignState: LooseRecord = {
+    shiftId: null,
+    reservedOccurrenceIds: [],
+    phaseCompleted: false,
+    auditCompleted: false,
+  };
+  if (composeAndAssignMode) {
+    requestedPersonnelId = requireId(body, 'personnel_id');
+    requestedSlotIndex = nonNegativeInteger(body.slot_index ?? 0, 'slot_index');
+    requestedRequiredCount = positiveInteger(body.required_count || 1, 'required_count');
+    if (requestedSlotIndex >= requestedRequiredCount) {
+      throw new ApiError(400, 'slot_index valt buiten required_count');
+    }
+  }
+  compositionRequestHash = await sha256(stableStringify({
+    action,
+    shift_id: requestedShiftId || null,
+    personnel_id: requestedPersonnelId,
+    slot_index: composeAndAssignMode ? requestedSlotIndex : null,
+    required_count: composeAndAssignMode ? requestedRequiredCount : body.required_count || null,
+    expected_shift_revision: body.expected_shift_revision || null,
+    service_name: compact(body.service_name || body.name) || null,
+    assignment_source: compact(body.assignment_source) || (composeAndAssignMode ? 'compose_and_assign' : null),
+    warnings: normalizeSuppliedWarnings(body),
+    expected_occurrence_revisions: body.expected_occurrence_revisions || {},
+    segments: requestedSegments.map(item => ({
+      task_occurrence_id: compact(item.task_occurrence_id),
+      start_date: compact(item.start_date) || null,
+      end_date: compact(item.end_date) || null,
+      start_time: compact(item.start_time),
+      end_time: compact(item.end_time),
+    })),
+  }));
+  if (composeAndAssignMode) composeAndAssignRequestHash = compositionRequestHash;
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  let pendingCompositionAudit: LooseRecord | null = null;
+  if (replay) {
+    if (
+      replay.actor_user_id !== (user.id || null)
+      || replay.metadata?.request_hash !== compositionRequestHash
+    ) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere dienstsamenstelling');
+    }
+    const replayShiftId = compact(replay.after_state?.shift?.id || replay.shift_id);
+    const replayShift = replayShiftId
+      ? await getRecord(base44, 'PlanningShift', replayShiftId)
+      : null;
+    if (replayShift?.metadata?.planning_composition?.phase === 'completed') {
+      if (composeAndAssignMode) {
+        await mutateIdempotencyClaim(
+          base44,
+          user,
+          context,
+          composeAndAssignRequestHash as string,
+          'completed',
+        );
+      }
+      return replayResult(replay);
+    }
+    pendingCompositionAudit = replay;
+  }
+
   if (!requestedSegments.length) throw new ApiError(400, 'Voeg minimaal één taaksegment toe');
   if (requestedSegments.length > 50) throw new ApiError(400, 'Een dienst mag maximaal 50 taaksegmenten bevatten');
   const occurrenceIds = uniqueStrings(requestedSegments.map(item => item.task_occurrence_id));
   if (occurrenceIds.length > 50) throw new ApiError(400, 'Te veel verschillende taakuitvoeringen in één dienst');
+  if (composeAndAssignMode) composeAndAssignState.requestedOccurrenceIds = occurrenceIds;
   const occurrences = await Promise.all(
     occurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
   );
+  const requestedPersonnel = composeAndAssignMode
+    ? await requireRecord(base44, 'Personnel', requestedPersonnelId as string, 'Medewerker')
+    : null;
   const occurrenceById = new Map<string, LooseRecord>(occurrences.map(item => [String(item.id), item]));
   occurrences.forEach(occurrence => {
     if (occurrence.lifecycle_status !== 'active') {
@@ -1455,6 +2660,9 @@ async function composeShift(
   const expectedOccurrenceRevisions = body.expected_occurrence_revisions || {};
   const expectedOccurrenceRevisionById = new Map<string, number>();
   for (const occurrence of occurrences) {
+    if (composeAndAssignMode && expectedOccurrenceRevisions[occurrence.id] == null) {
+      throw new ApiError(400, `expected_occurrence_revisions.${occurrence.id} is verplicht`);
+    }
     const expected = expectedOccurrenceRevisions[occurrence.id] == null
       ? revisionOf(occurrence)
       : positiveInteger(
@@ -1464,6 +2672,38 @@ async function composeShift(
     expectedOccurrenceRevisionById.set(String(occurrence.id), expected);
     const reservation = occurrence.metadata?.planning_composition_reservation;
     const ownsReservation = reservation?.idempotency_key === context.idempotencyKey;
+    const completedByThisComposition = occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey;
+    const completedByThisRequest = composeAndAssignMode
+      && occurrence.metadata?.last_compose_and_assign_idempotency_key === context.idempotencyKey;
+    const compensatedByThisRequest = composeAndAssignMode
+      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey;
+    if (ownsReservation && reservation.request_hash !== compositionRequestHash) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere taakreservering', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+      });
+    }
+    if (completedByThisComposition
+      && occurrence.metadata?.last_composition_request_hash !== compositionRequestHash) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere afgeronde dienstsamenstelling', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+      });
+    }
+    if (completedByThisRequest
+      && occurrence.metadata?.last_compose_and_assign_request_hash !== composeAndAssignRequestHash) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere afgeronde taakreservering', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+      });
+    }
+    if (compensatedByThisRequest
+      && occurrence.metadata?.last_compose_and_assign_recovery_request_hash !== composeAndAssignRequestHash) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere gecompenseerde taakreservering', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+      });
+    }
     const reservationActive = reservation?.status === 'pending'
       && Date.parse(reservation.expires_at || '') > Date.now();
     if (reservationActive && !ownsReservation) {
@@ -1473,7 +2713,13 @@ async function composeShift(
         reservation_expires_at: reservation.expires_at,
       });
     }
-    if (revisionOf(occurrence) !== expected && !ownsReservation) {
+    if (
+      revisionOf(occurrence) !== expected
+      && !ownsReservation
+      && !completedByThisComposition
+      && !completedByThisRequest
+      && !compensatedByThisRequest
+    ) {
       throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
         entity: 'PlanningTaskOccurrence',
         id: occurrence.id,
@@ -1483,10 +2729,6 @@ async function composeShift(
     }
   }
 
-  const serviceDates = uniqueStrings(occurrences.map(item => item.service_date));
-  if (serviceDates.length !== 1) {
-    throw new ApiError(409, 'Eén dienst kan alleen taakuitvoeringen met dezelfde startdatum bevatten');
-  }
   const normalizedSegments = requestedSegments
     .map(item => {
       const occurrence = occurrenceById.get(String(item.task_occurrence_id));
@@ -1504,16 +2746,208 @@ async function composeShift(
       });
     }
   }
+  const compositionEnvelopeMinutes = (
+    normalizedSegments.at(-1)!._interval.end - normalizedSegments[0]._interval.start
+  );
+  if (compositionEnvelopeMinutes > MAX_COMPOSED_SHIFT_MINUTES) {
+    throw new ApiError(409, 'Een samengestelde dienst mag maximaal 24 uur beslaan', {
+      duration_minutes: compositionEnvelopeMinutes,
+      maximum_duration_minutes: MAX_COMPOSED_SHIFT_MINUTES,
+    });
+  }
 
-  const sourceKey = `task-composition:${context.idempotencyKey}`;
+  try {
+    if (composeAndAssignMode) {
+      await mutateIdempotencyClaim(
+        base44,
+        user,
+        context,
+        composeAndAssignRequestHash as string,
+        'pending',
+      );
+      composeAndAssignClaimed = true;
+    }
+
+    const compositionDescriptors: LooseRecord[] = await Promise.all([
+      ...occurrenceIds.map(id => resourceCoordinatorDescriptor('task_occurrence', id)),
+      resourceCoordinatorDescriptor(
+        'shift_composition',
+        requestedShiftId || `source:task-composition:${context.idempotencyKey}`,
+      ),
+    ]);
+    if (composeAndAssignMode) {
+      compositionDescriptors.push(...await personnelDayDescriptors(
+        [requestedPersonnelId as string],
+        [{
+          service_date: normalizedSegments[0].start_date,
+          end_date: normalizedSegments.at(-1)?.end_date,
+          start_time: normalizedSegments[0].start_time,
+          end_time: normalizedSegments.at(-1)?.end_time,
+        }],
+      ));
+    }
+    compositionLeases = await acquirePlanningResourceLeases(
+      base44,
+      user,
+      context,
+      compositionRequestHash,
+      compositionDescriptors,
+    );
+
+  const sourceKey = composeAndAssignMode
+    ? `task-compose-and-assign:${context.idempotencyKey}`
+    : `task-composition:${context.idempotencyKey}`;
+  const sourceKeyMatches = requestedShiftId
+    ? []
+    : await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { source_key: sourceKey });
+  let reconciledSourceShift: LooseRecord | null = null;
+  if (sourceKeyMatches.length > 1) {
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    reconciledSourceShift = await reconcilePlanningShiftSourceKey(
+      base44,
+      user,
+      sourceKey,
+      () => renewPlanningResourceLeases(base44, user, compositionLeases),
+      candidate => assertNoForeignPendingMutation(
+        base44,
+        candidate,
+        context,
+        action,
+        user,
+        compositionRequestHash,
+      ),
+    );
+  }
   let shift = requestedShiftId
     ? await requireRecord(base44, 'PlanningShift', requestedShiftId, 'Dienst')
-    : (await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { source_key: sourceKey }))[0] || null;
+    : reconciledSourceShift || sourceKeyMatches[0] || null;
+  if (shift) {
+    await assertNoForeignPendingMutation(
+      base44,
+      shift,
+      context,
+      action,
+      user,
+      compositionRequestHash,
+    );
+  }
+  if (composeAndAssignMode && shift) {
+    const recovery = shift.metadata?.compose_and_assign;
+    if (
+      recovery?.idempotency_key !== context.idempotencyKey
+      || recovery?.request_hash !== composeAndAssignRequestHash
+      || recovery?.personnel_id !== requestedPersonnelId
+      || Number(recovery?.slot_index) !== requestedSlotIndex
+    ) {
+      throw new ApiError(409, 'Bestaande herstelstaat hoort bij een andere compose_and_assign-opdracht', {
+        shift_id: shift.id,
+      });
+    }
+    if (recovery.phase === 'completed') {
+      const [storedSegments, storedAssignment] = await Promise.all([
+        filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: shift.id }),
+        recovery.assignment_id
+          ? getRecord(base44, 'PlanningAssignment', recovery.assignment_id)
+          : Promise.resolve(null),
+      ]);
+      const expectedSegmentIds = new Set(uniqueStrings(recovery.segment_ids));
+      const activeStoredSegments = storedSegments.filter((item: LooseRecord) => item.status !== 'removed');
+      const storedStateComplete = Boolean(
+        storedAssignment
+        && storedAssignment.status !== 'removed'
+        && storedAssignment.metadata?.compose_and_assign_request_hash === composeAndAssignRequestHash
+        && String(storedAssignment.personnel_id) === String(requestedPersonnelId)
+        && Number(storedAssignment.slot_index) === requestedSlotIndex
+        && activeStoredSegments.length === expectedSegmentIds.size
+        && activeStoredSegments.every((item: LooseRecord) => expectedSegmentIds.has(String(item.id)))
+      );
+      if (storedStateComplete) {
+        composeAndAssignState.shiftId = shift.id;
+        composeAndAssignState.phaseCompleted = true;
+        const recoveredResult = {
+          shift,
+          segments: activeStoredSegments,
+          assignment: storedAssignment,
+          assignments: [storedAssignment],
+          task_occurrences: occurrences,
+          composition_warnings: normalizeArray(shift.service_context_snapshot?.composition_warnings),
+        };
+        await renewPlanningResourceLeases(base44, user, compositionLeases);
+        const recoveryAudit = await appendAudit(base44, user, {
+          action,
+          resource_type: 'PlanningShift',
+          resource_id: shift.id,
+          shift_id: shift.id,
+          assignment_id: storedAssignment.id,
+          before_state: { shift: null, segments: [], assignments: [] },
+          after_state: recoveredResult,
+          correlation_id: context.correlationId,
+          idempotency_key: context.idempotencyKey,
+          undoable: false,
+          metadata: {
+            request_hash: composeAndAssignRequestHash,
+            assignment_source: compact(body.assignment_source) || 'compose_and_assign',
+            task_occurrence_ids: occurrenceIds,
+            task_segment_count: activeStoredSegments.length,
+            recovered_completed_state: true,
+          },
+        });
+        composeAndAssignState.auditCompleted = true;
+        await mutateIdempotencyClaim(
+          base44,
+          user,
+          context,
+          composeAndAssignRequestHash as string,
+          'completed',
+        );
+        await renewPlanningResourceLeases(base44, user, compositionLeases);
+        const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+        compositionLeases = [];
+        if (releaseErrors.length) {
+          throw new ApiError(503, 'Planningactie is opgeslagen, maar de personeelsreservering kon niet worden vrijgegeven', {
+            release_errors: releaseErrors,
+          });
+        }
+        return {
+          ok: true,
+          idempotent: true,
+          ...recoveredResult,
+          audit_event_id: recoveryAudit.id,
+          undoable: false,
+          undo_token: null,
+        };
+      }
+    }
+  }
+  const compositionRecovery = shift?.metadata?.planning_composition;
+  if (
+    compositionRecovery?.idempotency_key === context.idempotencyKey
+    && compositionRecovery?.request_hash !== compositionRequestHash
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere bestaande dienstsamenstelling', {
+      shift_id: shift.id,
+    });
+  }
   const recovering = Boolean(
     shift
     && shift.metadata?.last_composition_idempotency_key === context.idempotencyKey
+    && compositionRecovery?.request_hash === compositionRequestHash
   );
-  if (shift?.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden samengesteld');
+  const ownedComposeAndAssignRecovery = Boolean(
+    composeAndAssignMode
+    && shift?.metadata?.compose_and_assign?.idempotency_key === context.idempotencyKey
+    && shift?.metadata?.compose_and_assign?.request_hash === composeAndAssignRequestHash
+    && shift?.metadata?.compose_and_assign?.phase !== 'completed'
+  );
+  const ownedCompositionRecovery = Boolean(
+    shift
+    && compositionRecovery?.idempotency_key === context.idempotencyKey
+    && compositionRecovery?.request_hash === compositionRequestHash
+    && compositionRecovery?.phase !== 'completed'
+  );
+  if (shift?.status === 'cancelled' && !ownedComposeAndAssignRecovery && !ownedCompositionRecovery) {
+    throw new ApiError(409, 'Een geannuleerde dienst kan niet worden samengesteld');
+  }
   if (requestedShiftId && shift.source_type !== 'task' && !recovering) {
     throw new ApiError(409, 'Alleen een vanuit objecttaken samengestelde dienst kan hier worden bewerkt');
   }
@@ -1529,10 +2963,87 @@ async function composeShift(
     }
   }
 
-  const allSegments = await listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date');
-  const otherActiveSegments = allSegments.filter((item: LooseRecord) =>
-    item.status !== 'removed'
-    && (!shift || String(item.shift_id) !== String(shift.id))
+  if (pendingCompositionAudit) {
+    if (!shift || !ownedCompositionRecovery) {
+      throw new ApiError(409, 'De geaudite dienstsamenstelling heeft geen herstelbare pending dienst');
+    }
+    const storedSegments = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningShiftTaskSegment,
+      { shift_id: shift.id },
+    )).filter((item: LooseRecord) => item.status !== 'removed');
+    const expectedSegmentIds = new Set(uniqueStrings(
+      normalizeArray<LooseRecord>(pendingCompositionAudit.after_state?.segments).map(item => item.id),
+    ));
+    const occurrenceStateComplete = occurrences.every(occurrence => (
+      occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+      && !occurrence.metadata?.planning_composition_reservation
+    ));
+    const segmentStateComplete = storedSegments.length === expectedSegmentIds.size
+      && storedSegments.every(item => expectedSegmentIds.has(String(item.id)));
+    if (!occurrenceStateComplete || !segmentStateComplete) {
+      throw new ApiError(409, 'De geaudite dienstsamenstelling is niet volledig herstelbaar', {
+        shift_id: shift.id,
+        occurrence_state_complete: occurrenceStateComplete,
+        segment_state_complete: segmentStateComplete,
+      });
+    }
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    const completedShift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+      status: 'draft',
+      metadata: {
+        ...(shift.metadata || {}),
+        planning_composition: {
+          ...(shift.metadata?.planning_composition || {}),
+          phase: 'completed',
+          segment_ids: storedSegments.map(item => item.id),
+          completed_at: nowIso(),
+        },
+        ...(composeAndAssignMode ? {
+          compose_and_assign: {
+            ...(shift.metadata?.compose_and_assign || {}),
+            phase: 'completed',
+            assignment_id: pendingCompositionAudit.after_state?.assignment?.id || null,
+            segment_ids: storedSegments.map(item => item.id),
+            completed_at: nowIso(),
+          },
+        } : {}),
+      },
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+    });
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+    compositionLeases = [];
+    if (releaseErrors.length) {
+      throw new ApiError(503, 'Dienst is hersteld, maar de samenstellingsreservering kon niet worden vrijgegeven', {
+        release_errors: releaseErrors,
+      });
+    }
+    if (composeAndAssignMode) {
+      composeAndAssignState.phaseCompleted = true;
+      composeAndAssignState.auditCompleted = true;
+      await mutateIdempotencyClaim(
+        base44,
+        user,
+        context,
+        composeAndAssignRequestHash as string,
+        'completed',
+      );
+    }
+    return {
+      ...replayResult(pendingCompositionAudit),
+      shift: completedShift,
+      segments: storedSegments,
+      task_occurrences: occurrences,
+    };
+  }
+
+  const [allSegments, allParentShifts] = await Promise.all([
+    listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
+    listAllRecords(base44.asServiceRole.entities.PlanningShift),
+  ]);
+  const otherActiveSegments = activeTaskSegments(allSegments, allParentShifts).filter((item: LooseRecord) =>
+    (!shift || String(item.shift_id) !== String(shift.id))
     && occurrenceById.has(String(item.task_occurrence_id))
   );
   for (const occurrence of occurrences) {
@@ -1542,7 +3053,7 @@ async function composeShift(
     );
     const intervals = [...external, ...proposed]
       .map(segmentInterval)
-      .filter(Boolean)
+      .filter((item): item is NonNullable<typeof item> => item != null)
       .sort((a, b) => a.start - b.start || a.end - b.end);
     for (let index = 1; index < intervals.length; index += 1) {
       if (intervals[index].start < intervals[index - 1].end) {
@@ -1615,7 +3126,9 @@ async function composeShift(
     end_time: lastSegment.end_time,
     timezone: 'Europe/Amsterdam',
     duration_minutes: lastSegment._interval.end - firstSegment._interval.start,
-    required_count: positiveInteger(body.required_count || shift?.required_count || 1, 'required_count'),
+    required_count: composeAndAssignMode
+      ? requestedRequiredCount
+      : positiveInteger(body.required_count || shift?.required_count || 1, 'required_count'),
     cao_key: consistentValue(objects.map(item => item.cao_key)),
     service_function_type: consistentValue(objects.map(item => item.default_service_function_type)),
     required_cao_function_group: consistentValue(objects.map(item => item.default_cao_function_group)),
@@ -1652,26 +3165,121 @@ async function composeShift(
       })),
       composition_warnings: warnings,
     },
-    status: 'draft',
+    // A compose_and_assign shift is invisible to all readers until the final
+    // single-record commit flips both status and saga phase.
+    // Every composition stays outside normal readers until its audit exists
+    // and the final single-record commit marks the saga completed.
+    status: 'cancelled',
     last_modified_by_user_id: user.id || null,
     last_modified_at: nowIso(),
     metadata: {
       ...(shift?.metadata || {}),
       last_composition_idempotency_key: context.idempotencyKey,
       last_composition_correlation_id: context.correlationId,
+      planning_composition: {
+        idempotency_key: context.idempotencyKey,
+        correlation_id: context.correlationId,
+        request_hash: compositionRequestHash,
+        phase: 'pending',
+        started_at: shift?.metadata?.planning_composition?.started_at || nowIso(),
+      },
+      ...(composeAndAssignMode ? {
+        compose_and_assign: {
+          idempotency_key: context.idempotencyKey,
+          correlation_id: context.correlationId,
+          request_hash: composeAndAssignRequestHash,
+          personnel_id: requestedPersonnelId,
+          slot_index: requestedSlotIndex,
+          phase: 'composition_pending',
+          started_at: shift?.metadata?.compose_and_assign?.started_at || nowIso(),
+        },
+      } : {}),
     },
   };
 
+  let requestedAssignmentBefore: LooseRecord | null = null;
+  let requestedAssignmentEligibility: LooseRecord | null = null;
+  if (composeAndAssignMode) {
+    requestedAssignmentBefore = shift
+      ? await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex)
+      : null;
+    if (
+      requestedAssignmentBefore
+      && requestedAssignmentBefore.status !== 'removed'
+      && String(requestedAssignmentBefore.personnel_id) !== String(requestedPersonnelId)
+    ) {
+      throw new ApiError(409, 'De bezettingsplaats is al door een andere medewerker ingevuld', {
+        shift_id: shift?.id || null,
+        slot_index: requestedSlotIndex,
+        assignment_id: requestedAssignmentBefore.id,
+      });
+    }
+    if (shift) {
+      const samePersonnelAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
+        shift_id: shift.id,
+        personnel_id: requestedPersonnelId,
+      });
+      const duplicateAssignment = samePersonnelAssignments.find((item: LooseRecord) =>
+        item.status !== 'removed' && item.id !== requestedAssignmentBefore?.id
+      );
+      if (duplicateAssignment) {
+        throw new ApiError(409, 'Medewerker is al aan deze dienst toegewezen', {
+          shift_id: shift.id,
+          personnel_id: requestedPersonnelId,
+          assignment_id: duplicateAssignment.id,
+        });
+      }
+    }
+    const suppliedAssignmentWarnings = normalizeSuppliedWarnings(body);
+    if (objectIds.length > 1) suppliedAssignmentWarnings.push(warning(
+      'multi_object_shift_review',
+      'warning',
+      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
+      'planner',
+      { object_ids: objectIds },
+    ));
+    requestedAssignmentEligibility = await evaluateAssignmentWarnings(
+      base44,
+      { ...(shift || {}), ...shiftPayload, id: shift?.id || `pending:${sourceKey}` },
+      requestedPersonnel as LooseRecord,
+      requestedAssignmentBefore?.id || null,
+      suppliedAssignmentWarnings,
+    );
+  }
+
   const reservedOccurrences: LooseRecord[] = [];
   const reservationExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+  await renewPlanningResourceLeases(base44, user, compositionLeases);
   for (const occurrence of [...occurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const reservation = occurrence.metadata?.planning_composition_reservation;
-    if (reservation?.idempotency_key === context.idempotencyKey) {
+    if (
+      reservation?.idempotency_key === context.idempotencyKey
+      && reservation?.request_hash === compositionRequestHash
+    ) {
+      reservedOccurrences.push(occurrence);
+      if (composeAndAssignMode) {
+        composeAndAssignState.reservedOccurrenceIds = uniqueStrings([
+          ...composeAndAssignState.reservedOccurrenceIds,
+          occurrence.id,
+        ]);
+      }
+      continue;
+    }
+    if (
+      occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+      && !occurrence.metadata?.planning_composition_reservation
+    ) {
       reservedOccurrences.push(occurrence);
       continue;
     }
-    const expectedRevision = expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
-    reservedOccurrences.push(await casUpdate(
+    const compensatedByThisRequest = composeAndAssignMode
+      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey;
+    const expectedRevision = compensatedByThisRequest
+      ? revisionOf(occurrence)
+      : expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    const reservedOccurrence = await casUpdate(
       base44,
       'PlanningTaskOccurrence',
       occurrence,
@@ -1684,18 +3292,28 @@ async function composeShift(
           planning_composition_reservation: {
             idempotency_key: context.idempotencyKey,
             correlation_id: context.correlationId,
+            action,
+            request_hash: compositionRequestHash,
             status: 'pending',
             acquired_at: nowIso(),
             expires_at: reservationExpiresAt,
           },
         },
       },
-    ));
+    );
+    reservedOccurrences.push(reservedOccurrence);
+    if (composeAndAssignMode) {
+      composeAndAssignState.reservedOccurrenceIds = uniqueStrings([
+        ...composeAndAssignState.reservedOccurrenceIds,
+        occurrence.id,
+      ]);
+    }
   }
 
   const beforeShift = shift;
+  await renewPlanningResourceLeases(base44, user, compositionLeases);
   if (shift) {
-    shift = await markShiftDraft(base44, shift, revisionOf(shift), user, shiftPayload);
+    shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), shiftPayload);
   } else {
     shift = await base44.asServiceRole.entities.PlanningShift.create({
       ...shiftPayload,
@@ -1705,11 +3323,13 @@ async function composeShift(
       last_published_correlation_id: null,
     });
   }
+  if (composeAndAssignMode) composeAndAssignState.shiftId = shift.id;
 
   const previousSegments = allSegments.filter((item: LooseRecord) =>
     String(item.shift_id) === String(shift.id) && item.status !== 'removed'
   );
   for (const segment of previousSegments) {
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
     await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
       status: 'removed',
       last_modified_by_user_id: user.id || null,
@@ -1721,6 +3341,7 @@ async function composeShift(
   const createdSegments: LooseRecord[] = [];
   for (const segment of normalizedSegments) {
     const { _interval, ...safeSegment } = segment;
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
     createdSegments.push(await base44.asServiceRole.entities.PlanningShiftTaskSegment.create({
       ...safeSegment,
       shift_id: shift.id,
@@ -1733,13 +3354,134 @@ async function composeShift(
       metadata: {
         composition_idempotency_key: context.idempotencyKey,
         composition_correlation_id: context.correlationId,
+        ...(composeAndAssignMode ? {
+          compose_and_assign_request_hash: composeAndAssignRequestHash,
+        } : {}),
       },
     }));
   }
 
-  const assignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
+  const assignmentsBeforeMutation = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningAssignment,
+    { shift_id: shift.id },
+  );
+  let requestedAssignment: LooseRecord | null = null;
+  if (composeAndAssignMode) {
+    const targetAssignment = await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex);
+    if (
+      targetAssignment
+      && targetAssignment.status !== 'removed'
+      && String(targetAssignment.personnel_id) !== String(requestedPersonnelId)
+    ) {
+      throw new ApiError(409, 'De bezettingsplaats is intussen door een andere medewerker ingevuld', {
+        shift_id: shift.id,
+        slot_index: requestedSlotIndex,
+        assignment_id: targetAssignment.id,
+      });
+    }
+    const finalSuppliedWarnings = normalizeSuppliedWarnings(body);
+    if (objectIds.length > 1) finalSuppliedWarnings.push(warning(
+      'multi_object_shift_review',
+      'warning',
+      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
+      'planner',
+      { object_ids: objectIds },
+    ));
+    const eligibility = await evaluateAssignmentWarnings(
+      base44,
+      shift,
+      requestedPersonnel as LooseRecord,
+      targetAssignment?.id || null,
+      finalSuppliedWarnings,
+    );
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    const assignmentPayload = {
+      personnel_id: requestedPersonnel?.id,
+      personnel_name_snapshot: requestedPersonnel?.name
+        || [requestedPersonnel?.call_name || requestedPersonnel?.first_name, requestedPersonnel?.name_prefix, requestedPersonnel?.last_name]
+          .filter(Boolean)
+          .join(' ')
+        || 'Medewerker',
+      personnel_contract_id: eligibility.personnel_contract_id,
+      status: 'draft',
+      warning_codes: eligibility.warning_codes,
+      warning_snapshot: eligibility.warning_snapshot,
+      has_critical_warnings: eligibility.has_critical_warnings,
+      contract_routing_snapshot: eligibility.contract_routing_snapshot,
+      assigned_by_user_id: user.id || null,
+      assigned_at: nowIso(),
+      removed_by_user_id: null,
+      removed_at: null,
+      last_published_correlation_id: targetAssignment?.last_published_correlation_id || null,
+      metadata: {
+        ...(targetAssignment?.metadata || {}),
+        assignment_source: compact(body.assignment_source) || 'compose_and_assign',
+        compose_and_assign_idempotency_key: context.idempotencyKey,
+        compose_and_assign_correlation_id: context.correlationId,
+        compose_and_assign_request_hash: composeAndAssignRequestHash,
+      },
+    };
+    const writtenAssignment: LooseRecord = targetAssignment
+      ? await casUpdate(
+          base44,
+          'PlanningAssignment',
+          targetAssignment,
+          revisionOf(targetAssignment),
+          assignmentPayload,
+        )
+      : await base44.asServiceRole.entities.PlanningAssignment.create({
+          shift_id: shift.id,
+          slot_index: requestedSlotIndex,
+          ...assignmentPayload,
+          revision: 1,
+          published_revision: 0,
+        });
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    const finalPersonnel = await requireRecord(
+      base44,
+      'Personnel',
+      requestedPersonnelId as string,
+      'Medewerker',
+    );
+    const finalEligibility = await evaluateAssignmentWarnings(
+      base44,
+      shift,
+      finalPersonnel,
+      writtenAssignment.id,
+      finalSuppliedWarnings,
+    );
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    requestedAssignment = await casUpdate(
+      base44,
+      'PlanningAssignment',
+      writtenAssignment,
+      revisionOf(writtenAssignment),
+      {
+        personnel_contract_id: finalEligibility.personnel_contract_id,
+        warning_codes: finalEligibility.warning_codes,
+        warning_snapshot: finalEligibility.warning_snapshot,
+        has_critical_warnings: finalEligibility.has_critical_warnings,
+        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
+        metadata: {
+          ...(writtenAssignment.metadata || {}),
+          final_assignment_validation_at: nowIso(),
+        },
+      },
+    );
+  }
+
+  const assignmentsForRevalidation = composeAndAssignMode && requestedAssignment
+    ? [
+        ...assignmentsBeforeMutation.filter(item => item.id !== requestedAssignment?.id),
+        requestedAssignment,
+      ]
+    : assignmentsBeforeMutation;
   const updatedAssignments: LooseRecord[] = [];
-  for (const assignment of assignments.filter((item: LooseRecord) => item.status !== 'removed')) {
+  for (const assignment of assignmentsForRevalidation.filter((item: LooseRecord) => item.status !== 'removed')) {
+    if (requestedAssignment && assignment.id === requestedAssignment.id) {
+      updatedAssignments.push(requestedAssignment);
+      continue;
+    }
     const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
     const supplied = normalizeArray(assignment.warning_snapshot)
       .filter((item: LooseRecord) => item.source === 'planner');
@@ -1751,6 +3493,7 @@ async function composeShift(
       { object_ids: objectIds },
     ));
     const eligibility = await evaluateAssignmentWarnings(base44, shift, personnel, assignment.id, supplied);
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
     updatedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
       status: 'draft',
       warning_codes: eligibility.warning_codes,
@@ -1763,7 +3506,21 @@ async function composeShift(
 
   const finalizedOccurrences: LooseRecord[] = [];
   for (const occurrence of reservedOccurrences) {
-    const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+    if (occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+      && !occurrence.metadata?.planning_composition_reservation) {
+      finalizedOccurrences.push(occurrence);
+      continue;
+    }
+    const {
+      planning_composition_reservation: _reservation,
+      last_compose_and_assign_recovery_idempotency_key: _recoveryKey,
+      last_compose_and_assign_recovery_request_hash: _recoveryHash,
+      last_compose_and_assign_recovery_status: _recoveryStatus,
+      last_compose_and_assign_recovery_at: _recoveryAt,
+      ...metadata
+    } = occurrence.metadata || {};
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
     finalizedOccurrences.push(await casUpdate(
       base44,
       'PlanningTaskOccurrence',
@@ -1776,31 +3533,179 @@ async function composeShift(
           ...metadata,
           last_composition_idempotency_key: context.idempotencyKey,
           last_composition_correlation_id: context.correlationId,
+          last_composition_request_hash: compositionRequestHash,
           last_composition_completed_at: nowIso(),
+          ...(composeAndAssignMode ? {
+            last_compose_and_assign_idempotency_key: context.idempotencyKey,
+            last_compose_and_assign_correlation_id: context.correlationId,
+            last_compose_and_assign_request_hash: composeAndAssignRequestHash,
+            last_compose_and_assign_completed_at: nowIso(),
+          } : {}),
         },
       },
     ));
   }
 
-  const result = {
-    shift,
+  const completionPatch = {
+    status: 'draft',
+    metadata: {
+      ...(shift.metadata || {}),
+      planning_composition: {
+        ...(shift.metadata?.planning_composition || {}),
+        phase: 'completed',
+        segment_ids: createdSegments.map(item => item.id),
+        completed_at: nowIso(),
+      },
+      ...(composeAndAssignMode ? {
+        compose_and_assign: {
+          ...(shift.metadata?.compose_and_assign || {}),
+          phase: 'completed',
+          assignment_id: requestedAssignment?.id || null,
+          segment_ids: createdSegments.map(item => item.id),
+          completed_at: nowIso(),
+        },
+      } : {}),
+    },
+    last_modified_by_user_id: user.id || null,
+    last_modified_at: nowIso(),
+  };
+  const anticipatedCompletedShift = {
+    ...shift,
+    ...completionPatch,
+    revision: revisionOf(shift) + 1,
+  };
+  const result: LooseRecord = {
+    shift: anticipatedCompletedShift,
     segments: createdSegments,
     assignments: updatedAssignments,
+    ...(requestedAssignment ? { assignment: requestedAssignment } : {}),
     task_occurrences: finalizedOccurrences,
     composition_warnings: warnings,
   };
+  await renewPlanningResourceLeases(base44, user, compositionLeases);
   const audit = await appendAudit(base44, user, {
     action,
     resource_type: 'PlanningShift',
     resource_id: shift.id,
     shift_id: shift.id,
-    before_state: { shift: beforeShift, segments: previousSegments, assignments },
+    assignment_id: requestedAssignment?.id || null,
+    before_state: composeAndAssignMode
+      ? { shift: null, segments: [], assignments: [] }
+      : { shift: beforeShift, segments: previousSegments, assignments: assignmentsBeforeMutation },
     after_state: result,
     correlation_id: context.correlationId,
     idempotency_key: context.idempotencyKey,
     undoable: false,
+    metadata: {
+      request_hash: compositionRequestHash,
+      ...(composeAndAssignMode ? {
+        assignment_source: compact(body.assignment_source) || 'compose_and_assign',
+      } : {}),
+      task_occurrence_ids: occurrenceIds,
+      task_segment_count: createdSegments.length,
+    },
   });
+  if (composeAndAssignMode) composeAndAssignState.auditCompleted = true;
+  // The audit is the visibility gate for every composition. Until it exists
+  // the shift remains cancelled+pending and cannot leak into normal readers.
+  await renewPlanningResourceLeases(base44, user, compositionLeases);
+  shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), completionPatch);
+  result.shift = shift;
+  if (composeAndAssignMode) composeAndAssignState.phaseCompleted = true;
+  if (composeAndAssignMode) {
+    composeAndAssignState.auditCompleted = true;
+    await mutateIdempotencyClaim(
+      base44,
+      user,
+      context,
+      composeAndAssignRequestHash as string,
+      'completed',
+    );
+    await renewPlanningResourceLeases(base44, user, compositionLeases);
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+    compositionLeases = [];
+    if (releaseErrors.length) {
+      throw new ApiError(503, 'Planningactie is opgeslagen, maar de personeelsreservering kon niet worden vrijgegeven', {
+        release_errors: releaseErrors,
+      });
+    }
+  } else {
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+    compositionLeases = [];
+    if (releaseErrors.length) {
+      throw new ApiError(503, 'Dienst is opgeslagen, maar de samenstellingsreservering kon niet worden vrijgegeven', {
+        release_errors: releaseErrors,
+      });
+    }
+  }
   return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  } catch (error) {
+    if (composeAndAssignMode) {
+      const recoveryErrors: LooseRecord[] = [];
+      if (
+        composeAndAssignClaimed
+        && composeAndAssignState.phaseCompleted !== true
+        && composeAndAssignState.auditCompleted !== true
+      ) {
+        try {
+          // Compensation is itself fenced. A stale worker whose lease expired
+          // or was replaced must never undo artifacts a newer retry now owns.
+          await renewPlanningResourceLeases(base44, user, compositionLeases);
+          recoveryErrors.push(...await compensateComposeAndAssign(
+            base44,
+            user,
+            context,
+            composeAndAssignRequestHash as string,
+            composeAndAssignState,
+            compositionLeases,
+          ));
+        } catch (fencingError) {
+          recoveryErrors.push({
+            entity: 'PlanningMutationCoordinator',
+            message: (fencingError as Error)?.message || String(fencingError),
+            compensation_skipped: true,
+          });
+        }
+      }
+      if (composeAndAssignClaimed) {
+        try {
+          await mutateIdempotencyClaim(
+            base44,
+            user,
+            context,
+            composeAndAssignRequestHash as string,
+            'retryable',
+          );
+        } catch (claimError) {
+          recoveryErrors.push({
+            entity: 'PlanningMutationCoordinator',
+            message: (claimError as Error)?.message || String(claimError),
+          });
+        }
+      }
+      recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
+      compositionLeases = [];
+      if (recoveryErrors.length && error && typeof error === 'object') {
+        (error as any).details = {
+          ...((error as any).details || {}),
+          compensation_errors: recoveryErrors,
+        };
+      }
+    } else {
+      await releasePlanningResourceLeases(base44, user, compositionLeases);
+      compositionLeases = [];
+    }
+    throw error;
+  }
+}
+
+async function composeAndAssign(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  return composeShift(base44, user, { ...body, action: 'compose_and_assign' }, context);
 }
 
 async function cancelTaskShift(
@@ -1809,13 +3714,24 @@ async function cancelTaskShift(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
-  if (!context.idempotencyKey) throw new ApiError(400, 'idempotency_key is verplicht om een conceptdienst te verwijderen');
+  requireMutationIdempotency(context, 'cancel_task_shift');
+  const requestHash = await mutationRequestHash('cancel_task_shift', body);
   const replay = await findReplay(base44, 'cancel_task_shift', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'cancel_task_shift');
+    return replayResult(replay);
+  }
 
   const shiftId = requireId(body, 'shift_id');
   let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
-  const recovering = shift.metadata?.last_task_shift_cancellation_key === context.idempotencyKey;
+  const cancellationOwnedByKey = shift.metadata?.last_task_shift_cancellation_key === context.idempotencyKey;
+  if (cancellationOwnedByKey && (
+    shift.metadata?.last_task_shift_cancellation_request_hash !== requestHash
+    || shift.metadata?.last_task_shift_cancellation_actor_user_id !== (user.id || null)
+  )) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere cancel_task_shift-opdracht');
+  }
+  let recovering = cancellationOwnedByKey;
   if (shift.source_type !== 'task') throw new ApiError(409, 'Alleen een dienst uit objecttaken kan hier worden verwijderd');
   if (Number(shift.published_revision || 0) > 0 || shift.status === 'published') {
     throw new ApiError(409, 'Een eerder gepubliceerde dienst moet via een formele annulering worden afgehandeld');
@@ -1841,12 +3757,57 @@ async function cancelTaskShift(
   const occurrences = await Promise.all(
     occurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
   );
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('shift_composition', shift.id),
+    ...occurrenceIds.map(id => resourceCoordinatorDescriptor('task_occurrence', id)),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    assignments.filter(item => item.status !== 'removed').map(item => item.personnel_id),
+    [shift],
+  ));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+  shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  await assertNoForeignPendingMutation(
+    base44,
+    shift,
+    context,
+    'cancel_task_shift',
+    user,
+    requestHash,
+  );
+  const lockedCancellationOwnedByKey = (
+    shift.metadata?.last_task_shift_cancellation_key === context.idempotencyKey
+  );
+  if (lockedCancellationOwnedByKey && (
+    shift.metadata?.last_task_shift_cancellation_request_hash !== requestHash
+    || shift.metadata?.last_task_shift_cancellation_actor_user_id !== (user.id || null)
+  )) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere cancel_task_shift-opdracht');
+  }
+  recovering = lockedCancellationOwnedByKey;
+  if (shift.source_type !== 'task') throw new ApiError(409, 'Alleen een dienst uit objecttaken kan hier worden verwijderd');
+  if (Number(shift.published_revision || 0) > 0 || shift.status === 'published') {
+    throw new ApiError(409, 'Een eerder gepubliceerde dienst moet via een formele annulering worden afgehandeld');
+  }
+  if (shift.status === 'cancelled' && !recovering) throw new ApiError(409, 'Deze dienst is al verwijderd');
+  if (!recovering) {
+    const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
+    if (revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+  }
   const expectedOccurrenceRevisions = body.expected_occurrence_revisions || {};
   const reservedOccurrences: LooseRecord[] = [];
   const reservationExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
   for (const occurrence of [...occurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const reservation = occurrence.metadata?.planning_composition_reservation;
-    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey;
+    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+      && reservation?.request_hash === requestHash;
     const completedByThisRequest = occurrence.metadata?.last_task_shift_cancellation_key === context.idempotencyKey;
     const reservationActive = reservation?.status === 'pending'
       && Date.parse(reservation.expires_at || '') > Date.now();
@@ -1870,6 +3831,7 @@ async function cancelTaskShift(
       reservedOccurrences.push(occurrence);
       continue;
     }
+    await renewPlanningResourceLeases(base44, user, leases);
     reservedOccurrences.push(await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, expected, {
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
@@ -1879,6 +3841,7 @@ async function cancelTaskShift(
           idempotency_key: context.idempotencyKey,
           correlation_id: context.correlationId,
           action: 'cancel_task_shift',
+          request_hash: requestHash,
           status: 'pending',
           acquired_at: nowIso(),
           expires_at: reservationExpiresAt,
@@ -1889,6 +3852,7 @@ async function cancelTaskShift(
 
   const beforeState = { shift, segments, assignments };
   if (!recovering) {
+    await renewPlanningResourceLeases(base44, user, leases);
     shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
       status: 'cancelled',
       last_modified_by_user_id: user.id || null,
@@ -1897,11 +3861,14 @@ async function cancelTaskShift(
         ...(shift.metadata || {}),
         last_task_shift_cancellation_key: context.idempotencyKey,
         last_task_shift_cancellation_correlation_id: context.correlationId,
+        last_task_shift_cancellation_request_hash: requestHash,
+        last_task_shift_cancellation_actor_user_id: user.id || null,
       },
     });
   }
   const removedSegments: LooseRecord[] = [];
   for (const segment of segments.filter(item => item.status !== 'removed')) {
+    await renewPlanningResourceLeases(base44, user, leases);
     removedSegments.push(await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
       status: 'removed',
       last_modified_by_user_id: user.id || null,
@@ -1911,6 +3878,7 @@ async function cancelTaskShift(
   }
   const removedAssignments: LooseRecord[] = [];
   for (const assignment of assignments.filter(item => item.status !== 'removed')) {
+    await renewPlanningResourceLeases(base44, user, leases);
     removedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
       status: 'removed',
       removed_by_user_id: user.id || null,
@@ -1925,6 +3893,7 @@ async function cancelTaskShift(
       continue;
     }
     const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+    await renewPlanningResourceLeases(base44, user, leases);
     updatedOccurrences.push(await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
@@ -1932,6 +3901,7 @@ async function cancelTaskShift(
         ...metadata,
         last_task_shift_cancellation_key: context.idempotencyKey,
         last_task_shift_cancellation_correlation_id: context.correlationId,
+        last_task_shift_cancellation_request_hash: requestHash,
         last_task_shift_cancellation_completed_at: nowIso(),
       },
     }));
@@ -1942,6 +3912,7 @@ async function cancelTaskShift(
     removed_assignment_ids: assignments.map(item => item.id),
     task_occurrences: updatedOccurrences,
   };
+  await renewPlanningResourceLeases(base44, user, leases);
   const audit = await appendAudit(base44, user, {
     action: 'cancel_task_shift',
     resource_type: 'PlanningShift',
@@ -1952,8 +3923,10 @@ async function cancelTaskShift(
     correlation_id: context.correlationId,
     idempotency_key: context.idempotencyKey,
     undoable: false,
+    metadata: { request_hash: requestHash },
   });
   return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  });
 }
 
 async function uniqueSlotAssignment(base44: LooseRecord, shiftId: string, slotIndex: number) {
@@ -1992,103 +3965,165 @@ async function assignPersonnel(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'assign');
+  const requestHash = await mutationRequestHash('assign', body);
   const replay = await findReplay(base44, 'assign', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'assign');
+    return replayResult(replay);
+  }
 
   const shiftId = requireId(body, 'shift_id');
   const personnelId = requireId(body, 'personnel_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
   const slotIndex = nonNegativeInteger(body.slot_index ?? 0, 'slot_index');
-  const [shift, personnel] = await Promise.all([
-    requireRecord(base44, 'PlanningShift', shiftId, 'Dienst'),
-    requireRecord(base44, 'Personnel', personnelId, 'Medewerker'),
-  ]);
-  if (shift.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden bezet');
-  if (slotIndex >= Number(shift.required_count || 1)) {
-    throw new ApiError(400, 'slot_index valt buiten required_count');
-  }
+  const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  const descriptors = await personnelDayDescriptors([personnelId], [initialShift]);
+  descriptors.push(await resourceCoordinatorDescriptor('shift_composition', shiftId));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const [shift, personnel] = await Promise.all([
+      requireRecord(base44, 'PlanningShift', shiftId, 'Dienst'),
+      requireRecord(base44, 'Personnel', personnelId, 'Medewerker'),
+    ]);
+    await assertNoForeignPendingMutation(base44, shift, context, 'assign', user, requestHash);
+    const recoveryMarker = matchingPlanningMutationMarker(
+      shift,
+      'assign',
+      context,
+      user,
+      requestHash,
+    );
+    const recovering = Boolean(recoveryMarker);
+    if (!recovering && revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+    if (shift.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden bezet');
+    if (slotIndex >= Number(shift.required_count || 1)) {
+      throw new ApiError(400, 'slot_index valt buiten required_count');
+    }
 
-  const existing = await uniqueSlotAssignment(base44, shiftId, slotIndex);
-  const sameShiftAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
-    shift_id: shiftId,
-    personnel_id: personnelId,
-  });
-  const duplicateAssignment = sameShiftAssignments.find((item: LooseRecord) =>
-    item.status !== 'removed' && item.id !== existing?.id
-  );
-  if (duplicateAssignment) {
-    throw new ApiError(409, 'Medewerker is al aan deze dienst toegewezen', {
+    const existing = await uniqueSlotAssignment(base44, shiftId, slotIndex);
+    const sameShiftAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
       shift_id: shiftId,
       personnel_id: personnelId,
-      assignment_id: duplicateAssignment.id,
     });
-  }
-  const eligibility = await evaluateAssignmentWarnings(
-    base44,
-    shift,
-    personnel,
-    existing?.id || null,
-    normalizeSuppliedWarnings(body),
-  );
-  const updatedShift = await markShiftDraft(base44, shift, expectedShiftRevision, user);
-  const assignmentPayload = {
-    personnel_id: personnel.id,
-    personnel_name_snapshot: personnel.name
-      || [personnel.call_name || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(' ')
-      || 'Medewerker',
-    personnel_contract_id: eligibility.personnel_contract_id,
-    status: 'draft',
-    warning_codes: eligibility.warning_codes,
-    warning_snapshot: eligibility.warning_snapshot,
-    has_critical_warnings: eligibility.has_critical_warnings,
-    contract_routing_snapshot: eligibility.contract_routing_snapshot,
-    assigned_by_user_id: user.id || null,
-    assigned_at: nowIso(),
-    removed_by_user_id: null,
-    removed_at: null,
-    last_published_correlation_id: existing?.last_published_correlation_id || null,
-    metadata: {
-      ...(existing?.metadata || {}),
-      assignment_source: body.assignment_source || 'planning_ui',
-    },
-  };
-  const assignment = existing
-    ? await casUpdate(base44, 'PlanningAssignment', existing, revisionOf(existing), assignmentPayload)
-    : await base44.asServiceRole.entities.PlanningAssignment.create({
-        shift_id: shift.id,
-        slot_index: slotIndex,
-        ...assignmentPayload,
-        revision: 1,
-        published_revision: 0,
+    const duplicateAssignment = sameShiftAssignments.find((item: LooseRecord) =>
+      item.status !== 'removed' && item.id !== existing?.id
+    );
+    if (duplicateAssignment) {
+      throw new ApiError(409, 'Medewerker is al aan deze dienst toegewezen', {
+        shift_id: shiftId,
+        personnel_id: personnelId,
+        assignment_id: duplicateAssignment.id,
       });
-  const result = { shift: updatedShift, assignment };
-  const audit = await appendAudit(base44, user, {
-    action: 'assign',
-    resource_type: 'PlanningAssignment',
-    resource_id: assignment.id,
-    shift_id: shift.id,
-    assignment_id: assignment.id,
-    before_state: existing ? { shift, assignment: existing } : { shift, assignment: null },
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: true,
-    undo_payload: {
-      action: existing ? 'assign' : 'unassign',
+    }
+    const eligibility = await evaluateAssignmentWarnings(
+      base44,
+      shift,
+      personnel,
+      existing?.id || null,
+      normalizeSuppliedWarnings(body),
+    );
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedShift = recovering
+      ? shift
+      : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
+          metadata: planningMutationMetadata(shift, 'assign', context, user, requestHash),
+        });
+    const assignmentPayload = {
+      personnel_id: personnel.id,
+      personnel_name_snapshot: personnel.name
+        || [personnel.call_name || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(' ')
+        || 'Medewerker',
+      personnel_contract_id: eligibility.personnel_contract_id,
+      status: 'draft',
+      warning_codes: eligibility.warning_codes,
+      warning_snapshot: eligibility.warning_snapshot,
+      has_critical_warnings: eligibility.has_critical_warnings,
+      contract_routing_snapshot: eligibility.contract_routing_snapshot,
+      assigned_by_user_id: user.id || null,
+      assigned_at: nowIso(),
+      removed_by_user_id: null,
+      removed_at: null,
+      last_published_correlation_id: existing?.last_published_correlation_id || null,
+      metadata: {
+        ...(existing?.metadata || {}),
+        assignment_source: body.assignment_source || 'planning_ui',
+        last_assign_idempotency_key: context.idempotencyKey,
+        last_assign_request_hash: requestHash,
+        last_assign_actor_user_id: user.id || null,
+      },
+    };
+    await renewPlanningResourceLeases(base44, user, leases);
+    const writtenAssignment = existing
+      ? await casUpdate(base44, 'PlanningAssignment', existing, revisionOf(existing), assignmentPayload)
+      : await base44.asServiceRole.entities.PlanningAssignment.create({
+          shift_id: shift.id,
+          slot_index: slotIndex,
+          ...assignmentPayload,
+          revision: 1,
+          published_revision: 0,
+        });
+    await renewPlanningResourceLeases(base44, user, leases);
+    const finalPersonnel = await requireRecord(base44, 'Personnel', personnelId, 'Medewerker');
+    const finalEligibility = await evaluateAssignmentWarnings(
+      base44,
+      updatedShift,
+      finalPersonnel,
+      writtenAssignment.id,
+      normalizeSuppliedWarnings(body),
+    );
+    await renewPlanningResourceLeases(base44, user, leases);
+    const assignment = await casUpdate(
+      base44,
+      'PlanningAssignment',
+      writtenAssignment,
+      revisionOf(writtenAssignment),
+      {
+        personnel_contract_id: finalEligibility.personnel_contract_id,
+        warning_codes: finalEligibility.warning_codes,
+        warning_snapshot: finalEligibility.warning_snapshot,
+        has_critical_warnings: finalEligibility.has_critical_warnings,
+        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
+        metadata: { ...(writtenAssignment.metadata || {}), final_assignment_validation_at: nowIso() },
+      },
+    );
+    const result = { shift: updatedShift, assignment };
+    await renewPlanningResourceLeases(base44, user, leases);
+    const audit = await appendAudit(base44, user, {
+      action: 'assign',
+      resource_type: 'PlanningAssignment',
+      resource_id: assignment.id,
       shift_id: shift.id,
       assignment_id: assignment.id,
-      slot_index: slotIndex,
-      previous_shift: shift,
-      previous_assignment: existing || null,
-    },
+      before_state: recovering ? null : existing ? { shift, assignment: existing } : { shift, assignment: null },
+      after_state: result,
+      correlation_id: context.correlationId,
+      idempotency_key: context.idempotencyKey,
+      undoable: !recovering,
+      metadata: { request_hash: requestHash, recovered_completed_state: recovering },
+      undo_payload: {
+        action: existing ? 'assign' : 'unassign',
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        slot_index: slotIndex,
+        previous_shift: shift,
+        previous_assignment: existing || null,
+      },
+    });
+    return {
+      ok: true,
+      ...result,
+      audit_event_id: audit.id,
+      undoable: audit.undoable === true,
+      undo_token: audit.undoable === true ? (audit.undo_token || null) : null,
+    };
   });
-  return {
-    ok: true,
-    ...result,
-    audit_event_id: audit.id,
-    undoable: true,
-    undo_token: audit.undo_token || null,
-  };
 }
 
 async function unassignPersonnel(
@@ -2097,13 +4132,18 @@ async function unassignPersonnel(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'unassign');
+  const requestHash = await mutationRequestHash('unassign', body);
   const replay = await findReplay(base44, 'unassign', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'unassign');
+    return replayResult(replay);
+  }
 
   const shiftId = requireId(body, 'shift_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
-  const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
-  let assignment: LooseRecord | null = null;
+  const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  let initialAssignment: LooseRecord | null = null;
   if (body.assignment_id) {
     const loadedAssignment = await requireRecord(
       base44,
@@ -2111,49 +4151,125 @@ async function unassignPersonnel(
       compact(body.assignment_id),
       'Toewijzing',
     );
-    if (loadedAssignment.shift_id !== shift.id) throw new ApiError(409, 'Toewijzing hoort niet bij deze dienst');
-    assignment = loadedAssignment;
+    if (loadedAssignment.shift_id !== initialShift.id) throw new ApiError(409, 'Toewijzing hoort niet bij deze dienst');
+    initialAssignment = loadedAssignment;
   } else {
-    assignment = await uniqueSlotAssignment(base44, shift.id, nonNegativeInteger(body.slot_index ?? 0, 'slot_index'));
+    initialAssignment = await uniqueSlotAssignment(
+      base44,
+      initialShift.id,
+      nonNegativeInteger(body.slot_index ?? 0, 'slot_index'),
+    );
   }
-  if (!assignment) throw new ApiError(404, 'Toewijzing niet gevonden');
-  if (assignment.status === 'removed') {
-    return { ok: true, idempotent: true, shift, assignment, undoable: false, undo_token: null };
-  }
+  if (!initialAssignment) throw new ApiError(404, 'Toewijzing niet gevonden');
+  const descriptors = await personnelDayDescriptors([initialAssignment.personnel_id], [initialShift]);
+  descriptors.push(await resourceCoordinatorDescriptor('shift_composition', shiftId));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const [shift, assignment] = await Promise.all([
+      requireRecord(base44, 'PlanningShift', shiftId, 'Dienst'),
+      requireRecord(base44, 'PlanningAssignment', initialAssignment.id, 'Toewijzing'),
+    ]);
+    if (
+      String(assignment.shift_id) !== String(shift.id)
+      || String(assignment.personnel_id) !== String(initialAssignment.personnel_id)
+    ) throw new ApiError(409, 'Toewijzing is intussen gewijzigd; laad het rooster opnieuw');
+    await assertNoForeignPendingMutation(base44, shift, context, 'unassign', user, requestHash);
+    const recoveryMarker = matchingPlanningMutationMarker(
+      shift,
+      'unassign',
+      context,
+      user,
+      requestHash,
+    );
+    const recovering = Boolean(recoveryMarker);
+    if (!recovering && revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+    if (assignment.status === 'removed') {
+      if (
+        assignment.metadata?.last_unassign_idempotency_key !== context.idempotencyKey
+        || assignment.metadata?.last_unassign_request_hash !== requestHash
+        || assignment.metadata?.last_unassign_actor_user_id !== (user.id || null)
+      ) {
+        throw new ApiError(409, 'Deze toewijzing was al door een andere planningactie verwijderd');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      const recoveryAudit = await appendAudit(base44, user, {
+        action: 'unassign',
+        resource_type: 'PlanningAssignment',
+        resource_id: assignment.id,
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        before_state: null,
+        after_state: { shift, assignment },
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: { request_hash: requestHash, recovered_completed_state: true },
+      });
+      return {
+        ok: true,
+        idempotent: true,
+        shift,
+        assignment,
+        audit_event_id: recoveryAudit.id,
+        undoable: false,
+        undo_token: null,
+      };
+    }
 
-  const updatedShift = await markShiftDraft(base44, shift, expectedShiftRevision, user);
-  const updatedAssignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
-    status: 'removed',
-    removed_by_user_id: user.id || null,
-    removed_at: nowIso(),
-  });
-  const result = { shift: updatedShift, assignment: updatedAssignment };
-  const audit = await appendAudit(base44, user, {
-    action: 'unassign',
-    resource_type: 'PlanningAssignment',
-    resource_id: assignment.id,
-    shift_id: shift.id,
-    assignment_id: assignment.id,
-    before_state: { shift, assignment },
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: true,
-    undo_payload: {
-      action: 'restore_assignment',
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedShift = recovering
+      ? shift
+      : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
+          metadata: planningMutationMetadata(shift, 'unassign', context, user, requestHash),
+        });
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedAssignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+      status: 'removed',
+      removed_by_user_id: user.id || null,
+      removed_at: nowIso(),
+      metadata: {
+        ...(assignment.metadata || {}),
+        last_unassign_idempotency_key: context.idempotencyKey,
+        last_unassign_request_hash: requestHash,
+        last_unassign_actor_user_id: user.id || null,
+      },
+    });
+    const result = { shift: updatedShift, assignment: updatedAssignment };
+    await renewPlanningResourceLeases(base44, user, leases);
+    const audit = await appendAudit(base44, user, {
+      action: 'unassign',
+      resource_type: 'PlanningAssignment',
+      resource_id: assignment.id,
       shift_id: shift.id,
       assignment_id: assignment.id,
-      previous_shift: shift,
-      previous_assignment: assignment,
-    },
+      before_state: recovering ? null : { shift, assignment },
+      after_state: result,
+      correlation_id: context.correlationId,
+      idempotency_key: context.idempotencyKey,
+      undoable: !recovering,
+      undo_payload: {
+        action: 'restore_assignment',
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        previous_shift: shift,
+        previous_assignment: assignment,
+      },
+      metadata: { request_hash: requestHash, recovered_completed_state: recovering },
+    });
+    return {
+      ok: true,
+      ...result,
+      audit_event_id: audit.id,
+      undoable: audit.undoable === true,
+      undo_token: audit.undoable === true ? (audit.undo_token || null) : null,
+    };
   });
-  return {
-    ok: true,
-    ...result,
-    audit_event_id: audit.id,
-    undoable: true,
-    undo_token: audit.undo_token || null,
-  };
 }
 
 async function restoreAssignment(
@@ -2162,72 +4278,179 @@ async function restoreAssignment(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'restore_assignment');
+  const requestHash = await mutationRequestHash('restore_assignment', body);
   const replay = await findReplay(base44, 'restore_assignment', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'restore_assignment');
+    return replayResult(replay);
+  }
 
   const assignmentId = requireId(body, 'assignment_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
-  const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
-  const [shift, personnel] = await Promise.all([
-    requireRecord(base44, 'PlanningShift', assignment.shift_id, 'Dienst'),
-    requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker'),
-  ]);
-  if (shift.status === 'cancelled') throw new ApiError(409, 'Een toewijzing op een geannuleerde dienst kan niet worden hersteld');
-  if (assignment.status !== 'removed') {
-    return { ok: true, idempotent: true, shift, assignment, undoable: false, undo_token: null };
-  }
-  const sameSlot = await uniqueSlotAssignment(base44, shift.id, Number(assignment.slot_index));
-  if (sameSlot && sameSlot.id !== assignment.id && sameSlot.status !== 'removed') {
-    throw new ApiError(409, 'De bezettingsplaats is intussen opnieuw ingevuld');
-  }
-  const eligibility = await evaluateAssignmentWarnings(
-    base44,
-    shift,
-    personnel,
-    assignment.id,
-    normalizeSuppliedWarnings(body),
-  );
-  const updatedShift = await markShiftDraft(base44, shift, expectedShiftRevision, user);
-  const updatedAssignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
-    status: 'draft',
-    warning_codes: eligibility.warning_codes,
-    warning_snapshot: eligibility.warning_snapshot,
-    has_critical_warnings: eligibility.has_critical_warnings,
-    contract_routing_snapshot: eligibility.contract_routing_snapshot,
-    personnel_contract_id: eligibility.personnel_contract_id,
-    assigned_by_user_id: user.id || assignment.assigned_by_user_id || null,
-    assigned_at: nowIso(),
-    removed_by_user_id: null,
-    removed_at: null,
-  });
-  const result = { shift: updatedShift, assignment: updatedAssignment };
-  const audit = await appendAudit(base44, user, {
-    action: 'restore_assignment',
-    resource_type: 'PlanningAssignment',
-    resource_id: assignment.id,
-    shift_id: shift.id,
-    assignment_id: assignment.id,
-    before_state: { shift, assignment },
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: true,
-    undo_of_event_id: compact(body.undo_of_event_id) || null,
-    undo_payload: {
-      action: 'unassign',
+  const initialAssignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
+  const initialShift = await requireRecord(base44, 'PlanningShift', initialAssignment.shift_id, 'Dienst');
+  const descriptors = await personnelDayDescriptors([initialAssignment.personnel_id], [initialShift]);
+  descriptors.push(await resourceCoordinatorDescriptor('shift_composition', initialShift.id));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
+    if (
+      String(assignment.shift_id) !== String(initialAssignment.shift_id)
+      || String(assignment.personnel_id) !== String(initialAssignment.personnel_id)
+    ) {
+      throw new ApiError(409, 'Toewijzing is intussen gewijzigd; laad het rooster opnieuw');
+    }
+    const [shift, personnel] = await Promise.all([
+      requireRecord(base44, 'PlanningShift', assignment.shift_id, 'Dienst'),
+      requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker'),
+    ]);
+    await assertNoForeignPendingMutation(base44, shift, context, 'restore_assignment', user, requestHash);
+    const recoveryMarker = matchingPlanningMutationMarker(
+      shift,
+      'restore_assignment',
+      context,
+      user,
+      requestHash,
+    );
+    const recovering = Boolean(recoveryMarker);
+    if (!recovering && revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+    if (shift.status === 'cancelled') throw new ApiError(409, 'Een toewijzing op een geannuleerde dienst kan niet worden hersteld');
+    if (assignment.status !== 'removed') {
+      if (
+        assignment.metadata?.last_restore_idempotency_key !== context.idempotencyKey
+        || assignment.metadata?.last_restore_request_hash !== requestHash
+        || assignment.metadata?.last_restore_actor_user_id !== (user.id || null)
+      ) {
+        throw new ApiError(409, 'Deze toewijzing is al door een andere planningactie hersteld');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      const recoveryAudit = await appendAudit(base44, user, {
+        action: 'restore_assignment',
+        resource_type: 'PlanningAssignment',
+        resource_id: assignment.id,
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        before_state: null,
+        after_state: { shift, assignment },
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: { request_hash: requestHash, recovered_completed_state: true },
+      });
+      return {
+        ok: true,
+        idempotent: true,
+        shift,
+        assignment,
+        audit_event_id: recoveryAudit.id,
+        undoable: false,
+        undo_token: null,
+      };
+    }
+    const sameSlot = await uniqueSlotAssignment(base44, shift.id, Number(assignment.slot_index));
+    if (sameSlot && sameSlot.id !== assignment.id && sameSlot.status !== 'removed') {
+      throw new ApiError(409, 'De bezettingsplaats is intussen opnieuw ingevuld');
+    }
+    const eligibility = await evaluateAssignmentWarnings(
+      base44,
+      shift,
+      personnel,
+      assignment.id,
+      normalizeSuppliedWarnings(body),
+    );
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedShift = recovering
+      ? shift
+      : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
+          metadata: planningMutationMetadata(shift, 'restore_assignment', context, user, requestHash),
+        });
+    await renewPlanningResourceLeases(base44, user, leases);
+    const writtenAssignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+      status: 'draft',
+      warning_codes: eligibility.warning_codes,
+      warning_snapshot: eligibility.warning_snapshot,
+      has_critical_warnings: eligibility.has_critical_warnings,
+      contract_routing_snapshot: eligibility.contract_routing_snapshot,
+      personnel_contract_id: eligibility.personnel_contract_id,
+      assigned_by_user_id: user.id || assignment.assigned_by_user_id || null,
+      assigned_at: nowIso(),
+      removed_by_user_id: null,
+      removed_at: null,
+      metadata: {
+        ...(assignment.metadata || {}),
+        last_restore_idempotency_key: context.idempotencyKey,
+        last_restore_request_hash: requestHash,
+        last_restore_actor_user_id: user.id || null,
+      },
+    });
+    await renewPlanningResourceLeases(base44, user, leases);
+    const finalPersonnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+    const finalEligibility = await evaluateAssignmentWarnings(
+      base44,
+      updatedShift,
+      finalPersonnel,
+      writtenAssignment.id,
+      normalizeSuppliedWarnings(body),
+    );
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedAssignment = await casUpdate(
+      base44,
+      'PlanningAssignment',
+      writtenAssignment,
+      revisionOf(writtenAssignment),
+      {
+        warning_codes: finalEligibility.warning_codes,
+        warning_snapshot: finalEligibility.warning_snapshot,
+        has_critical_warnings: finalEligibility.has_critical_warnings,
+        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
+        personnel_contract_id: finalEligibility.personnel_contract_id,
+        metadata: {
+          ...(writtenAssignment.metadata || {}),
+          final_assignment_validation_at: nowIso(),
+          last_restore_idempotency_key: context.idempotencyKey,
+          last_restore_request_hash: requestHash,
+          last_restore_actor_user_id: user.id || null,
+        },
+      },
+    );
+    const result = { shift: updatedShift, assignment: updatedAssignment };
+    await renewPlanningResourceLeases(base44, user, leases);
+    const audit = await appendAudit(base44, user, {
+      action: 'restore_assignment',
+      resource_type: 'PlanningAssignment',
+      resource_id: assignment.id,
       shift_id: shift.id,
       assignment_id: assignment.id,
-      previous_shift: shift,
-      previous_assignment: assignment,
-    },
+      before_state: recovering ? null : { shift, assignment },
+      after_state: result,
+      correlation_id: context.correlationId,
+      idempotency_key: context.idempotencyKey,
+      undoable: !recovering,
+      metadata: { request_hash: requestHash, recovered_completed_state: recovering },
+      undo_of_event_id: compact(body.undo_of_event_id) || null,
+      undo_payload: {
+        action: 'unassign',
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        previous_shift: shift,
+        previous_assignment: assignment,
+      },
+    });
+    return {
+      ok: true,
+      ...result,
+      audit_event_id: audit.id,
+      undoable: audit.undoable === true,
+      undo_token: audit.undoable === true ? (audit.undo_token || null) : null,
+    };
   });
-  return {
-    ok: true,
-    ...result,
-    audit_event_id: audit.id,
-    undoable: true,
-    undo_token: audit.undo_token || null,
-  };
 }
 
 async function moveShift(
@@ -2236,82 +4459,177 @@ async function moveShift(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'move');
+  const requestHash = await mutationRequestHash('move', body);
   const replay = await findReplay(base44, 'move', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'move');
+    return replayResult(replay);
+  }
 
   const shiftId = requireId(body, 'shift_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
-  const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
-  if (shift.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden verplaatst');
-  const composedSegments = await filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: shift.id });
-  if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
-    throw new ApiError(409, 'Pas tijden van een samengestelde dienst aan via Dienstinhoud; zo blijft taakdekking correct');
-  }
-  const serviceDate = body.service_date ? asDate(body.service_date, 'service_date') : shift.service_date;
-  const startTime = body.start_time ? asTime(body.start_time, 'start_time') : shift.start_time;
-  const endTime = body.end_time ? asTime(body.end_time, 'end_time') : shift.end_time;
-  const endDate = Object.prototype.hasOwnProperty.call(body, 'end_date')
-    ? optionalDate(body.end_date, 'end_date')
-    : shift.end_date || null;
-  if (endDate && endDate < serviceDate) throw new ApiError(400, 'end_date ligt voor service_date');
-  const updatedShift = await markShiftDraft(base44, shift, expectedShiftRevision, user, {
-    service_date: serviceDate,
-    end_date: endDate,
-    start_time: startTime,
-    end_time: endTime,
-  });
-
-  const assignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
-  const updatedAssignments: LooseRecord[] = [];
-  for (const assignment of assignments.filter((item: LooseRecord) => item.status !== 'removed')) {
-    const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-    const eligibility = await evaluateAssignmentWarnings(
-      base44,
-      updatedShift,
-      personnel,
-      assignment.id,
-      normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
-    );
-    updatedAssignments.push(await casUpdate(
-      base44,
-      'PlanningAssignment',
-      assignment,
-      revisionOf(assignment),
-      {
-        status: 'draft',
-        warning_codes: eligibility.warning_codes,
-        warning_snapshot: eligibility.warning_snapshot,
-        has_critical_warnings: eligibility.has_critical_warnings,
-        contract_routing_snapshot: eligibility.contract_routing_snapshot,
-        personnel_contract_id: eligibility.personnel_contract_id,
-      },
-    ));
-  }
-  const result = { shift: updatedShift, assignments: updatedAssignments };
-  const audit = await appendAudit(base44, user, {
-    action: 'move',
-    resource_type: 'PlanningShift',
-    resource_id: shift.id,
-    shift_id: shift.id,
-    before_state: { shift, assignments },
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: true,
-    undo_payload: {
-      action: 'move',
-      shift_id: shift.id,
-      previous_shift: shift,
-      previous_assignments: assignments,
-    },
-  });
-  return {
-    ok: true,
-    ...result,
-    audit_event_id: audit.id,
-    undoable: true,
-    undo_token: audit.undo_token || null,
+  const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  const initialAssignments = (await filterAllRecords(
+    base44.asServiceRole.entities.PlanningAssignment,
+    { shift_id: shiftId },
+  )).filter((item: LooseRecord) => item.status !== 'removed');
+  const initialTiming = resolveShiftTiming(initialShift, body);
+  const proposedInitialShift = {
+    ...initialShift,
+    ...initialTiming,
   };
+  const descriptors = await personnelDayDescriptors(
+    initialAssignments.map(item => item.personnel_id),
+    [initialShift, proposedInitialShift],
+  );
+  descriptors.push(await resourceCoordinatorDescriptor('shift_composition', shiftId));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+    await assertNoForeignPendingMutation(base44, shift, context, 'move', user, requestHash);
+    const recoveryMarker = matchingPlanningMutationMarker(
+      shift,
+      'move',
+      context,
+      user,
+      requestHash,
+    );
+    const recovering = Boolean(recoveryMarker);
+    if (shift.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden verplaatst');
+    if (!recovering && revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+    const [composedSegments, assignments] = await Promise.all([
+      filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: shift.id }),
+      filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id }),
+    ]);
+    if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
+      throw new ApiError(409, 'Pas tijden van een samengestelde dienst aan via Dienstinhoud; zo blijft taakdekking correct');
+    }
+    const activeAssignments = assignments.filter((item: LooseRecord) => item.status !== 'removed');
+    const initialAssignmentKeys = initialAssignments
+      .map(item => `${item.id}:${item.personnel_id}`)
+      .sort();
+    const currentAssignmentKeys = activeAssignments
+      .map(item => `${item.id}:${item.personnel_id}`)
+      .sort();
+    if (stableStringify(currentAssignmentKeys) !== stableStringify(initialAssignmentKeys)) {
+      throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw');
+    }
+    const timing = resolveShiftTiming(shift, body);
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedShift = recovering
+      ? shift
+      : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
+          ...timing,
+          metadata: planningMutationMetadata(shift, 'move', context, user, requestHash),
+        });
+
+    const writtenAssignments: LooseRecord[] = [];
+    for (const assignment of activeAssignments) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+      const eligibility = await evaluateAssignmentWarnings(
+        base44,
+        updatedShift,
+        personnel,
+        assignment.id,
+        normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
+      );
+      await renewPlanningResourceLeases(base44, user, leases);
+      writtenAssignments.push(await casUpdate(
+        base44,
+        'PlanningAssignment',
+        assignment,
+        revisionOf(assignment),
+        {
+          status: 'draft',
+          warning_codes: eligibility.warning_codes,
+          warning_snapshot: eligibility.warning_snapshot,
+          has_critical_warnings: eligibility.has_critical_warnings,
+          contract_routing_snapshot: eligibility.contract_routing_snapshot,
+          personnel_contract_id: eligibility.personnel_contract_id,
+          metadata: {
+            ...(assignment.metadata || {}),
+            last_move_idempotency_key: context.idempotencyKey,
+            last_move_request_hash: requestHash,
+            last_move_actor_user_id: user.id || null,
+          },
+        },
+      ));
+    }
+    await renewPlanningResourceLeases(base44, user, leases);
+    const updatedAssignments: LooseRecord[] = [];
+    for (const writtenAssignment of writtenAssignments) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      const finalPersonnel = await requireRecord(
+        base44,
+        'Personnel',
+        writtenAssignment.personnel_id,
+        'Medewerker',
+      );
+      const finalEligibility = await evaluateAssignmentWarnings(
+        base44,
+        updatedShift,
+        finalPersonnel,
+        writtenAssignment.id,
+        normalizeArray(writtenAssignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
+      );
+      await renewPlanningResourceLeases(base44, user, leases);
+      updatedAssignments.push(await casUpdate(
+        base44,
+        'PlanningAssignment',
+        writtenAssignment,
+        revisionOf(writtenAssignment),
+        {
+          warning_codes: finalEligibility.warning_codes,
+          warning_snapshot: finalEligibility.warning_snapshot,
+          has_critical_warnings: finalEligibility.has_critical_warnings,
+          contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
+          personnel_contract_id: finalEligibility.personnel_contract_id,
+          metadata: {
+            ...(writtenAssignment.metadata || {}),
+            final_assignment_validation_at: nowIso(),
+            last_move_idempotency_key: context.idempotencyKey,
+            last_move_request_hash: requestHash,
+            last_move_actor_user_id: user.id || null,
+          },
+        },
+      ));
+    }
+    const result = { shift: updatedShift, assignments: updatedAssignments };
+    await renewPlanningResourceLeases(base44, user, leases);
+    const audit = await appendAudit(base44, user, {
+      action: 'move',
+      resource_type: 'PlanningShift',
+      resource_id: shift.id,
+      shift_id: shift.id,
+      before_state: recovering ? null : { shift, assignments },
+      after_state: result,
+      correlation_id: context.correlationId,
+      idempotency_key: context.idempotencyKey,
+      undoable: !recovering,
+      metadata: { request_hash: requestHash, recovered_completed_state: recovering },
+      undo_payload: {
+        action: 'move',
+        shift_id: shift.id,
+        previous_shift: shift,
+        previous_assignments: assignments,
+      },
+    });
+    return {
+      ok: true,
+      ...result,
+      audit_event_id: audit.id,
+      undoable: audit.undoable === true,
+      undo_token: audit.undoable === true ? (audit.undo_token || null) : null,
+    };
+  });
 }
 
 const SHIFT_UNDO_FIELDS = [
@@ -2348,6 +4666,7 @@ async function restoreShiftForUndo(
   shift: LooseRecord,
   expectedRevision: number,
   previousShift: LooseRecord | null,
+  extraPatch: LooseRecord = {},
 ) {
   const previousPatch = previousShift ? pick(previousShift, SHIFT_UNDO_FIELDS) : { status: 'draft' };
   if (previousShift?.status === 'published') {
@@ -2355,6 +4674,7 @@ async function restoreShiftForUndo(
   }
   return casUpdate(base44, 'PlanningShift', shift, expectedRevision, {
     ...previousPatch,
+    ...extraPatch,
     last_modified_by_user_id: user.id || null,
     last_modified_at: nowIso(),
   });
@@ -2372,8 +4692,13 @@ async function undoPlanning(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
+  requireMutationIdempotency(context, 'undo');
+  const requestHash = await mutationRequestHash('undo', body);
   const replay = await findReplay(base44, 'undo', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'undo');
+    return replayResult(replay);
+  }
 
   const auditEventId = requireId(body, 'audit_event_id');
   const undoToken = requireId(body, 'undo_token');
@@ -2407,124 +4732,256 @@ async function undoPlanning(
   const shiftId = compact(undoPayload.shift_id || sourceEvent.shift_id);
   if (!shiftId) throw new ApiError(409, 'Undo-payload mist shift_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
-  const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
   const previousShift = undoPayload.previous_shift && typeof undoPayload.previous_shift === 'object'
     ? undoPayload.previous_shift
     : null;
-  const beforeState: LooseRecord = { shift };
-  let updatedShift: LooseRecord;
-  let result: LooseRecord;
-
-  if (undoAction === 'unassign') {
-    const assignmentId = compact(undoPayload.assignment_id || sourceEvent.assignment_id);
-    if (!assignmentId) throw new ApiError(409, 'Undo-payload mist assignment_id');
-    const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
-    if (assignment.shift_id !== shift.id) throw new ApiError(409, 'Undo-toewijzing hoort niet bij de dienst');
-    beforeState.assignment = assignment;
-    updatedShift = await restoreShiftForUndo(
-      base44,
-      user,
-      shift,
-      expectedShiftRevision,
-      previousShift,
-    );
-    const previousAssignment = undoPayload.previous_assignment && typeof undoPayload.previous_assignment === 'object'
-      ? undoPayload.previous_assignment
-      : null;
-    const assignmentPatch = previousAssignment
-      ? assignmentUndoPatch(previousAssignment, revisionOf(assignment))
-      : {
-          status: 'removed',
-          removed_by_user_id: user.id || null,
-          removed_at: nowIso(),
-        };
-    const updatedAssignment = await casUpdate(
-      base44,
-      'PlanningAssignment',
-      assignment,
-      revisionOf(assignment),
-      assignmentPatch,
-    );
-    result = { shift: updatedShift, assignment: updatedAssignment };
-  } else if (undoAction === 'restore_assignment' || undoAction === 'assign') {
-    const assignmentId = compact(undoPayload.assignment_id || sourceEvent.assignment_id);
-    const previousAssignment = undoPayload.previous_assignment;
-    if (!assignmentId || !previousAssignment || typeof previousAssignment !== 'object') {
-      throw new ApiError(409, 'Undo-payload mist de vorige toewijzingsstaat');
-    }
-    const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
-    if (assignment.shift_id !== shift.id) throw new ApiError(409, 'Undo-toewijzing hoort niet bij de dienst');
-    beforeState.assignment = assignment;
-    updatedShift = await restoreShiftForUndo(
-      base44,
-      user,
-      shift,
-      expectedShiftRevision,
-      previousShift,
-    );
-    const updatedAssignment = await casUpdate(
-      base44,
-      'PlanningAssignment',
-      assignment,
-      revisionOf(assignment),
-      assignmentUndoPatch(previousAssignment, revisionOf(assignment)),
-    );
-    result = { shift: updatedShift, assignment: updatedAssignment };
-  } else {
-    const previousAssignments = normalizeArray<LooseRecord>(undoPayload.previous_assignments)
-      .filter(item => item?.id && item.status !== 'removed');
-    const currentAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
-    beforeState.assignments = currentAssignments;
-    updatedShift = await restoreShiftForUndo(
-      base44,
-      user,
-      shift,
-      expectedShiftRevision,
-      previousShift,
-    );
-    const currentById = new Map<string, LooseRecord>(
-      currentAssignments.map((item: LooseRecord) => [String(item.id), item]),
-    );
-    const restoredAssignments: LooseRecord[] = [];
-    for (const previousAssignment of previousAssignments) {
-      const current = currentById.get(String(previousAssignment.id));
-      if (!current) throw new ApiError(409, `Toewijzing ${previousAssignment.id} ontbreekt voor move-undo`);
-      restoredAssignments.push(await casUpdate(
+  const initialCurrentAssignments = undoAction === 'move'
+    ? (await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shiftId }))
+        .filter((item: LooseRecord) => item.status !== 'removed')
+    : [await requireRecord(
         base44,
         'PlanningAssignment',
-        current,
-        revisionOf(current),
-        assignmentUndoPatch(previousAssignment, revisionOf(current)),
+        requireId({ assignment_id: undoPayload.assignment_id || sourceEvent.assignment_id }, 'assignment_id'),
+        'Toewijzing',
+      )];
+  const previousAssignmentsForLock = undoAction === 'move'
+    ? normalizeArray<LooseRecord>(undoPayload.previous_assignments).filter(item => item?.id && item.status !== 'removed')
+    : undoPayload.previous_assignment && typeof undoPayload.previous_assignment === 'object'
+    ? [undoPayload.previous_assignment]
+    : [];
+  const descriptors = await personnelDayDescriptors(
+    [...initialCurrentAssignments, ...previousAssignmentsForLock].map(item => item.personnel_id),
+    [initialShift, previousShift]
+      .filter((item): item is LooseRecord => Boolean(item?.service_date && item?.start_time && item?.end_time)),
+  );
+  descriptors.push(await resourceCoordinatorDescriptor('shift_composition', shiftId));
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const completedInsideLease = (await filterAllRecords(base44.asServiceRole.entities.PlanningAuditEvent, {
+      undo_of_event_id: sourceEvent.id,
+    }, '-occurred_at')).find((event: LooseRecord) => event.action === 'undo');
+    if (completedInsideLease) {
+      return {
+        ok: true,
+        idempotent: true,
+        ...(completedInsideLease.after_state || {}),
+        audit_event_id: completedInsideLease.id,
+        undoable: false,
+        undo_token: null,
+      };
+    }
+
+    const shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+    await assertNoForeignPendingMutation(base44, shift, context, 'undo', user, requestHash);
+    const recoveryMarker = matchingPlanningMutationMarker(
+      shift,
+      'undo',
+      context,
+      user,
+      requestHash,
+    );
+    const recovering = Boolean(recoveryMarker);
+    if (!recovering && revisionOf(shift) !== expectedShiftRevision) {
+      throw new ApiError(409, 'Planning is intussen gewijzigd', {
+        entity: 'PlanningShift',
+        id: shift.id,
+        expected_revision: expectedShiftRevision,
+        current_revision: revisionOf(shift),
+      });
+    }
+    const undoShiftMetadata = planningMutationMetadata(
+      shift,
+      'undo',
+      context,
+      user,
+      requestHash,
+    );
+    const beforeState: LooseRecord = { shift };
+    let updatedShift: LooseRecord;
+    let result: LooseRecord;
+
+    if (undoAction === 'unassign') {
+      const assignmentId = compact(undoPayload.assignment_id || sourceEvent.assignment_id);
+      if (!assignmentId) throw new ApiError(409, 'Undo-payload mist assignment_id');
+      const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
+      if (
+        assignment.shift_id !== shift.id
+        || String(assignment.personnel_id) !== String(initialCurrentAssignments[0]?.personnel_id)
+      ) throw new ApiError(409, 'Undo-toewijzing is intussen gewijzigd');
+      beforeState.assignment = assignment;
+      await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = await restoreShiftForUndo(
+        base44,
+        user,
+        shift,
+        recovering ? revisionOf(shift) : expectedShiftRevision,
+        previousShift,
+        { metadata: undoShiftMetadata },
+      );
+      const previousAssignment = undoPayload.previous_assignment && typeof undoPayload.previous_assignment === 'object'
+        ? undoPayload.previous_assignment
+        : null;
+      const assignmentPatch = previousAssignment
+        ? assignmentUndoPatch(previousAssignment, revisionOf(assignment))
+        : {
+            status: 'removed',
+            removed_by_user_id: user.id || null,
+            removed_at: nowIso(),
+          };
+      await renewPlanningResourceLeases(base44, user, leases);
+      const updatedAssignment = await casUpdate(
+        base44,
+        'PlanningAssignment',
+        assignment,
+        revisionOf(assignment),
+        assignmentPatch,
+      );
+      result = { shift: updatedShift, assignment: updatedAssignment };
+    } else if (undoAction === 'restore_assignment' || undoAction === 'assign') {
+      const assignmentId = compact(undoPayload.assignment_id || sourceEvent.assignment_id);
+      const previousAssignment = undoPayload.previous_assignment;
+      if (!assignmentId || !previousAssignment || typeof previousAssignment !== 'object') {
+        throw new ApiError(409, 'Undo-payload mist de vorige toewijzingsstaat');
+      }
+      const assignment = await requireRecord(base44, 'PlanningAssignment', assignmentId, 'Toewijzing');
+      if (
+        assignment.shift_id !== shift.id
+        || String(assignment.personnel_id) !== String(initialCurrentAssignments[0]?.personnel_id)
+      ) throw new ApiError(409, 'Undo-toewijzing is intussen gewijzigd');
+      beforeState.assignment = assignment;
+      await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = await restoreShiftForUndo(
+        base44,
+        user,
+        shift,
+        recovering ? revisionOf(shift) : expectedShiftRevision,
+        previousShift,
+        { metadata: undoShiftMetadata },
+      );
+      await renewPlanningResourceLeases(base44, user, leases);
+      const updatedAssignment = await casUpdate(
+        base44,
+        'PlanningAssignment',
+        assignment,
+        revisionOf(assignment),
+        assignmentUndoPatch(previousAssignment, revisionOf(assignment)),
+      );
+      result = { shift: updatedShift, assignment: updatedAssignment };
+    } else {
+      const previousAssignments = normalizeArray<LooseRecord>(undoPayload.previous_assignments)
+        .filter(item => item?.id && item.status !== 'removed');
+      const currentAssignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
+      const currentActiveAssignmentKeys = currentAssignments
+        .filter((item: LooseRecord) => item.status !== 'removed')
+        .map((item: LooseRecord) => `${item.id}:${item.personnel_id}`)
+        .sort();
+      const initialActiveAssignmentKeys = initialCurrentAssignments
+        .map((item: LooseRecord) => `${item.id}:${item.personnel_id}`)
+        .sort();
+      if (stableStringify(currentActiveAssignmentKeys) !== stableStringify(initialActiveAssignmentKeys)) {
+        throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw');
+      }
+      beforeState.assignments = currentAssignments;
+      await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = await restoreShiftForUndo(
+        base44,
+        user,
+        shift,
+        recovering ? revisionOf(shift) : expectedShiftRevision,
+        previousShift,
+        { metadata: undoShiftMetadata },
+      );
+      const currentById = new Map<string, LooseRecord>(
+        currentAssignments.map((item: LooseRecord) => [String(item.id), item]),
+      );
+      const restoredAssignments: LooseRecord[] = [];
+      for (const previousAssignment of previousAssignments) {
+        const current = currentById.get(String(previousAssignment.id));
+        if (!current) throw new ApiError(409, `Toewijzing ${previousAssignment.id} ontbreekt voor move-undo`);
+        await renewPlanningResourceLeases(base44, user, leases);
+        restoredAssignments.push(await casUpdate(
+          base44,
+          'PlanningAssignment',
+          current,
+          revisionOf(current),
+          assignmentUndoPatch(previousAssignment, revisionOf(current)),
+        ));
+      }
+      result = { shift: updatedShift, assignments: restoredAssignments };
+    }
+
+    const activeAssignmentsAfterUndo = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: updatedShift.id },
+    )).filter((item: LooseRecord) => item.status !== 'removed');
+    const revalidatedAssignments: LooseRecord[] = [];
+    for (const assignment of activeAssignmentsAfterUndo) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      const finalPersonnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+      const finalEligibility = await evaluateAssignmentWarnings(
+        base44,
+        updatedShift,
+        finalPersonnel,
+        assignment.id,
+        normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
+      );
+      await renewPlanningResourceLeases(base44, user, leases);
+      revalidatedAssignments.push(await casUpdate(
+        base44,
+        'PlanningAssignment',
+        assignment,
+        revisionOf(assignment),
+        {
+          warning_codes: finalEligibility.warning_codes,
+          warning_snapshot: finalEligibility.warning_snapshot,
+          has_critical_warnings: finalEligibility.has_critical_warnings,
+          contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
+          personnel_contract_id: finalEligibility.personnel_contract_id,
+          metadata: {
+            ...(assignment.metadata || {}),
+            final_assignment_validation_at: nowIso(),
+            undo_revalidated_at: nowIso(),
+          },
+        },
       ));
     }
-    result = { shift: updatedShift, assignments: restoredAssignments };
-  }
+    const revalidatedById = new Map(
+      revalidatedAssignments.map((assignment: LooseRecord) => [String(assignment.id), assignment]),
+    );
+    if (result.assignment && revalidatedById.has(String(result.assignment.id))) {
+      result.assignment = revalidatedById.get(String(result.assignment.id));
+    }
+    if (undoAction === 'move') result.assignments = revalidatedAssignments;
 
-  const audit = await appendAudit(base44, user, {
-    action: 'undo',
-    resource_type: sourceEvent.resource_type || 'PlanningShift',
-    resource_id: sourceEvent.resource_id || shift.id,
-    shift_id: shift.id,
-    assignment_id: sourceEvent.assignment_id || null,
-    before_state: beforeState,
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: false,
-    undo_of_event_id: sourceEvent.id,
-    metadata: {
-      source_action: sourceEvent.action,
-      source_correlation_id: sourceEvent.correlation_id || null,
-    },
+    await renewPlanningResourceLeases(base44, user, leases);
+    const audit = await appendAudit(base44, user, {
+      action: 'undo',
+      resource_type: sourceEvent.resource_type || 'PlanningShift',
+      resource_id: sourceEvent.resource_id || shift.id,
+      shift_id: shift.id,
+      assignment_id: sourceEvent.assignment_id || null,
+      before_state: recovering ? null : beforeState,
+      after_state: result,
+      correlation_id: context.correlationId,
+      idempotency_key: context.idempotencyKey,
+      undoable: false,
+      undo_of_event_id: sourceEvent.id,
+      metadata: {
+        request_hash: requestHash,
+        recovered_completed_state: recovering,
+        source_action: sourceEvent.action,
+        source_correlation_id: sourceEvent.correlation_id || null,
+      },
+    });
+    return {
+      ok: true,
+      ...result,
+      audit_event_id: audit.id,
+      undoable: false,
+      undo_token: null,
+      undo_of_event_id: sourceEvent.id,
+    };
   });
-  return {
-    ok: true,
-    ...result,
-    audit_event_id: audit.id,
-    undoable: false,
-    undo_token: null,
-    undo_of_event_id: sourceEvent.id,
-  };
 }
 
 async function copyShift(
@@ -2533,76 +4990,264 @@ async function copyShift(
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
-  const replay = await findReplay(base44, 'copy', context.idempotencyKey);
-  if (replay) return replayResult(replay);
+  requireMutationIdempotency(context, 'copy');
+  const requestHash = await mutationRequestHash('copy', body);
+  let replay = await findReplay(base44, 'copy', context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, 'copy');
+    const replayShiftId = compact(replay.after_state?.shift?.id || replay.shift_id);
+    const replayShift = replayShiftId ? await getRecord(base44, 'PlanningShift', replayShiftId) : null;
+    if (!replayShift) {
+      throw new ApiError(409, 'De geaudite kopiedienst ontbreekt en kan niet automatisch worden hersteld', {
+        shift_id: replayShiftId || null,
+      });
+    }
+    if (replayShift.metadata?.copy_saga?.phase === 'completed') return replayResult(replay);
+  }
 
   const sourceShiftId = requireId(body, 'shift_id');
   const expectedShiftRevision = positiveInteger(body.expected_shift_revision, 'expected_shift_revision');
-  const source = await requireRecord(base44, 'PlanningShift', sourceShiftId, 'Brondienst');
-  if (revisionOf(source) !== expectedShiftRevision) {
-    throw new ApiError(409, 'Planning is intussen gewijzigd', {
-      entity: 'PlanningShift',
-      id: source.id,
-      expected_revision: expectedShiftRevision,
-      current_revision: revisionOf(source),
-    });
-  }
-  if (source.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden gekopieerd');
-  const composedSegments = await filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: source.id });
-  if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
-    throw new ApiError(409, 'Een samengestelde dienst kan niet los worden gekopieerd; maak een nieuwe dienst uit de taakwerkvoorraad');
-  }
+  const sourceKey = `copy:${sourceShiftId}:${context.idempotencyKey}`;
+  const preflightCopyTargets = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningShift,
+    { source_key: sourceKey },
+  );
+  const descriptors = await Promise.all([
+    resourceCoordinatorDescriptor('copy_source', sourceKey),
+    resourceCoordinatorDescriptor('shift_composition', sourceShiftId),
+    ...preflightCopyTargets.map(item => resourceCoordinatorDescriptor('shift_composition', item.id)),
+  ]);
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const source = await requireRecord(base44, 'PlanningShift', sourceShiftId, 'Brondienst');
+    const existingMatches = await filterAllRecords(
+      base44.asServiceRole.entities.PlanningShift,
+      { source_key: sourceKey },
+    );
+    for (const existingMatch of existingMatches) {
+      await assertNoForeignPendingMutation(
+        base44,
+        existingMatch,
+        context,
+        'copy',
+        user,
+        requestHash,
+      );
+    }
+    let existing = existingMatches.length > 1
+      ? await reconcilePlanningShiftSourceKey(
+          base44,
+          user,
+          sourceKey,
+          () => renewPlanningResourceLeases(base44, user, leases),
+          candidate => assertNoForeignPendingMutation(
+            base44,
+            candidate,
+            context,
+            'copy',
+            user,
+            requestHash,
+          ),
+        )
+      : existingMatches[0] || null;
+    if (!existing) {
+      if (revisionOf(source) !== expectedShiftRevision) {
+        throw new ApiError(409, 'Planning is intussen gewijzigd', {
+          entity: 'PlanningShift',
+          id: source.id,
+          expected_revision: expectedShiftRevision,
+          current_revision: revisionOf(source),
+        });
+      }
+      await assertNoForeignPendingMutation(base44, source, context, 'copy', user, requestHash);
+      if (source.status === 'cancelled') throw new ApiError(409, 'Een geannuleerde dienst kan niet worden gekopieerd');
+      const composedSegments = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShiftTaskSegment,
+        { shift_id: source.id },
+      );
+      if (composedSegments.some((item: LooseRecord) => item.status !== 'removed')) {
+        throw new ApiError(409, 'Een samengestelde dienst kan niet los worden gekopieerd; maak een nieuwe dienst uit de taakwerkvoorraad');
+      }
 
-  const sourceKey = `copy:${source.id}:${context.idempotencyKey || context.correlationId}`;
-  const existing = await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { source_key: sourceKey });
-  if (existing[0]) {
-    return { ok: true, idempotent: true, shift: existing[0], assignments: [], undoable: false };
-  }
-  const serviceDate = body.service_date ? asDate(body.service_date, 'service_date') : source.service_date;
-  const endDate = Object.prototype.hasOwnProperty.call(body, 'end_date')
-    ? optionalDate(body.end_date, 'end_date')
-    : source.end_date || null;
-  const startTime = body.start_time ? asTime(body.start_time, 'start_time') : source.start_time;
-  const endTime = body.end_time ? asTime(body.end_time, 'end_time') : source.end_time;
-  const shift = await base44.asServiceRole.entities.PlanningShift.create({
-    ...pick(source, SHIFT_COPY_FIELDS),
-    source_key: sourceKey,
-    source_type: 'copy',
-    source_id: source.id,
-    source_shift_id: source.id,
-    source_route_execution_id: null,
-    service_date: serviceDate,
-    end_date: endDate,
-    start_time: startTime,
-    end_time: endTime,
-    status: 'draft',
-    revision: 1,
-    published_revision: 0,
-    last_published_correlation_id: null,
-    last_modified_by_user_id: user.id || null,
-    last_modified_at: nowIso(),
-    metadata: {
-      copied_from_shift_id: source.id,
-      copy_correlation_id: context.correlationId,
-    },
+      const timing = resolveShiftTiming(source, body);
+      const initializedAt = nowIso();
+      const intendedShift = {
+        ...pick(source, SHIFT_COPY_FIELDS),
+        source_key: sourceKey,
+        source_type: 'copy',
+        source_id: source.id,
+        source_shift_id: source.id,
+        source_route_execution_id: null,
+        ...timing,
+        status: 'draft',
+        published_revision: 0,
+        last_published_correlation_id: null,
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: initializedAt,
+      };
+      const intendedShiftHash = await sha256(stableStringify(intendedShift));
+      await renewPlanningResourceLeases(base44, user, leases);
+      existing = await base44.asServiceRole.entities.PlanningShift.create({
+        ...intendedShift,
+        // A new copy remains outside every visible/publication scope until its
+        // immutable intended state has a durable audit record.
+        status: 'cancelled',
+        revision: 1,
+        metadata: {
+          copied_from_shift_id: source.id,
+          copy_correlation_id: context.correlationId,
+          copy_idempotency_key: context.idempotencyKey,
+          copy_request_hash: requestHash,
+          copy_actor_user_id: user.id || null,
+          planning_mutation: {
+            action: 'copy',
+            idempotency_key: context.idempotencyKey,
+            correlation_id: context.correlationId,
+            actor_user_id: user.id || null,
+            request_hash: requestHash,
+            phase: 'state_written_audit_pending',
+            started_at: initializedAt,
+            updated_at: initializedAt,
+          },
+          copy_saga: {
+            phase: 'audit_pending',
+            source_shift_id: source.id,
+            source_shift_revision: revisionOf(source),
+            intended_shift: intendedShift,
+            intended_shift_hash: intendedShiftHash,
+            initialized_at: initializedAt,
+          },
+        },
+      });
+    }
+
+    if (
+      existing.metadata?.copy_request_hash !== requestHash
+      || existing.metadata?.copy_actor_user_id !== (user.id || null)
+      || existing.metadata?.copy_saga?.source_shift_id !== sourceShiftId
+      || Number(existing.metadata?.copy_saga?.source_shift_revision) !== expectedShiftRevision
+    ) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere copy-opdracht');
+    }
+    matchingPlanningMutationMarker(existing, 'copy', context, user, requestHash);
+    const saga = existing.metadata?.copy_saga;
+    const intendedShift = saga?.intended_shift;
+    if (!intendedShift || typeof intendedShift !== 'object') {
+      throw new ApiError(409, 'De kopiedienst mist het onveranderlijke doelsnapshot');
+    }
+    const intendedShiftHash = await sha256(stableStringify(intendedShift));
+    if (intendedShiftHash !== saga.intended_shift_hash) {
+      throw new ApiError(409, 'Het doelsnapshot van de kopiedienst is gewijzigd en vereist handmatige controle');
+    }
+    if (saga.phase === 'completed') {
+      if (!replay) replay = await findReplay(base44, 'copy', context.idempotencyKey);
+      if (!replay) {
+        throw new ApiError(409, 'De zichtbare kopiedienst mist zijn verplichte audit-event');
+      }
+      assertReplayFingerprint(replay, user, requestHash, 'copy');
+      return replayResult(replay);
+    }
+    if (saga.phase !== 'audit_pending' || existing.status !== 'cancelled') {
+      throw new ApiError(409, 'De kopiedienst heeft een ongeldige herstelstatus', {
+        shift_id: existing.id,
+        copy_phase: saga.phase || null,
+        shift_status: existing.status,
+      });
+    }
+
+    if (!replay) replay = await findReplay(base44, 'copy', context.idempotencyKey);
+    if (replay) assertReplayFingerprint(replay, user, requestHash, 'copy');
+    let audit = replay;
+    let auditedShift = replay?.after_state?.shift || null;
+    if (!audit) {
+      const completedAt = nowIso();
+      const completedMetadata = {
+        ...(existing.metadata || {}),
+        planning_mutation: {
+          ...(existing.metadata?.planning_mutation || {}),
+          phase: 'completed',
+          updated_at: completedAt,
+          completed_at: completedAt,
+        },
+        copy_saga: {
+          ...saga,
+          phase: 'completed',
+          completed_at: completedAt,
+        },
+      };
+      auditedShift = {
+        ...existing,
+        ...intendedShift,
+        status: 'draft',
+        metadata: completedMetadata,
+        revision: revisionOf(existing) + 1,
+      };
+      await renewPlanningResourceLeases(base44, user, leases);
+      audit = await appendAudit(base44, user, {
+        action: 'copy',
+        resource_type: 'PlanningShift',
+        resource_id: existing.id,
+        shift_id: existing.id,
+        before_state: {
+          source_shift_id: sourceShiftId,
+          source_shift_revision: expectedShiftRevision,
+        },
+        after_state: { shift: auditedShift, assignments: [] },
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: {
+          request_hash: requestHash,
+          intended_shift_hash: intendedShiftHash,
+          recovered_pending_state: existingMatches.length > 0,
+        },
+      });
+    }
+    if (
+      !auditedShift
+      || String(auditedShift.id) !== String(existing.id)
+      || audit.metadata?.intended_shift_hash !== intendedShiftHash
+      || auditedShift.metadata?.copy_saga?.intended_shift_hash !== intendedShiftHash
+      || auditedShift.metadata?.copy_saga?.phase !== 'completed'
+      || auditedShift.status !== 'draft'
+    ) {
+      throw new ApiError(409, 'Het audit-event bevat niet het bedoelde kopiesnapshot');
+    }
+
+    const current = await requireRecord(base44, 'PlanningShift', existing.id, 'Kopiedienst');
+    if (current.metadata?.copy_saga?.phase === 'completed') return replayResult(audit);
+    if (
+      current.status !== 'cancelled'
+      || current.metadata?.copy_saga?.phase !== 'audit_pending'
+      || current.metadata?.copy_saga?.intended_shift_hash !== intendedShiftHash
+    ) {
+      throw new ApiError(409, 'De kopiedienst is tijdens herstel gewijzigd');
+    }
+    await renewPlanningResourceLeases(base44, user, leases);
+    const finalizedShift = await casUpdate(
+      base44,
+      'PlanningShift',
+      current,
+      revisionOf(current),
+      {
+        ...intendedShift,
+        status: 'draft',
+        metadata: auditedShift.metadata,
+      },
+    );
+    return {
+      ok: true,
+      idempotent: existingMatches.length > 0,
+      shift: finalizedShift,
+      assignments: [],
+      audit_event_id: audit.id,
+      undoable: false,
+      undo_token: null,
+    };
   });
-  const result = { shift, assignments: [] };
-  const audit = await appendAudit(base44, user, {
-    action: 'copy',
-    resource_type: 'PlanningShift',
-    resource_id: shift.id,
-    shift_id: shift.id,
-    before_state: { source_shift: source },
-    after_state: result,
-    correlation_id: context.correlationId,
-    idempotency_key: context.idempotencyKey,
-    undoable: false,
-  });
-  return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
 }
 
 function shiftMatchesPublicationScope(shift: LooseRecord, body: LooseRecord, shiftIds: Set<string>) {
-  if (shift.status === 'cancelled') return false;
+  if (!shiftAllowsActiveTaskSegments(shift)) return false;
   if (shiftIds.size && !shiftIds.has(String(shift.id))) return false;
   if (body.company_id && shift.company_id !== body.company_id) return false;
   if (body.customer_id && !uniqueStrings([shift.customer_id, ...(shift.customer_ids || [])]).includes(String(body.customer_id))) return false;
@@ -2670,7 +5315,12 @@ function publicationAssignmentSnapshot(assignment: LooseRecord) {
   };
 }
 
-function publicationOccurrenceSnapshot(occurrence: LooseRecord, segments: LooseRecord[]) {
+function publicationOccurrenceSnapshot(
+  occurrence: LooseRecord,
+  segments: LooseRecord[],
+  shifts?: LooseRecord[],
+  coverageSnapshot?: LooseRecord,
+) {
   return {
     id: occurrence.id,
     source_key: occurrence.source_key,
@@ -2693,7 +5343,15 @@ function publicationOccurrenceSnapshot(occurrence: LooseRecord, segments: LooseR
     window_end_time: occurrence.window_end_time,
     required_minutes: occurrence.required_minutes,
     lifecycle_status: occurrence.lifecycle_status,
-    coverage: occurrenceCoverage(occurrence, segments),
+    coverage: coverageSnapshot?.coverage || occurrenceCoverage(occurrence, segments, shifts),
+    coverage_basis: coverageSnapshot?.coverage_basis || {
+      calculation: 'snapshot_scope_only',
+      scope_shift_ids: uniqueStrings(shifts?.map(item => item.id) || []),
+      scope_segment_ids: uniqueStrings(segments.map(item => item.id)),
+      external_published_shift_ids: [],
+      external_published_segment_ids: [],
+      external_publication_evidence: [],
+    },
     revision: revisionOf(occurrence),
     published_revision: Number(occurrence.published_revision || 0),
   };
@@ -2726,28 +5384,499 @@ function publicationTaskSegmentSnapshot(segment: LooseRecord) {
   };
 }
 
+function publicationPlanEntry(
+  record: LooseRecord,
+  patch: LooseRecord,
+  fenceResourceType: string,
+  fenceResourceId: string,
+) {
+  return {
+    id: record.id,
+    base_revision: revisionOf(record),
+    target_revision: revisionOf(record) + 1,
+    fence_resource_type: fenceResourceType,
+    fence_resource_id: fenceResourceId,
+    patch,
+  };
+}
+
+function publicationTargetRecord(record: LooseRecord, entry: LooseRecord) {
+  return {
+    ...record,
+    ...(entry.patch || {}),
+    revision: Number(entry.target_revision),
+  };
+}
+
+function exactPublicationFinalizationMarker(
+  marker: LooseRecord | null | undefined,
+  publication: LooseRecord,
+  entry: LooseRecord,
+  intentId: string,
+  requestHash: string,
+  manifestHash: string,
+) {
+  return Boolean(
+    marker
+    && String(marker.publication_id) === String(publication.id)
+    && Number(marker.publication_version) === Number(publication.version)
+    && marker.intent_id === intentId
+    && marker.idempotency_key === publication.idempotency_key
+    && marker.actor_user_id === (publication.metadata?.actor_user_id || null)
+    && marker.request_hash === requestHash
+    && marker.finalization_manifest_hash === manifestHash
+    && Number(marker.base_revision) === Number(entry.base_revision)
+    && Number(marker.target_revision) === Number(entry.target_revision)
+  );
+}
+
+function immutablePublicationTarget(
+  publication: LooseRecord,
+  groupKey: string,
+  entry: LooseRecord,
+) {
+  const snapshotTarget = normalizeArray<LooseRecord>(publication.snapshot?.[groupKey])
+    .find(item => String(item.id) === String(entry.id));
+  if (!snapshotTarget) {
+    throw new ApiError(409, 'Immutable publicatiesnapshot mist een target uit het finalisatiemanifest', {
+      group: groupKey,
+      id: entry.id,
+    });
+  }
+  return {
+    ...snapshotTarget,
+    ...(entry.patch || {}),
+    revision: Number(entry.target_revision),
+  };
+}
+
+function assertFrozenPublicationTargets(
+  targetType: string,
+  preflightTargets: LooseRecord[],
+  freshTargets: LooseRecord[],
+) {
+  const preflightById = new Map(preflightTargets.map(item => [String(item.id), item]));
+  const freshById = new Map(freshTargets.map(item => [String(item.id), item]));
+  const addedIds = [...freshById.keys()].filter(id => !preflightById.has(id)).sort();
+  const removedIds = [...preflightById.keys()].filter(id => !freshById.has(id)).sort();
+  const changedIds = [...preflightById.keys()].filter(id => (
+    freshById.has(id)
+    && revisionOf(preflightById.get(id) as LooseRecord) !== revisionOf(freshById.get(id) as LooseRecord)
+  )).sort();
+  if (addedIds.length || removedIds.length || changedIds.length) {
+    throw new ApiError(409, 'De publicatiescope is tijdens het reserveren gewijzigd; laad de planning opnieuw', {
+      code: 'planning_publication_scope_changed',
+      target_type: targetType,
+      added_ids: addedIds,
+      removed_ids: removedIds,
+      changed_ids: changedIds,
+    });
+  }
+}
+
+async function finalizePlanningPublication(
+  base44: LooseRecord,
+  user: LooseRecord,
+  publication: LooseRecord,
+  audit: LooseRecord,
+  leases: LooseRecord[],
+) {
+  const plan = publication.metadata?.finalization_manifest;
+  const manifestHash = publication.metadata?.finalization_manifest_hash;
+  const intentId = publication.metadata?.publication_intent_id;
+  const requestHash = publication.metadata?.request_hash;
+  if (!plan || !manifestHash || !intentId || !requestHash) {
+    throw new ApiError(409, 'Publicatie mist het verplichte finalisatiemanifest');
+  }
+  if (await sha256(stableStringify(plan)) !== manifestHash) {
+    throw new ApiError(409, 'Het finalisatiemanifest van de publicatie is gewijzigd');
+  }
+  if (
+    audit.action !== 'publish'
+    || String(audit.publication_id || audit.resource_id) !== String(publication.id)
+    || audit.actor_user_id !== publication.metadata?.actor_user_id
+    || audit.metadata?.request_hash !== requestHash
+    || audit.metadata?.publication_checksum !== publication.checksum
+    || audit.metadata?.finalization_manifest_hash !== manifestHash
+  ) {
+    throw new ApiError(409, 'Audit-event hoort niet exact bij deze publicatie');
+  }
+
+  const finalized: Record<string, LooseRecord[]> = {
+    assignments: [],
+    task_segments: [],
+    task_occurrences: [],
+    shifts: [],
+  };
+  const groups = [
+    { key: 'assignments', entity: 'PlanningAssignment', label: 'Toewijzing' },
+    { key: 'task_segments', entity: 'PlanningShiftTaskSegment', label: 'Taaksegment' },
+    { key: 'task_occurrences', entity: 'PlanningTaskOccurrence', label: 'Taakuitvoering' },
+    // Parent shifts are made visible only after every child state is durable.
+    { key: 'shifts', entity: 'PlanningShift', label: 'Dienst' },
+  ];
+  for (const group of groups) {
+    for (const entry of normalizeArray<LooseRecord>(plan[group.key])) {
+      const current = await requireRecord(base44, group.entity, entry.id, group.label);
+      const finalization = current.metadata?.publication_finalization;
+      const alreadyFinalized = exactPublicationFinalizationMarker(
+        finalization,
+        publication,
+        entry,
+        intentId,
+        requestHash,
+        manifestHash,
+      );
+      if (alreadyFinalized) {
+        // This marker is durable historical proof that the manifest target was
+        // committed. A later legitimate planning mutation may have advanced
+        // the live record; a replay must never roll that mutation back.
+        finalized[group.key].push(immutablePublicationTarget(publication, group.key, entry));
+        continue;
+      }
+      if (revisionOf(current) !== Number(entry.base_revision)) {
+        throw new ApiError(409, 'Publicatiefinalisatie botst met een nieuwere planningwijziging', {
+          entity: group.entity,
+          id: entry.id,
+          base_revision: entry.base_revision,
+          target_revision: entry.target_revision,
+          current_revision: revisionOf(current),
+        });
+      }
+      const fallbackFence = group.key === 'task_occurrences'
+        ? { resourceType: 'task_occurrence', resourceId: current.id }
+        : { resourceType: 'shift_composition', resourceId: group.key === 'shifts' ? current.id : current.shift_id };
+      const fenceResourceType = entry.fence_resource_type || fallbackFence.resourceType;
+      const fenceResourceId = entry.fence_resource_id || fallbackFence.resourceId;
+      if (
+        group.key !== 'task_occurrences'
+        && group.key !== 'shifts'
+        && String(fenceResourceId) !== String(current.shift_id)
+      ) {
+        throw new ApiError(409, 'Finalisatiemanifest verwijst naar een andere parentdienst', {
+          entity: group.entity,
+          id: entry.id,
+          manifest_shift_id: fenceResourceId,
+          current_shift_id: current.shift_id,
+        });
+      }
+      await renewPlanningResourceLeases(
+        base44,
+        user,
+        planningPublicationLeasePair(leases, fenceResourceType, fenceResourceId),
+      );
+      finalized[group.key].push(await casUpdate(
+        base44,
+        group.entity,
+        current,
+        Number(entry.base_revision),
+        {
+          ...(entry.patch || {}),
+          metadata: {
+            ...(current.metadata || {}),
+            publication_finalization: {
+              publication_id: publication.id,
+              publication_version: publication.version,
+              intent_id: intentId,
+              idempotency_key: publication.idempotency_key,
+              actor_user_id: publication.metadata?.actor_user_id || null,
+              request_hash: requestHash,
+              finalization_manifest_hash: manifestHash,
+              base_revision: Number(entry.base_revision),
+              target_revision: Number(entry.target_revision),
+              finalized_at: nowIso(),
+            },
+          },
+        },
+      ));
+    }
+  }
+  const publicationIntent = publication.metadata?.publication_intent || {
+    intent_id: intentId,
+    idempotency_key: publication.idempotency_key,
+    actor_user_id: publication.metadata?.actor_user_id || null,
+    request_hash: requestHash,
+    scope_key: publication.scope_key,
+    manifest_hash: manifestHash,
+    correlation_id: publication.correlation_id,
+    prepared_at: publication.published_at,
+  };
+  await clearPlanningPublicationIntent(base44, user, leases, publicationIntent);
+  return finalized;
+}
+
+async function committedExternalPublicationCoverage(
+  base44: LooseRecord,
+  excludedShiftIds: Set<string>,
+) {
+  const [publications, audits] = await Promise.all([
+    listAllRecords(base44.asServiceRole.entities.PlanningPublication, '-published_at'),
+    listAllRecords(base44.asServiceRole.entities.PlanningAuditEvent, '-occurred_at'),
+  ]);
+  const auditByPublicationId = new Map<string, LooseRecord>();
+  for (const audit of audits.filter((item: LooseRecord) => item.action === 'publish')) {
+    const publicationId = compact(audit.publication_id || audit.resource_id);
+    if (publicationId && !auditByPublicationId.has(publicationId)) {
+      auditByPublicationId.set(publicationId, audit);
+    }
+  }
+  const committed = publications.filter((publication: LooseRecord) => {
+    const audit = auditByPublicationId.get(String(publication.id));
+    return Boolean(
+      audit
+      && audit.metadata?.publication_checksum === publication.checksum
+      && audit.metadata?.request_hash === publication.metadata?.request_hash
+      && audit.actor_user_id === publication.metadata?.actor_user_id
+    );
+  });
+  const latestByScope = new Map<string, LooseRecord>();
+  for (const publication of committed) {
+    const key = String(publication.scope_key);
+    const current = latestByScope.get(key);
+    if (
+      !current
+      || Number(publication.version || 0) > Number(current.version || 0)
+      || (
+        Number(publication.version || 0) === Number(current.version || 0)
+        && String(publication.published_at || publication.id) > String(current.published_at || current.id)
+      )
+    ) latestByScope.set(key, publication);
+  }
+
+  const candidatesBySegmentId = new Map<string, LooseRecord>();
+  for (const publication of latestByScope.values()) {
+    const shifts = normalizeArray<LooseRecord>(publication.snapshot?.shifts);
+    const shiftById = new Map(shifts.map(item => [String(item.id), item]));
+    for (const segment of normalizeArray<LooseRecord>(publication.snapshot?.task_segments)) {
+      const shift = shiftById.get(String(segment.shift_id));
+      if (
+        !shift
+        || excludedShiftIds.has(String(shift.id))
+        || shift.status !== 'published'
+        || segment.status !== 'published'
+        || Number(shift.revision) !== Number(shift.published_revision)
+        || Number(segment.revision) !== Number(segment.published_revision)
+      ) continue;
+      const evidence = {
+        publication_id: publication.id,
+        publication_version: Number(publication.version || 0),
+        publication_checksum: publication.checksum,
+        shift_id: shift.id,
+        shift_revision: Number(shift.revision),
+        segment_id: segment.id,
+        segment_revision: Number(segment.revision),
+      };
+      const current = candidatesBySegmentId.get(String(segment.id));
+      const candidatePublishedAt = String(publication.published_at || publication.id);
+      const currentPublishedAt = String(current?.published_at || current?.publication_id || '');
+      if (!current || candidatePublishedAt > currentPublishedAt || (
+        candidatePublishedAt === currentPublishedAt
+        && evidence.publication_version > current.evidence.publication_version
+      )) {
+        candidatesBySegmentId.set(String(segment.id), {
+          shift,
+          segment,
+          evidence,
+          published_at: publication.published_at || null,
+          publication_id: publication.id,
+        });
+      }
+    }
+  }
+  const candidates = [...candidatesBySegmentId.values()];
+  return {
+    shifts: uniqueRecords(candidates.map(item => item.shift), item => String(item.id)),
+    segments: candidates.map(item => item.segment),
+    evidenceBySegmentId: new Map(candidates.map(item => [String(item.segment.id), item.evidence])),
+  };
+}
+
+async function planningPublicationScope(
+  body: LooseRecord,
+  requestedShiftIds: Set<string>,
+  periodStart: string,
+  periodEnd: string,
+) {
+  const scopeType = ['day', 'week', 'selection', 'range'].includes(body.scope_type)
+    ? body.scope_type
+    : requestedShiftIds.size
+    ? 'selection'
+    : 'range';
+  const selectionHash = requestedShiftIds.size
+    ? await sha256([...requestedShiftIds].sort().join(','))
+    : null;
+  const routeScope = compact(body.route_id) || '*';
+  const suppliedScopeKey = compact(body.scope_key);
+  const scopeKey = suppliedScopeKey
+    ? `${suppliedScopeKey}:route:${routeScope}`
+    : scopeType === 'selection'
+    ? `selection:${selectionHash}:route:${routeScope}`
+    : [
+        scopeType,
+        body.company_id || '*',
+        body.customer_id || '*',
+        body.object_id || '*',
+        routeScope,
+        periodStart,
+        periodEnd,
+      ].join(':');
+  return { scopeType, scopeKey };
+}
+
+async function planningPublicationRequestHash(
+  body: LooseRecord,
+  requestedShiftIds: Set<string>,
+  reason: string,
+  scopeType: string,
+  scopeKey: string,
+  periodStart: string,
+  periodEnd: string,
+) {
+  return sha256(stableStringify({
+    action: 'publish',
+    scope_type: scopeType,
+    scope_key: scopeKey,
+    company_id: compact(body.company_id) || null,
+    customer_id: compact(body.customer_id) || null,
+    object_id: compact(body.object_id) || null,
+    route_id: compact(body.route_id) || null,
+    period_start: periodStart,
+    period_end: periodEnd,
+    shift_ids: [...requestedShiftIds].sort(),
+    expected_shift_revision: body.expected_shift_revision || null,
+    expected_shift_revisions: body.expected_shift_revisions || {},
+    publication_reason: reason,
+    acknowledge_critical_warnings: body.acknowledge_critical_warnings === true,
+    critical_warning_acknowledgement_reason: compact(body.critical_warning_acknowledgement_reason) || null,
+  }));
+}
+
+async function planningPublicationRecoveryDescriptors(publication: LooseRecord) {
+  const plan = publication.metadata?.finalization_manifest;
+  const manifestHash = publication.metadata?.finalization_manifest_hash;
+  if (!plan || !manifestHash || await sha256(stableStringify(plan)) !== manifestHash) {
+    throw new ApiError(409, 'Publicatie mist een geldig immutable finalisatiemanifest');
+  }
+  const descriptors: LooseRecord[] = [
+    await resourceCoordinatorDescriptor('publication_scope', publication.scope_key),
+  ];
+  const groupSpecs = [
+    { key: 'shifts', fallbackType: 'shift_composition', fallbackParent: 'id' },
+    { key: 'assignments', fallbackType: 'shift_composition', fallbackParent: 'shift_id' },
+    { key: 'task_segments', fallbackType: 'shift_composition', fallbackParent: 'shift_id' },
+    { key: 'task_occurrences', fallbackType: 'task_occurrence', fallbackParent: 'id' },
+  ];
+  for (const spec of groupSpecs) {
+    const snapshotById = new Map(
+      normalizeArray<LooseRecord>(publication.snapshot?.[spec.key])
+        .map(item => [String(item.id), item]),
+    );
+    for (const entry of normalizeArray<LooseRecord>(plan[spec.key])) {
+      const snapshotTarget = snapshotById.get(String(entry.id));
+      const resourceType = entry.fence_resource_type || spec.fallbackType;
+      const resourceId = compact(
+        entry.fence_resource_id
+        || (spec.fallbackParent === 'id' ? entry.id : snapshotTarget?.[spec.fallbackParent]),
+      );
+      if (!resourceId) {
+        throw new ApiError(409, 'Publicatiemanifest mist de parentfence van een target', {
+          group: spec.key,
+          id: entry.id,
+        });
+      }
+      descriptors.push(await resourceCoordinatorDescriptor(resourceType, resourceId));
+    }
+  }
+  return uniqueRecords(descriptors, item => item.coordinatorKey);
+}
+
+async function completeExistingPlanningPublication(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  existingPublication: LooseRecord,
+  leases: LooseRecord[],
+) {
+  if (
+    existingPublication.metadata?.actor_user_id !== (user.id || null)
+    || existingPublication.metadata?.request_hash !== requestHash
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere publicatieopdracht');
+  }
+  const recoveryShiftIds = uniqueStrings(
+    existingPublication.metadata?.finalization_manifest?.shifts?.map((item: LooseRecord) => item.id)
+    || existingPublication.shift_ids,
+  );
+  const recoveryShifts = await Promise.all(
+    recoveryShiftIds.map(id => requireRecord(base44, 'PlanningShift', id, 'Dienst')),
+  );
+  for (const shift of recoveryShifts) {
+    await assertNoForeignPendingMutation(base44, shift, context, 'publish', user, requestHash);
+  }
+  let replayAudit = await findReplay(base44, 'publish', context.idempotencyKey);
+  if (!replayAudit) {
+    await renewPlanningResourceLeases(base44, user, leases);
+    replayAudit = await appendAudit(base44, user, {
+      action: 'publish',
+      resource_type: 'PlanningPublication',
+      resource_id: existingPublication.id,
+      publication_id: existingPublication.id,
+      before_state: null,
+      after_state: {
+        publication: existingPublication,
+        shifts: existingPublication.snapshot?.shifts || [],
+        assignments: existingPublication.snapshot?.assignments || [],
+        task_occurrences: existingPublication.snapshot?.task_occurrences || [],
+        task_segments: existingPublication.snapshot?.task_segments || [],
+      },
+      correlation_id: existingPublication.correlation_id,
+      idempotency_key: context.idempotencyKey,
+      undoable: false,
+      metadata: {
+        request_hash: requestHash,
+        publication_id: existingPublication.id,
+        publication_checksum: existingPublication.checksum,
+        finalization_manifest_hash: existingPublication.metadata?.finalization_manifest_hash,
+        recovered_durable_publication: true,
+      },
+    });
+  } else if (
+    replayAudit.actor_user_id !== (user.id || null)
+    || replayAudit.metadata?.request_hash !== requestHash
+    || String(replayAudit.publication_id || replayAudit.resource_id) !== String(existingPublication.id)
+    || replayAudit.metadata?.publication_checksum !== existingPublication.checksum
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere publicatieopdracht');
+  }
+  const finalized = await finalizePlanningPublication(
+    base44,
+    user,
+    existingPublication,
+    replayAudit,
+    leases,
+  );
+  return {
+    ok: true,
+    idempotent: true,
+    publication: existingPublication,
+    shifts: finalized.shifts,
+    assignments: finalized.assignments,
+    task_occurrences: finalized.task_occurrences,
+    task_segments: finalized.task_segments,
+    audit_event_id: replayAudit.id,
+    undoable: false,
+    undo_token: null,
+  };
+}
+
 async function publishPlanning(
   base44: LooseRecord,
   user: LooseRecord,
   body: LooseRecord,
   context: ReturnType<typeof mutationContext>,
 ) {
-  if (context.idempotencyKey) {
-    const existingPublication = await base44.asServiceRole.entities.PlanningPublication
-      .filter({ idempotency_key: context.idempotencyKey }, '-published_at', 2);
-    if (existingPublication[0]) {
-      return {
-        ok: true,
-        idempotent: true,
-        publication: existingPublication[0],
-        undoable: false,
-        undo_token: null,
-      };
-    }
-  }
-  const replay = await findReplay(base44, 'publish', context.idempotencyKey);
-  if (replay) return replayResult(replay);
-
+  if (!context.idempotencyKey) throw new ApiError(400, 'idempotency_key is verplicht om te publiceren');
   const reason = compact(body.publication_reason || body.reason);
   if (!reason) throw new ApiError(400, 'publication_reason is verplicht');
   const requestedShiftIds = new Set(uniqueStrings(body.shift_ids));
@@ -2755,13 +5884,61 @@ async function publishPlanning(
     asDate(body.period_start, 'period_start');
     asDate(body.period_end, 'period_end');
   }
-  const allShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
-  const shifts = allShifts.filter((shift: LooseRecord) =>
+  const existingPublicationsBeforePreflight = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningPublication,
+    { idempotency_key: context.idempotencyKey },
+    '-published_at',
+  );
+  const existingPublicationBeforePreflight = existingPublicationsBeforePreflight
+    .sort(coordinatorOrder)[0] || null;
+  if (existingPublicationBeforePreflight) {
+    const recoveryPeriodStart = body.period_start
+      ? asDate(body.period_start, 'period_start')
+      : asDate(existingPublicationBeforePreflight.period_start, 'period_start');
+    const recoveryPeriodEnd = body.period_end
+      ? asDate(body.period_end, 'period_end')
+      : asDate(existingPublicationBeforePreflight.period_end, 'period_end');
+    const recoveryScope = await planningPublicationScope(
+      body,
+      requestedShiftIds,
+      recoveryPeriodStart,
+      recoveryPeriodEnd,
+    );
+    const recoveryRequestHash = await planningPublicationRequestHash(
+      body,
+      requestedShiftIds,
+      reason,
+      recoveryScope.scopeType,
+      recoveryScope.scopeKey,
+      recoveryPeriodStart,
+      recoveryPeriodEnd,
+    );
+    const recoveryDescriptors = await planningPublicationRecoveryDescriptors(
+      existingPublicationBeforePreflight,
+    );
+    return withPlanningResourceLeases(
+      base44,
+      user,
+      context,
+      recoveryRequestHash,
+      recoveryDescriptors,
+      leases => completeExistingPlanningPublication(
+        base44,
+        user,
+        context,
+        recoveryRequestHash,
+        existingPublicationBeforePreflight,
+        leases,
+      ),
+    );
+  }
+  const preflightAllShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
+  const preflightShifts = preflightAllShifts.filter((shift: LooseRecord) =>
     shiftMatchesPublicationScope(shift, body, requestedShiftIds)
   );
-  if (!shifts.length) throw new ApiError(404, 'Geen publiceerbare diensten in deze scope');
+  if (!preflightShifts.length) throw new ApiError(404, 'Geen publiceerbare diensten in deze scope');
   if (requestedShiftIds.size) {
-    const found = new Set(shifts.map((item: LooseRecord) => String(item.id)));
+    const found = new Set(preflightShifts.map((item: LooseRecord) => String(item.id)));
     const missing = [...requestedShiftIds].filter(id => !found.has(id));
     if (missing.length) {
       throw new ApiError(409, 'Een of meer geselecteerde diensten bestaan niet of zijn geannuleerd', {
@@ -2769,6 +5946,116 @@ async function publishPlanning(
       });
     }
   }
+  const periodStart = body.period_start
+    ? asDate(body.period_start, 'period_start')
+    : preflightShifts.map(item => item.service_date).sort()[0];
+  const periodEnd = body.period_end
+    ? asDate(body.period_end, 'period_end')
+    : preflightShifts.map(item => item.service_date).sort().at(-1);
+  const { scopeType, scopeKey } = await planningPublicationScope(
+    body,
+    requestedShiftIds,
+    periodStart,
+    periodEnd,
+  );
+  const requestHash = await planningPublicationRequestHash(
+    body,
+    requestedShiftIds,
+    reason,
+    scopeType,
+    scopeKey,
+    periodStart,
+    periodEnd,
+  );
+  const publicationDescriptor = await resourceCoordinatorDescriptor('publication_scope', scopeKey);
+  const preflightShiftIds = new Set(preflightShifts.map(item => String(item.id)));
+  const preflightTaskSegments = (await listAllRecords(
+    base44.asServiceRole.entities.PlanningShiftTaskSegment,
+  )).filter((segment: LooseRecord) => (
+    preflightShiftIds.has(String(segment.shift_id)) && segment.status !== 'removed'
+  ));
+  const preflightReferencedOccurrenceIds = new Set(
+    uniqueStrings(preflightTaskSegments.map(item => item.task_occurrence_id)),
+  );
+  const preflightOccurrences = await listAllRecords(
+    base44.asServiceRole.entities.PlanningTaskOccurrence,
+    '-service_date',
+  );
+  const preflightOccurrenceIds = uniqueStrings(preflightOccurrences
+    .filter((occurrence: LooseRecord) => (
+      occurrence.lifecycle_status === 'active'
+      && (
+        preflightReferencedOccurrenceIds.has(String(occurrence.id))
+        || (
+          !body.route_id
+          && occurrence.service_date >= periodStart
+          && occurrence.service_date <= periodEnd
+          && (!body.company_id || occurrence.company_id === body.company_id)
+          && (!body.customer_id || occurrence.customer_id === body.customer_id)
+          && (!body.object_id || occurrence.object_id === body.object_id)
+        )
+      )
+    ))
+    .map(item => item.id));
+  const preflightOccurrenceIdSet = new Set(preflightOccurrenceIds);
+  const publicationDescriptors = [
+    publicationDescriptor,
+    ...await Promise.all(preflightShifts.map((shift: LooseRecord) => (
+      resourceCoordinatorDescriptor('shift_composition', shift.id)
+    ))),
+    ...await Promise.all(preflightOccurrenceIds.map(id => (
+      resourceCoordinatorDescriptor('task_occurrence', id)
+    ))),
+  ];
+
+  return withPlanningResourceLeases(
+    base44,
+    user,
+    context,
+    requestHash,
+    publicationDescriptors,
+    async leases => {
+      const existingPublications = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningPublication,
+        { idempotency_key: context.idempotencyKey },
+        '-published_at',
+      );
+      const existingPublication = existingPublications.sort(coordinatorOrder)[0] || null;
+      if (existingPublication) {
+        return completeExistingPlanningPublication(
+          base44,
+          user,
+          context,
+          requestHash,
+          existingPublication,
+          leases,
+        );
+      }
+      const replayAudit = await findReplay(base44, 'publish', context.idempotencyKey);
+      if (replayAudit) {
+        assertReplayFingerprint(replayAudit, user, requestHash, 'publish');
+        throw new ApiError(409, 'Publicatie-audit bestaat zonder bijbehorend immutable publicatierecord');
+      }
+
+      const allShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
+      const shifts = allShifts.filter((shift: LooseRecord) =>
+        shiftMatchesPublicationScope(shift, body, requestedShiftIds)
+      );
+      if (!shifts.length) throw new ApiError(404, 'Geen publiceerbare diensten in deze scope');
+      if (requestedShiftIds.size) {
+        const found = new Set(shifts.map((item: LooseRecord) => String(item.id)));
+        const missing = [...requestedShiftIds].filter(id => !found.has(id));
+        if (missing.length) {
+          throw new ApiError(409, 'Een of meer geselecteerde diensten bestaan niet of zijn geannuleerd', {
+            missing_shift_ids: missing,
+          });
+        }
+      }
+      assertFrozenPublicationTargets('shift', preflightShifts, shifts);
+
+      for (const shift of shifts) {
+        await assertNoForeignPendingMutation(base44, shift, context, 'publish', user, requestHash);
+      }
 
   const expectedRevisions = body.expected_shift_revisions || {};
   if (body.expected_shift_revision != null && shifts.length !== 1) {
@@ -2793,12 +6080,6 @@ async function publishPlanning(
   }
 
   const shiftIdSet = new Set(shifts.map((item: LooseRecord) => String(item.id)));
-  const periodStart = body.period_start
-    ? asDate(body.period_start, 'period_start')
-    : shifts.map(item => item.service_date).sort()[0];
-  const periodEnd = body.period_end
-    ? asDate(body.period_end, 'period_end')
-    : shifts.map(item => item.service_date).sort().at(-1);
   const [allAssignments, allTaskSegments, allOccurrences] = await Promise.all([
     listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
     listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
@@ -2810,14 +6091,39 @@ async function publishPlanning(
   const taskSegments = allTaskSegments.filter((segment: LooseRecord) =>
     shiftIdSet.has(String(segment.shift_id)) && segment.status !== 'removed'
   );
+  assertFrozenPublicationTargets('task_segment', preflightTaskSegments, taskSegments);
+  const referencedOccurrenceIds = new Set(
+    taskSegments.map((segment: LooseRecord) => String(segment.task_occurrence_id)),
+  );
+  const occurrenceById = new Map<string, LooseRecord>(
+    allOccurrences.map((occurrence: LooseRecord) => [String(occurrence.id), occurrence]),
+  );
+  const invalidReferencedOccurrences = [...referencedOccurrenceIds]
+    .filter(id => occurrenceById.get(id)?.lifecycle_status !== 'active');
+  if (invalidReferencedOccurrences.length) {
+    throw new ApiError(409, 'Een of meer taaksegmenten verwijzen niet naar een actieve taakuitvoering', {
+      task_occurrence_ids: invalidReferencedOccurrences,
+    });
+  }
   const occurrences = allOccurrences.filter((occurrence: LooseRecord) =>
     occurrence.lifecycle_status === 'active'
-    && occurrence.service_date >= periodStart
-    && occurrence.service_date <= periodEnd
-    && (!body.company_id || occurrence.company_id === body.company_id)
-    && (!body.customer_id || occurrence.customer_id === body.customer_id)
-    && (!body.object_id || occurrence.object_id === body.object_id)
+    && (
+      referencedOccurrenceIds.has(String(occurrence.id))
+      || (
+        !body.route_id
+        &&
+        occurrence.service_date >= periodStart
+        && occurrence.service_date <= periodEnd
+        && (!body.company_id || occurrence.company_id === body.company_id)
+        && (!body.customer_id || occurrence.customer_id === body.customer_id)
+        && (!body.object_id || occurrence.object_id === body.object_id)
+      )
+    )
   );
+  const preflightRelevantOccurrences = preflightOccurrences.filter((occurrence: LooseRecord) => (
+    preflightOccurrenceIdSet.has(String(occurrence.id))
+  ));
+  assertFrozenPublicationTargets('task_occurrence', preflightRelevantOccurrences, occurrences);
   const occurrenceIdsBySourceKey = occurrences.reduce((groups: Map<string, string[]>, occurrence: LooseRecord) => {
     const key = String(occurrence.source_key);
     groups.set(key, [...(groups.get(key) || []), String(occurrence.id)]);
@@ -2836,8 +6142,38 @@ async function publishPlanning(
       task_occurrence_ids: reservedOccurrences.map(item => item.id),
     });
   }
+  const externalCommittedCoverage = await committedExternalPublicationCoverage(base44, shiftIdSet);
+  const externalPublishedShifts = externalCommittedCoverage.shifts;
+  const externalPublishedSegments = externalCommittedCoverage.segments;
+  const coverageParentShifts = [...shifts, ...externalPublishedShifts];
+  const coverageSegments = [...taskSegments, ...externalPublishedSegments];
+  const coverageSnapshotByOccurrenceId = new Map<string, LooseRecord>();
+  for (const occurrence of occurrences) {
+    const occurrenceId = String(occurrence.id);
+    const scopedEvidence = taskSegments.filter((segment: LooseRecord) => (
+      String(segment.task_occurrence_id) === occurrenceId
+    ));
+    const externalEvidence = externalPublishedSegments.filter((segment: LooseRecord) => (
+      String(segment.task_occurrence_id) === occurrenceId
+    ));
+    const externalPublicationEvidence = externalEvidence
+      .map((segment: LooseRecord) => externalCommittedCoverage.evidenceBySegmentId.get(String(segment.id)))
+      .filter(Boolean);
+    coverageSnapshotByOccurrenceId.set(occurrenceId, {
+      coverage: occurrenceCoverage(occurrence, coverageSegments, coverageParentShifts),
+      coverage_basis: {
+        calculation: 'scope_plus_external_published_parents',
+        scope_shift_ids: uniqueStrings(scopedEvidence.map(item => item.shift_id)),
+        scope_segment_ids: uniqueStrings(scopedEvidence.map(item => item.id)),
+        external_published_shift_ids: uniqueStrings(externalEvidence.map(item => item.shift_id)),
+        external_published_segment_ids: uniqueStrings(externalEvidence.map(item => item.id)),
+        external_publication_evidence: externalPublicationEvidence,
+      },
+    });
+  }
   const taskCoverageWarnings = occurrences.flatMap((occurrence: LooseRecord) => {
-    const coverage = occurrenceCoverage(occurrence, taskSegments);
+    const coverage = coverageSnapshotByOccurrenceId.get(String(occurrence.id))?.coverage
+      || occurrenceCoverage(occurrence, taskSegments, shifts);
     if (coverage.allocated_minutes > coverage.required_minutes) {
       throw new ApiError(409, 'Taakdekking bevat een overallocatie en kan niet worden gepubliceerd', {
         task_occurrence_id: occurrence.id,
@@ -2902,121 +6238,67 @@ async function publishPlanning(
     });
   }
 
-  const publishedShifts: LooseRecord[] = [];
-  for (const shift of shifts) {
-    if (
-      shift.status === 'published'
-      && shift.last_published_correlation_id === context.correlationId
-      && Number(shift.published_revision || 0) === revisionOf(shift)
-    ) {
-      publishedShifts.push(shift);
-      continue;
-    }
-    const currentRevision = revisionOf(shift);
-    publishedShifts.push(await casUpdate(base44, 'PlanningShift', shift, currentRevision, {
-      status: 'published',
-      published_revision: currentRevision + 1,
-      last_published_correlation_id: context.correlationId,
-      last_modified_by_user_id: user.id || null,
-      last_modified_at: nowIso(),
-    }));
-  }
-
-  const publishedAssignments: LooseRecord[] = [];
-  for (const assignment of assignments) {
-    if (
-      assignment.status === 'published'
-      && assignment.last_published_correlation_id === context.correlationId
-      && Number(assignment.published_revision || 0) === revisionOf(assignment)
-    ) {
-      publishedAssignments.push(assignment);
-      continue;
-    }
-    const currentRevision = revisionOf(assignment);
-    publishedAssignments.push(await casUpdate(
-      base44,
-      'PlanningAssignment',
-      assignment,
-      currentRevision,
-      {
-        status: 'published',
-        published_revision: currentRevision + 1,
-        last_published_correlation_id: context.correlationId,
-      },
-    ));
-  }
-
-  const publishedTaskSegments: LooseRecord[] = [];
-  for (const segment of taskSegments) {
-    if (
-      segment.status === 'published'
-      && segment.last_published_correlation_id === context.correlationId
-      && Number(segment.published_revision || 0) === revisionOf(segment)
-    ) {
-      publishedTaskSegments.push(segment);
-      continue;
-    }
-    const currentRevision = revisionOf(segment);
-    publishedTaskSegments.push(await casUpdate(
-      base44,
-      'PlanningShiftTaskSegment',
-      segment,
-      currentRevision,
-      {
-        status: 'published',
-        published_revision: currentRevision + 1,
-        last_published_correlation_id: context.correlationId,
-        last_modified_by_user_id: user.id || null,
-        last_modified_at: nowIso(),
-      },
-    ));
-  }
-
-  const publishedOccurrences: LooseRecord[] = [];
-  for (const occurrence of occurrences) {
-    if (
-      occurrence.last_published_correlation_id === context.correlationId
-      && Number(occurrence.published_revision || 0) === revisionOf(occurrence)
-    ) {
-      publishedOccurrences.push(occurrence);
-      continue;
-    }
-    const currentRevision = revisionOf(occurrence);
-    publishedOccurrences.push(await casUpdate(
-      base44,
-      'PlanningTaskOccurrence',
-      occurrence,
-      currentRevision,
-      {
-        published_revision: currentRevision + 1,
-        last_published_correlation_id: context.correlationId,
-        last_modified_by_user_id: user.id || null,
-        last_modified_at: nowIso(),
-      },
-    ));
-  }
-
-  const scopeType = ['day', 'week', 'selection', 'range'].includes(body.scope_type)
-    ? body.scope_type
-    : requestedShiftIds.size
-    ? 'selection'
-    : 'range';
-  const selectionHash = requestedShiftIds.size
-    ? await sha256([...requestedShiftIds].sort().join(','))
+  const scopeLease = leases.find(item => item.resourceType === 'publication_scope');
+  const scopeCoordinator = scopeLease
+    ? await requireRecord(base44, 'PlanningMutationCoordinator', scopeLease.coordinatorId, 'Planningcoordinator')
     : null;
-  const scopeKey = compact(body.scope_key) || (
-    scopeType === 'selection'
-      ? `selection:${selectionHash}`
-      : [
-          scopeType,
-          body.company_id || '*',
-          body.customer_id || '*',
-          body.object_id || '*',
-          periodStart,
-          periodEnd,
-        ].join(':')
+  const existingIntent = scopeCoordinator?.metadata?.pending_publication_intent || null;
+  const preparedAt = existingIntent?.prepared_at || nowIso();
+  const publicationCorrelationId = existingIntent?.correlation_id || context.correlationId;
+  const shiftPlan = shifts.map((shift: LooseRecord) => publicationPlanEntry(shift, {
+    status: 'published',
+    published_revision: revisionOf(shift) + 1,
+    last_published_correlation_id: publicationCorrelationId,
+    last_modified_by_user_id: user.id || null,
+    last_modified_at: preparedAt,
+  }, 'shift_composition', shift.id));
+  const assignmentPlan = assignments.map((assignment: LooseRecord) => publicationPlanEntry(assignment, {
+    status: 'published',
+    published_revision: revisionOf(assignment) + 1,
+    last_published_correlation_id: publicationCorrelationId,
+  }, 'shift_composition', assignment.shift_id));
+  const taskSegmentPlan = taskSegments.map((segment: LooseRecord) => publicationPlanEntry(segment, {
+    status: 'published',
+    published_revision: revisionOf(segment) + 1,
+    last_published_correlation_id: publicationCorrelationId,
+    last_modified_by_user_id: user.id || null,
+    last_modified_at: preparedAt,
+  }, 'shift_composition', segment.shift_id));
+  const occurrencePlan = occurrences.map((occurrence: LooseRecord) => publicationPlanEntry(occurrence, {
+    published_revision: revisionOf(occurrence) + 1,
+    last_published_correlation_id: publicationCorrelationId,
+    last_modified_by_user_id: user.id || null,
+    last_modified_at: preparedAt,
+  }, 'task_occurrence', occurrence.id));
+  const finalizationManifest = {
+    schema_version: 1,
+    shifts: shiftPlan,
+    assignments: assignmentPlan,
+    task_segments: taskSegmentPlan,
+    task_occurrences: occurrencePlan,
+  };
+  const finalizationManifestHash = await sha256(stableStringify(finalizationManifest));
+  const publicationIntentId = await sha256(
+    `${user.id || 'anonymous'}:${context.idempotencyKey}:${requestHash}`,
   );
-  const previous = await filterAllRecords(base44.asServiceRole.entities.PlanningPublication,
+  const publicationIntent = {
+    intent_id: publicationIntentId,
+    idempotency_key: context.idempotencyKey,
+    actor_user_id: user.id || null,
+    request_hash: requestHash,
+    scope_key: scopeKey,
+    manifest_hash: finalizationManifestHash,
+    correlation_id: publicationCorrelationId,
+    prepared_at: preparedAt,
+  };
+  await setPlanningPublicationIntent(base44, user, leases, publicationIntent);
+
+  const publishedShifts = shifts.map((item, index) => publicationTargetRecord(item, shiftPlan[index]));
+  const publishedAssignments = assignments.map((item, index) => publicationTargetRecord(item, assignmentPlan[index]));
+  const publishedTaskSegments = taskSegments.map((item, index) => publicationTargetRecord(item, taskSegmentPlan[index]));
+  const publishedOccurrences = occurrences.map((item, index) => publicationTargetRecord(item, occurrencePlan[index]));
+  const previous = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningPublication,
     { scope_key: scopeKey },
     '-version',
   );
@@ -3028,19 +6310,27 @@ async function publishPlanning(
     0,
   ) + taskCoverageWarnings.length + compositionWarnings.length;
   const snapshot = {
-    schema_version: 2,
+    schema_version: 3,
     scope: {
       scope_type: scopeType,
       scope_key: scopeKey,
       company_id: body.company_id || null,
       customer_id: body.customer_id || null,
       object_id: body.object_id || null,
+      route_id: body.route_id || null,
       period_start: periodStart,
       period_end: periodEnd,
     },
     shifts: publishedShifts.map(publicationShiftSnapshot),
     assignments: publishedAssignments.map(publicationAssignmentSnapshot),
-    task_occurrences: publishedOccurrences.map(item => publicationOccurrenceSnapshot(item, publishedTaskSegments)),
+    task_occurrences: publishedOccurrences.map(item => (
+      publicationOccurrenceSnapshot(
+        item,
+        publishedTaskSegments,
+        publishedShifts,
+        coverageSnapshotByOccurrenceId.get(String(item.id)),
+      )
+    )),
     task_segments: publishedTaskSegments.map(publicationTaskSegmentSnapshot),
     warning_summary: {
       warning_count: warningCount,
@@ -3052,14 +6342,16 @@ async function publishPlanning(
   const checksum = await sha256(stableStringify({
     snapshot,
     reason,
-    correlation_id: context.correlationId,
+    correlation_id: publicationCorrelationId,
   }));
+  await renewPlanningResourceLeases(base44, user, leases);
   const publication = await base44.asServiceRole.entities.PlanningPublication.create({
     scope_type: scopeType,
     scope_key: scopeKey,
     company_id: body.company_id || null,
     customer_id: body.customer_id || null,
     object_id: body.object_id || null,
+    route_id: body.route_id || null,
     period_start: periodStart,
     period_end: periodEnd,
     version: Number(previousPublication?.version || 0) + 1,
@@ -3082,75 +6374,97 @@ async function publishPlanning(
     published_by_user_id: user.id || null,
     published_by_name: actorName(user),
     published_by_email: compact(user.email) || null,
-    published_at: nowIso(),
-    correlation_id: context.correlationId,
+    published_at: preparedAt,
+    correlation_id: publicationCorrelationId,
     idempotency_key: context.idempotencyKey,
     metadata: {
       publication_source: body.publication_source || 'planning_ui',
+      actor_user_id: user.id || null,
+      request_hash: requestHash,
+      publication_intent_id: publicationIntentId,
+      publication_intent: publicationIntent,
+      finalization_manifest: finalizationManifest,
+      finalization_manifest_hash: finalizationManifestHash,
     },
   });
-  const result = {
+  const anticipatedResult = {
     publication,
     shifts: publishedShifts,
     assignments: publishedAssignments,
     task_occurrences: publishedOccurrences,
     task_segments: publishedTaskSegments,
   };
+  await renewPlanningResourceLeases(base44, user, leases);
   const audit = await appendAudit(base44, user, {
     action: 'publish',
     resource_type: 'PlanningPublication',
     resource_id: publication.id,
     publication_id: publication.id,
     before_state: {
-      shift_revisions: shifts.map((item: LooseRecord) => ({
-        id: item.id,
-        revision: revisionOf(item),
-        status: item.status,
-      })),
-      assignment_revisions: assignments.map((item: LooseRecord) => ({
-        id: item.id,
-        revision: revisionOf(item),
-        status: item.status,
-      })),
-      task_occurrence_revisions: occurrences.map((item: LooseRecord) => ({
-        id: item.id,
-        revision: revisionOf(item),
-        lifecycle_status: item.lifecycle_status,
-      })),
-      task_segment_revisions: taskSegments.map((item: LooseRecord) => ({
-        id: item.id,
-        revision: revisionOf(item),
-        status: item.status,
-      })),
+      shift_revisions: shifts.map((item: LooseRecord) => ({ id: item.id, revision: revisionOf(item), status: item.status })),
+      assignment_revisions: assignments.map((item: LooseRecord) => ({ id: item.id, revision: revisionOf(item), status: item.status })),
+      task_occurrence_revisions: occurrences.map((item: LooseRecord) => ({ id: item.id, revision: revisionOf(item), lifecycle_status: item.lifecycle_status })),
+      task_segment_revisions: taskSegments.map((item: LooseRecord) => ({ id: item.id, revision: revisionOf(item), status: item.status })),
     },
-    after_state: result,
-    correlation_id: context.correlationId,
+    after_state: anticipatedResult,
+    correlation_id: publicationCorrelationId,
     idempotency_key: context.idempotencyKey,
     undoable: false,
+    metadata: {
+      request_hash: requestHash,
+      publication_id: publication.id,
+      publication_checksum: checksum,
+      finalization_manifest_hash: finalizationManifestHash,
+    },
   });
-  return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  const finalized = await finalizePlanningPublication(base44, user, publication, audit, leases);
+  return {
+    ok: true,
+    publication,
+    shifts: finalized.shifts,
+    assignments: finalized.assignments,
+    task_occurrences: finalized.task_occurrences,
+    task_segments: finalized.task_segments,
+    audit_event_id: audit.id,
+    undoable: false,
+    undo_token: null,
+  };
+    },
+  );
 }
 
 export {
+  activeTaskSegments,
   asDate,
   asTime,
+  assignPersonnel,
   bootstrapRange,
   cancelTaskShift,
+  composeAndAssign,
   composeShift,
+  coordinatorOrder,
+  copyShift,
   dedupeWarnings,
   intervalsOverlap,
   mergeMinuteIntervals,
+  moveShift,
   normalizedPeriodInterval,
   occurrenceBlueprints,
   occurrenceCoverage,
+  planningIntervalDates,
   publishPlanning,
   publicationAssignmentSnapshot,
   publicationOccurrenceSnapshot,
   publicationShiftSnapshot,
   publicationTaskSegmentSnapshot,
+  renewPlanningResourceLeases,
+  restoreAssignment,
   revisionOf,
   serviceContextFromShift,
+  shiftAllowsActiveTaskSegments,
   stableStringify,
+  unassignPersonnel,
+  undoPlanning,
 };
 
 Deno.serve(async (req) => {
@@ -3165,6 +6479,9 @@ Deno.serve(async (req) => {
     const context = mutationContext(body);
 
     if (action === 'bootstrap_range') return json(await bootstrapRange(base44, user, body, context));
+    if (action === 'compose_and_assign') {
+      return json(await composeAndAssign(base44, user, body, context), 201);
+    }
     if (action === 'compose_shift' || action === 'update_shift_composition') {
       return json(await composeShift(base44, user, body, context), action === 'compose_shift' ? 201 : 200);
     }

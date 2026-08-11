@@ -20,6 +20,14 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import PersonnelCredentialsDetails from "@/components/planning/PersonnelCredentialsDetails";
+import { getShiftInterval, toDateKey } from "@/components/planning/planningDomain";
+
+const fullDateFormatter = new Intl.DateTimeFormat("nl-NL", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
 
 function personnelName(personnel) {
   return personnel?.name
@@ -40,11 +48,33 @@ function initials(name) {
     .toUpperCase();
 }
 
-function CandidateCard({ candidate, index, selectedShift, onAssign, qualifications, passes }) {
+function clockLabel(date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function selectedShiftTiming(shift) {
+  if (!shift) return { label: "", crossesCalendarDay: false };
+  const interval = getShiftInterval(shift);
+  if (!interval.valid) {
+    const startDate = shift.service_date || "datum onbekend";
+    const endDate = shift.end_date || startDate;
+    return {
+      label: `${startDate} ${shift.start_time || "--:--"} → ${endDate} ${shift.end_time || "--:--"}`,
+      crossesCalendarDay: startDate !== endDate,
+    };
+  }
+  return {
+    label: `${fullDateFormatter.format(interval.start)} ${clockLabel(interval.start)} → ${fullDateFormatter.format(interval.end)} ${clockLabel(interval.end)}`,
+    crossesCalendarDay: toDateKey(interval.start) !== toDateKey(interval.end),
+  };
+}
+
+function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes }) {
   const [expanded, setExpanded] = useState(false);
   const name = personnelName(candidate.personnel);
   const critical = Number(candidate.criticalCount || 0);
   const warnings = Number(candidate.warningCount || 0);
+  const assignedToSelectedShift = candidate.assignedToSelectedShift === true;
   const scheduledHours = Number(candidate.scheduledMinutes || 0) / 60;
   const contractHours = Number(candidate.contractMinutes || 0) / 60;
 
@@ -98,7 +128,11 @@ function CandidateCard({ candidate, index, selectedShift, onAssign, qualificatio
                   {scheduledHours.toLocaleString("nl-NL", { maximumFractionDigits: 1 })}u
                   {contractHours > 0 && ` / ${contractHours.toLocaleString("nl-NL", { maximumFractionDigits: 1 })}u`}
                 </span>
-                {critical > 0 ? (
+                {assignedToSelectedShift ? (
+                  <span className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                    <CheckCircle2 className="h-2.5 w-2.5" /> al ingepland
+                  </span>
+                ) : critical > 0 ? (
                   <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
                     <AlertOctagon className="h-2.5 w-2.5" /> {critical}
                   </span>
@@ -124,15 +158,16 @@ function CandidateCard({ candidate, index, selectedShift, onAssign, qualificatio
               >
                 <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
               </Button>
-              {selectedShift && (
+              {selectedShift && !assignedToSelectedShift && (
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-primary"
+                  variant={shiftTiming.crossesCalendarDay ? "outline" : "ghost"}
+                  size={shiftTiming.crossesCalendarDay ? "sm" : "icon"}
+                  className={cn("h-7 text-primary", shiftTiming.crossesCalendarDay ? "gap-1 px-2 text-[9px]" : "w-7")}
                   onClick={() => onAssign(candidate)}
-                  aria-label={`${name} inplannen op ${selectedShift.name}`}
+                  aria-label={`${name} ${shiftTiming.crossesCalendarDay ? "op de volledige dienst inplannen" : "inplannen"} op ${selectedShift.name}; ${shiftTiming.label}`}
                 >
                   <UserRoundPlus className="h-3.5 w-3.5" />
+                  {shiftTiming.crossesCalendarDay && <span>Volledige dienst inplannen</span>}
                 </Button>
               )}
             </div>
@@ -174,6 +209,7 @@ export default function PlanningEmployeePanel({
   embedded = false,
 }) {
   const [search, setSearch] = useState("");
+  const shiftTiming = useMemo(() => selectedShiftTiming(selectedShift), [selectedShift]);
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
     if (!query) return candidates;
@@ -201,9 +237,14 @@ export default function PlanningEmployeePanel({
             </div>
             <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
               {selectedShift
-                ? `${selectedShift.name} · ${selectedShift.start_time}–${selectedShift.end_time}`
-                : `${personnelCount} actieve medewerkers · sleep naar een dienst`}
+                ? selectedShift.name
+                : `${personnelCount} actieve medewerkers · sleep naar een taak of open plaats`}
             </p>
+            {selectedShift && (
+              <p className="mt-0.5 text-[10px] font-medium leading-snug text-foreground" data-testid="selected-shift-full-interval">
+                {shiftTiming.label}
+              </p>
+            )}
           </div>
           {selectedShift && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCloseShift} aria-label="Dienstselectie sluiten">
@@ -224,16 +265,24 @@ export default function PlanningEmployeePanel({
         </div>
 
         {selectedShift && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            <Badge variant="outline" className="h-5 rounded px-1.5 text-[9px] font-medium">
-              {selectedShift.object_name || selectedShift.group_label || "Mobiele surveillance"}
-            </Badge>
-            {selectedShift.function_type && (
-              <Badge variant="outline" className="h-5 rounded px-1.5 text-[9px] font-medium">
-                {selectedShift.function_type}
-              </Badge>
+          <>
+            {shiftTiming.crossesCalendarDay && (
+              <div role="note" className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-[9px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/35 dark:text-amber-200">
+                <strong className="block font-semibold">Bevestig de volledige nachtdienst</strong>
+                Deze dienst overschrijdt een kalenderdag. De actie ‘Volledige dienst inplannen’ geldt voor {shiftTiming.label}, inclusief het deel buiten de eerder gekozen dag.
+              </div>
             )}
-          </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Badge variant="outline" className="h-5 rounded px-1.5 text-[9px] font-medium">
+                {selectedShift.object_name || selectedShift.group_label || "Mobiele surveillance"}
+              </Badge>
+              {selectedShift.function_type && (
+                <Badge variant="outline" className="h-5 rounded px-1.5 text-[9px] font-medium">
+                  {selectedShift.function_type}
+                </Badge>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -250,6 +299,7 @@ export default function PlanningEmployeePanel({
                 candidate={candidate}
                 index={index}
                 selectedShift={selectedShift}
+                shiftTiming={shiftTiming}
                 onAssign={onAssign}
                 qualifications={qualifications.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}
                 passes={securityPasses.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}

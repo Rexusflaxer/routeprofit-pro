@@ -65,6 +65,24 @@ describe("taakdekking over diensten", () => {
     expect(remaining[0].end.getHours()).toBe(16);
   });
 
+  it("laat dekking van een geannuleerde dienst opnieuw vrij voor planning", () => {
+    const cancelledSegment = segment("cancelled", "shift-cancelled", "08:00", "16:00");
+    const remaining = getOccurrenceRemainingRanges(
+      occurrence,
+      [cancelledSegment],
+      [{ id: "shift-cancelled", status: "cancelled" }],
+    );
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].start.getHours()).toBe(8);
+    expect(remaining[0].end.getHours()).toBe(16);
+    expect(taskCoverageSummary(
+      [occurrence],
+      [cancelledSegment],
+      [{ id: "shift-cancelled", status: "cancelled" }],
+    )).toMatchObject({ open: 1, partial: 0, full: 0, allocatedMinutes: 0 });
+  });
+
   it("vat open, deels en volledig geplande taken samen", () => {
     const occurrences = [
       occurrence,
