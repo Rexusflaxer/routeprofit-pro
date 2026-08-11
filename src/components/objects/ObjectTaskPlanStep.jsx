@@ -1,0 +1,6 @@
+import React from "react";
+import { ChoiceCard, StepHeading } from "./ObjectWizardUi";
+
+export default function ObjectTaskPlanStep({ plans, selectedId, loading, error, onChoose }) {
+  return <><StepHeading title="Welk beveiligingsplan geldt?" description="Kies het plan dat bij deze taak wordt uitgevoerd." />{loading ? <p className="rounded-xl border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">Beveiligingsplannen laden...</p> : error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">{error.message}</p> : plans.length ? <div className="grid grid-cols-1 gap-2">{plans.map(plan => { const duration = Number(plan.current_revision?.duration_minutes || plan.draft_revision?.duration_minutes || 0); const continuous = plan.execution_mode === "continuous_post"; return <ChoiceCard key={plan.id} selected={selectedId === plan.id} onClick={() => onChoose(plan)} title={plan.variant_name} description={continuous ? "Doorlopende taak" : duration > 0 ? `Opgenomen duur: ${duration} minuten` : "Opgenomen duur ontbreekt in dit plan"} />; })}</div> : <p className="rounded-xl border border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">Binnen deze categorie zijn geen beveiligingsplannen beschikbaar.</p>}</>;
+}

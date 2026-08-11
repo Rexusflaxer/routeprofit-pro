@@ -8,6 +8,13 @@
     "object_id": {
       "type": "string"
     },
+    "security_plan_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekozen beveiligingsplan waarop deze taak is gebaseerd"
+    },
     "task_type": {
       "type": "string",
       "enum": [
@@ -161,9 +168,25 @@
     "status"
   ],
   "rls": {
-    "create": { "user_condition": { "role": "admin" } },
-    "read": { "user_condition": { "role": "admin" } },
-    "update": { "user_condition": { "role": "admin" } },
-    "delete": { "user_condition": { "role": "admin" } }
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
   }
 }
