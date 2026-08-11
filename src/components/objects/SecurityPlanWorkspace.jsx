@@ -124,12 +124,12 @@ function WorkspaceTabs({ active, onChange }) {
   return <div className="flex overflow-x-auto border-b border-border/70 bg-card/25 px-2 backdrop-blur-xl" role="tablist" aria-label="Beveiligingsplan"><div className="flex min-w-max">{WORKSPACE_TABS.map(tab => { const Icon = tab.icon; return <button key={tab.key} type="button" role="tab" aria-selected={active === tab.key} onClick={() => onChange(tab.key)} className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-medium transition-colors ${active === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}><Icon className="h-3.5 w-3.5" />{tab.label}</button>; })}</div></div>;
 }
 
-function OverviewTab({ form, onChange, revisionNumber }) {
+function OverviewTab({ form, onChange }) {
   const custom = form.task_type === "other";
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
-      <section className="space-y-5 rounded-xl border border-border/70 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
+    <div className="w-full">
+      <section className="w-full space-y-5 rounded-xl border border-border/70 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
         <div>
           <h3 className="text-sm font-semibold">Identiteit en uitvoeringsvorm</h3>
           <p className="mt-1 text-xs text-muted-foreground">Deze gegevens maken de variant later herkenbaar in Taken, Planning en mobiele uitvoering.</p>
@@ -151,13 +151,6 @@ function OverviewTab({ form, onChange, revisionNumber }) {
           </div>
         </div>
       </section>
-      <aside className="space-y-3">
-        <div className="rounded-xl border border-border/70 bg-card/45 p-4 shadow-sm backdrop-blur-xl">
-          <p className="text-xs font-semibold text-muted-foreground">Operationele samenvatting</p>
-          <dl className="mt-3 space-y-3 text-sm"><div><dt className="text-[11px] text-muted-foreground">Uitvoeringsvorm</dt><dd className="mt-0.5 font-medium">{securityPlanExecutionModeLabel(form.execution_mode)}</dd></div><div><dt className="text-[11px] text-muted-foreground">Werkrevisie</dt><dd className="mt-0.5 font-medium">Revisie {revisionNumber}</dd></div></dl>
-        </div>
-        <div className="rounded-xl border border-sky-300/50 bg-sky-500/10 p-4 text-xs text-sky-900 dark:text-sky-100"><p className="font-semibold">Plan en rooster blijven gescheiden</p><p className="mt-1 leading-relaxed opacity-80">Hier beschrijft u hoe de taak wordt uitgevoerd. Werkdagen en tijden legt u later vast in Taken.</p></div>
-      </aside>
     </div>
   );
 }
@@ -269,7 +262,7 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
     </header>
     <WorkspaceTabs active={activeSubtab} onChange={setSubtab} />
     <div className={`min-h-0 flex-1 ${activeSubtab === "modules" ? "p-0" : "p-4"} ${archived || migrationBlocked ? "pointer-events-none opacity-75" : ""}`}>
-      {activeSubtab === "overview" ? <OverviewTab form={form} onChange={setForm} revisionNumber={revisionNumber} /> : activeSubtab === "instructions" ? <SecurityPlanInstructionBuilder value={form.instruction_blocks} sections={activeSections} installations={detail.installations} routeOverlay={form.route_overlay} onChange={instruction_blocks => setForm(current => ({ ...current, instruction_blocks }))} /> : activeSubtab === "modules" ? <SecurityPlanModulesEditor modules={detail.modules} value={form.module_assignments} onChange={module_assignments => setForm(current => ({ ...current, module_assignments }))} /> : activeSubtab === "route" ? <SecurityPlanRouteEditor revision={form} floorplans={publishedFloorplans} sections={activeSections} instructionBlocks={form.instruction_blocks} onChange={setForm} onUpsertSection={(section, data) => sectionUpsert.mutateAsync({ section, data })} onArchiveSection={section => sectionArchive.mutateAsync(section)} sectionPending={sectionUpsert.isPending || sectionArchive.isPending} /> : <div className="space-y-4"><ReadinessPanel readiness={readiness} published={Boolean(detail.published_revision)} dirty={dirty} /><RevisionHistory revisions={detail.revision_history} plan={plan} /></div>}
+      {activeSubtab === "overview" ? <OverviewTab form={form} onChange={setForm} /> : activeSubtab === "instructions" ? <SecurityPlanInstructionBuilder value={form.instruction_blocks} sections={activeSections} installations={detail.installations} routeOverlay={form.route_overlay} onChange={instruction_blocks => setForm(current => ({ ...current, instruction_blocks }))} /> : activeSubtab === "modules" ? <SecurityPlanModulesEditor modules={detail.modules} value={form.module_assignments} onChange={module_assignments => setForm(current => ({ ...current, module_assignments }))} /> : activeSubtab === "route" ? <SecurityPlanRouteEditor revision={form} floorplans={publishedFloorplans} sections={activeSections} instructionBlocks={form.instruction_blocks} onChange={setForm} onUpsertSection={(section, data) => sectionUpsert.mutateAsync({ section, data })} onArchiveSection={section => sectionArchive.mutateAsync(section)} sectionPending={sectionUpsert.isPending || sectionArchive.isPending} /> : <div className="space-y-4"><ReadinessPanel readiness={readiness} published={Boolean(detail.published_revision)} dirty={dirty} /><RevisionHistory revisions={detail.revision_history} plan={plan} /></div>}
     </div>
     <Dialog open={duplicateOpen} onOpenChange={open => !duplicate.isPending && setDuplicateOpen(open)}><DialogContent><DialogHeader><DialogTitle>Planvariant dupliceren</DialogTitle><DialogDescription>Instructies, sectiekeuze en route worden gekopieerd naar een onafhankelijk concept. Geef de kopie een herkenbare naam.</DialogDescription></DialogHeader><div className="space-y-1.5"><Label htmlFor="duplicate-plan-name" className="text-xs font-semibold">Variantnaam</Label><Input id="duplicate-plan-name" value={duplicateName} onChange={event => setDuplicateName(event.target.value)} autoFocus /></div>{duplicate.error && <p className="text-xs text-destructive">{duplicate.error.message}</p>}<DialogFooter><Button type="button" variant="outline" onClick={() => setDuplicateOpen(false)} disabled={duplicate.isPending}>Annuleren</Button><Button type="button" onClick={() => duplicate.mutate()} disabled={!duplicateName.trim() || duplicate.isPending}>{duplicate.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Dupliceren</Button></DialogFooter></DialogContent></Dialog>
     <AlertDialog open={archiveOpen} onOpenChange={open => !archive.isPending && setArchiveOpen(open)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Planvariant archiveren?</AlertDialogTitle><AlertDialogDescription>{plan.variant_name} verdwijnt uit de actieve planbibliotheek. Gepubliceerde revisies, uitvoeringshistorie en het objectlogboek blijven behouden.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={archive.isPending}>Annuleren</AlertDialogCancel><AlertDialogAction disabled={archive.isPending} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={event => { event.preventDefault(); archive.mutate(); }}>{archive.isPending ? "Archiveren..." : "Archiveren"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
