@@ -18,7 +18,6 @@ const CONTINUOUS_SECURITY_PLAN_TASK_TYPES = new Set([
   "reception",
   "access_control",
   "fire_watch",
-  "closing_assistance",
   "concierge",
 ]);
 
@@ -29,13 +28,7 @@ export function securityPlanExecutionModeForTaskType(taskType) {
 // Tijdelijke export voor oude imports buiten Beveiligingsplan V2.
 export const SECURITY_PLAN_CATEGORIES = SECURITY_PLAN_TASK_TYPES.map(type => ({
   ...type,
-  durationRequired: [
-    "fire_closing_round",
-    "external_closing_round",
-    "external_control_round",
-    "opening_round",
-    "mobile_control_round",
-  ].includes(type.key),
+  durationRequired: !CONTINUOUS_SECURITY_PLAN_TASK_TYPES.has(type.key),
   supportsScope: type.key === "fire_closing_round",
 }));
 

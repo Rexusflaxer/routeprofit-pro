@@ -55,14 +55,15 @@ const WORKSPACE_TABS = [
 function formFromDetail(detail) {
   const plan = detail.plan;
   const revision = detail.draft_revision || detail.published_revision || plan.current_revision || {};
+  const executionMode = securityPlanExecutionModeForTaskType(plan.task_type);
   return {
     task_type: plan.task_type || "other",
     custom_task_type: plan.custom_task_type || "",
     variant_name: plan.variant_name || "",
-    execution_mode: securityPlanExecutionModeForTaskType(plan.task_type),
+    execution_mode: executionMode,
     summary: revision.summary || "",
-    duration_mode: "schedule_defined",
-    duration_minutes: "",
+    duration_mode: executionMode === "continuous_post" ? "schedule_defined" : "fixed",
+    duration_minutes: executionMode === "continuous_post" ? "" : (revision.duration_minutes ?? ""),
     section_policy: revision.section_policy || "not_applicable",
     default_section_ids: revision.default_section_ids || [],
     allowed_section_ids: revision.allowed_section_ids || [],
@@ -75,12 +76,14 @@ function formFromDetail(detail) {
 }
 
 function mutationData(form) {
+  const continuous = form.execution_mode === "continuous_post";
+  const duration = Number(form.duration_minutes);
   return {
     ...form,
     custom_task_type: form.task_type === "other" ? form.custom_task_type.trim() : null,
     variant_name: form.variant_name.trim(),
-    duration_mode: "schedule_defined",
-    duration_minutes: null,
+    duration_mode: continuous ? "schedule_defined" : "fixed",
+    duration_minutes: continuous ? null : duration,
   };
 }
 
@@ -128,6 +131,7 @@ function OverviewTab({ form, onChange }) {
             <Label htmlFor="plan-variant-name" className="text-xs font-semibold">Variantnaam</Label>
             <Input id="plan-variant-name" value={form.variant_name} onChange={event => onChange({ ...form, variant_name: event.target.value })} placeholder="Bijvoorbeeld Werkdagen of Volledig" maxLength={200} />
           </div>
+          {form.execution_mode !== "continuous_post" && <div className="space-y-1.5 md:col-span-2"><Label htmlFor="plan-duration" className="text-xs font-semibold">Opgenomen duur (minuten)</Label><Input id="plan-duration" type="number" min="1" max="10080" step="1" value={form.duration_minutes} onChange={event => onChange({ ...form, duration_minutes: event.target.value })} placeholder="Bijvoorbeeld 30" required /><p className="text-[11px] leading-relaxed text-muted-foreground">De verwachte tijd die voor één uitvoering van dit plan wordt opgenomen.</p></div>}
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="plan-summary" className="text-xs font-semibold">Doel en context</Label>
             <Textarea id="plan-summary" value={form.summary} onChange={event => onChange({ ...form, summary: event.target.value })} placeholder="Beschrijf kort wanneer en met welk doel deze variant wordt gebruikt." rows={3} maxLength={2000} />
@@ -208,7 +212,7 @@ function WorkspaceLoaded({ object, detail, onBack, onOpenPlan, refetch }) {
   const setSubtab = key => { const next = new URLSearchParams(searchParams); next.set("plan_tab", key); setSearchParams(next); };
   const status = securityPlanStatus(plan.status);
   const busy = save.isPending || publish.isPending || duplicate.isPending || archive.isPending;
-  const draftShapeValid = Boolean(form.variant_name.trim() && form.task_type && form.execution_mode && (form.task_type !== "other" || form.custom_task_type.trim()) && form.instruction_blocks.every(block => block.title.trim() && block.steps.every(step => step.title.trim() && step.instruction.trim())));
+  const draftShapeValid = Boolean(form.variant_name.trim() && form.task_type && form.execution_mode && (form.execution_mode === "continuous_post" || Number(form.duration_minutes) > 0) && (form.task_type !== "other" || form.custom_task_type.trim()) && form.instruction_blocks.every(block => block.title.trim() && block.steps.every(step => step.title.trim() && step.instruction.trim())));
   const revisionNumber = detail.draft_revision?.revision_number || (detail.published_revision?.revision_number || 0) + 1 || 1;
 
   return <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
