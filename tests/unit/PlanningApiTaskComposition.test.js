@@ -381,6 +381,94 @@ describe("planningApi dienstsamenstelling", () => {
     ]);
   });
 
+  it("staat exact twaalf uur automatisch toe, maar weigert twaalf uur en vijf minuten zonder neveneffecten", async () => {
+    const overnightDemand = {
+      ...occurrence("occurrence-reception-twelve-hours", "object-1", "18:00", "06:00", 720),
+      end_date: "2026-08-18",
+    };
+    const { base44, entities } = setup([overnightDemand]);
+    entities.Personnel.records.push({ id: "personnel-twelve-hours", name: "Nacht Beveiliger", status: "active" });
+    const body = {
+      personnel_id: "personnel-twelve-hours",
+      segments: [{
+        task_occurrence_id: overnightDemand.id,
+        start_date: "2026-08-17",
+        end_date: "2026-08-18",
+        start_time: "18:00",
+        end_time: "06:00",
+      }],
+      expected_occurrence_revisions: { [overnightDemand.id]: 1 },
+    };
+    const mutationContext = context("compose-and-assign-twelve-hours");
+
+    const first = await backend.composeAndAssign(base44, user, body, mutationContext);
+    const replay = await backend.composeAndAssign(base44, user, body, mutationContext);
+
+    expect(first.shift).toMatchObject({
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "18:00",
+      end_time: "06:00",
+      duration_minutes: 720,
+    });
+    expect(replay.shift.id).toBe(first.shift.id);
+    expect(entities.PlanningShift.records).toHaveLength(1);
+    expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(1);
+
+    const tooLongDemand = occurrence(
+      "occurrence-reception-twelve-hours-five-minutes",
+      "object-1",
+      "07:00",
+      "19:05",
+      725,
+    );
+    const rejected = setup([tooLongDemand]);
+    rejected.entities.Personnel.records.push({ id: "personnel-too-long", name: "Te lange dienst", status: "active" });
+
+    await expect(backend.composeAndAssign(rejected.base44, user, {
+      personnel_id: "personnel-too-long",
+      segments: [{ task_occurrence_id: tooLongDemand.id, start_time: "07:00", end_time: "19:05" }],
+      expected_occurrence_revisions: { [tooLongDemand.id]: 1 },
+    }, context("compose-and-assign-too-long"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        duration_minutes: 725,
+        maximum_duration_minutes: 720,
+      },
+    });
+    expect(rejected.entities.PlanningShift.records).toHaveLength(0);
+    expect(rejected.entities.PlanningShiftTaskSegment.records).toHaveLength(0);
+    expect(rejected.entities.PlanningAssignment.records).toHaveLength(0);
+    expect(rejected.entities.PlanningAuditEvent.records).toHaveLength(0);
+    expect(rejected.entities.PlanningMutationCoordinator.records).toHaveLength(0);
+    const rejectedOccurrence = await rejected.entities.PlanningTaskOccurrence.get(tooLongDemand.id);
+    expect(rejectedOccurrence.revision).toBe(1);
+    expect(rejectedOccurrence).not.toHaveProperty("metadata");
+  });
+
+  it("behoudt voor handmatig gevormde open diensten de bestaande grens van 24 uur", async () => {
+    const fullDayDemand = {
+      ...occurrence("occurrence-reception-full-day", "object-1", "00:00", "00:00", 1440),
+      end_date: "2026-08-18",
+    };
+    const { base44 } = setup([fullDayDemand]);
+
+    const result = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: fullDayDemand.id,
+        start_date: "2026-08-17",
+        end_date: "2026-08-18",
+        start_time: "00:00",
+        end_time: "00:00",
+      }],
+      expected_occurrence_revisions: { [fullDayDemand.id]: 1 },
+    }, context("compose-open-full-day"));
+
+    expect(result.shift).toMatchObject({ duration_minutes: 1440, start_time: "00:00", end_time: "00:00" });
+  });
+
   it("stelt een taakdienst samen en wijzigt die zonder globale segment- of dienstlijsten", async () => {
     const demand = occurrence("occurrence-targeted-composition", "object-1", "06:00", "20:00", 840);
     const { base44, entities } = setup([demand]);
@@ -1316,7 +1404,7 @@ describe("planningApi dienstsamenstelling", () => {
 
     const full = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-morning",
-      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "18:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
     }, context("timeline-full"));
     const occurrenceBeforeResize = await entities.PlanningTaskOccurrence.get(demand.id);
@@ -1513,7 +1601,7 @@ describe("planningApi dienstsamenstelling", () => {
     const composed = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-assigned",
       required_count: 2,
-      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "18:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
     }, context("assignment-race-compose"));
     const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany.bind(entities.PlanningMutationCoordinator);
@@ -1656,7 +1744,7 @@ describe("planningApi dienstsamenstelling", () => {
       personnel_id: "personnel-slot-zero",
       required_count: 2,
       slot_index: 0,
-      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "18:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
     }, context("required-count-compose"));
     const assigned = await backend.assignPersonnel(base44, user, {

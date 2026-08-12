@@ -150,11 +150,6 @@ function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, e
   };
 }
 
-function serviceEditorKey(shiftId, segmentId, serviceDate) {
-  if (!shiftId || !segmentId || !serviceDate) return null;
-  return `${shiftId}:${segmentId}:${serviceDate}`;
-}
-
 function optimisticCompositionRecords({ key, occurrence, personnelItem = null, segment }) {
   const shiftId = `pending-shift-${key}`;
   const segmentId = `pending-segment-${key}`;
@@ -279,7 +274,6 @@ export default function Planning() {
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [sidePanelMode, setSidePanelMode] = useState("tasks");
-  const [expandedServiceKey, setExpandedServiceKey] = useState(null);
   const [pendingMatrixChanges, setPendingMatrixChanges] = useState([]);
   const [composer, setComposer] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
@@ -325,7 +319,6 @@ export default function Planning() {
     setCustomPeriodStart(toDateKey(nextPeriod.start));
     setCustomPeriodEnd(toDateKey(nextPeriod.end));
     setSelectedShiftId(null);
-    setExpandedServiceKey(null);
   }, [searchParams, searchParamsKey]);
 
   useEffect(() => {
@@ -902,7 +895,7 @@ export default function Planning() {
     toast({ title: "Planning hersteld", description: message });
   };
 
-  const finishTimelineAssignment = (result, occurrence, personnelItem, serviceDate) => {
+  const finishTimelineAssignment = (result, occurrence, personnelItem) => {
     setStatusFilter("all");
     reconcilePlanningResult(result);
     refreshPlanningInBackground();
@@ -911,14 +904,6 @@ export default function Planning() {
     const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
     toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Dienst gemaakt en ingepland", description });
     setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
-    const resultSegment = (result.segments || []).find(item => (
-      String(item.task_occurrence_id) === String(occurrence.id)
-    ));
-    setExpandedServiceKey(serviceEditorKey(
-      result.shift?.id,
-      resultSegment?.id,
-      serviceDate || resultSegment?.start_date || occurrence.service_date,
-    ));
     setLiveMessage(description);
     return result;
   };
@@ -951,7 +936,7 @@ export default function Planning() {
           segments: [segment],
         },
       );
-      return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+      return finishTimelineAssignment(result, occurrence, personnelItem);
     } finally {
       removePendingMatrixChange(pendingKey);
     }
@@ -975,17 +960,9 @@ export default function Planning() {
       setStatusFilter("all");
       reconcilePlanningResult(result);
       refreshPlanningInBackground();
-      const resultSegment = (result.segments || []).find(item => (
-        String(item.task_occurrence_id) === String(occurrence.id)
-      ));
       const description = `Open dienst ${startTime}–${endTime} is gevormd binnen ${occurrence.task_name_snapshot || "de taak"}. Sleep nu een medewerker naar de open plaats.`;
       toast({ title: "Open dienst gemaakt", description });
       setSelectedShiftId(result.shift?.id || null);
-      setExpandedServiceKey(serviceEditorKey(
-        result.shift?.id,
-        resultSegment?.id,
-        serviceDate || resultSegment?.start_date || occurrence.service_date,
-      ));
       setSidePanelMode("employees");
       setLiveMessage(description);
       return result;
@@ -994,7 +971,7 @@ export default function Planning() {
     }
   };
 
-  const resizeTimelineTaskSegment = async ({ occurrence, serviceDate, shift, segment, startDate, endDate, startTime, endTime }) => {
+  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime }) => {
     if (!shift || !segment || runActionMutation.isPending) return;
     const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
@@ -1023,14 +1000,6 @@ export default function Planning() {
     refreshPlanningInBackground();
     const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
     toast({ title: "Diensttijd aangepast", description });
-    const resultSegment = (result.segments || []).find(item => (
-      String(item.task_occurrence_id) === String(occurrence?.id)
-    )) || result.segments?.[0];
-    setExpandedServiceKey(serviceEditorKey(
-      result.shift?.id || shift.id,
-      resultSegment?.id || segment.id,
-      serviceDate || resultSegment?.start_date || startDate,
-    ));
     setLiveMessage(description);
     return result;
   };
@@ -1057,13 +1026,6 @@ export default function Planning() {
       if (openShiftTarget) {
         const targetShift = shiftsInRangeById.get(String(openShiftTarget.shiftId));
         await executeAssignment(targetShift, personnelItem, openShiftTarget.slotIndex);
-        const targetSegment = (activeTaskSegmentsByShift.get(String(openShiftTarget.shiftId)) || [])
-          .find(item => String(item.task_occurrence_id) === String(occurrence.id));
-        setExpandedServiceKey(serviceEditorKey(
-          targetShift?.id,
-          targetSegment?.id,
-          serviceDate || targetSegment?.start_date || occurrence.service_date,
-        ));
         return;
       }
       const description = `${personnelName(personnelItem)} is al gekoppeld of er is op ${serviceDate} geen vrije dienst die volledig binnen deze kalenderdag valt. Open een nachtdienst expliciet om de volledige inzet te beoordelen.`;
@@ -1110,7 +1072,7 @@ export default function Planning() {
           segments,
         },
       );
-      return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+      return finishTimelineAssignment(result, occurrence, personnelItem);
     } finally {
       removePendingMatrixChange(pendingKey);
     }
@@ -1367,7 +1329,6 @@ export default function Planning() {
       setAnchorDate(current => addDays(current, direction * step));
     }
     setSelectedShiftId(null);
-    setExpandedServiceKey(null);
   };
 
   const updateCustomPeriod = (nextStartValue, nextEndValue) => {
@@ -1380,7 +1341,6 @@ export default function Planning() {
     setCustomPeriodEnd(toDateKey(nextRange.end));
     setAnchorDate(nextRange.start);
     setSelectedShiftId(null);
-    setExpandedServiceKey(null);
   };
 
   const goToToday = () => {
@@ -1392,7 +1352,6 @@ export default function Planning() {
     }
     setAnchorDate(today);
     setSelectedShiftId(null);
-    setExpandedServiceKey(null);
   };
 
   const isLoading = [
@@ -1419,7 +1378,6 @@ export default function Planning() {
         onPerspectiveChange={nextPerspective => {
           setPerspective(nextPerspective);
           setSelectedShiftId(null);
-          setExpandedServiceKey(null);
         }}
         compactMode={compactMode}
         onCompactModeChange={setCompactMode}
@@ -1489,8 +1447,6 @@ export default function Planning() {
               routes={routes}
               customers={customers}
               selectedShiftId={selectedShiftId}
-              expandedServiceKey={expandedServiceKey}
-              onExpandedServiceChange={setExpandedServiceKey}
               onSelectOccurrence={occurrence => openTaskComposer({ occurrence })}
               onSelectShift={shift => {
                 setSelectedShiftId(shift.id);
@@ -1573,7 +1529,6 @@ export default function Planning() {
             setPerspective("employee");
             setSidePanelMode("tasks");
             setSelectedShiftId(null);
-            setExpandedServiceKey(null);
           }}
           className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground"
         >

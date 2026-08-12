@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Droppable } from "@hello-pangea/dnd";
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
-  ChevronUp,
   Clock3,
   Copy,
   GripHorizontal,
@@ -39,6 +37,7 @@ import {
   toDateKey,
 } from "@/components/planning/planningDomain";
 import {
+  MAX_AUTOMATIC_TASK_SERVICE_MINUTES,
   clockToTimelineMinutes,
   getTaskTimelineDemand,
   getTaskTimelineGaps,
@@ -165,7 +164,10 @@ function OpenTaskIntervalCard({
   mutationPending,
 }) {
   const dropServiceDate = projection?.date || occurrence.service_date;
-  const proposedEnd = gap.startMinute + Math.min(8 * 60, gap.allocatableMinutes);
+  const proposedEnd = gap.startMinute + Math.min(
+    MAX_AUTOMATIC_TASK_SERVICE_MINUTES,
+    gap.allocatableMinutes,
+  );
   const proposedEndTime = timelineMinutesToClock(proposedEnd);
   const droppableId = `occurrence-gap:${encodeURIComponent(String(occurrence.id))}:${dropServiceDate}:${String(gap.startMinute).padStart(4, "0")}:${String(proposedEnd).padStart(4, "0")}`;
   const flexible = occurrence.execution_mode === "time_window";
@@ -291,6 +293,126 @@ function ShiftSlot({ shift, slotIndex, assignment, resourceKey, serviceDate, onS
   );
 }
 
+const SERVICE_RESIZE_PIXELS_PER_STEP = 2;
+
+function ServiceCardResizeHandle({
+  edge,
+  startMinute,
+  endMinute,
+  minMinute,
+  maxMinute,
+  preview,
+  onPreview,
+  onCommit,
+  onCancel,
+  disabled,
+  label,
+}) {
+  const cleanupRef = useRef(null);
+  const current = preview || { startMinute, endMinute };
+  const value = edge === "start" ? current.startMinute : current.endMinute;
+  const propose = pointerMinute => resizeTimelineInterval({
+    startMinute: current.startMinute,
+    endMinute: current.endMinute,
+    edge,
+    pointerMinute,
+    minMinute,
+    maxMinute,
+    snapMinutes: 5,
+    minimumDurationMinutes: 5,
+  });
+
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  const handlePointerDown = event => {
+    if (disabled || (event.button != null && event.button !== 0)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cleanupRef.current?.();
+    const initialPointerY = Number(event.clientY) || 0;
+    const initialBoundaryMinute = value;
+    let latest = current;
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
+      cleanupRef.current = null;
+    };
+    const move = pointerEvent => {
+      const stepDelta = Math.round(
+        ((Number(pointerEvent.clientY) || 0) - initialPointerY) / SERVICE_RESIZE_PIXELS_PER_STEP,
+      );
+      const proposal = propose(initialBoundaryMinute + stepDelta * 5);
+      if (!proposal) return;
+      latest = proposal;
+      onPreview?.(proposal);
+    };
+    const finish = () => {
+      cleanup();
+      if (latest.startMinute !== startMinute || latest.endMinute !== endMinute) onCommit?.(latest);
+      else onCancel?.();
+    };
+    const cancel = () => {
+      cleanup();
+      onCancel?.();
+    };
+
+    cleanupRef.current = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
+  };
+
+  const handleKeyDown = event => {
+    if (disabled) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel?.();
+      return;
+    }
+    if (event.key === "Enter" && preview) {
+      event.preventDefault();
+      onCommit?.(preview);
+      return;
+    }
+    if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 60 : 5;
+    const proposal = propose(value + (event.key === "ArrowUp" ? -step : step));
+    if (proposal) onPreview?.(proposal);
+  };
+
+  return (
+    <button
+      type="button"
+      role="slider"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuemin={Math.round(minMinute)}
+      aria-valuemax={Math.round(maxMinute)}
+      aria-valuenow={Math.round(value)}
+      aria-valuetext={timelineMinutesToClock(Math.round(value)) || ""}
+      data-service-resize-edge={edge}
+      disabled={disabled}
+      onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
+      onBlur={() => {
+        if (preview) onCancel?.();
+      }}
+      className={cn(
+        "absolute left-1/2 z-30 flex h-3 w-20 -translate-x-1/2 touch-none items-center justify-center text-primary/70 transition-colors hover:text-primary focus:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-35",
+        edge === "start" ? "top-0 cursor-n-resize" : "bottom-0 cursor-s-resize",
+      )}
+      title={`${edge === "start" ? "Bovenrand" : "Onderrand"} slepen · pijltjes 5 min · Shift 60 min · Enter opslaan`}
+    >
+      <span className="flex h-1.5 w-12 items-center justify-center rounded-full border border-primary/25 bg-background/95 shadow-sm">
+        <GripHorizontal className="h-2.5 w-2.5" />
+      </span>
+    </button>
+  );
+}
+
 function MatrixShiftBlock({
   shift,
   projections = [],
@@ -301,8 +423,6 @@ function MatrixShiftBlock({
   resourceKey,
   serviceDate,
   selected,
-  expanded,
-  onToggleExpanded,
   onSelect,
   onUnassign,
   onMove,
@@ -329,23 +449,121 @@ function MatrixShiftBlock({
   const lastProjection = orderedProjections.at(-1) || firstProjection;
   const projectionSegment = firstProjection?.segment || null;
   const segmentProjections = orderedProjections.filter(item => item.segment);
-  const displayedStartTime = firstProjection?.slice?.startTime || projectionSegment?.start_time || shift.start_time || "--:--";
-  const displayedEndTime = lastProjection?.slice?.endTime || lastProjection?.segment?.end_time || shift.end_time || "--:--";
+  const baseStartTime = firstProjection?.slice?.startTime || projectionSegment?.start_time || shift.start_time || "--:--";
+  const baseEndTime = lastProjection?.slice?.endTime || lastProjection?.segment?.end_time || shift.end_time || "--:--";
+  const baseStartMinute = clockToTimelineMinutes(baseStartTime);
+  const baseEndMinute = clockToTimelineMinutes(baseEndTime);
   const continuesBefore = orderedProjections.some(item => item.slice?.continuesBefore);
   const continuesAfter = orderedProjections.some(item => item.slice?.continuesAfter);
   const crossesDate = projectionSegment?.end_date
     && projectionSegment.end_date !== (projectionSegment.start_date || shift.service_date);
-  const canResizeInline = Boolean(
+  const resizeEligible = Boolean(
     occurrence
     && shift.source_type === "task"
     && activeSegments.length === 1
     && segmentProjections.length === 1,
   );
+  const demand = resizeEligible ? getTaskTimelineDemand(occurrence, serviceDate) : null;
+  const canResizeDirectly = Boolean(
+    resizeEligible
+    && demand
+    && baseStartMinute != null
+    && baseEndMinute != null
+    && baseEndMinute > baseStartMinute,
+  );
+  const otherProjections = canResizeDirectly
+    ? allOccurrenceSegments
+      .filter(item => item.status !== "removed" && String(item.id) !== String(projectionSegment.id))
+      .map(item => getTaskOccurrenceDayProjection({
+        service_date: item.start_date,
+        end_date: item.end_date,
+        window_start_time: item.start_time,
+        window_end_time: item.end_time,
+      }, serviceDate))
+      .filter(Boolean)
+      .map(item => ({
+        startMinute: clockToTimelineMinutes(item.startTime),
+        endMinute: clockToTimelineMinutes(item.endTime),
+      }))
+      .filter(item => item.startMinute != null && item.endMinute != null)
+    : [];
+  const previousEnd = canResizeDirectly
+    ? Math.max(demand.startMinute, ...otherProjections
+      .filter(item => item.endMinute <= baseStartMinute)
+      .map(item => item.endMinute))
+    : 0;
+  const nextStart = canResizeDirectly
+    ? Math.min(demand.endMinute, ...otherProjections
+      .filter(item => item.startMinute >= baseEndMinute)
+      .map(item => item.startMinute))
+    : 24 * 60;
+  const [resizePreview, setResizePreview] = useState(null);
+  const [committedResizePreview, setCommittedResizePreview] = useState(null);
+  const [resizeSaving, setResizeSaving] = useState(false);
+  const shownResize = resizePreview || committedResizePreview;
+  const displayedStartTime = shownResize
+    ? timelineMinutesToClock(shownResize.startMinute)
+    : baseStartTime;
+  const displayedEndTime = shownResize
+    ? timelineMinutesToClock(shownResize.endMinute)
+    : baseEndTime;
   const isPending = shift._optimistic_pending === true;
+
+  useEffect(() => {
+    setResizePreview(null);
+    setCommittedResizePreview(null);
+    setResizeSaving(false);
+  }, [projectionSegment?.id, serviceDate]);
+
+  useEffect(() => {
+    if (!committedResizePreview) return;
+    if (
+      committedResizePreview.startMinute === baseStartMinute
+      && committedResizePreview.endMinute === baseEndMinute
+    ) {
+      setCommittedResizePreview(null);
+    }
+  }, [baseEndMinute, baseStartMinute, committedResizePreview]);
+
+  const commitResize = async proposal => {
+    const slice = firstProjection?.slice;
+    const startBoundary = slice?.continuesBefore
+      ? {
+          date: projectionSegment.start_date || projectionSegment.service_date || shift.service_date,
+          time: projectionSegment.start_time || shift.start_time,
+        }
+      : timelineBoundary(serviceDate, proposal.startMinute);
+    const endBoundary = slice?.continuesAfter
+      ? {
+          date: projectionSegment.end_date || projectionSegment.start_date || projectionSegment.service_date || shift.end_date || shift.service_date,
+          time: projectionSegment.end_time || shift.end_time,
+        }
+      : timelineBoundary(serviceDate, proposal.endMinute);
+    setResizePreview(null);
+    setCommittedResizePreview(proposal);
+    setResizeSaving(true);
+    try {
+      const result = await onResizeTaskSegment?.({
+        occurrence,
+        serviceDate,
+        shift,
+        segment: projectionSegment,
+        startDate: startBoundary.date,
+        endDate: endBoundary.date,
+        startTime: startBoundary.time,
+        endTime: endBoundary.time,
+      });
+      if (!result) setCommittedResizePreview(null);
+    } catch {
+      setCommittedResizePreview(null);
+    } finally {
+      setResizeSaving(false);
+    }
+  };
 
   return (
     <article className={cn(
-      "w-full rounded-md border border-l-[3px] border-border border-l-primary bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+      "group/service relative w-full rounded-md border border-l-[3px] border-border border-l-primary bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
       isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
@@ -357,13 +575,30 @@ function MatrixShiftBlock({
       data-planning-start-minute={timeValue(displayedStartTime)}
       data-planning-width="full"
       data-segment-id={segmentProjections.length === 1 ? projectionSegment?.id : undefined}
+      data-resize-saving={resizeSaving ? "true" : "false"}
     >
+      {canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
+        <ServiceCardResizeHandle
+          edge="start"
+          startMinute={baseStartMinute}
+          endMinute={baseEndMinute}
+          minMinute={previousEnd}
+          maxMinute={baseEndMinute - 5}
+          preview={shownResize}
+          onPreview={setResizePreview}
+          onCommit={commitResize}
+          onCancel={() => setResizePreview(null)}
+          disabled={mutationPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          label={`Begintijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
+        />
+      )}
       <div className="flex items-start gap-1">
         <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
           <span className="flex min-w-0 items-center gap-1">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             <span className="truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
             {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Dienst wordt opgeslagen" />}
+            {resizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
           <span className="mt-0.5 block text-[9px] text-muted-foreground">
@@ -391,19 +626,6 @@ function MatrixShiftBlock({
             </span>
           )}
         </button>
-        {canResizeInline && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0"
-            disabled={mutationPending || isPending}
-            onClick={onToggleExpanded}
-            aria-expanded={expanded}
-            aria-label={`${shift.name || shift.service_name_snapshot || "Dienst"} tijd ${expanded ? "inklappen" : "aanpassen"}`}
-          >
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </Button>
-        )}
         {!isPending && <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button disabled={mutationPending} variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`Acties voor ${shift.name || "dienst"}`}>
@@ -449,16 +671,19 @@ function MatrixShiftBlock({
         ))}
       </div>
       {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings} waarschuwingen</p>}
-      {canResizeInline && expanded && (
-        <TaskServiceResizeRail
-          occurrence={occurrence}
-          shift={shift}
-          segment={projectionSegment}
-          slice={firstProjection?.slice}
-          dayKey={serviceDate}
-          allOccurrenceSegments={allOccurrenceSegments}
-          mutationPending={mutationPending || isPending}
-          onResizeTaskSegment={onResizeTaskSegment}
+      {canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
+        <ServiceCardResizeHandle
+          edge="end"
+          startMinute={baseStartMinute}
+          endMinute={baseEndMinute}
+          minMinute={baseStartMinute + 5}
+          maxMinute={nextStart}
+          preview={shownResize}
+          onPreview={setResizePreview}
+          onCommit={commitResize}
+          onCancel={() => setResizePreview(null)}
+          disabled={mutationPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          label={`Eindtijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
     </article>
@@ -595,25 +820,6 @@ function buildEmployeeResources(personnel) {
     .sort((left, right) => left.label.localeCompare(right.label, "nl"));
 }
 
-function timelinePosition(startMinute, endMinute, pixelsPerMinute, minimumHeight = 28, containerEndMinute = null) {
-  const start = Math.max(0, Number(startMinute) || 0);
-  const end = Math.max(start, Number(endMinute) || 0);
-  const startPixel = start * pixelsPerMinute;
-  const exactHeight = Math.max(1, (end - start) * pixelsPerMinute);
-  const height = Math.max(minimumHeight, exactHeight);
-  const containerEnd = Number(containerEndMinute);
-  const containerEndPixel = Number.isFinite(containerEnd) && containerEnd >= 0
-    ? containerEnd * pixelsPerMinute
-    : null;
-  return {
-    top: containerEndPixel == null
-      ? startPixel
-      : Math.max(0, Math.min(startPixel, containerEndPixel - height)),
-    height,
-    exactHeight,
-  };
-}
-
 function timelineBoundary(dayKey, minute) {
   if (minute === 24 * 60) {
     const day = parseDateKey(dayKey);
@@ -621,318 +827,6 @@ function timelineBoundary(dayKey, minute) {
     return { date: toDateKey(day), time: "00:00" };
   }
   return { date: dayKey, time: timelineMinutesToClock(minute) };
-}
-
-function TimelineResizeHandle({
-  edge,
-  startMinute,
-  endMinute,
-  minMinute,
-  maxMinute,
-  pixelsPerMinute,
-  minuteOrigin = 0,
-  preview,
-  onPreview,
-  onCommit,
-  onCancel,
-  disabled,
-  label,
-}) {
-  const current = preview || { startMinute, endMinute };
-  const value = edge === "start" ? current.startMinute : current.endMinute;
-  const propose = pointerMinute => resizeTimelineInterval({
-    startMinute: current.startMinute,
-    endMinute: current.endMinute,
-    edge,
-    pointerMinute,
-    minMinute,
-    maxMinute,
-    snapMinutes: 5,
-    minimumDurationMinutes: 5,
-  });
-
-  const handlePointerDown = event => {
-    if (disabled) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const canvas = event.currentTarget.closest("[data-timeline-day-canvas]");
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const canvasDurationMinutes = Number(canvas.dataset.timelineDurationMinutes);
-    const renderedPixelsPerMinute = Number.isFinite(canvasDurationMinutes) && canvasDurationMinutes > 0
-      ? rect.height / canvasDurationMinutes
-      : pixelsPerMinute;
-    let latest = current;
-    const move = pointerEvent => {
-      const pointerMinute = minuteOrigin
-        + (pointerEvent.clientY - rect.top) / Math.max(renderedPixelsPerMinute, 0.001);
-      const proposal = propose(pointerMinute);
-      if (!proposal) return;
-      latest = proposal;
-      onPreview?.(proposal);
-    };
-    const finish = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", cancel);
-      if (latest.startMinute !== startMinute || latest.endMinute !== endMinute) onCommit?.(latest);
-      else onCancel?.();
-    };
-    const cancel = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", cancel);
-      onCancel?.();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", cancel);
-  };
-
-  const handleKeyDown = event => {
-    if (disabled) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCancel?.();
-      return;
-    }
-    if (event.key === "Enter" && preview) {
-      event.preventDefault();
-      onCommit?.(preview);
-      return;
-    }
-    if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
-    event.preventDefault();
-    const step = event.shiftKey ? 60 : 5;
-    const proposal = propose(value + (event.key === "ArrowUp" ? -step : step));
-    if (proposal) onPreview?.(proposal);
-  };
-
-  return (
-    <button
-      type="button"
-      role="slider"
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuemin={Math.round(minMinute)}
-      aria-valuemax={Math.round(maxMinute)}
-      aria-valuenow={Math.round(value)}
-      aria-valuetext={timelineMinutesToClock(Math.round(value)) || ""}
-      disabled={disabled}
-      onPointerDown={handlePointerDown}
-      onKeyDown={handleKeyDown}
-      onBlur={() => {
-        if (preview) onCancel?.();
-      }}
-      className={cn(
-        "absolute left-1/2 z-30 flex h-7 w-14 -translate-x-1/2 touch-none items-center justify-center rounded-full border border-primary/35 bg-background/95 text-primary opacity-70 shadow-sm transition-opacity hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/segment:opacity-100",
-        edge === "start" ? "-top-3.5 cursor-n-resize" : "-bottom-3.5 cursor-s-resize",
-      )}
-      title={`${edge === "start" ? "Begintijd" : "Eindtijd"} aanpassen · pijltjes 5 min · Shift 60 min · Enter opslaan`}
-    >
-      <GripHorizontal className="h-3.5 w-3.5" />
-    </button>
-  );
-}
-
-function TimelineShiftSegmentCard({
-  occurrence,
-  shift,
-  segment,
-  slice,
-  dayKey,
-  demand,
-  allOccurrenceSegments,
-  pixelsPerMinute,
-  mutationPending,
-  onResizeTaskSegment,
-}) {
-  const startMinute = clockToTimelineMinutes(slice?.startTime || segment.start_time);
-  const endMinute = clockToTimelineMinutes(slice?.endTime || segment.end_time);
-  const [preview, setPreview] = useState(null);
-  const [committedPreview, setCommittedPreview] = useState(null);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!committedPreview) return;
-    if (committedPreview.startMinute === startMinute && committedPreview.endMinute === endMinute) {
-      setCommittedPreview(null);
-    }
-  }, [committedPreview, endMinute, startMinute]);
-  if (startMinute == null || endMinute == null || endMinute <= startMinute) return null;
-  const shown = preview || committedPreview || { startMinute, endMinute };
-  const position = timelinePosition(
-    shown.startMinute - demand.startMinute,
-    shown.endMinute - demand.startMinute,
-    pixelsPerMinute,
-    28,
-    demand.endMinute - demand.startMinute,
-  );
-  const otherProjections = allOccurrenceSegments
-    .filter(item => String(item.id) !== String(segment.id))
-    .map(item => getTaskOccurrenceDayProjection({
-      service_date: item.start_date,
-      end_date: item.end_date,
-      window_start_time: item.start_time,
-      window_end_time: item.end_time,
-    }, dayKey))
-    .filter(Boolean)
-    .map(item => ({
-      startMinute: clockToTimelineMinutes(item.startTime),
-      endMinute: clockToTimelineMinutes(item.endTime),
-    }))
-    .filter(item => item.startMinute != null && item.endMinute != null);
-  const previousEnd = Math.max(demand.startMinute, ...otherProjections
-    .filter(item => item.endMinute <= startMinute)
-    .map(item => item.endMinute));
-  const nextStart = Math.min(demand.endMinute, ...otherProjections
-    .filter(item => item.startMinute >= endMinute)
-    .map(item => item.startMinute));
-  const commitResize = async proposal => {
-    const startBoundary = slice?.continuesBefore
-      ? {
-          date: segment.start_date || segment.service_date || shift.service_date,
-          time: segment.start_time || shift.start_time,
-        }
-      : timelineBoundary(dayKey, proposal.startMinute);
-    const endBoundary = slice?.continuesAfter
-      ? {
-          date: segment.end_date || segment.start_date || segment.service_date || shift.end_date || shift.service_date,
-          time: segment.end_time || shift.end_time,
-        }
-      : timelineBoundary(dayKey, proposal.endMinute);
-    setPreview(null);
-    setCommittedPreview(proposal);
-    setSaving(true);
-    try {
-      await onResizeTaskSegment?.({
-        occurrence,
-        serviceDate: dayKey,
-        shift,
-        segment,
-        startDate: startBoundary.date,
-        endDate: endBoundary.date,
-        startTime: startBoundary.time,
-        endTime: endBoundary.time,
-      });
-    } catch {
-      setCommittedPreview(null);
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <article
-      className="group/segment absolute inset-x-0 z-20 border-y border-primary/45 bg-primary/15 px-2 py-1.5 shadow-sm"
-      style={{ top: position.top, height: position.height }}
-      data-segment-id={segment.id}
-      data-timeline-shift-segment="true"
-      data-resize-saving={saving ? "true" : "false"}
-      data-timeline-exact-top={(startMinute - demand.startMinute) * pixelsPerMinute}
-      data-timeline-exact-height={(endMinute - startMinute) * pixelsPerMinute}
-    >
-      {!slice?.continuesBefore && (
-        <TimelineResizeHandle
-          edge="start"
-          startMinute={startMinute}
-          endMinute={endMinute}
-          minMinute={previousEnd}
-          maxMinute={endMinute - 5}
-          pixelsPerMinute={pixelsPerMinute}
-          minuteOrigin={demand.startMinute}
-          preview={preview || committedPreview}
-          onPreview={setPreview}
-          onCommit={commitResize}
-          onCancel={() => setPreview(null)}
-          disabled={mutationPending || saving || Boolean(committedPreview)}
-          label={`Begintijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
-        />
-      )}
-      <span className="flex min-w-0 items-center gap-1 text-[9px] font-semibold tabular-nums">
-        {saving && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
-        <span className="truncate">Dienst {timelineMinutesToClock(shown.startMinute)}–{timelineMinutesToClock(shown.endMinute)}</span>
-      </span>
-      {!slice?.continuesAfter && (
-        <TimelineResizeHandle
-          edge="end"
-          startMinute={startMinute}
-          endMinute={endMinute}
-          minMinute={startMinute + 5}
-          maxMinute={nextStart}
-          pixelsPerMinute={pixelsPerMinute}
-          minuteOrigin={demand.startMinute}
-          preview={preview || committedPreview}
-          onPreview={setPreview}
-          onCommit={commitResize}
-          onCancel={() => setPreview(null)}
-          disabled={mutationPending || saving || Boolean(committedPreview)}
-          label={`Eindtijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
-        />
-      )}
-    </article>
-  );
-}
-
-function TaskServiceResizeRail({
-  occurrence,
-  shift,
-  segment,
-  slice,
-  dayKey,
-  allOccurrenceSegments,
-  mutationPending,
-  onResizeTaskSegment,
-}) {
-  const demand = getTaskTimelineDemand(occurrence, dayKey);
-  if (!demand) return null;
-  const durationMinutes = Math.max(5, demand.endMinute - demand.startMinute);
-  const canvasHeight = Math.min(360, Math.max(126, Math.round((durationMinutes / 60) * 28)));
-  const pixelsPerMinute = canvasHeight / durationMinutes;
-
-  return (
-    <section className="mt-2 border-t border-current/10 pt-2" aria-label={`Diensttijd aanpassen voor ${shift.name || shift.service_name_snapshot || "dienst"}`}>
-      <div className="mb-2 flex items-center justify-between gap-2 text-[9px] font-semibold">
-        <span>Diensttijd binnen klanttaak</span>
-        <span className="tabular-nums text-muted-foreground">Sleep de grepen per 5 minuten</span>
-      </div>
-      <div className="relative pl-11">
-        <span className="absolute left-0 top-0 -translate-y-1/2 text-[8px] font-semibold tabular-nums text-muted-foreground">{demand.startTime}</span>
-        <span className="absolute bottom-0 left-0 translate-y-1/2 text-[8px] font-semibold tabular-nums text-muted-foreground">{demand.endTime}</span>
-        <div
-          className={cn(
-            "relative overflow-visible rounded-md border border-primary/25 bg-primary/[0.035] shadow-[inset_3px_0_0_hsl(var(--primary)/0.5)]",
-            demand.isFlexible && "border-violet-300 bg-violet-50/30 shadow-[inset_3px_0_0_rgb(139_92_246/0.55)] dark:border-violet-800 dark:bg-violet-950/20",
-          )}
-          style={{
-            height: canvasHeight,
-            backgroundImage: "linear-gradient(to bottom, hsl(var(--border) / 0.4) 1px, transparent 1px)",
-            backgroundSize: `100% ${Math.max(24, 60 * pixelsPerMinute)}px`,
-          }}
-          data-timeline-day-canvas={dayKey}
-          data-timeline-minute-origin={demand.startMinute}
-          data-timeline-duration-minutes={durationMinutes}
-          data-service-time-rail="true"
-        >
-          {demand.isFlexible && (
-            <span className="absolute right-1 top-1 z-30 rounded bg-violet-100/95 px-1 py-0.5 text-[8px] font-semibold text-violet-700 dark:bg-violet-950 dark:text-violet-300">
-              {formatMinutesAsHours(demand.totalRequiredMinutes)} binnen venster
-            </span>
-          )}
-          <TimelineShiftSegmentCard
-            occurrence={occurrence}
-            shift={shift}
-            segment={segment}
-            slice={slice}
-            dayKey={dayKey}
-            demand={demand}
-            allOccurrenceSegments={allOccurrenceSegments}
-            pixelsPerMinute={pixelsPerMinute}
-            mutationPending={mutationPending}
-            onResizeTaskSegment={onResizeTaskSegment}
-          />
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function ObjectDayCell({
@@ -945,8 +839,6 @@ function ObjectDayCell({
   assignmentsByShift,
   segmentsByShift,
   selectedShiftId,
-  expandedServiceKey,
-  onExpandedServiceChange,
   onSelectOccurrence,
   onSelectShift,
   onUnassign,
@@ -1019,9 +911,6 @@ function ObjectDayCell({
         const occurrenceContext = projectionSegment
           ? occurrenceById.get(String(projectionSegment.task_occurrence_id))?.occurrence || null
           : null;
-        const editorKey = projectionSegment
-          ? `${shift.id}:${projectionSegment.id}:${dayKey}`
-          : null;
         return (
           <MatrixShiftBlock
             key={item.key}
@@ -1036,8 +925,6 @@ function ObjectDayCell({
             resourceKey={`${resource.key}:${dayKey}:shift:${shift.id}`}
             serviceDate={dayKey}
             selected={String(selectedShiftId || "") === String(shift.id)}
-            expanded={Boolean(editorKey && expandedServiceKey === editorKey)}
-            onToggleExpanded={() => editorKey && onExpandedServiceChange?.(expandedServiceKey === editorKey ? null : editorKey)}
             onSelect={() => onSelectShift?.(shift)}
             onUnassign={assignment => onUnassign?.(shift, assignment)}
             onMove={onMove}
@@ -1115,8 +1002,6 @@ export default function PlanningMatrix({
   objects = [],
   routes = [],
   selectedShiftId,
-  expandedServiceKey = null,
-  onExpandedServiceChange,
   onSelectOccurrence,
   onSelectShift,
   onUnassign,
@@ -1285,8 +1170,6 @@ export default function PlanningMatrix({
         assignmentsByShift={assignmentsByShift}
         segmentsByShift={segmentsByShift}
         selectedShiftId={selectedShiftId}
-        expandedServiceKey={expandedServiceKey}
-        onExpandedServiceChange={onExpandedServiceChange}
         onSelectOccurrence={onSelectOccurrence}
         onSelectShift={onSelectShift}
         onUnassign={onUnassign}
