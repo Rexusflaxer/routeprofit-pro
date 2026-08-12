@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Droppable } from "@hello-pangea/dnd";
 import {
   AlertTriangle,
@@ -16,7 +16,6 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import PlanningZoomControls from "@/components/planning/PlanningZoomControls";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +37,6 @@ import {
 import { cn } from "@/lib/utils";
 
 const dayFormatter = new Intl.DateTimeFormat("nl-NL", { weekday: "short", day: "numeric", month: "short" });
-const MATRIX_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 
 function dateKey(date) {
   const year = date.getFullYear();
@@ -203,7 +201,7 @@ function TaskOccurrenceBlock({ occurrence, planningState, projection, onSelectOc
             Tijd {formatMinutesAsHours(coverage.allocatedMinutes)}/{formatMinutesAsHours(coverage.requiredMinutes)} · Bezetting {planningState?.assignedSlots || 0}/{planningState?.requiredSlots || 0}
           </p>
           {planningState?.readiness !== "ready" && (
-            <p className="mt-1.5 flex items-center gap-1 border-t border-current/10 pt-1.5 text-[9px] font-medium text-muted-foreground">
+            <p className="compact-hide mt-1.5 flex items-center gap-1 border-t border-current/10 pt-1.5 text-[9px] font-medium text-muted-foreground">
               <UserRoundPlus className="h-2.5 w-2.5" />
               {snapshot.isDraggingOver
                 ? needsStaffing ? "Loslaten om de open plaats te bezetten" : "Loslaten om een dienst te maken"
@@ -213,7 +211,7 @@ function TaskOccurrenceBlock({ occurrence, planningState, projection, onSelectOc
           {needsStaffing && (
             <button
               type="button"
-              className="mt-1.5 inline-flex h-6 items-center gap-1 rounded bg-background/85 px-1.5 text-[9px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="compact-hide mt-1.5 inline-flex h-6 items-center gap-1 rounded bg-background/85 px-1.5 text-[9px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => onFillStaffing?.(occurrence)}
             >
               <UserRoundPlus className="h-2.5 w-2.5" /> Bezetting invullen
@@ -326,12 +324,12 @@ function MatrixShiftBlock({
             {linkedObjectCount > 1 ? ` · ${linkedObjectCount} objecten` : ""}
           </span>
           {segmentProjections.length === 1 && (
-            <span className="mt-0.5 block truncate text-[9px] font-medium text-primary">
+            <span className="compact-hide mt-0.5 block truncate text-[9px] font-medium text-primary">
               {projectionSegment.task_name_snapshot || projectionSegment.object_name_snapshot || "Taaksegment"}
             </span>
           )}
           {segmentProjections.length > 1 && (
-            <span className="mt-1 block space-y-0.5 border-t border-border/70 pt-1">
+            <span className="compact-hide mt-1 block space-y-0.5 border-t border-border/70 pt-1">
               {segmentProjections.map(({ segment, slice }, index) => (
                 <span
                   key={`${segment.id || index}:${slice?.date || ""}`}
@@ -371,7 +369,7 @@ function MatrixShiftBlock({
         </DropdownMenu>
       </div>
 
-      <p className="mt-1.5 text-[9px] font-medium text-muted-foreground" data-planning-dimensions="time-staffing">
+      <p className="compact-hide mt-1.5 text-[9px] font-medium text-muted-foreground" data-planning-dimensions="time-staffing">
         Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
       </p>
       <div className="mt-1 space-y-1">
@@ -405,7 +403,7 @@ function EmployeeAssignmentBlock({ shift, assignment, segments, projectionSlice,
             {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
             {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
           </span>
-          <span className="mt-0.5 block truncate text-[9px] text-muted-foreground">
+          <span className="compact-hide mt-0.5 block truncate text-[9px] text-muted-foreground">
             {shift.object_name || shift.object_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "Samengestelde of mobiele dienst")}
           </span>
         </button>
@@ -632,6 +630,9 @@ function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSele
  */
 export default function PlanningMatrix({
   perspective,
+  orientation = "days_horizontal",
+  compact = false,
+  zoom = 1,
   days,
   shifts = [],
   coverageShifts = shifts,
@@ -768,84 +769,122 @@ export default function PlanningMatrix({
     });
     return map;
   }, [assignments, days, shiftsById]);
-  const [zoomIndex, setZoomIndex] = useState(2);
-  const zoom = MATRIX_ZOOM_LEVELS[zoomIndex];
+  const renderCell = (resource, day) => {
+    const key = dateKey(day);
+    return perspective === "employee" ? (
+      <EmployeeDayCell
+        resource={resource}
+        dayKey={key}
+        placements={placementsByEmployeeCell.get(`${resource.id}:${key}`) || []}
+        segmentsByShift={segmentsByShift}
+        onSelectShift={onSelectShift}
+        onUnassign={onUnassign}
+      />
+    ) : (
+      <ObjectDayCell
+        resource={resource}
+        dayKey={key}
+        occurrences={occurrencesByCell.get(`${resource.key}:${key}`) || []}
+        shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
+        assignmentsByShift={assignmentsByShift}
+        segmentsByShift={segmentsByShift}
+        selectedShiftId={selectedShiftId}
+        onSelectOccurrence={onSelectOccurrence}
+        onFillStaffing={onFillStaffing}
+        onSelectShift={onSelectShift}
+        onUnassign={onUnassign}
+        onMove={onMove}
+        onCopy={onCopy}
+        onEditComposition={onEditComposition}
+        onCancelComposition={onCancelComposition}
+      />
+    );
+  };
 
   return (
-    <div className="relative h-full min-h-0">
-      <PlanningZoomControls
-        value={Math.round(zoom * 100)}
-        onZoomOut={() => setZoomIndex(current => Math.max(0, current - 1))}
-        onZoomIn={() => setZoomIndex(current => Math.min(MATRIX_ZOOM_LEVELS.length - 1, current + 1))}
-        canZoomOut={zoomIndex > 0}
-        canZoomIn={zoomIndex < MATRIX_ZOOM_LEVELS.length - 1}
-      />
+    <div className="h-full min-h-0">
       <div
         className="h-full min-h-0 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
         data-testid="planning-matrix-scroll"
       >
-      <table style={{ zoom }} className="min-w-max table-fixed border-separate border-spacing-0" aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}>
-        <thead>
-          <tr>
-            <th scope="col" className="sticky left-0 top-0 z-50 w-[220px] min-w-[220px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
-              <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {perspective === "employee" ? "Medewerker" : "Object"}
-              </span>
-            </th>
-            {days.map(day => {
-              const key = dateKey(day);
-              return (
-                <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top text-left backdrop-blur last:border-r-0">
-                  <DayHeader day={day} />
+      <table
+        style={{ zoom }}
+        className={cn(
+          "min-w-max table-fixed border-separate border-spacing-0",
+          compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:p-1.5 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
+        )}
+        aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}
+      >
+        {orientation === "resources_horizontal" ? (
+          <>
+            <thead>
+              <tr>
+                <th scope="col" className="sticky left-0 top-0 z-50 w-[138px] min-w-[138px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
+                  <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Dag</span>
                 </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {resources.map(resource => (
-            <tr key={resource.key}>
-              <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
-                <ResourceHeader resource={resource} perspective={perspective} />
-              </th>
+                {resources.map(resource => (
+                  <th key={resource.key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top backdrop-blur last:border-r-0">
+                    <ResourceHeader resource={resource} perspective={perspective} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
               {days.map(day => {
                 const key = dateKey(day);
                 return (
-                  <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
-                    {perspective === "employee" ? (
-                      <EmployeeDayCell
-                        resource={resource}
-                        dayKey={key}
-                        placements={placementsByEmployeeCell.get(`${resource.id}:${key}`) || []}
-                        segmentsByShift={segmentsByShift}
-                        onSelectShift={onSelectShift}
-                        onUnassign={onUnassign}
-                      />
-                    ) : (
-                      <ObjectDayCell
-                        resource={resource}
-                        dayKey={key}
-                        occurrences={occurrencesByCell.get(`${resource.key}:${key}`) || []}
-                        shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
-                        assignmentsByShift={assignmentsByShift}
-                        segmentsByShift={segmentsByShift}
-                        selectedShiftId={selectedShiftId}
-                        onSelectOccurrence={onSelectOccurrence}
-                        onFillStaffing={onFillStaffing}
-                        onSelectShift={onSelectShift}
-                        onUnassign={onUnassign}
-                        onMove={onMove}
-                        onCopy={onCopy}
-                        onEditComposition={onEditComposition}
-                        onCancelComposition={onCancelComposition}
-                      />
-                    )}
-                  </td>
+                  <tr key={key}>
+                    <th scope="row" className="sticky left-0 z-30 w-[138px] min-w-[138px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
+                      <DayHeader day={day} />
+                    </th>
+                    {resources.map(resource => (
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                        {renderCell(resource, day)}
+                      </td>
+                    ))}
+                  </tr>
                 );
               })}
-            </tr>
-          ))}
-        </tbody>
+            </tbody>
+          </>
+        ) : (
+          <>
+            <thead>
+              <tr>
+                <th scope="col" className="sticky left-0 top-0 z-50 w-[220px] min-w-[220px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
+                  <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {perspective === "employee" ? "Medewerker" : "Object"}
+                  </span>
+                </th>
+                {days.map(day => {
+                  const key = dateKey(day);
+                  return (
+                    <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top text-left backdrop-blur last:border-r-0">
+                      <DayHeader day={day} />
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {resources.map(resource => (
+                <tr key={resource.key}>
+                  <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
+                    <ResourceHeader resource={resource} perspective={perspective} />
+                  </th>
+                  {days.map(day => {
+                    const key = dateKey(day);
+                    return (
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                        {renderCell(resource, day)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </>
+        )}
       </table>
       {resources.length === 0 && (
         <div className="sticky left-0 flex min-h-48 w-[min(100vw,680px)] items-center justify-center p-6 text-center">

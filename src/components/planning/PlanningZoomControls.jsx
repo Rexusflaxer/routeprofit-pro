@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 
 export default function PlanningZoomControls({ value, onZoomIn, onZoomOut, canZoomIn, canZoomOut }) {
   return (
-    <div className="absolute right-3 top-2 z-[60] flex items-center rounded-md border border-border bg-card/95 p-0.5 shadow-sm backdrop-blur">
+    <div className="flex h-8 items-center rounded-md border border-border bg-card p-0.5">
       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onZoomOut} disabled={!canZoomOut} aria-label="Planning uitzoomen">
         <Minus className="h-3.5 w-3.5" />
       </Button>

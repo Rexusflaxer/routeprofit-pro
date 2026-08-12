@@ -63,6 +63,7 @@ import {
 
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
+const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 
@@ -186,6 +187,10 @@ export default function Planning() {
   const [customPeriodStart, setCustomPeriodStart] = useState(toDateKey(initialPeriod.start));
   const [customPeriodEnd, setCustomPeriodEnd] = useState(toDateKey(initialPeriod.end));
   const [perspective, setPerspective] = useState(initialPerspective);
+  const [matrixOrientation, setMatrixOrientation] = useState("days_horizontal");
+  const [compactMode, setCompactMode] = useState(false);
+  const [zoomIndex, setZoomIndex] = useState(2);
+  const planningZoom = PLANNING_ZOOM_LEVELS[zoomIndex];
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [customerFilter, setCustomerFilter] = useState("all");
@@ -1043,6 +1048,15 @@ export default function Planning() {
           setPerspective(nextPerspective);
           setSelectedShiftId(null);
         }}
+        orientation={matrixOrientation}
+        onOrientationChange={setMatrixOrientation}
+        compactMode={compactMode}
+        onCompactModeChange={setCompactMode}
+        zoomValue={Math.round(planningZoom * 100)}
+        onZoomOut={() => setZoomIndex(current => Math.max(0, current - 1))}
+        onZoomIn={() => setZoomIndex(current => Math.min(PLANNING_ZOOM_LEVELS.length - 1, current + 1))}
+        canZoomOut={zoomIndex > 0}
+        canZoomIn={zoomIndex < PLANNING_ZOOM_LEVELS.length - 1}
         view={view}
         onViewChange={nextView => {
           if (nextView === "period" && view !== "period") {
@@ -1091,6 +1105,9 @@ export default function Planning() {
           <ResizablePanel defaultSize={76} minSize={56}>
             <PlanningBoard
               perspective={perspective}
+              orientation={matrixOrientation}
+              compact={compactMode}
+              zoom={planningZoom}
               days={range.days}
               shifts={filteredShifts}
               coverageShifts={shiftsInRange}

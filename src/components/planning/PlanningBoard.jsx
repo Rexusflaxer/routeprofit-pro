@@ -19,6 +19,9 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  */
 export default function PlanningBoard({
   perspective,
+  orientation,
+  compact,
+  zoom,
   days = [],
   shifts = [],
   coverageShifts = shifts,
@@ -53,6 +56,9 @@ export default function PlanningBoard({
   return (
     <PlanningMatrix
       perspective={perspective}
+      orientation={orientation}
+      compact={compact}
+      zoom={zoom}
       days={days}
       shifts={shifts}
       coverageShifts={coverageShifts}

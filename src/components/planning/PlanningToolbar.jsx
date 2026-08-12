@@ -6,12 +6,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  ArrowRightLeft,
+  Minimize2,
   Rows3,
   Search,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import PlanningZoomControls from "@/components/planning/PlanningZoomControls";
 import {
   Select,
   SelectContent,
@@ -63,6 +66,15 @@ function Segment({ options, value, onChange, ariaLabel }) {
 export default function PlanningToolbar({
   perspective,
   onPerspectiveChange,
+  orientation,
+  onOrientationChange,
+  compactMode,
+  onCompactModeChange,
+  zoomValue,
+  onZoomIn,
+  onZoomOut,
+  canZoomIn,
+  canZoomOut,
   view,
   onViewChange,
   rangeLabel,
@@ -115,11 +127,40 @@ export default function PlanningToolbar({
           onChange={onPerspectiveChange}
           ariaLabel="Planningperspectief"
         />
+        <Button
+          variant={orientation === "days_horizontal" ? "secondary" : "outline"}
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => onOrientationChange(orientation === "days_horizontal" ? "resources_horizontal" : "days_horizontal")}
+          aria-label="Horizontale en verticale matrixweergave wisselen"
+          title="Rijen en kolommen wisselen"
+        >
+          <ArrowRightLeft className="h-3.5 w-3.5" />
+        </Button>
         <Segment
           options={VIEWS}
           value={normalizedView}
           onChange={onViewChange}
           ariaLabel="Periodeweergave"
+        />
+
+        <Button
+          variant={compactMode ? "secondary" : "outline"}
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => onCompactModeChange(!compactMode)}
+          aria-label="Compacte modus aan- of uitzetten"
+          aria-pressed={compactMode}
+          title="Compacte modus"
+        >
+          <Minimize2 className="h-3.5 w-3.5" />
+        </Button>
+        <PlanningZoomControls
+          value={zoomValue}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
+          canZoomIn={canZoomIn}
+          canZoomOut={canZoomOut}
         />
 
         <div className="inline-flex h-8 items-center rounded-md border border-border bg-card">
