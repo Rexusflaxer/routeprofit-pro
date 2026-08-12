@@ -11,9 +11,9 @@ LOC gebruikt een vraaggestuurde planning in drie afzonderlijke lagen:
 2. **Dienstindeling** - een of meer operationele diensten en taaksegmenten die de klanttaak afdekken.
 3. **Personeelsbezetting** - de medewerker die een dienst uitvoert.
 
-De objectweergave wordt een `coverage canvas`: de klanttaak blijft als harde achtergrond zichtbaar en dienst-/medewerkerkaarten worden daarbinnen gevormd. De planning mag de klanttaak niet verplaatsen, verlengen of dupliceren. Een bronwijziging gebeurt uitsluitend in het objectdossier.
+De objectweergave wordt een taakgestuurde kaartmatrix: de klanttaak blijft als vaste bronkaart zichtbaar en dienst-/medewerkerkaarten worden daarbinnen gevormd. Na de eerste planning klapt alleen die taakkaart uit tot een lokale verticale tijdverdeling. De planning mag de klanttaak niet verplaatsen, verlengen of dupliceren. Een bronwijziging gebeurt uitsluitend in het objectdossier.
 
-Dit bouwt voort op [Planningmatrix V2](./planning-matrix-v2.md). Objecten blijven horizontaal, dagen verticaal en medewerkers blijven in de vaste rechterwerkvoorraad. De medewerkerweergave behoudt de omgekeerde sleepstroom.
+Dit bouwt voort op [Planningmatrix V2](./planning-matrix-v2.md), met een door de gebruiker gekozen oriëntatiecorrectie: in objectweergave staan objecten verticaal als rijen links en dagen horizontaal als kolommen boven. Medewerkers blijven in de vaste rechterwerkvoorraad. De medewerkerweergave behoudt de omgekeerde sleepstroom met medewerkers horizontaal en dagen verticaal.
 
 ## Begrippen en invarianten
 
@@ -50,20 +50,20 @@ De taak vereist `required_minutes` binnen een ruimer toegestaan venster. Bijvoor
 - Een volledig segment kan binnen het venster worden verschoven zonder de duur te wijzigen.
 - Als vensterduur en vereiste duur gelijk zijn, gedraagt de taak zich visueel als een vaste taak.
 
-## Tijdlijnindeling
+## Kaartmatrix en lokale tijdverdeling
 
-Iedere geopende dag gebruikt één gedeelde verticale tijdas voor alle objectkolommen. Taakoverlays worden op basis van hun werkelijke lokale start- en eindtijd gepositioneerd.
+Er is één kaartweergave; een globale 00:00-24:00-tijdlijn en een transposeknop zijn niet nodig. Dit houdt een week of langere periode scanbaar.
 
-- De objectkop, dagkop en tijdas zijn sticky.
-- De matrix scrollt horizontaal door objecten en verticaal door tijd/dagen.
-- De medewerkerwerkvoorraad rechts blijft buiten de horizontale matrixscroll.
-- Een dag heeft een compacte **Overzicht**-stand en een nauwkeurige **Tijdlijn**-stand.
-- In Tijdlijn wordt de gekozen dag op bruikbare schaal geopend; andere dagen blijven compacte samenvattingen. Zo blijft een week of periode navigeerbaar.
-- Zoomstanden zijn `Compact`, `Normaal` en `Ruim`; de gekozen dichtheid is een persoonlijke voorkeur van de planner.
-- `Alleen actieve uren` mag lege tijdvakken inklappen, maar toont altijd duidelijke breukmarkeringen en een actie `Toon volledige dag`.
-- Een taak korter dan het minimale klikvlak krijgt een klikoppervlak van minimaal 28-32 px. Dunne begin-/eindlijnen blijven de echte tijd aangeven.
-- Overlappende klanttaken in hetzelfde object worden in afzonderlijke taakbanen gezet; zij worden niet over elkaar heen getekend.
-- Periodeweergaven worden gevirtualiseerd; niet-zichtbare dagtijdlijnen worden niet volledig gerenderd.
+- De objectkop links en dagkop boven zijn sticky binnen één matrixscrollcontainer.
+- De matrix scrollt horizontaal door dagen en verticaal door objecten.
+- De medewerkerwerkvoorraad rechts blijft buiten deze matrixscroll.
+- Een ongeplande taak is een compacte kaart met taaknaam, exact venster, tijddekking en bezetting.
+- Na een geslaagde medewerkerdrop klapt precies die kaart in-place uit. Maximaal één taakkaart is tegelijk geopend.
+- De lokale verticale tijdrail loopt uitsluitend van taakstart tot taakeinde, bijvoorbeeld 06:00-20:00, en toont daarin open delen en gevormde diensten.
+- Een geplande of volledig afgedekte taak blijft als bronkaart zichtbaar; gekoppelde diensten worden niet nogmaals als losse kaarten ernaast getoond.
+- Een taak korter dan het minimale klikvlak krijgt een groter bedieningsvlak, terwijl begin-/eindlabels de echte tijd blijven aangeven.
+- Nachttaken verschijnen als twee dagsneden met dezelfde occurrence- en dienstidentiteit.
+- Compactmodus verkleint gesloten kaarten, maar verbergt een geopende lokale tijdverdeling niet.
 
 ## Visuele lagen en toestanden
 
@@ -87,9 +87,9 @@ Status mag nooit alleen door kleur worden overgebracht. Iedere status heeft teks
 
 ### Medewerker naar ongedekte taak
 
-1. Bij het starten van de drag markeert LOC alleen compatibele ongedekte intervallen.
+1. Bij het starten van de drag markeert LOC alleen compatibele taakkaarten en open intervallen binnen een reeds geopende kaart.
 2. Incompatibele doelen worden gedimd. Hover of toetsenbordfocus verklaart de reden, bijvoorbeeld overlap, afwezigheid of ontbrekende kwalificatie.
-3. Boven een geldig interval verschijnt een ghostkaart met medewerker, start, einde, duur en resterende dekking.
+3. Boven een compacte taakkaart toont LOC het eerstvolgende veilige voorstel; binnen een geopende kaart toont het exacte open interval de ghostkaart met medewerker, start, einde, duur en resterende dekking.
 4. Loslaten voert `compose_and_assign` uit: dienst vormen, segment reserveren, regels controleren en medewerker toewijzen in één serveractie.
 5. Na succes verschijnt een korte undo-toast. Bij conflict blijft de taak ongewijzigd en wordt de actuele planning herladen.
 
@@ -250,10 +250,10 @@ Waarschuwen volgens bedrijfsinstellingen:
 
 ## Fasering
 
-### Fase 1 - coverage canvas
+### Fase 1 - taakgestuurde kaartmatrix
 
-- verticale taakoverlays voor `continuous` en `time_window`;
-- compacte en geopende dagtijdlijn;
+- objectrijen met dagkolommen en blijvend zichtbare brontaken;
+- compacte taakkaart en lokale verticale tijdverdeling;
 - 8-uursvoorstel en 5-minutensnap;
 - medewerkerdrag met ghostkaart en `compose_and_assign`;
 - losse resizegrepen;

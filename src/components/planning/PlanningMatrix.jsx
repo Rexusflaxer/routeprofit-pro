@@ -3,6 +3,8 @@ import { Droppable } from "@hello-pangea/dnd";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   Copy,
   GripHorizontal,
@@ -40,7 +42,6 @@ import {
   clockToTimelineMinutes,
   getTaskTimelineDemand,
   getTaskTimelineGaps,
-  layoutTimelineIntervalLanes,
   resizeTimelineInterval,
   timelineMinutesToClock,
 } from "@/components/planning/planningTimelineDomain";
@@ -160,23 +161,126 @@ function taskStatusClass(status) {
   return "border-rose-300 bg-rose-50/75 dark:border-rose-800 dark:bg-rose-950/30";
 }
 
-function TaskOccurrenceBlock({ occurrence, planningState, projection, onSelectOccurrence, onFillStaffing }) {
+function TaskOccurrenceBlock({
+  occurrence,
+  planningState,
+  projection,
+  linkedShifts,
+  allSegments,
+  coverageShifts,
+  assignmentsByShift,
+  segmentsByShift,
+  selectedShiftId,
+  expanded,
+  onToggleExpanded,
+  onSelectOccurrence,
+  onFillStaffing,
+  onSelectShift,
+  onUnassign,
+  onCreateOpenTaskSlice,
+  onResizeTaskSegment,
+  mutationPending,
+}) {
   const coverage = planningState?.coverage || getTaskOccurrenceCoverage(occurrence, []);
   const isFull = coverage.status === "full";
   const needsStaffing = isFull && planningState?.readiness === "needs_staffing";
   const dropServiceDate = projection?.date || occurrence.service_date;
   const droppableId = `occurrence:${occurrence.id}:${dropServiceDate}`;
+  const gaps = getTaskTimelineGaps({
+    occurrence,
+    serviceDate: dropServiceDate,
+    segments: allSegments,
+    shifts: coverageShifts,
+  });
+  const firstGap = gaps[0] || null;
+  const linkedShiftCount = new Set(linkedShifts.map(item => String(item.shift.id))).size;
+  const proposedEnd = firstGap
+    ? Math.min(firstGap.endMinute, firstGap.startMinute + 8 * 60)
+    : null;
   const label = isFull
     ? "Volledig gepland"
     : coverage.status === "partial"
       ? `${formatMinutesAsHours(coverage.remainingMinutes)} resterend`
       : "Nog niet gepland";
+  const taskHeader = (
+    <button
+      type="button"
+      className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => linkedShifts.length > 0 ? onToggleExpanded?.() : onSelectOccurrence?.(occurrence)}
+      aria-expanded={linkedShifts.length > 0 ? expanded : undefined}
+    >
+      <span className="flex items-start justify-between gap-2">
+        <span className="min-w-0">
+          <span className="block truncate text-[11px] font-semibold">{occurrence.task_name_snapshot || "Taak"}</span>
+          <span className="mt-0.5 flex items-center gap-1 text-[9px] text-muted-foreground">
+            <Clock3 className="h-2.5 w-2.5" />
+            {projection?.startTime || occurrence.window_start_time || "--:--"}–{projection?.endTime || occurrence.window_end_time || "--:--"}
+            {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <span className="rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-semibold">{label}</span>
+          {linkedShifts.length > 0 && (expanded
+            ? <ChevronUp className="h-3.5 w-3.5" aria-label="Tijdverdeling inklappen" />
+            : <ChevronDown className="h-3.5 w-3.5" aria-label="Tijdverdeling uitklappen" />)}
+        </span>
+      </span>
+    </button>
+  );
+  const taskSummary = (
+    <>
+      <p className="mt-1 text-[9px] text-muted-foreground" data-planning-dimensions="time-staffing">
+        Tijd {formatMinutesAsHours(coverage.allocatedMinutes)}/{formatMinutesAsHours(coverage.requiredMinutes)} · Bezetting {planningState?.assignedSlots || 0}/{planningState?.requiredSlots || 0}
+        {linkedShiftCount > 0 ? ` · ${linkedShiftCount} dienst${linkedShiftCount === 1 ? "" : "en"}` : ""}
+      </p>
+      {needsStaffing && (
+        <button
+          type="button"
+          className="compact-hide mt-1.5 inline-flex h-6 items-center gap-1 rounded bg-background/85 px-1.5 text-[9px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onFillStaffing?.(occurrence)}
+        >
+          <UserRoundPlus className="h-2.5 w-2.5" /> Bezetting invullen
+        </button>
+      )}
+    </>
+  );
+
+  if (expanded && linkedShifts.length > 0) {
+    return (
+      <article
+        data-task-occurrence-id={occurrence.id}
+        data-inline-time-editor="true"
+        className={cn(
+          "rounded-md border p-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)]",
+          taskStatusClass(coverage.status),
+        )}
+      >
+        {taskHeader}
+        {taskSummary}
+        <TaskCoverageTimeline
+          occurrence={occurrence}
+          dayKey={dropServiceDate}
+          timelineSegments={linkedShifts}
+          allSegments={allSegments}
+          coverageShifts={coverageShifts}
+          assignmentsByShift={assignmentsByShift}
+          segmentsByShift={segmentsByShift}
+          selectedShiftId={selectedShiftId}
+          mutationPending={mutationPending}
+          onSelectShift={onSelectShift}
+          onUnassign={onUnassign}
+          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+          onResizeTaskSegment={onResizeTaskSegment}
+        />
+      </article>
+    );
+  }
 
   return (
     <Droppable
       droppableId={droppableId}
       type="PERSONNEL"
-      isDropDisabled={isFull && planningState?.readiness === "ready"}
+      isDropDisabled={mutationPending || (isFull && planningState?.readiness === "ready")}
     >
       {(provided, snapshot) => (
         <article
@@ -190,42 +294,19 @@ function TaskOccurrenceBlock({ occurrence, planningState, projection, onSelectOc
             snapshot.isDraggingOver && "border-primary bg-primary/10 ring-2 ring-primary/25",
           )}
         >
-          <button
-            type="button"
-            className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => (needsStaffing ? onFillStaffing?.(occurrence) : onSelectOccurrence?.(occurrence))}
-          >
-            <span className="flex items-start justify-between gap-2">
-              <span className="min-w-0">
-                <span className="block truncate text-[11px] font-semibold">{occurrence.task_name_snapshot || "Taak"}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-[9px] text-muted-foreground">
-                  <Clock3 className="h-2.5 w-2.5" />
-                  {projection?.startTime || occurrence.window_start_time || "--:--"}–{projection?.endTime || occurrence.window_end_time || "--:--"}
-                  {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
-                </span>
-              </span>
-              <span className="shrink-0 rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-semibold">{label}</span>
-            </span>
-          </button>
-          <p className="mt-1 text-[9px] text-muted-foreground" data-planning-dimensions="time-staffing">
-            Tijd {formatMinutesAsHours(coverage.allocatedMinutes)}/{formatMinutesAsHours(coverage.requiredMinutes)} · Bezetting {planningState?.assignedSlots || 0}/{planningState?.requiredSlots || 0}
-          </p>
+          {taskHeader}
+          {taskSummary}
           {planningState?.readiness !== "ready" && (
             <p className="compact-hide mt-1.5 flex items-center gap-1 border-t border-current/10 pt-1.5 text-[9px] font-medium text-muted-foreground">
               <UserRoundPlus className="h-2.5 w-2.5" />
               {snapshot.isDraggingOver
-                ? needsStaffing ? "Loslaten om de open plaats te bezetten" : "Loslaten om een dienst te maken"
+                ? needsStaffing
+                  ? "Loslaten om de open plaats te bezetten"
+                  : firstGap
+                    ? `Loslaten voor ${firstGap.startTime}–${timelineMinutesToClock(proposedEnd)}`
+                    : "Loslaten om een dienst te maken"
                 : needsStaffing ? "Sleep medewerker naar de open bezettingsplaats" : "Sleep medewerker naar deze taak"}
             </p>
-          )}
-          {needsStaffing && (
-            <button
-              type="button"
-              className="compact-hide mt-1.5 inline-flex h-6 items-center gap-1 rounded bg-background/85 px-1.5 text-[9px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => onFillStaffing?.(occurrence)}
-            >
-              <UserRoundPlus className="h-2.5 w-2.5" /> Bezetting invullen
-            </button>
           )}
           <div className="hidden">{provided.placeholder}</div>
         </article>
@@ -566,6 +647,7 @@ function TimelineResizeHandle({
   minMinute,
   maxMinute,
   pixelsPerMinute,
+  minuteOrigin = 0,
   preview,
   onPreview,
   onCommit,
@@ -593,9 +675,14 @@ function TimelineResizeHandle({
     const canvas = event.currentTarget.closest("[data-timeline-day-canvas]");
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    const canvasDurationMinutes = Number(canvas.dataset.timelineDurationMinutes);
+    const renderedPixelsPerMinute = Number.isFinite(canvasDurationMinutes) && canvasDurationMinutes > 0
+      ? rect.height / canvasDurationMinutes
+      : pixelsPerMinute;
     let latest = current;
     const move = pointerEvent => {
-      const pointerMinute = (pointerEvent.clientY - rect.top) / Math.max(pixelsPerMinute, 0.001);
+      const pointerMinute = minuteOrigin
+        + (pointerEvent.clientY - rect.top) / Math.max(renderedPixelsPerMinute, 0.001);
       const proposal = propose(pointerMinute);
       if (!proposal) return;
       latest = proposal;
@@ -655,8 +742,8 @@ function TimelineResizeHandle({
         if (preview) onCancel?.();
       }}
       className={cn(
-        "absolute left-1/2 z-30 flex h-5 w-11 -translate-x-1/2 touch-none items-center justify-center rounded-full border border-primary/35 bg-background/95 text-primary opacity-0 shadow-sm transition-opacity focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/segment:opacity-100",
-        edge === "start" ? "-top-2.5 cursor-n-resize" : "-bottom-2.5 cursor-s-resize",
+        "absolute left-1/2 z-30 flex h-7 w-14 -translate-x-1/2 touch-none items-center justify-center rounded-full border border-primary/35 bg-background/95 text-primary opacity-70 shadow-sm transition-opacity hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/segment:opacity-100",
+        edge === "start" ? "-top-3.5 cursor-n-resize" : "-bottom-3.5 cursor-s-resize",
       )}
       title={`${edge === "start" ? "Begintijd" : "Eindtijd"} aanpassen · pijltjes 5 min · Shift 60 min · Enter opslaan`}
     >
@@ -699,6 +786,11 @@ function TimelineShiftSegmentCard({
   const primaryAssignment = currentAssignments[0] || null;
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const isOpen = currentAssignments.length < requiredCount;
+  const assignmentLabel = currentAssignments.length === 0
+    ? "Open dienst"
+    : currentAssignments.length === 1
+      ? primaryAssignment?.personnel_name || primaryAssignment?.personnel_name_snapshot || "Medewerker"
+      : `${primaryAssignment?.personnel_name || primaryAssignment?.personnel_name_snapshot || "Medewerker"} +${currentAssignments.length - 1}`;
   const slotIndex = Array.from({ length: requiredCount }, (_, index) => index)
     .find(index => !new Set(currentAssignments.map(item => Number(item.slot_index || 0))).has(index)) ?? 0;
   const otherProjections = allOccurrenceSegments
@@ -738,6 +830,7 @@ function TimelineShiftSegmentCard({
     setPreview(null);
     onResizeTaskSegment?.({
       occurrence,
+      serviceDate: dayKey,
       shift,
       segment,
       startDate: startBoundary.date,
@@ -768,6 +861,7 @@ function TimelineShiftSegmentCard({
           minMinute={previousEnd}
           maxMinute={endMinute - 5}
           pixelsPerMinute={pixelsPerMinute}
+          minuteOrigin={demand.startMinute}
           preview={preview}
           onPreview={setPreview}
           onCommit={commitResize}
@@ -779,17 +873,43 @@ function TimelineShiftSegmentCard({
       <button type="button" onClick={onSelect} className="block w-full min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className="flex min-w-0 items-center gap-1">
           <span className={cn("h-2 w-2 shrink-0 rounded-full", primaryAssignment ? "bg-primary" : "bg-amber-500")} />
-          <span className="truncate text-[10px] font-semibold">{primaryAssignment?.personnel_name || primaryAssignment?.personnel_name_snapshot || "Open dienst"}</span>
+          <span className="truncate text-[10px] font-semibold">{assignmentLabel}</span>
           {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
         </span>
         <span className="mt-0.5 block truncate text-[9px] font-medium tabular-nums text-muted-foreground">
           {timelineMinutesToClock(shown.startMinute)}–{timelineMinutesToClock(shown.endMinute)} · {shift.name || shift.service_name_snapshot || "Dienst"}
+          {requiredCount > 1 ? ` · ${currentAssignments.length}/${requiredCount} bezet` : ""}
         </span>
       </button>
-      {primaryAssignment && (
+      {currentAssignments.length === 1 && primaryAssignment && (
         <button type="button" onClick={() => onUnassign?.(primaryAssignment)} className="absolute right-1 top-1 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive focus:opacity-100 group-hover/segment:opacity-100" aria-label={`${primaryAssignment.personnel_name || "Medewerker"} vrijmaken`}>
           <UserMinus className="h-3 w-3" />
         </button>
+      )}
+      {currentAssignments.length > 1 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="absolute right-1 top-1 z-40 rounded bg-background/90 p-0.5 text-muted-foreground shadow-sm hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`${currentAssignments.length} medewerkers beheren`}
+            >
+              <MoreHorizontal className="h-3 w-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {currentAssignments.map(assignment => (
+              <DropdownMenuItem
+                key={assignment.id || `${assignment.personnel_id}:${assignment.slot_index || 0}`}
+                className="text-destructive focus:text-destructive"
+                onSelect={() => onUnassign?.(assignment)}
+              >
+                <UserMinus className="h-3.5 w-3.5" />
+                <span className="truncate">{assignment.personnel_name || assignment.personnel_name_snapshot || "Medewerker"} vrijmaken</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       {directResize && !slice?.continuesAfter && (
         <TimelineResizeHandle
@@ -799,6 +919,7 @@ function TimelineShiftSegmentCard({
           minMinute={startMinute + 5}
           maxMinute={nextStart}
           pixelsPerMinute={pixelsPerMinute}
+          minuteOrigin={demand.startMinute}
           preview={preview}
           onPreview={setPreview}
           onCommit={commitResize}
@@ -830,21 +951,16 @@ function TimelineShiftSegmentCard({
   );
 }
 
-function TaskDemandTimelineOverlay({
+function TaskCoverageTimeline({
   occurrence,
-  planningState,
   dayKey,
   timelineSegments,
   allSegments,
   coverageShifts,
   assignmentsByShift,
   segmentsByShift,
-  lane,
-  laneCount,
-  pixelsPerMinute,
   selectedShiftId,
   mutationPending,
-  onSelectOccurrence,
   onSelectShift,
   onUnassign,
   onCreateOpenTaskSlice,
@@ -852,299 +968,134 @@ function TaskDemandTimelineOverlay({
 }) {
   const demand = getTaskTimelineDemand(occurrence, dayKey);
   if (!demand) return null;
-  const position = timelinePosition(demand.startMinute, demand.endMinute, pixelsPerMinute, 28, 24 * 60);
+  const durationMinutes = Math.max(5, demand.endMinute - demand.startMinute);
+  const canvasHeight = Math.min(480, Math.max(126, Math.round((durationMinutes / 60) * 34)));
+  const pixelsPerMinute = canvasHeight / durationMinutes;
   const gaps = getTaskTimelineGaps({ occurrence, serviceDate: dayKey, segments: allSegments, shifts: coverageShifts });
-  const coverage = planningState?.coverage || getTaskOccurrenceCoverage(occurrence, allSegments);
-  const laneWidth = 100 / Math.max(1, laneCount);
   const suggestedByGap = new Map(gaps.map(gap => {
-    const durationMinutes = Math.min(8 * 60, gap.allocatableMinutes);
-    return [gap.id, { ...gap, endMinute: gap.startMinute + durationMinutes, durationMinutes }];
+    const suggestionMinutes = Math.min(8 * 60, gap.allocatableMinutes);
+    return [gap.id, { ...gap, endMinute: gap.startMinute + suggestionMinutes }];
   }));
-  return (
-    <section
-      className={cn(
-        "absolute z-10 overflow-visible rounded-md border border-primary/25 bg-primary/[0.035] shadow-[inset_3px_0_0_hsl(var(--primary)/0.5)]",
-        demand.isFlexible && "border-violet-300 bg-violet-50/30 shadow-[inset_3px_0_0_rgb(139_92_246/0.55)] dark:border-violet-800 dark:bg-violet-950/20",
-      )}
-      style={{
-        top: position.top,
-        height: position.height,
-        left: `calc(${lane * laneWidth}% + 3px)`,
-        width: `calc(${laneWidth}% - 6px)`,
-      }}
-      data-task-occurrence-id={occurrence.id}
-      data-timeline-task-overlay="true"
-      data-timeline-exact-top={demand.startMinute * pixelsPerMinute}
-      data-timeline-exact-height={(demand.endMinute - demand.startMinute) * pixelsPerMinute}
-    >
-      <button
-        type="button"
-        onClick={() => onSelectOccurrence?.(occurrence)}
-        className="sticky top-0 z-30 mx-1 mt-1 flex max-w-[calc(100%-8px)] items-center gap-1 rounded bg-background/90 px-1.5 py-1 text-left shadow-sm backdrop-blur focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title={`${occurrence.task_name_snapshot || "Taak"} ${demand.startTime}–${demand.endTime}`}
-      >
-        <span className="min-w-0 flex-1 truncate text-[9px] font-semibold">{occurrence.task_name_snapshot || "Taak"}</span>
-        <span className="shrink-0 text-[8px] font-medium tabular-nums text-muted-foreground">{demand.startTime}–{demand.endTime}</span>
-        <span
-          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", coverage.status === "full" ? "bg-emerald-500" : coverage.status === "partial" ? "bg-amber-500" : "bg-rose-500")}
-          aria-hidden="true"
-        />
-        <span className="sr-only">
-          {coverage.status === "full" ? "Taak volledig verdeeld" : coverage.status === "partial" ? "Taak deels verdeeld" : "Taak nog niet verdeeld"}
-        </span>
-      </button>
-      {demand.isFlexible && (
-        <span className="absolute right-1 top-8 z-30 rounded bg-violet-100/95 px-1 py-0.5 text-[8px] font-semibold text-violet-700 dark:bg-violet-950 dark:text-violet-300">
-          {formatMinutesAsHours(demand.totalRequiredMinutes)} binnen venster
-        </span>
-      )}
-      {gaps.map(gap => {
-        const suggested = suggestedByGap.get(gap.id);
-        const start = gap.startMinute - demand.startMinute;
-        const end = gap.endMinute - demand.startMinute;
-        const gapPosition = timelinePosition(start, end, pixelsPerMinute, 24, demand.endMinute - demand.startMinute);
-        const dropEnd = suggested.endMinute;
-        const droppableId = `occurrence-gap:${encodeURIComponent(String(occurrence.id))}:${dayKey}:${String(gap.startMinute).padStart(4, "0")}:${String(dropEnd).padStart(4, "0")}`;
-        return (
-          <Droppable key={gap.id} droppableId={droppableId} type="PERSONNEL" isDropDisabled={mutationPending}>
-            {(provided, snapshot) => (
-              <div
-                ref={provided.innerRef}
-                {...provided.droppableProps}
-                data-droppable-id={droppableId}
-                data-timeline-gap={`${occurrence.id}:${dayKey}:${gap.startTime}-${gap.endTime}`}
-                className={cn(
-                  "absolute inset-x-1 z-10 flex min-h-6 flex-col items-center justify-center rounded border border-dashed border-amber-400/70 bg-[repeating-linear-gradient(135deg,rgba(245,158,11,0.08)_0,rgba(245,158,11,0.08)_5px,transparent_5px,transparent_10px)] px-1 text-center text-amber-800 transition-colors dark:text-amber-300",
-                  snapshot.isDraggingOver && "border-primary bg-primary/15 text-primary ring-2 ring-primary/40",
-                )}
-                style={{ top: gapPosition.top, height: gapPosition.height }}
-              >
-                <span className="pointer-events-none text-[8px] font-semibold tabular-nums">
-                  {snapshot.isDraggingOver ? `Maak dienst ${gap.startTime}–${timelineMinutesToClock(dropEnd)}` : `Open ${gap.startTime}–${gap.endTime}`}
-                </span>
-                {gapPosition.height >= 44 && !snapshot.isDraggingOver && (
-                  <button
-                    type="button"
-                    disabled={mutationPending}
-                    onClick={() => onCreateOpenTaskSlice?.({
-                      occurrence,
-                      serviceDate: dayKey,
-                      startTime: gap.startTime,
-                      endTime: timelineMinutesToClock(dropEnd),
-                    })}
-                    className="mt-1 inline-flex items-center gap-1 rounded bg-background/90 px-1.5 py-1 text-[8px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <Scissors className="h-2.5 w-2.5" /> Open dienst maken
-                  </button>
-                )}
-                {gapPosition.height < 44 && !snapshot.isDraggingOver && (
-                  <button
-                    type="button"
-                    disabled={mutationPending}
-                    onClick={() => onCreateOpenTaskSlice?.({
-                      occurrence,
-                      serviceDate: dayKey,
-                      startTime: gap.startTime,
-                      endTime: timelineMinutesToClock(dropEnd),
-                    })}
-                    className="absolute right-0.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded bg-background/95 text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={`Open dienst maken ${gap.startTime}–${timelineMinutesToClock(dropEnd)}`}
-                    title={`Open dienst maken ${gap.startTime}–${timelineMinutesToClock(dropEnd)}`}
-                  >
-                    <Scissors className="h-2.5 w-2.5" />
-                  </button>
-                )}
-                <div className="hidden">{provided.placeholder}</div>
-              </div>
-            )}
-          </Droppable>
-        );
-      })}
-      {timelineSegments.map(({ shift, segment, slice }) => (
-        <TimelineShiftSegmentCard
-          key={`${segment.id}:${slice.date}`}
-          occurrence={occurrence}
-          shift={shift}
-          segment={segment}
-          slice={slice}
-          assignments={assignmentsByShift.get(String(shift.id)) || []}
-          resourceKey={`object:${occurrence.object_id}:${dayKey}`}
-          dayKey={dayKey}
-          demand={demand}
-          allOccurrenceSegments={allSegments.filter(item => item.status !== "removed" && String(item.task_occurrence_id) === String(occurrence.id))}
-          selected={String(selectedShiftId || "") === String(shift.id)}
-          pixelsPerMinute={pixelsPerMinute}
-          mutationPending={mutationPending}
-          onSelect={() => onSelectShift?.(shift)}
-          onUnassign={assignment => onUnassign?.(shift, assignment)}
-          onResizeTaskSegment={onResizeTaskSegment}
-          shiftSegmentCount={(segmentsByShift.get(String(shift.id)) || []).filter(item => item.status !== "removed").length}
-        />
-      ))}
-    </section>
-  );
-}
 
-function ObjectTimelineDayCell({
-  resource,
-  dayKey,
-  occurrences,
-  shifts,
-  coverageShifts,
-  allSegments,
-  assignmentsByShift,
-  segmentsByShift,
-  selectedShiftId,
-  pixelsPerMinute,
-  canvasHeight,
-  mutationPending,
-  onSelectOccurrence,
-  onSelectShift,
-  onUnassign,
-  onCreateOpenTaskSlice,
-  onResizeTaskSegment,
-}) {
-  const projected = occurrences.map(({ occurrence, planningState }) => {
-    const demand = getTaskTimelineDemand(occurrence, dayKey);
-    return demand ? { occurrence, planningState, ...demand, id: String(occurrence.id) } : null;
-  }).filter(Boolean);
-  const laidOut = layoutTimelineIntervalLanes(projected, {
-    minimumVisualDurationMinutes: Math.ceil(30 / pixelsPerMinute),
-  });
-  const linkedOccurrenceIds = new Set(projected.map(item => String(item.occurrence.id)));
-  const linkedSegments = shifts.filter(item => item.segment && linkedOccurrenceIds.has(String(item.segment.task_occurrence_id)));
-  const unlinked = shifts.filter(item => !item.segment || !linkedOccurrenceIds.has(String(item.segment.task_occurrence_id)));
   return (
-    <div
-      className="relative min-w-0 overflow-hidden bg-[linear-gradient(to_bottom,hsl(var(--border)/0.45)_1px,transparent_1px)] [background-size:100%_var(--timeline-hour-height)]"
-      style={{ height: canvasHeight, "--timeline-hour-height": `${pixelsPerMinute * 60}px` }}
-      data-matrix-cell={`${resource.key}:${dayKey}`}
-      data-timeline-day-canvas={dayKey}
-    >
-      {laidOut.map(item => (
-        <TaskDemandTimelineOverlay
-          key={item.occurrence.id}
-          occurrence={item.occurrence}
-          planningState={item.planningState}
-          dayKey={dayKey}
-          timelineSegments={linkedSegments.filter(entry => String(entry.segment?.task_occurrence_id) === String(item.occurrence.id))}
-          allSegments={allSegments}
-          coverageShifts={coverageShifts}
-          assignmentsByShift={assignmentsByShift}
-          segmentsByShift={segmentsByShift}
-          lane={item.lane}
-          laneCount={item.laneCount}
-          pixelsPerMinute={pixelsPerMinute}
-          selectedShiftId={selectedShiftId}
-          mutationPending={mutationPending}
-          onSelectOccurrence={onSelectOccurrence}
-          onSelectShift={onSelectShift}
-          onUnassign={onUnassign}
-          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
-          onResizeTaskSegment={onResizeTaskSegment}
-        />
-      ))}
-      {unlinked.map(({ shift, slice }, index) => {
-        const start = clockToTimelineMinutes(slice?.startTime || shift.start_time);
-        const end = clockToTimelineMinutes(slice?.endTime || shift.end_time);
-        if (start == null || end == null || end <= start) return null;
-        const position = timelinePosition(start, end, pixelsPerMinute, 28, 24 * 60);
-        return (
-          <button
-            key={`${shift.id}:${index}`}
-            type="button"
-            onClick={() => onSelectShift?.(shift)}
-            className="absolute inset-x-2 z-20 overflow-hidden rounded-md border border-border bg-card/95 p-2 text-left shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            style={{ top: position.top, height: position.height }}
-            data-shift-id={shift.id}
-          >
-            <span className="block truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
-            <span className="block text-[9px] tabular-nums text-muted-foreground">{slice?.startTime || shift.start_time}–{slice?.endTime || shift.end_time}</span>
-          </button>
-        );
-      })}
-      {projected.length === 0 && unlinked.length === 0 && (
-        <span className="absolute left-2 top-2 text-[9px] text-muted-foreground/55">Geen klantvraag</span>
-      )}
-    </div>
-  );
-}
-
-function EmployeeTimelineDayCell({ resource, dayKey, placements, segmentsByShift, pixelsPerMinute, canvasHeight, onSelectShift, onUnassign }) {
-  const droppableId = `employee-day:${resource.id}:${dayKey}`;
-  const projected = placements.map((placement, index) => {
-    const startMinute = clockToTimelineMinutes(placement.slice?.startTime || placement.shift.start_time);
-    const endMinute = clockToTimelineMinutes(placement.slice?.endTime || placement.shift.end_time);
-    return startMinute != null && endMinute != null && endMinute > startMinute
-      ? { ...placement, id: `${placement.shift.id}:${placement.assignment.id || index}`, startMinute, endMinute }
-      : null;
-  }).filter(Boolean);
-  const lanes = layoutTimelineIntervalLanes(projected, { minimumVisualDurationMinutes: Math.ceil(30 / pixelsPerMinute) });
-  return (
-    <Droppable droppableId={droppableId} type="TASK">
-      {(provided, snapshot) => (
+    <section className="mt-2 border-t border-current/10 pt-2" aria-label={`Tijdverdeling voor ${occurrence.task_name_snapshot || "taak"}`}>
+      <div className="mb-2 flex items-center justify-between gap-2 text-[9px] font-semibold">
+        <span>Verticale tijdverdeling</span>
+        <span className="tabular-nums text-muted-foreground">Sleep de grepen per 5 minuten</span>
+      </div>
+      <div className="relative pl-11">
+        <span className="absolute left-0 top-0 -translate-y-1/2 text-[8px] font-semibold tabular-nums text-muted-foreground">{demand.startTime}</span>
+        <span className="absolute bottom-0 left-0 translate-y-1/2 text-[8px] font-semibold tabular-nums text-muted-foreground">{demand.endTime}</span>
         <div
-          ref={provided.innerRef}
-          {...provided.droppableProps}
-          data-droppable-id={droppableId}
-          data-matrix-cell={`${resource.key}:${dayKey}`}
-          data-timeline-day-canvas={dayKey}
           className={cn(
-            "relative min-w-0 overflow-hidden bg-[linear-gradient(to_bottom,hsl(var(--border)/0.45)_1px,transparent_1px)] [background-size:100%_var(--timeline-hour-height)] transition-colors",
-            snapshot.isDraggingOver && "bg-primary/[0.08] ring-2 ring-inset ring-primary/35",
+            "relative overflow-visible rounded-md border border-primary/25 bg-primary/[0.035] shadow-[inset_3px_0_0_hsl(var(--primary)/0.5)]",
+            demand.isFlexible && "border-violet-300 bg-violet-50/30 shadow-[inset_3px_0_0_rgb(139_92_246/0.55)] dark:border-violet-800 dark:bg-violet-950/20",
           )}
-          style={{ height: canvasHeight, "--timeline-hour-height": `${pixelsPerMinute * 60}px` }}
+          style={{
+            height: canvasHeight,
+            backgroundImage: "linear-gradient(to bottom, hsl(var(--border) / 0.4) 1px, transparent 1px)",
+            backgroundSize: `100% ${Math.max(24, 60 * pixelsPerMinute)}px`,
+          }}
+          data-timeline-day-canvas={dayKey}
+          data-timeline-minute-origin={demand.startMinute}
+          data-timeline-duration-minutes={durationMinutes}
+          data-task-time-rail="true"
         >
-          {lanes.map(item => {
-            const position = timelinePosition(item.startMinute, item.endMinute, pixelsPerMinute, 28, 24 * 60);
-            const width = 100 / item.laneCount;
-            const activeSegments = (segmentsByShift.get(String(item.shift.id)) || []).filter(segment => segment.status !== "removed");
+          {demand.isFlexible && (
+            <span className="absolute right-1 top-1 z-30 rounded bg-violet-100/95 px-1 py-0.5 text-[8px] font-semibold text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+              {formatMinutesAsHours(demand.totalRequiredMinutes)} binnen venster
+            </span>
+          )}
+          {gaps.map(gap => {
+            const suggested = suggestedByGap.get(gap.id);
+            const gapPosition = timelinePosition(
+              gap.startMinute - demand.startMinute,
+              gap.endMinute - demand.startMinute,
+              pixelsPerMinute,
+              28,
+              durationMinutes,
+            );
+            const dropEnd = suggested.endMinute;
+            const droppableId = `occurrence-gap:${encodeURIComponent(String(occurrence.id))}:${dayKey}:${String(gap.startMinute).padStart(4, "0")}:${String(dropEnd).padStart(4, "0")}`;
             return (
-              <article
-                key={item.id}
-                className="absolute z-20 overflow-hidden rounded-md border border-primary/35 bg-card/95 p-2 shadow-md"
-                style={{ top: position.top, height: position.height, left: `calc(${item.lane * width}% + 3px)`, width: `calc(${width}% - 6px)` }}
-                data-shift-id={item.shift.id}
-              >
-                <button type="button" onClick={() => onSelectShift?.(item.shift)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <span className="block truncate text-[10px] font-semibold">{item.shift.name || item.shift.service_name_snapshot || "Dienst"}</span>
-                  <span className="block text-[9px] tabular-nums text-muted-foreground">{item.slice?.startTime || item.shift.start_time}–{item.slice?.endTime || item.shift.end_time}</span>
-                  <span className="block truncate text-[8px] text-muted-foreground">{activeSegments.length > 1 ? `${activeSegments.length} taken` : item.shift.object_name || item.shift.object_name_snapshot || "Planning"}</span>
-                </button>
-                <button type="button" onClick={() => onUnassign?.(item.assignment)} className="absolute right-1 top-1 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`${item.shift.name || "Dienst"} vrijmaken`}>
-                  <UserMinus className="h-3 w-3" />
-                </button>
-              </article>
+              <Droppable key={gap.id} droppableId={droppableId} type="PERSONNEL" isDropDisabled={mutationPending}>
+                {(provided, snapshot) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    data-droppable-id={droppableId}
+                    data-timeline-gap={`${occurrence.id}:${dayKey}:${gap.startTime}-${gap.endTime}`}
+                    className={cn(
+                      "absolute inset-x-1 z-10 flex min-h-7 flex-col items-center justify-center rounded border border-dashed border-amber-400/70 bg-[repeating-linear-gradient(135deg,rgba(245,158,11,0.08)_0,rgba(245,158,11,0.08)_5px,transparent_5px,transparent_10px)] px-1 text-center text-amber-800 transition-colors dark:text-amber-300",
+                      snapshot.isDraggingOver && "border-primary bg-primary/15 text-primary ring-2 ring-primary/40",
+                    )}
+                    style={{ top: gapPosition.top, height: gapPosition.height }}
+                  >
+                    <span className="pointer-events-none text-[8px] font-semibold tabular-nums">
+                      {snapshot.isDraggingOver ? `Maak dienst ${gap.startTime}–${timelineMinutesToClock(dropEnd)}` : `Open ${gap.startTime}–${gap.endTime}`}
+                    </span>
+                    {gapPosition.height >= 48 && !snapshot.isDraggingOver && (
+                      <button
+                        type="button"
+                        disabled={mutationPending}
+                        onClick={() => onCreateOpenTaskSlice?.({
+                          occurrence,
+                          serviceDate: dayKey,
+                          startTime: gap.startTime,
+                          endTime: timelineMinutesToClock(dropEnd),
+                        })}
+                        className="mt-1 inline-flex items-center gap-1 rounded bg-background/90 px-1.5 py-1 text-[8px] font-semibold text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Scissors className="h-2.5 w-2.5" /> Open dienst maken
+                      </button>
+                    )}
+                    {gapPosition.height < 48 && !snapshot.isDraggingOver && (
+                      <button
+                        type="button"
+                        disabled={mutationPending}
+                        onClick={() => onCreateOpenTaskSlice?.({
+                          occurrence,
+                          serviceDate: dayKey,
+                          startTime: gap.startTime,
+                          endTime: timelineMinutesToClock(dropEnd),
+                        })}
+                        className="absolute right-0.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded bg-background/95 text-foreground shadow-sm hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`Open dienst maken ${gap.startTime}–${timelineMinutesToClock(dropEnd)}`}
+                        title={`Open dienst maken ${gap.startTime}–${timelineMinutesToClock(dropEnd)}`}
+                      >
+                        <Scissors className="h-3 w-3" />
+                      </button>
+                    )}
+                    <div className="hidden">{provided.placeholder}</div>
+                  </div>
+                )}
+              </Droppable>
             );
           })}
-          {projected.length === 0 && (
-            <p className="absolute left-2 top-2 rounded border border-dashed border-border px-2 py-1 text-[9px] text-muted-foreground/60">
-              {snapshot.isDraggingOver ? "Loslaten om taak hier te plannen" : "Sleep hier een open taak"}
-            </p>
-          )}
-          <div className="hidden">{provided.placeholder}</div>
+          {timelineSegments.map(({ shift, segment, slice }) => (
+            <TimelineShiftSegmentCard
+              key={`${segment.id}:${slice.date}`}
+              occurrence={occurrence}
+              shift={shift}
+              segment={segment}
+              slice={slice}
+              assignments={assignmentsByShift.get(String(shift.id)) || []}
+              resourceKey={`object:${occurrence.object_id}:${dayKey}`}
+              dayKey={dayKey}
+              demand={demand}
+              allOccurrenceSegments={allSegments.filter(item => item.status !== "removed" && String(item.task_occurrence_id) === String(occurrence.id))}
+              selected={String(selectedShiftId || "") === String(shift.id)}
+              pixelsPerMinute={pixelsPerMinute}
+              mutationPending={mutationPending}
+              onSelect={() => onSelectShift?.(shift)}
+              onUnassign={assignment => onUnassign?.(shift, assignment)}
+              onResizeTaskSegment={onResizeTaskSegment}
+              shiftSegmentCount={(segmentsByShift.get(String(shift.id)) || []).filter(item => item.status !== "removed").length}
+            />
+          ))}
         </div>
-      )}
-    </Droppable>
-  );
-}
-
-function TimelineDayRuler({ day, canvasHeight, pixelsPerMinute }) {
-  return (
-    <div className="relative" style={{ height: canvasHeight }}>
-      <div className="sticky top-14 z-20 border-b border-border bg-card/95 shadow-sm backdrop-blur">
-        <DayHeader day={day} />
       </div>
-      {Array.from({ length: 13 }, (_, index) => index * 2).map(hour => (
-        <span
-          key={hour}
-          className="absolute right-2 -translate-y-1/2 text-[9px] font-medium tabular-nums text-muted-foreground"
-          style={{ top: hour * 60 * pixelsPerMinute }}
-        >
-          {String(hour).padStart(2, "0")}:00
-        </span>
-      ))}
-    </div>
+    </section>
   );
 }
 
@@ -1153,9 +1104,13 @@ function ObjectDayCell({
   dayKey,
   occurrences,
   shifts,
+  coverageShifts,
+  allSegments,
   assignmentsByShift,
   segmentsByShift,
   selectedShiftId,
+  expandedTaskCardKey,
+  onExpandedTaskCardChange,
   onSelectOccurrence,
   onFillStaffing,
   onSelectShift,
@@ -1164,10 +1119,17 @@ function ObjectDayCell({
   onCopy,
   onEditComposition,
   onCancelComposition,
+  onCreateOpenTaskSlice,
+  onResizeTaskSegment,
+  mutationPending,
 }) {
   const cellOccurrences = sortByStart(occurrences, item => item.projection?.startTime || item.occurrence?.window_start_time);
+  const linkedOccurrenceIds = new Set(cellOccurrences.map(item => String(item.occurrence.id)));
+  const standaloneShifts = shifts.filter(item => (
+    !item.segment || !linkedOccurrenceIds.has(String(item.segment.task_occurrence_id))
+  ));
   const groupedShifts = new Map();
-  sortByStart(shifts, item => item.slice?.startTime || item.segment?.start_time || item.shift?.start_time).forEach(projection => {
+  sortByStart(standaloneShifts, item => item.slice?.startTime || item.segment?.start_time || item.shift?.start_time).forEach(projection => {
     const shiftId = String(projection.shift.id);
     if (!groupedShifts.has(shiftId)) groupedShifts.set(shiftId, { shift: projection.shift, projections: [] });
     groupedShifts.get(shiftId).projections.push(projection);
@@ -1175,16 +1137,35 @@ function ObjectDayCell({
   const cellShifts = [...groupedShifts.values()];
   return (
     <div className="min-h-[112px] space-y-1.5 p-2" data-matrix-cell={`${resource.key}:${dayKey}`}>
-      {cellOccurrences.map(({ occurrence, planningState, projection }) => (
+      {cellOccurrences.map(({ occurrence, planningState, projection }) => {
+        const cardKey = `${occurrence.id}:${dayKey}`;
+        const linkedShifts = shifts.filter(item => (
+          item.segment && String(item.segment.task_occurrence_id) === String(occurrence.id)
+        ));
+        return (
         <TaskOccurrenceBlock
-          key={occurrence.id}
+          key={cardKey}
           occurrence={occurrence}
           planningState={planningState}
           projection={projection}
+          linkedShifts={linkedShifts}
+          allSegments={allSegments}
+          coverageShifts={coverageShifts}
+          assignmentsByShift={assignmentsByShift}
+          segmentsByShift={segmentsByShift}
+          selectedShiftId={selectedShiftId}
+          expanded={expandedTaskCardKey === cardKey}
+          onToggleExpanded={() => onExpandedTaskCardChange?.(expandedTaskCardKey === cardKey ? null : cardKey)}
           onSelectOccurrence={onSelectOccurrence}
           onFillStaffing={onFillStaffing}
+          onSelectShift={onSelectShift}
+          onUnassign={onUnassign}
+          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+          onResizeTaskSegment={onResizeTaskSegment}
+          mutationPending={mutationPending}
         />
-      ))}
+        );
+      })}
       {cellShifts.map(({ shift, projections }) => (
         <MatrixShiftBlock
           key={shift.id}
@@ -1257,8 +1238,6 @@ function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSele
  */
 export default function PlanningMatrix({
   perspective,
-  orientation = "days_horizontal",
-  layout = "cards",
   compact = false,
   zoom = 1,
   days,
@@ -1271,6 +1250,8 @@ export default function PlanningMatrix({
   objects = [],
   routes = [],
   selectedShiftId,
+  expandedTaskCardKey = null,
+  onExpandedTaskCardChange,
   onSelectOccurrence,
   onFillStaffing,
   onSelectShift,
@@ -1283,6 +1264,7 @@ export default function PlanningMatrix({
   onResizeTaskSegment,
   mutationPending = false,
 }) {
+  const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
   const shiftsById = useMemo(() => new Map(shifts.map(item => [String(item.id), item])), [shifts]);
   const assignmentsByShift = useMemo(() => {
     const map = new Map();
@@ -1326,36 +1308,13 @@ export default function PlanningMatrix({
   const occurrencesByCell = useMemo(() => {
     const map = new Map();
     const visibleDays = days.map(dateKey);
-    const displayedOccurrenceIds = new Set(segmentsByShift.allSegments
-      .map(segment => segment.task_occurrence_id)
-      .filter(Boolean)
-      .map(String));
     occurrences.filter(item => item.lifecycle_status !== "cancelled").forEach(item => {
       if (!item.object_id) return;
-      const projection = visibleDays
-        .map(day => getTaskOccurrenceDayProjection(item, day))
-        .find(Boolean);
-      if (!projection) return;
       const planningState = occurrencePlanningStates.get(String(item.id));
-      const coverage = planningState?.coverage || getTaskOccurrenceCoverage(item, coverageSegments);
-      if (coverage.status === "full" && displayedOccurrenceIds.has(String(item.id))) return;
-      appendToMap(map, `object:${item.object_id}:${projection.date}`, { occurrence: item, planningState, projection });
-    });
-    return map;
-  }, [coverageSegments, days, occurrencePlanningStates, occurrences, segmentsByShift]);
-  const occurrencesByTimelineCell = useMemo(() => {
-    const map = new Map();
-    const visibleDays = days.map(dateKey);
-    occurrences.filter(item => item.lifecycle_status !== "cancelled").forEach(item => {
-      if (!item.object_id) return;
       visibleDays.forEach(day => {
         const projection = getTaskOccurrenceDayProjection(item, day);
         if (!projection) return;
-        appendToMap(map, `object:${item.object_id}:${day}`, {
-          occurrence: item,
-          planningState: occurrencePlanningStates.get(String(item.id)),
-          projection,
-        });
+        appendToMap(map, `object:${item.object_id}:${day}`, { occurrence: item, planningState, projection });
       });
     });
     return map;
@@ -1434,9 +1393,13 @@ export default function PlanningMatrix({
         dayKey={key}
         occurrences={occurrencesByCell.get(`${resource.key}:${key}`) || []}
         shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
+        coverageShifts={coverageShifts}
+        allSegments={coverageSegments}
         assignmentsByShift={assignmentsByShift}
         segmentsByShift={segmentsByShift}
         selectedShiftId={selectedShiftId}
+        expandedTaskCardKey={expandedTaskCardKey}
+        onExpandedTaskCardChange={onExpandedTaskCardChange}
         onSelectOccurrence={onSelectOccurrence}
         onFillStaffing={onFillStaffing}
         onSelectShift={onSelectShift}
@@ -1445,99 +1408,12 @@ export default function PlanningMatrix({
         onCopy={onCopy}
         onEditComposition={onEditComposition}
         onCancelComposition={onCancelComposition}
+        onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+        onResizeTaskSegment={onResizeTaskSegment}
+        mutationPending={mutationPending}
       />
     );
   };
-
-  if (layout === "timeline") {
-    const hourHeight = Math.max(22, Math.round((compact ? 25 : 32) * zoom));
-    const pixelsPerMinute = hourHeight / 60;
-    const canvasHeight = hourHeight * 24;
-    const renderTimelineCell = (resource, day) => {
-      const key = dateKey(day);
-      return perspective === "employee" ? (
-        <EmployeeTimelineDayCell
-          resource={resource}
-          dayKey={key}
-          placements={placementsByEmployeeCell.get(`${resource.id}:${key}`) || []}
-          segmentsByShift={segmentsByShift}
-          pixelsPerMinute={pixelsPerMinute}
-          canvasHeight={canvasHeight}
-          onSelectShift={onSelectShift}
-          onUnassign={item => {
-            const shift = shiftsById.get(String(item.planning_shift_id || item.shift_id));
-            onUnassign?.(shift, item);
-          }}
-        />
-      ) : (
-        <ObjectTimelineDayCell
-          resource={resource}
-          dayKey={key}
-          occurrences={occurrencesByTimelineCell.get(`${resource.key}:${key}`) || []}
-          shifts={shiftsByObjectCell.get(`${resource.key}:${key}`) || []}
-          coverageShifts={coverageShifts}
-          allSegments={coverageSegments}
-          assignmentsByShift={assignmentsByShift}
-          segmentsByShift={segmentsByShift}
-          selectedShiftId={selectedShiftId}
-          pixelsPerMinute={pixelsPerMinute}
-          canvasHeight={canvasHeight}
-          mutationPending={mutationPending}
-          onSelectOccurrence={onSelectOccurrence}
-          onSelectShift={onSelectShift}
-          onUnassign={onUnassign}
-          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
-          onResizeTaskSegment={onResizeTaskSegment}
-        />
-      );
-    };
-
-    return (
-      <div className="h-full min-h-0">
-        <div className="h-full min-h-0 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]" data-testid="planning-matrix-scroll">
-          <table className="min-w-max table-fixed border-separate border-spacing-0" aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"} data-planning-layout="timeline">
-            <thead>
-              <tr>
-                <th scope="col" className="sticky left-0 top-0 z-50 w-[138px] min-w-[138px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
-                  <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Dag · tijd</span>
-                </th>
-                {resources.map(resource => (
-                  <th key={resource.key} scope="col" className="sticky top-0 z-40 w-[260px] min-w-[260px] max-w-[260px] border-b border-r border-border bg-card/95 align-top backdrop-blur last:border-r-0">
-                    <ResourceHeader resource={resource} perspective={perspective} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {days.map(day => {
-                const key = dateKey(day);
-                return (
-                  <tr key={key} style={{ contentVisibility: "auto", containIntrinsicSize: `${canvasHeight}px` }}>
-                    <th scope="row" className="sticky left-0 z-30 w-[138px] min-w-[138px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
-                      <TimelineDayRuler day={day} canvasHeight={canvasHeight} pixelsPerMinute={pixelsPerMinute} />
-                    </th>
-                    {resources.map(resource => (
-                      <td key={`${resource.key}:${key}`} className="w-[260px] min-w-[260px] max-w-[260px] border-b border-r border-border/80 align-top last:border-r-0">
-                        {renderTimelineCell(resource, day)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {resources.length === 0 && (
-            <div className="sticky left-0 flex min-h-48 w-[min(100vw,680px)] items-center justify-center p-6 text-center">
-              <div className="rounded-lg border border-dashed border-border bg-card p-6">
-                <p className="text-[12px] font-semibold">Geen planningseenheden in deze selectie</p>
-                <p className="mt-1 text-[10px] text-muted-foreground">Pas de periode of filters aan.</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-full min-h-0">
@@ -1549,9 +1425,10 @@ export default function PlanningMatrix({
         style={{ zoom }}
         className={cn(
           "min-w-max table-fixed border-separate border-spacing-0",
-          compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:p-1.5 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
+          compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:p-1.5 [&_[data-inline-time-editor=true]]:p-2 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
         )}
         aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}
+        data-planning-layout="cards"
       >
         {orientation === "resources_horizontal" ? (
           <>

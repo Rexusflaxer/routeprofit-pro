@@ -3416,20 +3416,34 @@ async function composeShift(
     Promise.all(customerIds.map(id => requireRecord(base44, 'Customer', id, 'Klant'))),
   ]);
   const objectsWithoutOperatingCompany = objects.filter(item => !compact(item.default_operating_company_id));
-  if (objectsWithoutOperatingCompany.length) {
-    throw new ApiError(409, 'Configureer voor ieder object eerst het uitvoerende bedrijf', {
-      object_ids: objectsWithoutOperatingCompany.map(item => item.id),
-    });
-  }
   const companyIds = uniqueStrings(objects.map(item => item.default_operating_company_id));
   if (companyIds.length > 1) {
     throw new ApiError(409, 'Taken van verschillende uitvoerende bedrijven kunnen niet in één dienst', {
       company_ids: companyIds,
     });
   }
+  // During the phased object/company rollout a task may already be plannable
+  // while its object has no operating-company default yet. Never infer the one
+  // known company for a partially configured multi-object shift: keep the
+  // aggregate company unresolved until every object agrees on the same value.
+  const resolvedCompanyId = objectsWithoutOperatingCompany.length === 0
+    ? companyIds[0] || null
+    : null;
   const firstSegment = normalizedSegments[0];
   const lastSegment = normalizedSegments.at(-1) as LooseRecord;
   const warnings = compositionWarnings(normalizedSegments);
+  if (objectsWithoutOperatingCompany.length) {
+    warnings.push(warning(
+      'operating_company_unresolved',
+      'warning',
+      'Uitvoerend bedrijf is nog niet voor ieder object vastgelegd. De dienst kan als concept worden gepland, maar vereist handmatige controle voordat contract- en CAO-koppeling definitief zijn.',
+      'SurveillanceObject',
+      {
+        object_ids: objectsWithoutOperatingCompany.map(item => item.id),
+        configured_company_ids: companyIds,
+      },
+    ));
+  }
   const requestedName = compact(body.service_name || body.name);
   const serviceName = requestedName.slice(0, 160) || (
     normalizedSegments.length === 1
@@ -3442,7 +3456,7 @@ async function composeShift(
     source_id: occurrences.length === 1 ? occurrences[0].object_task_definition_id : null,
     source_shift_id: null,
     source_route_execution_id: null,
-    company_id: companyIds[0] || null,
+    company_id: resolvedCompanyId,
     customer_id: customerIds.length === 1 ? customerIds[0] : null,
     customer_ids: customerIds,
     object_id: objectIds.length === 1 ? objectIds[0] : null,
@@ -3472,7 +3486,8 @@ async function composeShift(
     required_security_role_status: consistentValue(objects.map(item => item.default_security_role_status)),
     required_qualification_types: uniqueStrings(objects.flatMap(item => item.default_required_qualification_types || [])),
     required_qualification_groups: uniqueStrings(objects.flatMap(item => item.default_required_qualification_groups || [])),
-    contract_assignment_policy: strictPolicies.length === objects.length
+    contract_assignment_policy: objectsWithoutOperatingCompany.length === 0
+      && strictPolicies.length === objects.length
       && strictPolicies.every(item => item === 'strict_contract_match')
       ? 'strict_contract_match'
       : 'allow_manual_review',
