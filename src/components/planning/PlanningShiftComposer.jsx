@@ -170,7 +170,7 @@ export default function PlanningShiftComposer({
       return;
     }
     const stored = shift
-      ? sortTaskSegments(segments.filter(segment => String(segment.shift_id) === String(shift.id))).map(fromStoredSegment)
+      ? sortTaskSegments(segments.filter(segment => segment.status !== "removed" && String(segment.shift_id) === String(shift.id))).map(fromStoredSegment)
       : [];
     if (initialOccurrence && !stored.some(item => String(item.task_occurrence_id) === String(initialOccurrence.id))) {
       const created = createDraftSegment(initialOccurrence, externalSegments);
@@ -182,6 +182,14 @@ export default function PlanningShiftComposer({
   }, [externalSegments, initialOccurrence, open, segments, shift]);
 
   const occurrenceById = useMemo(() => new Map(occurrences.map(item => [String(item.id), item])), [occurrences]);
+  const storedOccurrenceIds = useMemo(() => shift ? [...new Set(segments
+    .filter(segment => segment.status !== "removed" && String(segment.shift_id) === String(shift.id))
+    .map(segment => String(segment.task_occurrence_id)))] : [], [segments, shift]);
+  const affectedOccurrenceIds = useMemo(() => [...new Set([
+    ...storedOccurrenceIds,
+    ...draftSegments.map(item => String(item.task_occurrence_id)),
+  ])], [draftSegments, storedOccurrenceIds]);
+  const missingAffectedOccurrenceIds = affectedOccurrenceIds.filter(id => !occurrenceById.has(id));
   const serviceDate = draftSegments[0]?.start_date || initialOccurrence?.service_date || shift?.service_date || "";
   const availableOccurrences = occurrences.filter(occurrence => (
     occurrence.lifecycle_status === "active"
@@ -211,7 +219,15 @@ export default function PlanningShiftComposer({
       ? [{ code: `overallocated_${id}`, message: `${occurrence.task_name_snapshot} krijgt meer tijd dan vereist.` }]
       : [];
   });
-  const validationErrors = [...composition.errors, ...allocationValidation.errors, ...coverageErrors];
+  const validationErrors = [
+    ...composition.errors,
+    ...allocationValidation.errors,
+    ...coverageErrors,
+    ...missingAffectedOccurrenceIds.map(id => ({
+      code: `missing_affected_occurrence_${id}`,
+      message: "Een eerder gekoppelde klanttaak is niet geladen. Open de volledige taakperiode voordat u deze dienst wijzigt.",
+    })),
+  ];
   const errorsBySegmentId = validationErrors.reduce((map, error) => {
     if (!error.segmentId) return map;
     const current = map.get(String(error.segmentId)) || [];
@@ -263,14 +279,13 @@ export default function PlanningShiftComposer({
   };
   const submit = async () => {
     if (!draftSegments.length || validationErrors.length) return;
-    const uniqueOccurrenceIds = [...new Set(draftSegments.map(item => String(item.task_occurrence_id)))];
     const payload = {
       action: shift ? "update_shift_composition" : "compose_shift",
       shift_id: shift?.id || undefined,
       expected_shift_revision: shift ? Number(shift.revision || 1) : undefined,
       service_name: name.trim() || undefined,
       required_count: Number(shift?.required_count || 1),
-      expected_occurrence_revisions: Object.fromEntries(uniqueOccurrenceIds.map(id => [id, Number(occurrenceById.get(id)?.revision || 1)])),
+      expected_occurrence_revisions: Object.fromEntries(affectedOccurrenceIds.map(id => [id, Number(occurrenceById.get(id)?.revision || 1)])),
       segments: draftSegments.map(segment => ({
         task_occurrence_id: segment.task_occurrence_id,
         start_date: segment.start_date,

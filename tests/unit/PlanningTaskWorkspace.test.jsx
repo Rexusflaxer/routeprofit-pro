@@ -279,6 +279,79 @@ describe("Planning dienstcomposer", () => {
     }));
   });
 
+  it("stuurt bij het verwijderen van een bestaand taaksegment ook de revisie van die vrijgegeven klanttaak mee", async () => {
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    const closingOccurrence = {
+      ...occurrence,
+      id: "occurrence-closing",
+      revision: 3,
+      window_start_time: "16:00",
+      window_end_time: "17:00",
+      required_minutes: 60,
+      task_name_snapshot: "Sluitronde",
+    };
+    const existingShift = {
+      id: "shift-existing-composite",
+      name: "Receptie en sluitronde",
+      service_date: occurrence.service_date,
+      start_time: "08:00",
+      end_time: "17:00",
+      required_count: 1,
+      revision: 7,
+    };
+    const storedSegments = [
+      {
+        id: "segment-existing-reception",
+        shift_id: existingShift.id,
+        task_occurrence_id: occurrence.id,
+        start_date: occurrence.service_date,
+        end_date: occurrence.service_date,
+        start_time: "08:00",
+        end_time: "16:00",
+        status: "draft",
+        task_name_snapshot: occurrence.task_name_snapshot,
+      },
+      {
+        id: "segment-existing-closing",
+        shift_id: existingShift.id,
+        task_occurrence_id: closingOccurrence.id,
+        start_date: closingOccurrence.service_date,
+        end_date: closingOccurrence.service_date,
+        start_time: "16:00",
+        end_time: "17:00",
+        status: "draft",
+        task_name_snapshot: closingOccurrence.task_name_snapshot,
+      },
+    ];
+    render(
+      <PlanningShiftComposer
+        open
+        onOpenChange={vi.fn()}
+        shift={existingShift}
+        initialOccurrence={null}
+        occurrences={[occurrence, closingOccurrence]}
+        segments={storedSegments}
+        shifts={[existingShift]}
+        onSave={onSave}
+        isPending={false}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Taaksegment verwijderen" })[1]);
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      action: "update_shift_composition",
+      shift_id: existingShift.id,
+      expected_shift_revision: 7,
+      expected_occurrence_revisions: {
+        [occurrence.id]: 1,
+        [closingOccurrence.id]: 3,
+      },
+      segments: [expect.objectContaining({ task_occurrence_id: occurrence.id })],
+    })));
+  });
+
   it.each([
     ["geannuleerde", [{ id: "shift-stale", status: "cancelled" }]],
     ["ontbrekende", []],

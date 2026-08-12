@@ -91,6 +91,22 @@ describe("planningmatrix dropresolutie", () => {
     });
   });
 
+  it("vertaalt een medewerkerdrop op een tijdlijngat naar exact het voorgestelde dienstdeel", () => {
+    expect(resolvePlanningDrop(drop({
+      draggableId: "personnel:person-17",
+      sourceId: "personnel-pool",
+      destinationId: "occurrence-gap:occurrence-reception:2027-01-04:0360:0840",
+      type: "PERSONNEL",
+    }))).toEqual({
+      kind: "compose_occurrence_slice_for_personnel",
+      personnelId: "person-17",
+      occurrenceId: "occurrence-reception",
+      serviceDate: "2027-01-04",
+      startTime: "06:00",
+      endTime: "14:00",
+    });
+  });
+
   it("vertaalt een taak naar de dagcel van een medewerker", () => {
     expect(resolvePlanningDrop(drop({
       draggableId: "task:occurrence-9",
@@ -154,6 +170,7 @@ describe("planningmatrix dropresolutie", () => {
     ["ongeldige medewerkerdag", drop({ draggableId: "task:occurrence-9", sourceId: "task-backlog", destinationId: "employee-day:person-17:2027-02-30", type: "TASK" })],
     ["ongeldige objectdag", drop({ draggableId: "personnel:person-17", sourceId: "personnel-pool", destinationId: "occurrence:occurrence-9:2027-02-30", type: "PERSONNEL" })],
     ["lege occurrence-id", drop({ draggableId: "task:", sourceId: "task-backlog", destinationId: "employee-day:person-17:2027-01-04", type: "TASK" })],
+    ["ongeldig tijdlijngat", drop({ draggableId: "personnel:person-17", sourceId: "personnel-pool", destinationId: "occurrence-gap:occurrence-9:2027-01-04:0840:0360", type: "PERSONNEL" })],
   ])("retourneert null voor %s", (_label, result) => {
     expect(resolvePlanningDrop(result)).toBeNull();
   });

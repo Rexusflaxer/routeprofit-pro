@@ -691,6 +691,41 @@ export function resolvePlanningDrop(result) {
   const droppableId = String(result?.destination?.droppableId || "");
   if (!draggableId || !droppableId) return null;
 
+  if (draggableId.startsWith("personnel:") && droppableId.startsWith("occurrence-gap:")) {
+    const personnelId = draggableId.slice("personnel:".length);
+    const match = droppableId.match(/^occurrence-gap:([^:]+):(\d{4}-\d{2}-\d{2}):(\d{4}):(\d{4})$/);
+    if (!personnelId || !match || !parseDateKey(match[2])) return null;
+    const timelineMinuteClock = value => {
+      const totalMinutes = Number(value);
+      if (!Number.isInteger(totalMinutes) || totalMinutes < 0 || totalMinutes > 24 * 60) return "";
+      if (totalMinutes === 24 * 60) return "24:00";
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    };
+    const startTime = timelineMinuteClock(match[3]);
+    const endTime = timelineMinuteClock(match[4]);
+    let occurrenceId;
+    try {
+      occurrenceId = decodeURIComponent(match[1]);
+    } catch {
+      return null;
+    }
+    const clockMinutes = value => {
+      const [hours, minutes] = String(value).split(":").map(Number);
+      return hours * 60 + minutes;
+    };
+    if (!occurrenceId || !startTime || !endTime || clockMinutes(endTime) <= clockMinutes(startTime)) return null;
+    return {
+      kind: "compose_occurrence_slice_for_personnel",
+      personnelId,
+      occurrenceId,
+      serviceDate: match[2],
+      startTime,
+      endTime,
+    };
+  }
+
   if (draggableId.startsWith("personnel:") && droppableId.startsWith("slot:")) {
     const personnelId = draggableId.slice("personnel:".length);
     const [, shiftId, slotValue, projectionValue] = droppableId.split(":");

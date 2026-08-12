@@ -1107,6 +1107,517 @@ describe("planningApi dienstsamenstelling", () => {
       expected_occurrence_revisions: { [demand.id]: occurrenceAfterFirstComposition.revision },
     }, context("compose-overlap"))).rejects.toMatchObject({ status: 409 });
   });
+
+  it("verkleint 06:00-20:00 veilig, vult 12:00-20:00 aan en laat een overlappende resize niets wijzigen", async () => {
+    const demand = occurrence("occurrence-reception-timeline", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push(
+      { id: "personnel-morning", name: "Ochtend Beveiliger", status: "active" },
+      { id: "personnel-evening", name: "Avond Beveiliger", status: "active" },
+    );
+
+    const full = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-morning",
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("timeline-full"));
+    const occurrenceBeforeResize = await entities.PlanningTaskOccurrence.get(demand.id);
+    const resized = await backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: full.shift.id,
+      expected_shift_revision: full.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: occurrenceBeforeResize.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    }, context("timeline-resize-morning"));
+
+    expect(resized.shift).toMatchObject({ start_time: "06:00", end_time: "12:00", duration_minutes: 360 });
+    expect(resized.assignments).toContainEqual(expect.objectContaining({ personnel_id: "personnel-morning", status: "draft" }));
+    expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "partial", allocated_minutes: 360, remaining_minutes: 480 });
+
+    const occurrenceBeforeEvening = await entities.PlanningTaskOccurrence.get(demand.id);
+    const evening = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-evening",
+      segments: [{ task_occurrence_id: demand.id, start_time: "12:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: occurrenceBeforeEvening.revision },
+    }, context("timeline-fill-evening"));
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 840, remaining_minutes: 0 });
+
+    const occurrenceBeforeOverlap = await entities.PlanningTaskOccurrence.get(demand.id);
+    const businessStateBeforeOverlap = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+      assignments: entities.PlanningAssignment.records,
+    });
+    await expect(backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: resized.shift.id,
+      expected_shift_revision: resized.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: occurrenceBeforeOverlap.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "13:00" }],
+    }, context("timeline-overlap-rejected"))).rejects.toMatchObject({ status: 409 });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+      assignments: entities.PlanningAssignment.records,
+    }).toEqual(businessStateBeforeOverlap);
+    expect(evening.shift.start_time).toBe("12:00");
+  });
+
+  it("fencet bij full replacement zowel verwijderde als blijvende taakuitvoeringen", async () => {
+    const reception = occurrence("occurrence-reception-union", "object-1", "08:00", "12:00", 240);
+    const round = occurrence("occurrence-round-union", "object-2", "12:00", "13:00", 60);
+    const { base44, entities } = setup([reception, round]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [
+        { task_occurrence_id: reception.id, start_time: "08:00", end_time: "12:00" },
+        { task_occurrence_id: round.id, start_time: "12:00", end_time: "13:00" },
+      ],
+      expected_occurrence_revisions: { [reception.id]: 1, [round.id]: 1 },
+    }, context("union-compose"));
+    const currentReception = await entities.PlanningTaskOccurrence.get(reception.id);
+    const currentRound = await entities.PlanningTaskOccurrence.get(round.id);
+    const updateBody = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      segments: [{ task_occurrence_id: reception.id, start_time: "08:00", end_time: "12:00" }],
+    };
+
+    await expect(backend.composeShift(base44, user, {
+      ...updateBody,
+      expected_occurrence_revisions: { [reception.id]: currentReception.revision },
+    }, context("union-missing-removed-revision"))).rejects.toMatchObject({ status: 400 });
+
+    const roundCoordinator = entities.PlanningMutationCoordinator.records.find(item => (
+      item.resource_type === "task_occurrence" && item.resource_id === round.id
+    ));
+    roundCoordinator.lease = {
+      token: "foreign-union-lease",
+      status: "pending",
+      idempotency_key: "foreign-union-action",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const beforeBlockedUpdate = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+    await expect(backend.composeShift(base44, user, {
+      ...updateBody,
+      expected_occurrence_revisions: {
+        [reception.id]: currentReception.revision,
+        [round.id]: currentRound.revision,
+      },
+    }, context("union-foreign-fence"))).rejects.toMatchObject({ status: 409 });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(beforeBlockedUpdate);
+
+    roundCoordinator.lease = null;
+    const updated = await backend.composeShift(base44, user, {
+      ...updateBody,
+      expected_occurrence_revisions: {
+        [reception.id]: currentReception.revision,
+        [round.id]: currentRound.revision,
+      },
+    }, context("union-remove-round"));
+    expect(updated.shift.task_occurrence_ids).toEqual([reception.id]);
+    expect(updated.task_occurrences.map(item => item.id).sort()).toEqual([reception.id, round.id].sort());
+    expect((await entities.PlanningTaskOccurrence.get(round.id)).revision).toBeGreaterThan(currentRound.revision);
+    expect(entities.PlanningShiftTaskSegment.records.filter(item => (
+      item.status !== "removed" && item.task_occurrence_id === round.id
+    ))).toHaveLength(0);
+    expect(entities.PlanningMutationCoordinator.records.find(item => item.id === roundCoordinator.id)
+      ?.metadata?.last_released_idempotency_key).toBe("union-remove-round");
+  });
+
+  it("reserveert bij overnight resize de oude en nieuwe personeelsdagen en respecteert een foreign daglease", async () => {
+    const demand = {
+      ...occurrence("occurrence-reception-overnight-resize", "object-1", "22:00", "06:00", 480),
+      end_date: "2026-08-18",
+    };
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-overnight-resize", name: "Nacht Beveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-overnight-resize",
+      segments: [{
+        task_occurrence_id: demand.id,
+        start_date: "2026-08-17",
+        end_date: "2026-08-18",
+        start_time: "22:00",
+        end_time: "02:00",
+      }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("overnight-resize-compose"));
+    const day17 = entities.PlanningMutationCoordinator.records.find(item => (
+      item.resource_type === "personnel_day" && item.resource_id === "personnel-overnight-resize:2026-08-17"
+    ));
+    const day18 = entities.PlanningMutationCoordinator.records.find(item => (
+      item.resource_type === "personnel_day" && item.resource_id === "personnel-overnight-resize:2026-08-18"
+    ));
+    day17.lease = {
+      token: "foreign-personnel-day",
+      status: "pending",
+      idempotency_key: "foreign-personnel-action",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const update = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{
+        task_occurrence_id: demand.id,
+        start_date: "2026-08-18",
+        end_date: "2026-08-18",
+        start_time: "00:00",
+        end_time: "06:00",
+      }],
+    };
+    await expect(backend.composeShift(base44, user, update, context("overnight-resize-blocked")))
+      .rejects.toMatchObject({ status: 409 });
+
+    day17.lease = null;
+    const resized = await backend.composeShift(base44, user, update, context("overnight-resize-complete"));
+    expect(resized.shift).toMatchObject({
+      service_date: "2026-08-18",
+      end_date: null,
+      start_time: "00:00",
+      end_time: "06:00",
+    });
+    expect(entities.PlanningMutationCoordinator.records.find(item => item.id === day17.id)
+      ?.metadata?.last_released_idempotency_key).toBe("overnight-resize-complete");
+    expect(entities.PlanningMutationCoordinator.records.find(item => item.id === day18.id)
+      ?.metadata?.last_released_idempotency_key).toBe("overnight-resize-complete");
+  });
+
+  it("weigert een resize als de assignmentset tussen preflight en lock verandert", async () => {
+    const demand = occurrence("occurrence-reception-assignment-race", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push(
+      { id: "personnel-assigned", name: "Bestaande Beveiliger", status: "active" },
+      { id: "personnel-injected", name: "Gelijktijdige Beveiliger", status: "active" },
+    );
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-assigned",
+      required_count: 2,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("assignment-race-compose"));
+    const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany.bind(entities.PlanningMutationCoordinator);
+    let injected = false;
+    entities.PlanningMutationCoordinator.updateMany = async (query, patch) => {
+      const result = await originalCoordinatorUpdate(query, patch);
+      const coordinator = entities.PlanningMutationCoordinator.records.find(item => String(item.id) === String(query.id));
+      if (
+        !injected
+        && coordinator?.resource_type === "shift_composition"
+        && patch.$set?.lease?.idempotency_key === "assignment-race-resize"
+      ) {
+        injected = true;
+        entities.PlanningAssignment.records.push({
+          id: "assignment-concurrent",
+          shift_id: composed.shift.id,
+          slot_index: 1,
+          personnel_id: "personnel-injected",
+          personnel_name_snapshot: "Gelijktijdige Beveiliger",
+          status: "draft",
+          warning_codes: [],
+          warning_snapshot: [],
+          has_critical_warnings: false,
+          revision: 1,
+          published_revision: 0,
+        });
+      }
+      return result;
+    };
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const beforeSegments = structuredClone(entities.PlanningShiftTaskSegment.records);
+    const beforeShift = structuredClone(entities.PlanningShift.records);
+
+    await expect(backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    }, context("assignment-race-resize"))).rejects.toMatchObject({ status: 409 });
+    expect(injected).toBe(true);
+    expect(entities.PlanningShift.records).toEqual(beforeShift);
+    expect(entities.PlanningShiftTaskSegment.records).toEqual(beforeSegments);
+  });
+
+  it("herstelt een update_shift_composition met dezelfde sleutel zonder dubbel actief segment", async () => {
+    const demand = occurrence("occurrence-reception-resize-retry", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("resize-retry-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const body = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failed = false;
+    entities.PlanningAuditEvent.create = async data => {
+      if (!failed && data.action === "update_shift_composition") {
+        failed = true;
+        throw new Error("tijdelijke resize-auditstoring");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.composeShift(base44, user, body, context("resize-retry")))
+      .rejects.toThrow("tijdelijke resize-auditstoring");
+    expect(backend.activeTaskSegments(
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toEqual([]);
+
+    const recovered = await backend.composeShift(base44, user, body, context("resize-retry"));
+    expect(recovered.shift).toMatchObject({ status: "draft", start_time: "06:00", end_time: "12:00" });
+    expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition")).toHaveLength(1);
+  });
+
+  it("laat alleen de oorspronkelijke actor een pending update_shift_composition herstellen", async () => {
+    const demand = occurrence("occurrence-reception-actor-recovery", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("actor-recovery-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const body = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failed = false;
+    entities.PlanningAuditEvent.create = async data => {
+      if (!failed && data.action === "update_shift_composition") {
+        failed = true;
+        throw new Error("tijdelijke actor-recovery-auditstoring");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.composeShift(base44, user, body, context("actor-recovery-resize")))
+      .rejects.toThrow("tijdelijke actor-recovery-auditstoring");
+    const pendingShift = await entities.PlanningShift.get(composed.shift.id);
+    expect(pendingShift.metadata?.planning_composition).toMatchObject({
+      phase: "pending",
+      actor_user_id: user.id,
+    });
+
+    await expect(backend.composeShift(
+      base44,
+      { ...user, id: "admin-2", name: "Andere planner" },
+      body,
+      context("actor-recovery-resize"),
+    )).rejects.toMatchObject({ status: 409 });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition"))
+      .toHaveLength(0);
+
+    const recovered = await backend.composeShift(base44, user, body, context("actor-recovery-resize"));
+    expect(recovered.shift).toMatchObject({ status: "draft", start_time: "06:00", end_time: "12:00" });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition"))
+      .toEqual([expect.objectContaining({ actor_user_id: user.id })]);
+  });
+
+  it("weigert required_count onder bestaande actieve slots te verlagen", async () => {
+    const demand = occurrence("occurrence-reception-required-count", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push(
+      { id: "personnel-slot-zero", name: "Eerste beveiliger", status: "active" },
+      { id: "personnel-slot-one", name: "Tweede beveiliger", status: "active" },
+    );
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-slot-zero",
+      required_count: 2,
+      slot_index: 0,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("required-count-compose"));
+    const assigned = await backend.assignPersonnel(base44, user, {
+      shift_id: composed.shift.id,
+      personnel_id: "personnel-slot-one",
+      slot_index: 1,
+      expected_shift_revision: composed.shift.revision,
+    }, context("required-count-second-assignment"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const businessStateBefore = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+
+    await expect(backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: assigned.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      required_count: 1,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    }, context("required-count-invalid-resize"))).rejects.toMatchObject({ status: 409 });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(businessStateBefore);
+    expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed").map(item => item.slot_index).sort())
+      .toEqual([0, 1]);
+  });
+
+  it("ruimt een gedeeltelijke occurrence-reservering op na een revision-race", async () => {
+    const firstDemand = occurrence("occurrence-a-partial-reservation", "object-1", "08:00", "12:00", 240);
+    const secondDemand = occurrence("occurrence-b-partial-reservation", "object-2", "12:00", "16:00", 240);
+    const { base44, entities } = setup([firstDemand, secondDemand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [
+        { task_occurrence_id: firstDemand.id, start_time: "08:00", end_time: "12:00" },
+        { task_occurrence_id: secondDemand.id, start_time: "12:00", end_time: "16:00" },
+      ],
+      expected_occurrence_revisions: { [firstDemand.id]: 1, [secondDemand.id]: 1 },
+    }, context("partial-reservation-compose"));
+    const firstBefore = await entities.PlanningTaskOccurrence.get(firstDemand.id);
+    const secondBefore = await entities.PlanningTaskOccurrence.get(secondDemand.id);
+    const staleBody = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: {
+        [firstDemand.id]: firstBefore.revision,
+        [secondDemand.id]: secondBefore.revision,
+      },
+      segments: [
+        { task_occurrence_id: firstDemand.id, start_time: "08:00", end_time: "11:00" },
+        { task_occurrence_id: secondDemand.id, start_time: "12:00", end_time: "16:00" },
+      ],
+    };
+    const originalOccurrenceUpdate = entities.PlanningTaskOccurrence.updateMany.bind(entities.PlanningTaskOccurrence);
+    let injected = false;
+    entities.PlanningTaskOccurrence.updateMany = async (query, update) => {
+      const result = await originalOccurrenceUpdate(query, update);
+      if (
+        !injected
+        && query.id === firstDemand.id
+        && update.$set?.metadata?.planning_composition_reservation?.idempotency_key === "partial-reservation-resize"
+      ) {
+        injected = true;
+        const concurrentOccurrence = entities.PlanningTaskOccurrence.records.find(item => item.id === secondDemand.id);
+        concurrentOccurrence.revision += 1;
+        concurrentOccurrence.metadata = {
+          ...(concurrentOccurrence.metadata || {}),
+          changed_by_concurrent_action: true,
+        };
+      }
+      return result;
+    };
+
+    await expect(backend.composeShift(base44, user, staleBody, context("partial-reservation-resize")))
+      .rejects.toMatchObject({ status: 409 });
+    expect(injected).toBe(true);
+    const firstAfterFailure = await entities.PlanningTaskOccurrence.get(firstDemand.id);
+    const secondAfterFailure = await entities.PlanningTaskOccurrence.get(secondDemand.id);
+    expect(firstAfterFailure.metadata?.planning_composition_reservation).toBeUndefined();
+    expect(secondAfterFailure.metadata?.planning_composition_reservation).toBeUndefined();
+    expect(firstAfterFailure.metadata).toMatchObject({
+      last_composition_recovery_idempotency_key: "partial-reservation-resize",
+      last_composition_recovery_actor_user_id: user.id,
+      last_composition_recovery_status: "reservation_released",
+    });
+
+    await expect(backend.composeShift(base44, user, staleBody, context("partial-reservation-resize")))
+      .rejects.toMatchObject({ status: 409 });
+    const recovered = await backend.composeShift(base44, user, {
+      ...staleBody,
+      expected_occurrence_revisions: {
+        [firstDemand.id]: firstAfterFailure.revision,
+        [secondDemand.id]: secondAfterFailure.revision,
+      },
+    }, context("partial-reservation-reloaded-resize"));
+    expect(recovered.shift).toMatchObject({ status: "draft", start_time: "08:00", end_time: "16:00" });
+    expect((await entities.PlanningTaskOccurrence.get(firstDemand.id)).metadata?.planning_composition_reservation)
+      .toBeUndefined();
+    expect((await entities.PlanningTaskOccurrence.get(secondDemand.id)).metadata?.planning_composition_reservation)
+      .toBeUndefined();
+  });
+
+  it("behoudt occurrence-fences na een late update-auditfout tot same-key recovery", async () => {
+    const demand = occurrence("occurrence-late-audit-fence", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "20:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("late-audit-fence-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const body = {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failed = false;
+    entities.PlanningAuditEvent.create = async data => {
+      if (!failed && data.action === "update_shift_composition") {
+        failed = true;
+        throw new Error("tijdelijke late auditstoring");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.composeShift(base44, user, body, context("late-audit-fence-resize")))
+      .rejects.toThrow("tijdelijke late auditstoring");
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.planning_composition_reservation)
+      .toMatchObject({
+        idempotency_key: "late-audit-fence-resize",
+        actor_user_id: user.id,
+        status: "pending",
+      });
+
+    await expect(backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "12:00", end_time: "20:00" }],
+      expected_occurrence_revisions: {
+        [demand.id]: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      },
+    }, context("late-audit-fence-foreign-compose"))).rejects.toMatchObject({ status: 409 });
+    expect(entities.PlanningShift.records).toHaveLength(1);
+
+    const recovered = await backend.composeShift(base44, user, body, context("late-audit-fence-resize"));
+    expect(recovered.shift).toMatchObject({ status: "draft", start_time: "06:00", end_time: "12:00" });
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.planning_composition_reservation)
+      .toBeUndefined();
+    expect(entities.PlanningShift.records).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition"))
+      .toHaveLength(1);
+  });
 });
 
 describe("planningApi medewerker/dag-reserveringen", () => {
