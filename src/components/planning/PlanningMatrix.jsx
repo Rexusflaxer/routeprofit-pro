@@ -16,6 +16,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ObjectDayTimeline from "@/components/planning/ObjectDayTimeline";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -546,8 +547,25 @@ function ObjectDayCell({
     groupedShifts.get(shiftId).projections.push(projection);
   });
   const cellShifts = [...groupedShifts.values()];
+  const timelineItems = [
+    ...cellOccurrences.map(({ occurrence, planningState, projection }) => ({
+      id: `occurrence:${occurrence.id}`,
+      label: occurrence.task_name_snapshot || "Taak",
+      start: projection?.startTime || occurrence.window_start_time || "00:00",
+      end: projection?.endTime || occurrence.window_end_time || "24:00",
+      tone: planningState?.coverage?.status || "open",
+    })),
+    ...cellShifts.flatMap(({ shift, projections }) => projections.map((projection, index) => ({
+      id: projection.projectionKey || `shift:${shift.id}:${index}`,
+      label: projection.segment?.task_name_snapshot || shift.name || shift.service_name_snapshot || "Dienst",
+      start: projection.slice?.startTime || projection.segment?.start_time || shift.start_time || "00:00",
+      end: projection.slice?.endTime || projection.segment?.end_time || shift.end_time || "24:00",
+      tone: "primary",
+    }))),
+  ];
   return (
     <div className="min-h-[112px] space-y-1.5 p-2" data-matrix-cell={`${resource.key}:${dayKey}`}>
+      {resource.kind === "object" && <ObjectDayTimeline items={timelineItems} />}
       {cellOccurrences.map(({ occurrence, planningState, projection }) => (
         <TaskOccurrenceBlock
           key={occurrence.id}
