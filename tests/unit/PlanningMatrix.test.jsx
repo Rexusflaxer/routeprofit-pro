@@ -127,6 +127,10 @@ function toolbarProps(overrides = {}) {
   return {
     perspective: "object",
     onPerspectiveChange: vi.fn(),
+    orientation: "resources_horizontal",
+    onOrientationChange: vi.fn(),
+    planningLayout: "timeline",
+    onPlanningLayoutChange: vi.fn(),
     view: "week",
     onViewChange: vi.fn(),
     rangeLabel: "17 – 23 augustus 2026",
@@ -153,6 +157,358 @@ function toolbarProps(overrides = {}) {
 }
 
 describe("Planning matrix", () => {
+  it("toont in tijdlijnmodus de klanttaak als vaste 24-uursvraag met een exact open dienstvoorstel", () => {
+    const longOccurrence = {
+      ...occurrence,
+      id: "occurrence-long-reception",
+      window_start_time: "06:00",
+      window_end_time: "20:00",
+      required_minutes: 840,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence] })} />,
+    );
+
+    expect(screen.getByRole("table", { name: "Planning per object" })).toHaveAttribute("data-planning-layout", "timeline");
+    expect(screen.getByText("00:00")).toBeInTheDocument();
+    expect(screen.getByText("24:00")).toBeInTheDocument();
+    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-long-reception"]');
+    expect(overlay).toHaveAttribute("data-timeline-task-overlay", "true");
+    expect(within(overlay).getByText("06:00–20:00")).toBeInTheDocument();
+    expect(within(overlay).getByText("Taak nog niet verdeeld")).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-long-reception:2026-08-17:0360:0840"]')).toBeInTheDocument();
+    expect(within(overlay).getByRole("button", { name: /open dienst maken/i })).toBeInTheDocument();
+  });
+
+  it("maakt via de snelle actie exact de voorgestelde eerste dienst van maximaal acht uur", () => {
+    const onCreateOpenTaskSlice = vi.fn();
+    const longOccurrence = {
+      ...occurrence,
+      id: "occurrence-open-service",
+      window_start_time: "06:00",
+      window_end_time: "20:00",
+      required_minutes: 840,
+    };
+    renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence], onCreateOpenTaskSlice })} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open dienst maken/i }));
+    expect(onCreateOpenTaskSlice).toHaveBeenCalledWith({
+      occurrence: longOccurrence,
+      serviceDate: "2026-08-17",
+      startTime: "06:00",
+      endTime: "14:00",
+    });
+  });
+
+  it("behoudt een korte brand- en sluitronde als exact sleepbaar taakvenster", () => {
+    const onCreateOpenTaskSlice = vi.fn();
+    const shortOccurrence = {
+      ...occurrence,
+      id: "occurrence-fire-round",
+      task_name_snapshot: "Brand- en sluitronde",
+      window_start_time: "22:00",
+      window_end_time: "22:25",
+      required_minutes: 25,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [shortOccurrence], onCreateOpenTaskSlice })} />,
+    );
+
+    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-fire-round"]');
+    expect(parseFloat(overlay.style.top)).toBeCloseTo(22 * 32, 4);
+    expect(within(overlay).getByText("22:00–22:25")).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-fire-round:2026-08-17:1320:1345"]')).toBeInTheDocument();
+    fireEvent.click(within(overlay).getByRole("button", { name: "Open dienst maken 22:00–22:25" }));
+    expect(onCreateOpenTaskSlice).toHaveBeenCalledWith({
+      occurrence: shortOccurrence,
+      serviceDate: "2026-08-17",
+      startTime: "22:00",
+      endTime: "22:25",
+    });
+  });
+
+  it("houdt een korte taak vlak voor middernacht volledig binnen het dagcanvas", () => {
+    const midnightOccurrence = {
+      ...occurrence,
+      id: "occurrence-midnight-round",
+      task_name_snapshot: "Late sluitronde",
+      window_start_time: "23:50",
+      window_end_time: "00:00",
+      end_date: "2026-08-18",
+      required_minutes: 10,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [midnightOccurrence] })} />,
+    );
+
+    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-midnight-round"]');
+    const canvas = overlay.closest("[data-timeline-day-canvas]");
+    expect(parseFloat(overlay.style.top) + parseFloat(overlay.style.height)).toBeLessThanOrEqual(parseFloat(canvas.style.height));
+    expect(within(overlay).getByText("23:50–24:00")).toBeInTheDocument();
+  });
+
+  it("projecteert een nachttaak op beide kalenderdagen zonder klantvraag te verliezen", () => {
+    const overnightOccurrence = {
+      ...occurrence,
+      id: "occurrence-overnight",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      window_start_time: "22:00",
+      window_end_time: "06:00",
+      required_minutes: 480,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        layout: "timeline",
+        days: [serviceDay, new Date(2026, 7, 18, 12)],
+        occurrences: [overnightOccurrence],
+      })} />,
+    );
+
+    expect(container.querySelectorAll('[data-task-occurrence-id="occurrence-overnight"]')).toHaveLength(2);
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-17:1320:1440"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-18:0000:0360"]')).toBeInTheDocument();
+  });
+
+  it("behoudt bij resize van de eerste nachthelft het oorspronkelijke einde op de volgende dag", () => {
+    const onResizeTaskSegment = vi.fn();
+    const overnightOccurrence = {
+      ...occurrence,
+      id: "occurrence-overnight-start-resize",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      window_start_time: "22:00",
+      window_end_time: "06:00",
+      required_minutes: 480,
+    };
+    const overnightShift = {
+      ...shift,
+      id: "shift-overnight-start-resize",
+      source_type: "task",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+    };
+    const overnightSegment = {
+      id: "segment-overnight-start-resize",
+      shift_id: overnightShift.id,
+      task_occurrence_id: overnightOccurrence.id,
+      object_id: overnightOccurrence.object_id,
+      start_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+      status: "draft",
+    };
+    renderInDragContext(<PlanningBoard {...boardProps({
+      layout: "timeline",
+      days: [serviceDay, new Date(2026, 7, 18, 12)],
+      occurrences: [overnightOccurrence],
+      shifts: [overnightShift],
+      segments: [overnightSegment],
+      onResizeTaskSegment,
+    })} />);
+
+    const startHandle = screen.getByRole("slider", { name: /begintijd van avonddienst aanpassen/i });
+    fireEvent.keyDown(startHandle, { key: "ArrowDown" });
+    fireEvent.keyDown(startHandle, { key: "Enter" });
+    expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      startDate: "2026-08-17",
+      startTime: "22:05",
+      endDate: "2026-08-18",
+      endTime: "06:00",
+    }));
+  });
+
+  it("behoudt bij resize van de tweede nachthelft de oorspronkelijke start op de vorige dag", () => {
+    const onResizeTaskSegment = vi.fn();
+    const overnightOccurrence = {
+      ...occurrence,
+      id: "occurrence-overnight-end-resize",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      window_start_time: "22:00",
+      window_end_time: "06:00",
+      required_minutes: 480,
+    };
+    const overnightShift = {
+      ...shift,
+      id: "shift-overnight-end-resize",
+      source_type: "task",
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+    };
+    const overnightSegment = {
+      id: "segment-overnight-end-resize",
+      shift_id: overnightShift.id,
+      task_occurrence_id: overnightOccurrence.id,
+      object_id: overnightOccurrence.object_id,
+      start_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+      status: "draft",
+    };
+    renderInDragContext(<PlanningBoard {...boardProps({
+      layout: "timeline",
+      days: [serviceDay, new Date(2026, 7, 18, 12)],
+      occurrences: [overnightOccurrence],
+      shifts: [overnightShift],
+      segments: [overnightSegment],
+      onResizeTaskSegment,
+    })} />);
+
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    expect(endHandle).toHaveAttribute("aria-orientation", "vertical");
+    fireEvent.keyDown(endHandle, { key: "ArrowUp" });
+    fireEvent.keyDown(endHandle, { key: "Enter" });
+    expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      startDate: "2026-08-17",
+      startTime: "22:00",
+      endDate: "2026-08-18",
+      endTime: "05:55",
+    }));
+  });
+
+  it("maakt na een eerste deel precies het resterende taakdeel als volgende dropzone zichtbaar", () => {
+    const longOccurrence = {
+      ...occurrence,
+      id: "occurrence-split-reception",
+      window_start_time: "06:00",
+      window_end_time: "20:00",
+      required_minutes: 840,
+    };
+    const firstShift = {
+      ...shift,
+      id: "shift-first-half",
+      source_type: "task",
+      start_time: "06:00",
+      end_time: "12:00",
+    };
+    const firstSegment = {
+      id: "segment-first-half",
+      shift_id: firstShift.id,
+      task_occurrence_id: longOccurrence.id,
+      object_id: longOccurrence.object_id,
+      start_date: longOccurrence.service_date,
+      end_date: longOccurrence.service_date,
+      start_time: "06:00",
+      end_time: "12:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence], shifts: [firstShift], segments: [firstSegment] })} />,
+    );
+
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-split-reception:2026-08-17:0720:1200"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-segment-id="segment-first-half"]')).toHaveTextContent(/06:00–12:00/);
+  });
+
+  it("houdt een volledig afgedekte klanttaak zichtbaar onder de bemande dienst", () => {
+    const coveredShift = { ...shift, id: "shift-timeline-covered", source_type: "task", start_time: "08:00", end_time: "16:00" };
+    const coveredSegment = {
+      id: "segment-timeline-covered",
+      shift_id: coveredShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const coveredAssignment = { ...assignment, planning_shift_id: coveredShift.id };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [coveredShift], segments: [coveredSegment], assignments: [coveredAssignment] })} />,
+    );
+
+    expect(container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`)).toBeInTheDocument();
+    expect(container.querySelector('[data-segment-id="segment-timeline-covered"]')).toHaveTextContent("Anna Beveiliger");
+    expect(container.querySelector(`[data-timeline-gap^="${occurrence.id}:"]`)).not.toBeInTheDocument();
+  });
+
+  it("maakt een gevormde maar onbemande dienst tot een expliciete medewerkersdropzone", () => {
+    const openShift = { ...shift, id: "shift-timeline-open", source_type: "task", start_time: "08:00", end_time: "16:00" };
+    const openSegment = {
+      id: "segment-timeline-open",
+      shift_id: openShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [openShift], segments: [openSegment] })} />,
+    );
+
+    expect(container.querySelector('[data-segment-id="segment-timeline-open"]')).toHaveTextContent("Open dienst");
+    expect(container.querySelector('[data-droppable-id^="slot:shift-timeline-open:0:2026-08-17:"]')).toBeInTheDocument();
+  });
+
+  it("resizet met het toetsenbord in stappen van vijf minuten en schrijft pas bij Enter", () => {
+    const onResizeTaskSegment = vi.fn();
+    const resizeShift = { ...shift, id: "shift-resize", source_type: "task", start_time: "08:00", end_time: "16:00" };
+    const resizeSegment = {
+      id: "segment-resize",
+      shift_id: resizeShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [resizeShift], segments: [resizeSegment], onResizeTaskSegment })} />,
+    );
+
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    fireEvent.keyDown(endHandle, { key: "ArrowUp" });
+    expect(onResizeTaskSegment).not.toHaveBeenCalled();
+    fireEvent.keyDown(endHandle, { key: "Enter" });
+    expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      shift: resizeShift,
+      segment: resizeSegment,
+      startTime: "08:00",
+      endTime: "15:55",
+    }));
+  });
+
+  it("annuleert een niet-opgeslagen toetsenbordresize wanneer de greep focus verliest", () => {
+    const onResizeTaskSegment = vi.fn();
+    const resizeShift = { ...shift, id: "shift-resize-blur", source_type: "task", start_time: "08:00", end_time: "16:00" };
+    const resizeSegment = {
+      id: "segment-resize-blur",
+      shift_id: resizeShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [resizeShift], segments: [resizeSegment], onResizeTaskSegment })} />,
+    );
+
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    fireEvent.keyDown(endHandle, { key: "ArrowUp" });
+    expect(container.querySelector('[data-segment-id="segment-resize-blur"]')).toHaveTextContent("08:00–15:55");
+    fireEvent.blur(endHandle);
+    expect(container.querySelector('[data-segment-id="segment-resize-blur"]')).toHaveTextContent("08:00–16:00");
+    expect(onResizeTaskSegment).not.toHaveBeenCalled();
+  });
+
   it("toont objecten horizontaal, dagen verticaal en taakvoorkomens als expliciete dropzones", () => {
     const { container } = renderInDragContext(<PlanningBoard {...boardProps()} />);
 
@@ -722,5 +1078,20 @@ describe("Planning matrix-bediening", () => {
     fireEvent.change(screen.getByLabelText("Einddatum periode"), { target: { value: "2026-08-25" } });
     expect(onCustomStartChange).toHaveBeenCalledWith("2026-08-18");
     expect(onCustomEndChange).toHaveBeenCalledWith("2026-08-25");
+  });
+
+  it("wisselt expliciet tussen tijdlijn en kaarten en verbergt transponeren in de tijdlijn", () => {
+    const onPlanningLayoutChange = vi.fn();
+    const props = toolbarProps({ onPlanningLayoutChange, planningLayout: "timeline" });
+    const { rerender } = render(<PlanningToolbar {...props} />);
+
+    expect(screen.getByRole("button", { name: "Tijdlijn" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /matrixweergave wisselen/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Kaarten" }));
+    expect(onPlanningLayoutChange).toHaveBeenCalledWith("cards");
+
+    rerender(<PlanningToolbar {...props} planningLayout="cards" />);
+    expect(screen.getByRole("button", { name: "Kaarten" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /matrixweergave wisselen/i })).toBeInTheDocument();
   });
 });

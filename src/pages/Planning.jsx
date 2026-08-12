@@ -60,9 +60,14 @@ import {
   taskCoverageSummary,
   toDateKey,
 } from "@/components/planning/planningDomain";
+import {
+  buildTimelineResizeCompositionPayload,
+  getSuggestedTaskTimelineAllocation,
+} from "@/components/planning/planningTimelineDomain";
 
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
+const VALID_PLANNING_LAYOUTS = new Set(["timeline", "cards"]);
 const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
@@ -137,6 +142,29 @@ function occurrenceSegmentsForRemainingWork(occurrence, segments, shifts, servic
   }));
 }
 
+function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime) {
+  const startDate = toDateKey(serviceDate);
+  if (!occurrence?.id || !startDate || !startTime || !endTime) return null;
+  if (endTime === "24:00") {
+    const parsed = parseDateKey(startDate);
+    if (!parsed) return null;
+    return {
+      task_occurrence_id: occurrence.id,
+      start_date: startDate,
+      end_date: toDateKey(addDays(parsed, 1)),
+      start_time: startTime,
+      end_time: "00:00",
+    };
+  }
+  return {
+    task_occurrence_id: occurrence.id,
+    start_date: startDate,
+    end_date: startDate,
+    start_time: startTime,
+    end_time: endTime,
+  };
+}
+
 function mutationMessage(error) {
   if (Number(error?.status) === 409) return `${error.message} De planning is opnieuw geladen.`;
   return error?.message || "De planningactie kon niet worden uitgevoerd.";
@@ -176,6 +204,9 @@ export default function Planning() {
   const initialPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
     ? searchParams.get("perspective")
     : "object";
+  const initialPlanningLayout = VALID_PLANNING_LAYOUTS.has(searchParams.get("layout"))
+    ? searchParams.get("layout")
+    : "timeline";
   const initialPeriod = getPlanningRange(initialDate, "period", {
     periodStart: searchParams.get("from"),
     periodEnd: searchParams.get("to"),
@@ -187,7 +218,8 @@ export default function Planning() {
   const [customPeriodStart, setCustomPeriodStart] = useState(toDateKey(initialPeriod.start));
   const [customPeriodEnd, setCustomPeriodEnd] = useState(toDateKey(initialPeriod.end));
   const [perspective, setPerspective] = useState(initialPerspective);
-  const [matrixOrientation, setMatrixOrientation] = useState("days_horizontal");
+  const [planningLayout, setPlanningLayout] = useState(initialPlanningLayout);
+  const [matrixOrientation, setMatrixOrientation] = useState("resources_horizontal");
   const [compactMode, setCompactMode] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(2);
   const planningZoom = PLANNING_ZOOM_LEVELS[zoomIndex];
@@ -230,6 +262,9 @@ export default function Planning() {
     const nextPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
       ? searchParams.get("perspective")
       : "object";
+    const nextPlanningLayout = VALID_PLANNING_LAYOUTS.has(searchParams.get("layout"))
+      ? searchParams.get("layout")
+      : "timeline";
     const nextPeriod = getPlanningRange(nextDate, "period", {
       periodStart: searchParams.get("from"),
       periodEnd: searchParams.get("to"),
@@ -239,6 +274,7 @@ export default function Planning() {
     setAnchorDate(nextDate);
     setView(nextView);
     setPerspective(nextPerspective);
+    setPlanningLayout(nextPlanningLayout);
     setCustomPeriodStart(toDateKey(nextPeriod.start));
     setCustomPeriodEnd(toDateKey(nextPeriod.end));
     setSelectedShiftId(null);
@@ -253,6 +289,7 @@ export default function Planning() {
     next.set("date", toDateKey(anchorDate));
     next.set("view", view);
     next.set("perspective", perspective);
+    next.set("layout", planningLayout);
     if (view === "period") {
       next.set("from", periodStart);
       next.set("to", periodEnd);
@@ -264,7 +301,7 @@ export default function Planning() {
     if (nextSearchKey === searchParamsKey) return;
     lastWrittenSearchKey.current = nextSearchKey;
     setSearchParams(next, { replace: true });
-  }, [anchorDate, periodEnd, periodStart, perspective, searchParams, searchParamsKey, setSearchParams, view]);
+  }, [anchorDate, periodEnd, periodStart, perspective, planningLayout, searchParams, searchParamsKey, setSearchParams, view]);
 
   const shiftsQuery = useQuery({
     queryKey: ["planning-shifts", periodStart, periodEnd],
@@ -704,6 +741,93 @@ export default function Planning() {
     toast({ title: "Planning hersteld", description: message });
   };
 
+  const finishTimelineAssignment = async (result, occurrence, personnelItem) => {
+    await refreshPlanning();
+    const warnings = assignmentWarnings(result.assignment);
+    const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
+    const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
+    toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Dienst gemaakt en ingepland", description });
+    setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
+    setLiveMessage(description);
+    return result;
+  };
+
+  const composeAndAssignOccurrenceSlice = async ({ occurrence, personnelItem, serviceDate, startTime, endTime }) => {
+    if (!occurrence || !personnelItem || runActionMutation.isPending) return;
+    const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
+    if (!segment) return;
+    const result = await runIntentMutation(
+      `timeline-compose-and-assign:${occurrence.id}`,
+      "timeline-compose-and-assign",
+      {
+        action: "compose_and_assign",
+        personnel_id: personnelItem.id,
+        personnel_name: personnelName(personnelItem),
+        slot_index: 0,
+        required_count: 1,
+        assignment_source: "object_timeline_gap_drop",
+        expected_occurrence_revisions: {
+          [occurrence.id]: Number(occurrence.revision || 1),
+        },
+        segments: [segment],
+      },
+    );
+    return finishTimelineAssignment(result, occurrence, personnelItem);
+  };
+
+  const createOpenOccurrenceSlice = async ({ occurrence, serviceDate, startTime, endTime }) => {
+    if (!occurrence || runActionMutation.isPending) return;
+    const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
+    if (!segment) return;
+    const result = await runIntentMutation(`timeline-open-shift:${occurrence.id}`, "timeline-open-shift", {
+      action: "compose_shift",
+      required_count: 1,
+      expected_occurrence_revisions: {
+        [occurrence.id]: Number(occurrence.revision || 1),
+      },
+      segments: [segment],
+    });
+    await refreshPlanning();
+    const description = `Open dienst ${startTime}–${endTime} is gevormd binnen ${occurrence.task_name_snapshot || "de taak"}. Sleep nu een medewerker naar de open plaats.`;
+    toast({ title: "Open dienst gemaakt", description });
+    setSelectedShiftId(result.shift?.id || null);
+    setSidePanelMode("employees");
+    setLiveMessage(description);
+    return result;
+  };
+
+  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime }) => {
+    if (!shift || !segment || runActionMutation.isPending) return;
+    const activeSegments = taskSegments
+      .filter(item => item.status !== "removed" && String(item.shift_id) === String(shift.id))
+      .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
+    const occurrenceIds = [...new Set(activeSegments.map(item => String(item.task_occurrence_id)))];
+    const occurrenceById = new Map(taskOccurrences.map(item => [String(item.id), item]));
+    const missingOccurrenceIds = occurrenceIds.filter(id => !occurrenceById.has(id));
+    if (missingOccurrenceIds.length) {
+      const description = "Niet alle gekoppelde klanttaken zijn in de huidige periode geladen. Open de volledige dienstinhoud om deze dienst veilig te wijzigen.";
+      toast({ variant: "destructive", title: "Dienst kan hier niet worden verkleind", description });
+      setLiveMessage(description);
+      return;
+    }
+    const payload = buildTimelineResizeCompositionPayload({
+      shift,
+      targetSegmentId: segment.id,
+      segments: activeSegments,
+      occurrences: occurrenceIds.map(id => occurrenceById.get(id)),
+      nextStartDate: startDate,
+      nextEndDate: endDate,
+      nextStartTime: startTime,
+      nextEndTime: endTime,
+    });
+    const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
+    await refreshPlanning();
+    const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
+    toast({ title: "Diensttijd aangepast", description });
+    setLiveMessage(description);
+    return result;
+  };
+
   const composeAndAssignOccurrence = async (occurrence, personnelItem, serviceDate) => {
     if (!occurrence || !personnelItem) return;
     const state = getOccurrencePlanningState({
@@ -734,11 +858,21 @@ export default function Planning() {
       return;
     }
 
-    const segments = occurrenceSegmentsForRemainingWork(occurrence, taskSegments, shiftsInRange, serviceDate);
+    const timelineSuggestion = planningLayout === "timeline"
+      ? getSuggestedTaskTimelineAllocation({
+          occurrence,
+          serviceDate,
+          segments: taskSegments,
+          shifts: shiftsInRange,
+        })
+      : null;
+    const segments = planningLayout === "timeline"
+      ? (timelineSuggestion?.segment ? [timelineSuggestion.segment] : [])
+      : occurrenceSegmentsForRemainingWork(occurrence, taskSegments, shiftsInRange, serviceDate);
     if (segments.length === 0) {
       toast({
-        title: "Taak is al volledig ingepland",
-        description: "Er is geen open tijdvak of bezettingsplaats meer voor deze taak.",
+        title: "Geen open taakdeel op deze dag",
+        description: "Kies een dag waarop nog klantvraag openstaat, of vul een bestaande open dienst.",
       });
       return;
     }
@@ -754,14 +888,7 @@ export default function Planning() {
       },
       segments,
     });
-    await refreshPlanning();
-    const warnings = assignmentWarnings(result.assignment);
-    const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
-    const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
-    toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Taak ingepland", description });
-    setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
-    setLiveMessage(description);
-    return result;
+    return finishTimelineAssignment(result, occurrence, personnelItem);
   };
 
   const openOccurrenceStaffing = occurrence => {
@@ -790,6 +917,21 @@ export default function Planning() {
   const handleDragEnd = result => {
     const drop = resolvePlanningDrop(result);
     if (!drop || runActionMutation.isPending) return;
+
+    if (drop.kind === "compose_occurrence_slice_for_personnel") {
+      const occurrence = taskOccurrencesInRange.find(item => String(item.id) === String(drop.occurrenceId));
+      const personnelItem = activePersonnel.find(item => String(item.id) === String(drop.personnelId));
+      if (occurrence && personnelItem) {
+        composeAndAssignOccurrenceSlice({
+          occurrence,
+          personnelItem,
+          serviceDate: drop.serviceDate,
+          startTime: drop.startTime,
+          endTime: drop.endTime,
+        }).catch(() => undefined);
+      }
+      return;
+    }
 
     if (drop.kind === "assign_personnel_to_shift") {
       const shift = allShifts.find(item => String(item.id) === String(drop.shiftId));
@@ -1050,6 +1192,8 @@ export default function Planning() {
         }}
         orientation={matrixOrientation}
         onOrientationChange={setMatrixOrientation}
+        planningLayout={planningLayout}
+        onPlanningLayoutChange={setPlanningLayout}
         compactMode={compactMode}
         onCompactModeChange={setCompactMode}
         zoomValue={Math.round(planningZoom * 100)}
@@ -1106,6 +1250,7 @@ export default function Planning() {
             <PlanningBoard
               perspective={perspective}
               orientation={matrixOrientation}
+              layout={planningLayout}
               compact={compactMode}
               zoom={planningZoom}
               days={range.days}
@@ -1133,6 +1278,9 @@ export default function Planning() {
                 shift,
                 idempotencyKey: createPlanningMutationKey("cancel-task-shift"),
               })}
+              onCreateOpenTaskSlice={payload => createOpenOccurrenceSlice(payload).catch(() => undefined)}
+              onResizeTaskSegment={payload => resizeTimelineTaskSegment(payload).catch(() => undefined)}
+              mutationPending={runActionMutation.isPending}
               taskOccurrenceCount={visibleTaskOccurrences.length}
               isLoading={isLoading}
             />

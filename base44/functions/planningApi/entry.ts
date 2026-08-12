@@ -804,9 +804,11 @@ async function releaseComposeAndAssignOccurrenceReservations(
         const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
         const reservation = occurrence.metadata?.planning_composition_reservation;
         const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
-          && reservation?.request_hash === requestHash;
+          && reservation?.request_hash === requestHash
+          && reservation?.actor_user_id === (user.id || null);
         const ownsCompletion = occurrence.metadata?.last_compose_and_assign_idempotency_key === context.idempotencyKey
-          && occurrence.metadata?.last_compose_and_assign_request_hash === requestHash;
+          && occurrence.metadata?.last_compose_and_assign_request_hash === requestHash
+          && occurrence.metadata?.last_compose_and_assign_actor_user_id === (user.id || null);
         if (!ownsReservation && !ownsCompletion) {
           released = true;
           continue;
@@ -816,6 +818,7 @@ async function releaseComposeAndAssignOccurrenceReservations(
           last_compose_and_assign_idempotency_key: _completedKey,
           last_compose_and_assign_correlation_id: _completedCorrelation,
           last_compose_and_assign_request_hash: _completedHash,
+          last_compose_and_assign_actor_user_id: _completedActor,
           last_compose_and_assign_completed_at: _completedAt,
           ...metadata
         } = occurrence.metadata || {};
@@ -825,6 +828,7 @@ async function releaseComposeAndAssignOccurrenceReservations(
             ...metadata,
             last_compose_and_assign_recovery_idempotency_key: context.idempotencyKey,
             last_compose_and_assign_recovery_request_hash: requestHash,
+            last_compose_and_assign_recovery_actor_user_id: user.id || null,
             last_compose_and_assign_recovery_status: 'compensated',
             last_compose_and_assign_recovery_at: nowIso(),
           },
@@ -837,6 +841,131 @@ async function releaseComposeAndAssignOccurrenceReservations(
       }
     }
     if (!released) {
+      errors.push({
+        entity: 'PlanningTaskOccurrence',
+        id: occurrenceId,
+        message: (lastError as Error)?.message || String(lastError),
+      });
+    }
+  }
+  return errors;
+}
+
+async function releaseCompositionOccurrenceReservations(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  occurrenceIds: string[],
+  leases: LooseRecord[] = [],
+) {
+  const errors: LooseRecord[] = [];
+  for (const occurrenceId of uniqueStrings(occurrenceIds)) {
+    const occurrenceLease = leases.find(item => (
+      item.resourceType === 'task_occurrence'
+      && String(item.resourceId) === String(occurrenceId)
+    ));
+    if (!occurrenceLease) continue;
+    let released = false;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 8 && !released; attempt += 1) {
+      try {
+        const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+        const reservation = occurrence.metadata?.planning_composition_reservation;
+        const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+          && reservation?.request_hash === requestHash
+          && reservation?.actor_user_id === (user.id || null);
+        if (!ownsReservation) {
+          released = true;
+          continue;
+        }
+        const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+        await renewPlanningResourceLeases(base44, user, [occurrenceLease]);
+        await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          metadata: {
+            ...metadata,
+            last_composition_recovery_idempotency_key: context.idempotencyKey,
+            last_composition_recovery_request_hash: requestHash,
+            last_composition_recovery_actor_user_id: user.id || null,
+            last_composition_recovery_status: 'reservation_released',
+            last_composition_recovery_at: nowIso(),
+            last_composition_recovery_revision: revisionOf(occurrence) + 1,
+          },
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+        released = true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!released) {
+      errors.push({
+        entity: 'PlanningTaskOccurrence',
+        id: occurrenceId,
+        message: (lastError as Error)?.message || String(lastError),
+      });
+    }
+  }
+  return errors;
+}
+
+async function clearCompletedCompositionOccurrenceReservations(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  occurrenceIds: string[],
+  leases: LooseRecord[] = [],
+) {
+  const errors: LooseRecord[] = [];
+  for (const occurrenceId of uniqueStrings(occurrenceIds)) {
+    const occurrenceLease = leases.find(item => (
+      item.resourceType === 'task_occurrence'
+      && String(item.resourceId) === String(occurrenceId)
+    ));
+    if (!occurrenceLease) {
+      errors.push({
+        entity: 'PlanningTaskOccurrence',
+        id: occurrenceId,
+        message: 'Taakuitvoering-fence ontbreekt tijdens afronding',
+      });
+      continue;
+    }
+    let cleared = false;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 8 && !cleared; attempt += 1) {
+      try {
+        const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+        const reservation = occurrence.metadata?.planning_composition_reservation;
+        if (!reservation) {
+          cleared = true;
+          continue;
+        }
+        const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+          && reservation?.request_hash === requestHash
+          && reservation?.actor_user_id === (user.id || null);
+        const ownsCompletion = occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+          && occurrence.metadata?.last_composition_request_hash === requestHash
+          && occurrence.metadata?.last_composition_actor_user_id === (user.id || null);
+        if (!ownsReservation || !ownsCompletion) {
+          throw new ApiError(409, 'Taakuitvoering hoort bij een andere dienstsamenstelling', {
+            task_occurrence_id: occurrenceId,
+          });
+        }
+        const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+        await renewPlanningResourceLeases(base44, user, [occurrenceLease]);
+        await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          metadata,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+        cleared = true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!cleared) {
       errors.push({
         entity: 'PlanningTaskOccurrence',
         id: occurrenceId,
@@ -865,6 +994,7 @@ async function compensateComposeAndAssign(
       );
       const matchingShifts = possibleShifts.filter((item: LooseRecord) => (
         item.metadata?.compose_and_assign?.request_hash === requestHash
+        && item.metadata?.compose_and_assign?.actor_user_id === (user.id || null)
       ));
       if (matchingShifts.length > 1) {
         errors.push({
@@ -890,6 +1020,7 @@ async function compensateComposeAndAssign(
         if (
           recovery?.idempotency_key !== context.idempotencyKey
           || recovery?.request_hash !== requestHash
+          || recovery?.actor_user_id !== (user.id || null)
         ) {
           throw new ApiError(409, 'Dienst hoort niet bij deze herstelopdracht', { shift_id: shiftId });
         }
@@ -2573,6 +2704,7 @@ async function composeShift(
   let compositionRequestHash: string;
   let composeAndAssignRequestHash: string | null = null;
   let compositionLeases: LooseRecord[] = [];
+  let compositionBusinessWriteStarted = false;
   let composeAndAssignClaimed = false;
   const composeAndAssignState: LooseRecord = {
     shiftId: null,
@@ -2610,6 +2742,7 @@ async function composeShift(
   if (composeAndAssignMode) composeAndAssignRequestHash = compositionRequestHash;
   const replay = await findReplay(base44, action, context.idempotencyKey);
   let pendingCompositionAudit: LooseRecord | null = null;
+  let completedCompositionReplay: LooseRecord | null = null;
   if (replay) {
     if (
       replay.actor_user_id !== (user.id || null)
@@ -2622,18 +2755,35 @@ async function composeShift(
       ? await getRecord(base44, 'PlanningShift', replayShiftId)
       : null;
     if (replayShift?.metadata?.planning_composition?.phase === 'completed') {
-      if (composeAndAssignMode) {
-        await mutateIdempotencyClaim(
-          base44,
-          user,
-          context,
-          composeAndAssignRequestHash as string,
-          'completed',
-        );
+      const replayOccurrenceIds = uniqueStrings([
+        ...normalizeArray(replay.metadata?.affected_task_occurrence_ids),
+        ...normalizeArray<LooseRecord>(replay.after_state?.task_occurrences).map(item => item.id),
+      ]);
+      const replayOccurrences = await Promise.all(
+        replayOccurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
+      );
+      const hasOwnedReservation = replayOccurrences.some(occurrence => {
+        const reservation = occurrence.metadata?.planning_composition_reservation;
+        return reservation?.idempotency_key === context.idempotencyKey
+          && reservation?.request_hash === compositionRequestHash
+          && reservation?.actor_user_id === (user.id || null);
+      });
+      if (!hasOwnedReservation) {
+        if (composeAndAssignMode) {
+          await mutateIdempotencyClaim(
+            base44,
+            user,
+            context,
+            composeAndAssignRequestHash as string,
+            'completed',
+          );
+        }
+        return replayResult(replay);
       }
-      return replayResult(replay);
+      completedCompositionReplay = replay;
+    } else {
+      pendingCompositionAudit = replay;
     }
-    pendingCompositionAudit = replay;
   }
 
   if (!requestedSegments.length) throw new ApiError(400, 'Voeg minimaal één taaksegment toe');
@@ -2641,9 +2791,57 @@ async function composeShift(
   const occurrenceIds = uniqueStrings(requestedSegments.map(item => item.task_occurrence_id));
   if (occurrenceIds.length > 50) throw new ApiError(400, 'Te veel verschillende taakuitvoeringen in één dienst');
   if (composeAndAssignMode) composeAndAssignState.requestedOccurrenceIds = occurrenceIds;
-  const occurrences = await Promise.all(
-    occurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
+  const initialUpdateShift = requestedShiftId
+    ? await requireRecord(base44, 'PlanningShift', requestedShiftId, 'Dienst')
+    : null;
+  const [initialUpdateSegments, initialUpdateAssignments] = requestedShiftId
+    ? await Promise.all([
+        filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: requestedShiftId })
+          .then((items: LooseRecord[]) => items.filter(item => item.status !== 'removed')),
+        filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: requestedShiftId })
+          .then((items: LooseRecord[]) => items.filter(item => item.status !== 'removed')),
+      ])
+    : [[], []];
+  const initialCompositionRecovery = initialUpdateShift?.metadata?.planning_composition;
+  if (
+    initialCompositionRecovery?.idempotency_key === context.idempotencyKey
+    && (
+      initialCompositionRecovery?.request_hash !== compositionRequestHash
+      || initialCompositionRecovery?.actor_user_id !== (user.id || null)
+    )
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere bestaande dienstsamenstelling', {
+      shift_id: initialUpdateShift?.id || null,
+    });
+  }
+  const initialRecoveryOccurrenceIds = (
+    initialCompositionRecovery?.phase !== 'completed'
+    && initialCompositionRecovery?.idempotency_key === context.idempotencyKey
+    && initialCompositionRecovery?.request_hash === compositionRequestHash
+    && initialCompositionRecovery?.actor_user_id === (user.id || null)
+  )
+    ? normalizeArray(initialCompositionRecovery?.affected_occurrence_ids)
+    : [];
+  const completedReplayOccurrenceIds = completedCompositionReplay
+    ? uniqueStrings([
+        ...normalizeArray(completedCompositionReplay.metadata?.affected_task_occurrence_ids),
+        ...normalizeArray<LooseRecord>(completedCompositionReplay.after_state?.task_occurrences).map(item => item.id),
+      ])
+    : [];
+  const affectedOccurrenceIds = uniqueStrings([
+    ...occurrenceIds,
+    ...initialUpdateSegments.map((item: LooseRecord) => item.task_occurrence_id),
+    ...initialRecoveryOccurrenceIds,
+    ...completedReplayOccurrenceIds,
+  ]);
+  if (affectedOccurrenceIds.length > 100) {
+    throw new ApiError(400, 'Te veel geraakte taakuitvoeringen in één dienstbewerking');
+  }
+  const affectedOccurrences = await Promise.all(
+    affectedOccurrenceIds.map(id => requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')),
   );
+  const requestedOccurrenceIdSet = new Set(occurrenceIds.map(String));
+  const occurrences = affectedOccurrences.filter(item => requestedOccurrenceIdSet.has(String(item.id)));
   const requestedPersonnel = composeAndAssignMode
     ? await requireRecord(base44, 'Personnel', requestedPersonnelId as string, 'Medewerker')
     : null;
@@ -2659,8 +2857,8 @@ async function composeShift(
 
   const expectedOccurrenceRevisions = body.expected_occurrence_revisions || {};
   const expectedOccurrenceRevisionById = new Map<string, number>();
-  for (const occurrence of occurrences) {
-    if (composeAndAssignMode && expectedOccurrenceRevisions[occurrence.id] == null) {
+  for (const occurrence of affectedOccurrences) {
+    if ((composeAndAssignMode || requestedShiftId) && expectedOccurrenceRevisions[occurrence.id] == null) {
       throw new ApiError(400, `expected_occurrence_revisions.${occurrence.id} is verplicht`);
     }
     const expected = expectedOccurrenceRevisions[occurrence.id] == null
@@ -2671,12 +2869,20 @@ async function composeShift(
         );
     expectedOccurrenceRevisionById.set(String(occurrence.id), expected);
     const reservation = occurrence.metadata?.planning_composition_reservation;
-    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey;
-    const completedByThisComposition = occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey;
+    const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+      && reservation?.actor_user_id === (user.id || null);
+    const completedByThisComposition = occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_actor_user_id === (user.id || null);
+    const compensatedByThisComposition = occurrence.metadata?.last_composition_recovery_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_recovery_request_hash === compositionRequestHash
+      && occurrence.metadata?.last_composition_recovery_actor_user_id === (user.id || null)
+      && Number(occurrence.metadata?.last_composition_recovery_revision) === revisionOf(occurrence);
     const completedByThisRequest = composeAndAssignMode
-      && occurrence.metadata?.last_compose_and_assign_idempotency_key === context.idempotencyKey;
+      && occurrence.metadata?.last_compose_and_assign_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_compose_and_assign_actor_user_id === (user.id || null);
     const compensatedByThisRequest = composeAndAssignMode
-      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey;
+      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_compose_and_assign_recovery_actor_user_id === (user.id || null);
     if (ownsReservation && reservation.request_hash !== compositionRequestHash) {
       throw new ApiError(409, 'idempotency_key hoort bij een andere taakreservering', {
         entity: 'PlanningTaskOccurrence',
@@ -2686,6 +2892,15 @@ async function composeShift(
     if (completedByThisComposition
       && occurrence.metadata?.last_composition_request_hash !== compositionRequestHash) {
       throw new ApiError(409, 'idempotency_key hoort bij een andere afgeronde dienstsamenstelling', {
+        entity: 'PlanningTaskOccurrence',
+        id: occurrence.id,
+      });
+    }
+    if (
+      occurrence.metadata?.last_composition_recovery_idempotency_key === context.idempotencyKey
+      && !compensatedByThisComposition
+    ) {
+      throw new ApiError(409, 'idempotency_key hoort bij een andere herstelde dienstsamenstelling', {
         entity: 'PlanningTaskOccurrence',
         id: occurrence.id,
       });
@@ -2717,6 +2932,7 @@ async function composeShift(
       revisionOf(occurrence) !== expected
       && !ownsReservation
       && !completedByThisComposition
+      && !compensatedByThisComposition
       && !completedByThisRequest
       && !compensatedByThisRequest
     ) {
@@ -2769,7 +2985,7 @@ async function composeShift(
     }
 
     const compositionDescriptors: LooseRecord[] = await Promise.all([
-      ...occurrenceIds.map(id => resourceCoordinatorDescriptor('task_occurrence', id)),
+      ...affectedOccurrenceIds.map(id => resourceCoordinatorDescriptor('task_occurrence', id)),
       resourceCoordinatorDescriptor(
         'shift_composition',
         requestedShiftId || `source:task-composition:${context.idempotencyKey}`,
@@ -2784,6 +3000,19 @@ async function composeShift(
           start_time: normalizedSegments[0].start_time,
           end_time: normalizedSegments.at(-1)?.end_time,
         }],
+      ));
+    } else if (requestedShiftId && initialUpdateAssignments.length) {
+      compositionDescriptors.push(...await personnelDayDescriptors(
+        initialUpdateAssignments.map((item: LooseRecord) => item.personnel_id),
+        [
+          initialUpdateShift as LooseRecord,
+          {
+            service_date: normalizedSegments[0].start_date,
+            end_date: normalizedSegments.at(-1)?.end_date,
+            start_time: normalizedSegments[0].start_time,
+            end_time: normalizedSegments.at(-1)?.end_time,
+          },
+        ],
       ));
     }
     compositionLeases = await acquirePlanningResourceLeases(
@@ -2821,6 +3050,51 @@ async function composeShift(
   let shift = requestedShiftId
     ? await requireRecord(base44, 'PlanningShift', requestedShiftId, 'Dienst')
     : reconciledSourceShift || sourceKeyMatches[0] || null;
+  let lockedUpdateAssignmentsAll: LooseRecord[] | null = null;
+  if (requestedShiftId) {
+    const [lockedSegments, lockedAssignments] = await Promise.all([
+      filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: requestedShiftId }),
+      filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: requestedShiftId }),
+    ]);
+    const assignmentKeys = (items: LooseRecord[]) => items
+      .filter(item => item.status !== 'removed')
+      .map(item => `${item.id}:${item.personnel_id}:${Number(item.slot_index || 0)}:${revisionOf(item)}`)
+      .sort();
+    if (stableStringify(assignmentKeys(lockedAssignments)) !== stableStringify(assignmentKeys(initialUpdateAssignments))) {
+      throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw');
+    }
+    const lockedAffectedOccurrenceIds = uniqueStrings([
+      ...occurrenceIds,
+      ...lockedSegments
+        .filter((item: LooseRecord) => item.status !== 'removed')
+        .map((item: LooseRecord) => item.task_occurrence_id),
+      ...initialRecoveryOccurrenceIds,
+      ...completedReplayOccurrenceIds,
+    ]).sort();
+    if (stableStringify([...affectedOccurrenceIds].sort()) !== stableStringify(lockedAffectedOccurrenceIds)) {
+      throw new ApiError(409, 'Dienstinhoud is intussen gewijzigd; laad het rooster opnieuw');
+    }
+    lockedUpdateAssignmentsAll = lockedAssignments;
+    const targetRequiredCount = positiveInteger(
+      body.required_count ?? shift?.required_count ?? 1,
+      'required_count',
+    );
+    const activeLockedAssignments = lockedAssignments.filter(item => item.status !== 'removed');
+    const invalidAssignmentSlots = activeLockedAssignments.filter(item => (
+      Number(item.slot_index || 0) >= targetRequiredCount
+    ));
+    if (
+      activeLockedAssignments.length > targetRequiredCount
+      || invalidAssignmentSlots.length
+    ) {
+      throw new ApiError(409, 'required_count kan niet lager zijn dan de bestaande dienstbezetting', {
+        shift_id: requestedShiftId,
+        required_count: targetRequiredCount,
+        active_assignment_count: activeLockedAssignments.length,
+        invalid_assignment_ids: invalidAssignmentSlots.map(item => item.id),
+      });
+    }
+  }
   if (shift) {
     await assertNoForeignPendingMutation(
       base44,
@@ -2836,6 +3110,7 @@ async function composeShift(
     if (
       recovery?.idempotency_key !== context.idempotencyKey
       || recovery?.request_hash !== composeAndAssignRequestHash
+      || recovery?.actor_user_id !== (user.id || null)
       || recovery?.personnel_id !== requestedPersonnelId
       || Number(recovery?.slot_index) !== requestedSlotIndex
     ) {
@@ -2922,7 +3197,10 @@ async function composeShift(
   const compositionRecovery = shift?.metadata?.planning_composition;
   if (
     compositionRecovery?.idempotency_key === context.idempotencyKey
-    && compositionRecovery?.request_hash !== compositionRequestHash
+    && (
+      compositionRecovery?.request_hash !== compositionRequestHash
+      || compositionRecovery?.actor_user_id !== (user.id || null)
+    )
   ) {
     throw new ApiError(409, 'idempotency_key hoort bij een andere bestaande dienstsamenstelling', {
       shift_id: shift.id,
@@ -2931,20 +3209,58 @@ async function composeShift(
   const recovering = Boolean(
     shift
     && shift.metadata?.last_composition_idempotency_key === context.idempotencyKey
+    && shift.metadata?.last_composition_actor_user_id === (user.id || null)
     && compositionRecovery?.request_hash === compositionRequestHash
+    && compositionRecovery?.actor_user_id === (user.id || null)
   );
   const ownedComposeAndAssignRecovery = Boolean(
     composeAndAssignMode
     && shift?.metadata?.compose_and_assign?.idempotency_key === context.idempotencyKey
     && shift?.metadata?.compose_and_assign?.request_hash === composeAndAssignRequestHash
+    && shift?.metadata?.compose_and_assign?.actor_user_id === (user.id || null)
     && shift?.metadata?.compose_and_assign?.phase !== 'completed'
   );
   const ownedCompositionRecovery = Boolean(
     shift
     && compositionRecovery?.idempotency_key === context.idempotencyKey
     && compositionRecovery?.request_hash === compositionRequestHash
+    && compositionRecovery?.actor_user_id === (user.id || null)
     && compositionRecovery?.phase !== 'completed'
   );
+  if (completedCompositionReplay) {
+    const exactCompletedComposition = Boolean(
+      compositionRecovery?.phase === 'completed'
+      && compositionRecovery?.idempotency_key === context.idempotencyKey
+      && compositionRecovery?.request_hash === compositionRequestHash
+      && compositionRecovery?.actor_user_id === (user.id || null)
+    );
+    if (!exactCompletedComposition) {
+      throw new ApiError(409, 'De afgeronde dienstsamenstelling hoort niet bij deze herstelopdracht', {
+        shift_id: shift?.id || null,
+      });
+    }
+    const occurrenceClearErrors = await clearCompletedCompositionOccurrenceReservations(
+      base44,
+      user,
+      context,
+      compositionRequestHash,
+      affectedOccurrenceIds,
+      compositionLeases,
+    );
+    if (occurrenceClearErrors.length) {
+      throw new ApiError(503, 'Dienst is opgeslagen, maar taakreserveringen konden niet worden afgerond', {
+        recovery_errors: occurrenceClearErrors,
+      });
+    }
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+    compositionLeases = [];
+    if (releaseErrors.length) {
+      throw new ApiError(503, 'Dienst is opgeslagen, maar de samenstellingsreservering kon niet worden vrijgegeven', {
+        release_errors: releaseErrors,
+      });
+    }
+    return replayResult(completedCompositionReplay);
+  }
   if (shift?.status === 'cancelled' && !ownedComposeAndAssignRecovery && !ownedCompositionRecovery) {
     throw new ApiError(409, 'Een geannuleerde dienst kan niet worden samengesteld');
   }
@@ -2974,11 +3290,18 @@ async function composeShift(
     const expectedSegmentIds = new Set(uniqueStrings(
       normalizeArray<LooseRecord>(pendingCompositionAudit.after_state?.segments).map(item => item.id),
     ));
-    const occurrenceStateComplete = occurrences.every(occurrence => (
-      occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
-      && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
-      && !occurrence.metadata?.planning_composition_reservation
-    ));
+    const occurrenceStateComplete = affectedOccurrences.every(occurrence => {
+      const reservation = occurrence.metadata?.planning_composition_reservation;
+      const reservationOwnedByThisComposition = !reservation || (
+        reservation.idempotency_key === context.idempotencyKey
+        && reservation.request_hash === compositionRequestHash
+        && reservation.actor_user_id === (user.id || null)
+      );
+      return occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
+        && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+        && occurrence.metadata?.last_composition_actor_user_id === (user.id || null)
+        && reservationOwnedByThisComposition;
+    });
     const segmentStateComplete = storedSegments.length === expectedSegmentIds.size
       && storedSegments.every(item => expectedSegmentIds.has(String(item.id)));
     if (!occurrenceStateComplete || !segmentStateComplete) {
@@ -3012,6 +3335,19 @@ async function composeShift(
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
     });
+    const occurrenceClearErrors = await clearCompletedCompositionOccurrenceReservations(
+      base44,
+      user,
+      context,
+      compositionRequestHash,
+      affectedOccurrenceIds,
+      compositionLeases,
+    );
+    if (occurrenceClearErrors.length) {
+      throw new ApiError(503, 'Dienst is hersteld, maar taakreserveringen konden niet worden afgerond', {
+        recovery_errors: occurrenceClearErrors,
+      });
+    }
     const releaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
     compositionLeases = [];
     if (releaseErrors.length) {
@@ -3034,7 +3370,7 @@ async function composeShift(
       ...replayResult(pendingCompositionAudit),
       shift: completedShift,
       segments: storedSegments,
-      task_occurrences: occurrences,
+      task_occurrences: affectedOccurrences,
     };
   }
 
@@ -3176,10 +3512,13 @@ async function composeShift(
       ...(shift?.metadata || {}),
       last_composition_idempotency_key: context.idempotencyKey,
       last_composition_correlation_id: context.correlationId,
+      last_composition_actor_user_id: user.id || null,
       planning_composition: {
         idempotency_key: context.idempotencyKey,
         correlation_id: context.correlationId,
         request_hash: compositionRequestHash,
+        actor_user_id: user.id || null,
+        affected_occurrence_ids: affectedOccurrenceIds,
         phase: 'pending',
         started_at: shift?.metadata?.planning_composition?.started_at || nowIso(),
       },
@@ -3188,6 +3527,7 @@ async function composeShift(
           idempotency_key: context.idempotencyKey,
           correlation_id: context.correlationId,
           request_hash: composeAndAssignRequestHash,
+          actor_user_id: user.id || null,
           personnel_id: requestedPersonnelId,
           slot_index: requestedSlotIndex,
           phase: 'composition_pending',
@@ -3250,11 +3590,12 @@ async function composeShift(
   const reservedOccurrences: LooseRecord[] = [];
   const reservationExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
   await renewPlanningResourceLeases(base44, user, compositionLeases);
-  for (const occurrence of [...occurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+  for (const occurrence of [...affectedOccurrences].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const reservation = occurrence.metadata?.planning_composition_reservation;
     if (
       reservation?.idempotency_key === context.idempotencyKey
       && reservation?.request_hash === compositionRequestHash
+      && reservation?.actor_user_id === (user.id || null)
     ) {
       reservedOccurrences.push(occurrence);
       if (composeAndAssignMode) {
@@ -3268,14 +3609,20 @@ async function composeShift(
     if (
       occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
       && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+      && occurrence.metadata?.last_composition_actor_user_id === (user.id || null)
       && !occurrence.metadata?.planning_composition_reservation
     ) {
       reservedOccurrences.push(occurrence);
       continue;
     }
     const compensatedByThisRequest = composeAndAssignMode
-      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey;
-    const expectedRevision = compensatedByThisRequest
+      && occurrence.metadata?.last_compose_and_assign_recovery_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_compose_and_assign_recovery_actor_user_id === (user.id || null);
+    const compensatedByThisComposition = occurrence.metadata?.last_composition_recovery_idempotency_key === context.idempotencyKey
+      && occurrence.metadata?.last_composition_recovery_request_hash === compositionRequestHash
+      && occurrence.metadata?.last_composition_recovery_actor_user_id === (user.id || null)
+      && Number(occurrence.metadata?.last_composition_recovery_revision) === revisionOf(occurrence);
+    const expectedRevision = compensatedByThisRequest || compensatedByThisComposition
       ? revisionOf(occurrence)
       : expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
     await renewPlanningResourceLeases(base44, user, compositionLeases);
@@ -3294,6 +3641,7 @@ async function composeShift(
             correlation_id: context.correlationId,
             action,
             request_hash: compositionRequestHash,
+            actor_user_id: user.id || null,
             status: 'pending',
             acquired_at: nowIso(),
             expires_at: reservationExpiresAt,
@@ -3312,6 +3660,9 @@ async function composeShift(
 
   const beforeShift = shift;
   await renewPlanningResourceLeases(base44, user, compositionLeases);
+  // From the first shift write onward, the occurrence reservation is the
+  // durable fence that keeps a different key from overtaking this recovery.
+  compositionBusinessWriteStarted = true;
   if (shift) {
     shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), shiftPayload);
   } else {
@@ -3361,7 +3712,7 @@ async function composeShift(
     }));
   }
 
-  const assignmentsBeforeMutation = await filterAllRecords(
+  const assignmentsBeforeMutation = lockedUpdateAssignmentsAll || await filterAllRecords(
     base44.asServiceRole.entities.PlanningAssignment,
     { shift_id: shift.id },
   );
@@ -3508,16 +3859,23 @@ async function composeShift(
   for (const occurrence of reservedOccurrences) {
     if (occurrence.metadata?.last_composition_idempotency_key === context.idempotencyKey
       && occurrence.metadata?.last_composition_request_hash === compositionRequestHash
+      && occurrence.metadata?.last_composition_actor_user_id === (user.id || null)
       && !occurrence.metadata?.planning_composition_reservation) {
       finalizedOccurrences.push(occurrence);
       continue;
     }
     const {
-      planning_composition_reservation: _reservation,
       last_compose_and_assign_recovery_idempotency_key: _recoveryKey,
       last_compose_and_assign_recovery_request_hash: _recoveryHash,
+      last_compose_and_assign_recovery_actor_user_id: _recoveryActor,
       last_compose_and_assign_recovery_status: _recoveryStatus,
       last_compose_and_assign_recovery_at: _recoveryAt,
+      last_composition_recovery_idempotency_key: _compositionRecoveryKey,
+      last_composition_recovery_request_hash: _compositionRecoveryHash,
+      last_composition_recovery_actor_user_id: _compositionRecoveryActor,
+      last_composition_recovery_status: _compositionRecoveryStatus,
+      last_composition_recovery_at: _compositionRecoveryAt,
+      last_composition_recovery_revision: _compositionRecoveryRevision,
       ...metadata
     } = occurrence.metadata || {};
     await renewPlanningResourceLeases(base44, user, compositionLeases);
@@ -3534,11 +3892,13 @@ async function composeShift(
           last_composition_idempotency_key: context.idempotencyKey,
           last_composition_correlation_id: context.correlationId,
           last_composition_request_hash: compositionRequestHash,
+          last_composition_actor_user_id: user.id || null,
           last_composition_completed_at: nowIso(),
           ...(composeAndAssignMode ? {
             last_compose_and_assign_idempotency_key: context.idempotencyKey,
             last_compose_and_assign_correlation_id: context.correlationId,
             last_compose_and_assign_request_hash: composeAndAssignRequestHash,
+            last_compose_and_assign_actor_user_id: user.id || null,
             last_compose_and_assign_completed_at: nowIso(),
           } : {}),
         },
@@ -3574,12 +3934,20 @@ async function composeShift(
     ...completionPatch,
     revision: revisionOf(shift) + 1,
   };
+  const anticipatedFinalizedOccurrences = finalizedOccurrences.map(occurrence => {
+    const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+    return {
+      ...occurrence,
+      revision: revisionOf(occurrence) + (_reservation ? 1 : 0),
+      metadata,
+    };
+  });
   const result: LooseRecord = {
     shift: anticipatedCompletedShift,
     segments: createdSegments,
     assignments: updatedAssignments,
     ...(requestedAssignment ? { assignment: requestedAssignment } : {}),
-    task_occurrences: finalizedOccurrences,
+    task_occurrences: anticipatedFinalizedOccurrences,
     composition_warnings: warnings,
   };
   await renewPlanningResourceLeases(base44, user, compositionLeases);
@@ -3602,6 +3970,7 @@ async function composeShift(
         assignment_source: compact(body.assignment_source) || 'compose_and_assign',
       } : {}),
       task_occurrence_ids: occurrenceIds,
+      affected_task_occurrence_ids: affectedOccurrenceIds,
       task_segment_count: createdSegments.length,
     },
   });
@@ -3611,6 +3980,19 @@ async function composeShift(
   await renewPlanningResourceLeases(base44, user, compositionLeases);
   shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), completionPatch);
   result.shift = shift;
+  const occurrenceClearErrors = await clearCompletedCompositionOccurrenceReservations(
+    base44,
+    user,
+    context,
+    compositionRequestHash,
+    affectedOccurrenceIds,
+    compositionLeases,
+  );
+  if (occurrenceClearErrors.length) {
+    throw new ApiError(503, 'Dienst is opgeslagen, maar taakreserveringen konden niet worden afgerond', {
+      recovery_errors: occurrenceClearErrors,
+    });
+  }
   if (composeAndAssignMode) composeAndAssignState.phaseCompleted = true;
   if (composeAndAssignMode) {
     composeAndAssignState.auditCompleted = true;
@@ -3692,8 +4074,24 @@ async function composeShift(
         };
       }
     } else {
-      await releasePlanningResourceLeases(base44, user, compositionLeases);
+      const recoveryErrors = compositionBusinessWriteStarted
+        ? []
+        : await releaseCompositionOccurrenceReservations(
+            base44,
+            user,
+            context,
+            compositionRequestHash,
+            affectedOccurrenceIds,
+            compositionLeases,
+          );
+      recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
       compositionLeases = [];
+      if (recoveryErrors.length && error && typeof error === 'object') {
+        (error as any).details = {
+          ...((error as any).details || {}),
+          compensation_errors: recoveryErrors,
+        };
+      }
     }
     throw error;
   }

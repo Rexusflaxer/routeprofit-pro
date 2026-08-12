@@ -19,7 +19,8 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  */
 export default function PlanningBoard({
   perspective,
-  orientation,
+  orientation = "resources_horizontal",
+  layout = "cards",
   compact,
   zoom,
   days = [],
@@ -40,6 +41,9 @@ export default function PlanningBoard({
   onCopy,
   onEditComposition,
   onCancelComposition,
+  onCreateOpenTaskSlice,
+  onResizeTaskSegment,
+  mutationPending = false,
   isLoading,
 }) {
   if (isLoading) {
@@ -57,6 +61,7 @@ export default function PlanningBoard({
     <PlanningMatrix
       perspective={perspective}
       orientation={orientation}
+      layout={layout}
       compact={compact}
       zoom={zoom}
       days={days}
@@ -77,6 +82,9 @@ export default function PlanningBoard({
       onCopy={onCopy}
       onEditComposition={onEditComposition}
       onCancelComposition={onCancelComposition}
+      onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+      onResizeTaskSegment={onResizeTaskSegment}
+      mutationPending={mutationPending}
     />
   );
 }
