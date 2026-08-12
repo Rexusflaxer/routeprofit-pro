@@ -16,7 +16,7 @@ function minutes(value) {
 export default function ObjectDayTimeline({ items = [] }) {
   const marks = [0, 4, 8, 12, 16, 20, 24];
   return (
-    <div className="relative h-[300px] overflow-hidden rounded-md border border-border/80 bg-muted/30" aria-label="Dagplanning van 00:00 tot 24:00">
+    <div className="relative h-[300px] w-full overflow-hidden bg-muted/20" aria-label="Dagplanning van 00:00 tot 24:00">
       {marks.map(hour => (
         <div key={hour} className="absolute left-0 right-0 border-t border-border/70" style={{ top: `${(hour / 24) * 100}%` }}>
           <span className="absolute left-1 top-0 -translate-y-1/2 bg-muted px-1 text-[8px] font-medium tabular-nums text-muted-foreground">
@@ -32,7 +32,7 @@ export default function ObjectDayTimeline({ items = [] }) {
             key={item.id}
             type="button"
             onClick={item.onClick}
-            className={cn("absolute left-11 right-2 overflow-hidden rounded-sm px-1.5 text-left text-[8px] font-semibold text-white shadow-sm ring-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", toneClasses[item.tone] || toneClasses.primary)}
+            className={cn("absolute left-0 right-0 overflow-hidden px-2 text-left text-[8px] font-semibold text-white shadow-sm ring-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", toneClasses[item.tone] || toneClasses.primary)}
             style={{ top: `${start / 14.4}%`, height: `${Math.max(0.2, (end - start) / 14.4)}%` }}
             title={`${item.label} · ${item.start}–${item.end}`}
             aria-label={`${item.label}, ${item.start} tot ${item.end}`}

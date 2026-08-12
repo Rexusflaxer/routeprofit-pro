@@ -568,7 +568,7 @@ function ObjectDayCell({
     }))),
   ];
   return (
-    <div className="min-h-[112px] space-y-1.5 p-2" data-matrix-cell={`${resource.key}:${dayKey}`}>
+    <div className={cn("min-h-[112px] space-y-1.5", resource.kind === "object" ? "p-0" : "p-2")} data-matrix-cell={`${resource.key}:${dayKey}`}>
       {resource.kind === "object" ? (
         <ObjectDayTimeline items={timelineItems} />
       ) : (
