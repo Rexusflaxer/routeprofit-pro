@@ -23,7 +23,11 @@ beforeAll(async () => {
 
 function entity(initial = [], prefix = "record") {
   const records = initial.map(item => structuredClone(item));
-  const matches = (record, query = {}) => Object.entries(query).every(([key, value]) => record[key] === value);
+  const matches = (record, query = {}) => Object.entries(query).every(([key, value]) => (
+    value && typeof value === "object" && Object.hasOwn(value, "$in")
+      ? value.$in.some(candidate => candidate === record[key])
+      : record[key] === value
+  ));
   return {
     records,
     async list() { return records.map(item => structuredClone(item)); },
@@ -575,6 +579,68 @@ describe("planningApi route-bootstrap reconciliatie", () => {
 });
 
 describe("planningApi lease fencing", () => {
+  it("vernieuwt onafhankelijke leases begrensd parallel met behoud van ownership-readback", async () => {
+    const { base44, entities } = setup();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-parallel-a",
+        coordinator_key: "task_occurrence:occurrence-a",
+        resource_type: "task_occurrence",
+        resource_id: "occurrence-a",
+        revision: 1,
+        lease: { token: "shared-token", status: "pending", expires_at: expiresAt },
+      },
+      {
+        id: "coordinator-parallel-b",
+        coordinator_key: "task_occurrence:occurrence-b",
+        resource_type: "task_occurrence",
+        resource_id: "occurrence-b",
+        revision: 1,
+        lease: { token: "shared-token", status: "pending", expires_at: expiresAt },
+      },
+    );
+    const coordinatorGet = entities.PlanningMutationCoordinator.get.bind(entities.PlanningMutationCoordinator);
+    let inFlightReads = 0;
+    let maximumConcurrentReads = 0;
+    let readCount = 0;
+    entities.PlanningMutationCoordinator.get = async id => {
+      inFlightReads += 1;
+      readCount += 1;
+      maximumConcurrentReads = Math.max(maximumConcurrentReads, inFlightReads);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const record = await coordinatorGet(id);
+      inFlightReads -= 1;
+      return record;
+    };
+
+    await backend.renewPlanningResourceLeases(base44, user, [
+      {
+        coordinatorId: "coordinator-parallel-a",
+        resourceType: "task_occurrence",
+        resourceId: "occurrence-a",
+        token: "shared-token",
+      },
+      {
+        coordinatorId: "coordinator-parallel-b",
+        resourceType: "task_occurrence",
+        resourceId: "occurrence-b",
+        token: "shared-token",
+      },
+    ]);
+
+    expect(maximumConcurrentReads).toBeGreaterThan(1);
+    expect(readCount).toBe(4);
+    expect(await coordinatorGet("coordinator-parallel-a")).toMatchObject({
+      revision: 2,
+      lease: { token: "shared-token" },
+    });
+    expect(await coordinatorGet("coordinator-parallel-b")).toMatchObject({
+      revision: 2,
+      lease: { token: "shared-token" },
+    });
+  });
+
   it("laat een verlopen eigenaar zijn lease niet hernieuwen of een write hervatten", async () => {
     const { base44, entities } = setup();
     entities.PlanningMutationCoordinator.records.push({

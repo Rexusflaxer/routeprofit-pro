@@ -1,6 +1,6 @@
 import React from "react";
 import { DragDropContext } from "@hello-pangea/dnd";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import PlanningBoard from "@/components/planning/PlanningBoard";
 import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
@@ -82,10 +82,9 @@ function boardProps(overrides = {}) {
     routes: [],
     customers: [{ id: "customer-1", name: "Klant 1" }],
     selectedShiftId: null,
-    expandedTaskCardKey: null,
-    onExpandedTaskCardChange: vi.fn(),
+    expandedServiceKey: null,
+    onExpandedServiceChange: vi.fn(),
     onSelectOccurrence: vi.fn(),
-    onFillStaffing: vi.fn(),
     onSelectShift: vi.fn(),
     onUnassign: vi.fn(),
     onMove: vi.fn(),
@@ -173,12 +172,14 @@ describe("Planning matrix", () => {
     const card = container.querySelector('[data-task-occurrence-id="occurrence-long-reception"]');
     expect(card).not.toHaveAttribute("data-inline-time-editor");
     expect(within(card).getByText("06:00–20:00")).toBeInTheDocument();
-    expect(within(card).getByText("Nog niet gepland")).toBeInTheDocument();
-    expect(card).toHaveAttribute("data-droppable-id", "occurrence:occurrence-long-reception:2026-08-17");
-    expect(container.querySelector('[data-task-time-rail="true"]')).not.toBeInTheDocument();
+    expect(within(card).getByText("Open")).toBeInTheDocument();
+    expect(within(card).getByText("14u nog niet ingepland")).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-open-task-interval", "06:00-20:00");
+    expect(card).toHaveAttribute("data-droppable-id", "occurrence-gap:occurrence-long-reception:2026-08-17:0360:0840");
+    expect(container.querySelector('[data-service-time-rail="true"]')).not.toBeInTheDocument();
   });
 
-  it("klapt een gedeeltelijk gevormde taakkaart open en stelt maximaal acht uur voor het resterende deel voor", () => {
+  it("toont een gedeeltelijk gevormde dienst los van uitsluitend het resterende open taakdeel", () => {
     const onCreateOpenTaskSlice = vi.fn();
     const longOccurrence = {
       ...occurrence,
@@ -210,14 +211,18 @@ describe("Planning matrix", () => {
         occurrences: [longOccurrence],
         shifts: [firstShift],
         segments: [firstSegment],
-        expandedTaskCardKey: `${longOccurrence.id}:2026-08-17`,
+        expandedServiceKey: `${firstShift.id}:${firstSegment.id}:2026-08-17`,
         onCreateOpenTaskSlice,
       })} />,
     );
 
     const card = container.querySelector(`[data-task-occurrence-id="${longOccurrence.id}"]`);
-    expect(card).toHaveAttribute("data-inline-time-editor", "true");
-    expect(within(card).getByRole("region", { name: /tijdverdeling voor receptiedienst/i })).toBeInTheDocument();
+    const service = container.querySelector(`[data-shift-id="${firstShift.id}"]`);
+    expect(card).toHaveAttribute("data-open-task-interval", "12:00-20:00");
+    expect(card).not.toContainElement(service);
+    expect(service).toHaveAttribute("data-service-block", "true");
+    expect(service).toHaveAttribute("data-planning-width", "full");
+    expect(within(service).getByRole("region", { name: /diensttijd aanpassen voor avonddienst/i })).toBeInTheDocument();
     expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-open-service:2026-08-17:0720:1200"]')).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /open dienst maken/i }));
     expect(onCreateOpenTaskSlice).toHaveBeenCalledWith({
@@ -260,16 +265,17 @@ describe("Planning matrix", () => {
         occurrences: [shortOccurrence],
         shifts: [shortShift],
         segments: [shortSegment],
-        expandedTaskCardKey: `${shortOccurrence.id}:2026-08-17`,
+        expandedServiceKey: `${shortShift.id}:${shortSegment.id}:2026-08-17`,
       })} />,
     );
 
-    const card = container.querySelector('[data-task-occurrence-id="occurrence-fire-round"]');
-    const rail = within(card).getByRole("region", { name: /tijdverdeling voor brand- en sluitronde/i })
-      .querySelector('[data-task-time-rail="true"]');
+    const service = container.querySelector('[data-shift-id="shift-fire-round"]');
+    expect(container.querySelector('[data-task-occurrence-id="occurrence-fire-round"]')).not.toBeInTheDocument();
+    const rail = within(service).getByRole("region", { name: /diensttijd aanpassen voor avonddienst/i })
+      .querySelector('[data-service-time-rail="true"]');
     expect(rail).toHaveStyle({ height: "126px" });
-    expect(within(card).getAllByText("22:00–22:25", { exact: false }).length).toBeGreaterThan(0);
-    expect(container.querySelector('[data-segment-id="segment-fire-round"]')).toHaveAttribute("data-timeline-exact-height");
+    expect(within(service).getAllByText("22:00–22:25", { exact: false }).length).toBeGreaterThan(0);
+    expect(service.querySelector('[data-timeline-shift-segment="true"]')).toHaveAttribute("data-timeline-exact-height");
     expect(screen.getByRole("slider", { name: /begintijd van avonddienst aanpassen/i })).toHaveAttribute("aria-orientation", "vertical");
   });
 
@@ -307,16 +313,17 @@ describe("Planning matrix", () => {
         occurrences: [midnightOccurrence],
         shifts: [midnightShift],
         segments: [midnightSegment],
-        expandedTaskCardKey: `${midnightOccurrence.id}:2026-08-17`,
+        expandedServiceKey: `${midnightShift.id}:${midnightSegment.id}:2026-08-17`,
       })} />,
     );
 
-    const card = container.querySelector('[data-task-occurrence-id="occurrence-midnight-round"]');
-    const rail = card.querySelector('[data-task-time-rail="true"]');
-    const segmentCard = card.querySelector('[data-segment-id="segment-midnight-round"]');
+    const service = container.querySelector('[data-shift-id="shift-midnight-round"]');
+    expect(container.querySelector('[data-task-occurrence-id="occurrence-midnight-round"]')).not.toBeInTheDocument();
+    const rail = service.querySelector('[data-service-time-rail="true"]');
+    const segmentCard = service.querySelector('[data-timeline-shift-segment="true"]');
     expect(rail).toHaveStyle({ height: "126px" });
     expect(parseFloat(segmentCard.style.top) + parseFloat(segmentCard.style.height)).toBeLessThanOrEqual(parseFloat(rail.style.height));
-    expect(within(card).getAllByText("23:50–24:00", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(service).getAllByText("23:50–24:00", { exact: false }).length).toBeGreaterThan(0);
   });
 
   it("projecteert een nachttaak op beide kalenderdagen zonder klantvraag te verliezen", () => {
@@ -337,14 +344,14 @@ describe("Planning matrix", () => {
     );
 
     expect(container.querySelectorAll('[data-task-occurrence-id="occurrence-overnight"]')).toHaveLength(2);
-    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-overnight:2026-08-17"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-overnight:2026-08-18"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-17:1320:1440"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-18:0000:0360"]')).toBeInTheDocument();
     expect(screen.getByText(/22:00–24:00 · loopt door/i)).toBeInTheDocument();
     expect(screen.getByText(/00:00–06:00 · vervolg/i)).toBeInTheDocument();
   });
 
   it("behoudt bij resize van de eerste nachthelft het oorspronkelijke einde op de volgende dag", () => {
-    const onResizeTaskSegment = vi.fn();
+    const onResizeTaskSegment = vi.fn(() => new Promise(() => {}));
     const overnightOccurrence = {
       ...occurrence,
       id: "occurrence-overnight-start-resize",
@@ -379,7 +386,7 @@ describe("Planning matrix", () => {
       occurrences: [overnightOccurrence],
       shifts: [overnightShift],
       segments: [overnightSegment],
-      expandedTaskCardKey: `${overnightOccurrence.id}:2026-08-17`,
+      expandedServiceKey: `${overnightShift.id}:${overnightSegment.id}:2026-08-17`,
       onResizeTaskSegment,
     })} />);
 
@@ -397,7 +404,7 @@ describe("Planning matrix", () => {
   });
 
   it("behoudt bij resize van de tweede nachthelft de oorspronkelijke start op de vorige dag", () => {
-    const onResizeTaskSegment = vi.fn();
+    const onResizeTaskSegment = vi.fn(() => new Promise(() => {}));
     const overnightOccurrence = {
       ...occurrence,
       id: "occurrence-overnight-end-resize",
@@ -432,7 +439,7 @@ describe("Planning matrix", () => {
       occurrences: [overnightOccurrence],
       shifts: [overnightShift],
       segments: [overnightSegment],
-      expandedTaskCardKey: `${overnightOccurrence.id}:2026-08-18`,
+      expandedServiceKey: `${overnightShift.id}:${overnightSegment.id}:2026-08-18`,
       onResizeTaskSegment,
     })} />);
 
@@ -481,15 +488,64 @@ describe("Planning matrix", () => {
         occurrences: [longOccurrence],
         shifts: [firstShift],
         segments: [firstSegment],
-        expandedTaskCardKey: `${longOccurrence.id}:2026-08-17`,
+        expandedServiceKey: `${firstShift.id}:${firstSegment.id}:2026-08-17`,
       })} />,
     );
 
     expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-split-reception:2026-08-17:0720:1200"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-segment-id="segment-first-half"]')).toHaveTextContent(/06:00–12:00/);
+    const service = container.querySelector('[data-shift-id="shift-first-half"]');
+    expect(service).toHaveTextContent(/06:00–12:00/);
+    expect(service).toHaveAttribute("data-planning-width", "full");
+    expect(container.querySelector('[data-task-occurrence-id="occurrence-split-reception"]')).toHaveAttribute(
+      "data-open-task-interval",
+      "12:00-20:00",
+    );
   });
 
-  it("houdt een volledig afgedekte klanttaak zichtbaar en nest de bemande dienst zonder duplicaat", () => {
+  it("mengt open taakdelen en zelfstandige diensten in chronologische volgorde", () => {
+    const dayOccurrence = {
+      ...occurrence,
+      id: "occurrence-chronological",
+      window_start_time: "06:00",
+      window_end_time: "20:00",
+      required_minutes: 840,
+    };
+    const middleShift = {
+      ...shift,
+      id: "shift-chronological",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "12:00",
+    };
+    const middleSegment = {
+      id: "segment-chronological",
+      shift_id: middleShift.id,
+      task_occurrence_id: dayOccurrence.id,
+      object_id: dayOccurrence.object_id,
+      start_date: dayOccurrence.service_date,
+      end_date: dayOccurrence.end_date,
+      start_time: "08:00",
+      end_time: "12:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        occurrences: [dayOccurrence],
+        shifts: [middleShift],
+        segments: [middleSegment],
+      })} />,
+    );
+
+    const cell = container.querySelector('[data-matrix-cell="object:object-1:2026-08-17"]');
+    const items = [...cell.querySelectorAll(":scope > article")];
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveAttribute("data-open-task-interval", "06:00-08:00");
+    expect(items[1]).toHaveAttribute("data-shift-id", middleShift.id);
+    expect(items[1]).toHaveAttribute("data-planning-width", "full");
+    expect(items[2]).toHaveAttribute("data-open-task-interval", "12:00-20:00");
+  });
+
+  it("verwijdert een volledig afgedekte klanttaakkaart en toont alleen de zelfstandige bemande dienst", () => {
     const coveredShift = { ...shift, id: "shift-timeline-covered", source_type: "task", start_time: "08:00", end_time: "16:00" };
     const coveredSegment = {
       id: "segment-timeline-covered",
@@ -508,15 +564,16 @@ describe("Planning matrix", () => {
         shifts: [coveredShift],
         segments: [coveredSegment],
         assignments: [coveredAssignment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${coveredShift.id}:${coveredSegment.id}:2026-08-17`,
       })} />,
     );
 
     const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
-    expect(taskCard).toHaveAttribute("data-inline-time-editor", "true");
-    expect(taskCard).toHaveTextContent("Volledig gepland");
-    expect(taskCard.querySelector('[data-segment-id="segment-timeline-covered"]')).toHaveTextContent("Anna Beveiliger");
-    expect(taskCard.querySelector(`[data-timeline-gap^="${occurrence.id}:"]`)).not.toBeInTheDocument();
+    const service = container.querySelector('[data-shift-id="shift-timeline-covered"]');
+    expect(taskCard).not.toBeInTheDocument();
+    expect(service).toHaveTextContent("Anna Beveiliger");
+    expect(service).toHaveAttribute("data-service-block", "true");
+    expect(service).toHaveAttribute("data-planning-width", "full");
     expect(container.querySelectorAll('[data-shift-id="shift-timeline-covered"]')).toHaveLength(1);
   });
 
@@ -537,16 +594,18 @@ describe("Planning matrix", () => {
       <PlanningBoard {...boardProps({
         shifts: [openShift],
         segments: [openSegment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${openShift.id}:${openSegment.id}:2026-08-17`,
       })} />,
     );
 
-    expect(container.querySelector('[data-segment-id="segment-timeline-open"]')).toHaveTextContent("Open dienst");
+    expect(container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`)).not.toBeInTheDocument();
+    expect(container.querySelector('[data-shift-id="shift-timeline-open"]')).toHaveTextContent("Open plaats");
+    expect(container.querySelector('[data-shift-id="shift-timeline-open"]')).toHaveAttribute("data-service-block", "true");
     expect(container.querySelector('[data-droppable-id^="slot:shift-timeline-open:0:2026-08-17:"]')).toBeInTheDocument();
   });
 
   it("resizet met het toetsenbord in stappen van vijf minuten en schrijft pas bij Enter", () => {
-    const onResizeTaskSegment = vi.fn();
+    const onResizeTaskSegment = vi.fn(() => new Promise(() => {}));
     const resizeShift = { ...shift, id: "shift-resize", source_type: "task", start_time: "08:00", end_time: "16:00" };
     const resizeSegment = {
       id: "segment-resize",
@@ -563,7 +622,7 @@ describe("Planning matrix", () => {
       <PlanningBoard {...boardProps({
         shifts: [resizeShift],
         segments: [resizeSegment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${resizeShift.id}:${resizeSegment.id}:2026-08-17`,
         onResizeTaskSegment,
       })} />,
     );
@@ -583,7 +642,7 @@ describe("Planning matrix", () => {
   });
 
   it("berekent pointer-resize uit de werkelijk gerenderde railhoogte bij vijftig procent CSS-zoom", () => {
-    const onResizeTaskSegment = vi.fn();
+    const onResizeTaskSegment = vi.fn(() => new Promise(() => {}));
     const resizeShift = {
       ...shift,
       id: "shift-pointer-resize-zoom",
@@ -607,30 +666,30 @@ describe("Planning matrix", () => {
         zoom: 0.5,
         shifts: [resizeShift],
         segments: [resizeSegment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${resizeShift.id}:${resizeSegment.id}:2026-08-17`,
         onResizeTaskSegment,
       })} />,
     );
 
-    const rail = container.querySelector('[data-task-time-rail="true"]');
+    const rail = container.querySelector('[data-service-time-rail="true"]');
     expect(rail).toHaveAttribute("data-timeline-duration-minutes", "480");
-    expect(rail).toHaveStyle({ height: "272px" });
+    expect(rail).toHaveStyle({ height: "224px" });
     vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
       top: 100,
-      bottom: 236,
+      bottom: 212,
       left: 0,
       right: 200,
       width: 200,
-      height: 136,
+      height: 112,
       x: 0,
       y: 100,
       toJSON: () => ({}),
     });
 
     const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
-    fireEvent.pointerDown(endHandle, { button: 0, clientY: 236 });
-    fireEvent.pointerMove(window, { clientY: 168 });
-    fireEvent.pointerUp(window, { clientY: 168 });
+    fireEvent.pointerDown(endHandle, { button: 0, clientY: 212 });
+    fireEvent.pointerMove(window, { clientY: 156 });
+    fireEvent.pointerUp(window, { clientY: 156 });
 
     expect(onResizeTaskSegment).toHaveBeenCalledTimes(1);
     expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
@@ -661,7 +720,7 @@ describe("Planning matrix", () => {
       <PlanningBoard {...boardProps({
         shifts: [resizeShift],
         segments: [resizeSegment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${resizeShift.id}:${resizeSegment.id}:2026-08-17`,
         onResizeTaskSegment,
       })} />,
     );
@@ -672,6 +731,54 @@ describe("Planning matrix", () => {
     fireEvent.blur(endHandle);
     expect(container.querySelector('[data-segment-id="segment-resize-blur"]')).toHaveTextContent("08:00–16:00");
     expect(onResizeTaskSegment).not.toHaveBeenCalled();
+  });
+
+  it("houdt een resize zichtbaar tijdens opslaan en rolt hem terug wanneer opslaan mislukt", async () => {
+    let rejectResize;
+    const pendingResize = new Promise((resolve, reject) => {
+      rejectResize = reject;
+    });
+    const onResizeTaskSegment = vi.fn(() => pendingResize);
+    const resizeShift = { ...shift, id: "shift-resize-pending", source_type: "task", start_time: "08:00", end_time: "16:00" };
+    const resizeSegment = {
+      id: "segment-resize-pending",
+      shift_id: resizeShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        shifts: [resizeShift],
+        segments: [resizeSegment],
+        expandedServiceKey: `${resizeShift.id}:${resizeSegment.id}:2026-08-17`,
+        onResizeTaskSegment,
+      })} />,
+    );
+
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    fireEvent.keyDown(endHandle, { key: "ArrowUp" });
+    fireEvent.keyDown(endHandle, { key: "Enter" });
+
+    const timelineService = container.querySelector('[data-timeline-shift-segment="true"]');
+    expect(timelineService).toHaveTextContent("Dienst 08:00–15:55");
+    expect(timelineService).toHaveAttribute("data-resize-saving", "true");
+    expect(endHandle).toBeDisabled();
+
+    await act(async () => {
+      rejectResize(new Error("Opslaan mislukt"));
+      await pendingResize.catch(() => undefined);
+    });
+
+    await waitFor(() => {
+      expect(timelineService).toHaveTextContent("Dienst 08:00–16:00");
+      expect(timelineService).toHaveAttribute("data-resize-saving", "false");
+    });
+    expect(screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i })).not.toBeDisabled();
   });
 
   it("laat iedere actieve medewerker van een meervoudig bezette inline dienst afzonderlijk vrijmaken", async () => {
@@ -723,23 +830,21 @@ describe("Planning matrix", () => {
         shifts: [multiShift],
         segments: [multiSegment],
         assignments: [annaAssignment, borisAssignment, removedAssignment],
-        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        expandedServiceKey: `${multiShift.id}:${multiSegment.id}:2026-08-17`,
         onUnassign,
       })} />,
     );
 
-    const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
-    expect(taskCard).toHaveTextContent("Anna Beveiliger +1");
-    expect(taskCard).toHaveTextContent("2/2 bezet");
-    const manageButton = within(taskCard).getByRole("button", { name: "2 medewerkers beheren" });
-
-    fireEvent.pointerDown(manageButton, { button: 0, ctrlKey: false });
-    expect(screen.queryByRole("menuitem", { name: "Verwijderde medewerker vrijmaken" })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Anna Beveiliger vrijmaken" }));
+    const service = container.querySelector(`[data-shift-id="${multiShift.id}"]`);
+    expect(container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`)).not.toBeInTheDocument();
+    expect(service).toHaveTextContent("Anna Beveiliger");
+    expect(service).toHaveTextContent("Boris Beveiliger");
+    expect(service).toHaveTextContent("Bezetting 2/2");
+    expect(within(service).queryByRole("button", { name: "Verwijderde medewerker vrijmaken" })).not.toBeInTheDocument();
+    fireEvent.click(within(service).getByRole("button", { name: "Anna Beveiliger vrijmaken" }));
     expect(onUnassign).toHaveBeenNthCalledWith(1, multiShift, annaAssignment);
 
-    fireEvent.pointerDown(manageButton, { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Boris Beveiliger vrijmaken" }));
+    fireEvent.click(within(service).getByRole("button", { name: "Boris Beveiliger vrijmaken" }));
     expect(onUnassign).toHaveBeenNthCalledWith(2, multiShift, borisAssignment);
   });
 
@@ -751,7 +856,7 @@ describe("Planning matrix", () => {
     expect(screen.getByRole("rowheader", { name: /Object 2/i })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /17 aug/i })).toBeInTheDocument();
     expect(screen.getByText("Receptiedienst")).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-reception:2026-08-17"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-reception:2026-08-17:0480:0960"]')).toBeInTheDocument();
 
     const scrollContainer = screen.getByTestId("planning-matrix-scroll");
     expect(scrollContainer).toHaveClass("overflow-auto");
@@ -802,8 +907,8 @@ describe("Planning matrix", () => {
     expect(screen.queryByRole("columnheader", { name: /Nieuwe medewerker/i })).not.toBeInTheDocument();
   });
 
-  it("houdt een volledig afgedekte bronkaart compact zichtbaar en opent de geneste dienst op verzoek", () => {
-    const coveredShift = { ...shift, id: "shift-covered", name: "Geplande receptiedienst", start_time: "08:00", end_time: "16:00" };
+  it("opent de tijdeditor vanuit de zelfstandige dienst zonder de volledig afgedekte bronkaart te tonen", () => {
+    const coveredShift = { ...shift, id: "shift-covered", name: "Geplande receptiedienst", source_type: "task", start_time: "08:00", end_time: "16:00" };
     const coveredSegment = {
       id: "segment-covered",
       shift_id: coveredShift.id,
@@ -818,20 +923,19 @@ describe("Planning matrix", () => {
       object_name_snapshot: occurrence.object_name_snapshot,
       status: "draft",
     };
-    const onExpandedTaskCardChange = vi.fn();
+    const onExpandedServiceChange = vi.fn();
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ shifts: [coveredShift], segments: [coveredSegment], onExpandedTaskCardChange })} />,
+      <PlanningBoard {...boardProps({ shifts: [coveredShift], segments: [coveredSegment], onExpandedServiceChange })} />,
     );
 
     const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
-    expect(taskCard).toBeInTheDocument();
-    expect(taskCard).toHaveTextContent("Volledig gepland");
-    expect(taskCard).toHaveTextContent("1 dienst");
-    expect(taskCard).not.toHaveAttribute("data-inline-time-editor");
-    expect(container.querySelector(`[data-shift-id="${coveredShift.id}"]`)).not.toBeInTheDocument();
-    expect(container.querySelector(`[data-segment-id="${coveredSegment.id}"]`)).not.toBeInTheDocument();
-    fireEvent.click(within(taskCard).getByRole("button", { name: /Receptiedienst/i }));
-    expect(onExpandedTaskCardChange).toHaveBeenCalledWith(`${occurrence.id}:2026-08-17`);
+    const service = container.querySelector(`[data-shift-id="${coveredShift.id}"]`);
+    expect(taskCard).not.toBeInTheDocument();
+    expect(service).toBeInTheDocument();
+    expect(service).toHaveAttribute("data-planning-width", "full");
+    expect(service.querySelector('[data-service-time-rail="true"]')).not.toBeInTheDocument();
+    fireEvent.click(within(service).getByRole("button", { name: /geplande receptiedienst tijd aanpassen/i }));
+    expect(onExpandedServiceChange).toHaveBeenCalledWith(`${coveredShift.id}:${coveredSegment.id}:2026-08-17`);
   });
 
   it("projecteert een samengestelde dienst per object en segmentdatum, inclusief het nachtsegment", () => {
@@ -948,7 +1052,7 @@ describe("Planning matrix", () => {
     const mondayCell = container.querySelector('[data-matrix-cell="object:object-1:2026-08-17"]');
     expect(within(mondayCell).getByText(/00:00–06:00 · vervolg/)).toBeInTheDocument();
     expect(mondayCell.querySelector('[data-task-occurrence-id="occurrence-carry-in"]')).toBeInTheDocument();
-    expect(mondayCell.querySelector('[data-droppable-id="occurrence:occurrence-carry-in:2026-08-17"]')).toBeInTheDocument();
+    expect(mondayCell.querySelector('[data-droppable-id="occurrence-gap:occurrence-carry-in:2026-08-17:0000:0360"]')).toBeInTheDocument();
   });
 
   it("houdt expliciete sparse slots vrij zonder een bestaande medewerker te dupliceren", () => {
@@ -1009,8 +1113,8 @@ describe("Planning matrix", () => {
     expect(within(cell).getByText("Sluitronde")).toBeInTheDocument();
   });
 
-  it("houdt taakdekking volledig wanneer een gekoppelde shift alleen visueel is uitgefilterd", () => {
-    const coveredShift = { ...shift, id: "shift-filtered-covered", start_time: "08:00", end_time: "16:00" };
+  it("opent geen taakgat opnieuw wanneer de dekkende dienst alleen visueel is uitgefilterd", () => {
+    const coveredShift = { ...shift, id: "shift-filtered-covered", source_type: "task", start_time: "08:00", end_time: "16:00" };
     const coveredSegment = {
       id: "segment-filtered-covered",
       shift_id: coveredShift.id,
@@ -1022,20 +1126,15 @@ describe("Planning matrix", () => {
       end_time: "16:00",
       status: "published",
     };
-    const onFillStaffing = vi.fn();
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ shifts: [], coverageShifts: [coveredShift], segments: [coveredSegment], onFillStaffing })} />,
+      <PlanningBoard {...boardProps({ shifts: [], coverageShifts: [coveredShift], segments: [coveredSegment] })} />,
     );
 
     const occurrenceCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
-    expect(occurrenceCard).toHaveTextContent("Volledig gepland");
-    expect(occurrenceCard).not.toHaveTextContent("Nog niet gepland");
-    expect(occurrenceCard).toHaveTextContent("Tijd 8u/8u");
-    expect(occurrenceCard).toHaveTextContent("Bezetting 0/1");
-    expect(occurrenceCard).toHaveTextContent("Sleep medewerker naar de open bezettingsplaats");
-    expect(container.querySelector(`[data-droppable-id="occurrence:${occurrence.id}:2026-08-17"]`)).toBeInTheDocument();
-    fireEvent.click(within(occurrenceCard).getByRole("button", { name: "Bezetting invullen" }));
-    expect(onFillStaffing).toHaveBeenCalledWith(occurrence);
+    expect(occurrenceCard).not.toBeInTheDocument();
+    expect(container.querySelector(`[data-shift-id="${coveredShift.id}"]`)).not.toBeInTheDocument();
+    expect(container.querySelector(`[data-droppable-id^="occurrence-gap:${occurrence.id}:"]`)).not.toBeInTheDocument();
+    expect(container.querySelector('[data-matrix-cell="object:object-1:2026-08-17"]')).toHaveTextContent("Geen planning");
   });
 
   it("behoudt snapshotkolommen voor taakvraag bij gearchiveerde en conceptobjecten", () => {
@@ -1067,8 +1166,8 @@ describe("Planning matrix", () => {
     expect(screen.getByRole("rowheader", { name: /Snapshotlocatie Concept/i })).toBeInTheDocument();
     expect(screen.queryByRole("rowheader", { name: /Leeg gearchiveerd object/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("rowheader", { name: /Leeg conceptobject/i })).not.toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-archived-object:2026-08-17"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-concept-object:2026-08-17"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-archived-object:2026-08-17:0480:0960"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-concept-object:2026-08-17:0480:0960"]')).toBeInTheDocument();
   });
 });
 

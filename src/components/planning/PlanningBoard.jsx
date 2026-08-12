@@ -8,13 +8,14 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  * supplied range in the card matrix and exposes typed drop targets through
  * PlanningMatrix. Object view keeps objects as rows and days as columns;
  * employee view keeps employees as columns and days as rows:
- * - object: occurrence:<occurrenceId>:<YYYY-MM-DD> accepts a PERSONNEL
- *   draggable and limits composition to that visible day slice;
+ * - object: occurrence-gap:<occurrenceId>:<YYYY-MM-DD>:<start>:<end> accepts
+ *   a PERSONNEL draggable and limits composition to that exact open slice;
  * - employee: employee-day:<personnelId>:<YYYY-MM-DD> accepts a TASK draggable;
  * - object slots: slot:<shiftId>:<slotIndex>:<YYYY-MM-DD>:<resourceKey>
  *   accepts PERSONNEL; a cross-day shift opens full-shift confirmation.
  *
- * Planned task cards can expand in place to a task-local vertical time editor.
+ * Open task intervals remain cards. Planned coverage is rendered as a
+ * standalone full-width service block whose time editor can expand in place.
  * Legacy props such as `view`, `weeks`, `customers` and
  * `taskOccurrenceCount` remain safe to pass; week/custom-period behavior is
  * expressed entirely by the `days` collection.
@@ -33,10 +34,9 @@ export default function PlanningBoard({
   objects = [],
   routes = [],
   selectedShiftId,
-  expandedTaskCardKey,
-  onExpandedTaskCardChange,
+  expandedServiceKey,
+  onExpandedServiceChange,
   onSelectOccurrence,
-  onFillStaffing,
   onSelectShift,
   onUnassign,
   onMove,
@@ -74,10 +74,9 @@ export default function PlanningBoard({
       objects={objects}
       routes={routes}
       selectedShiftId={selectedShiftId}
-      expandedTaskCardKey={expandedTaskCardKey}
-      onExpandedTaskCardChange={onExpandedTaskCardChange}
+      expandedServiceKey={expandedServiceKey}
+      onExpandedServiceChange={onExpandedServiceChange}
       onSelectOccurrence={onSelectOccurrence}
-      onFillStaffing={onFillStaffing}
       onSelectShift={onSelectShift}
       onUnassign={onUnassign}
       onMove={onMove}
