@@ -23,7 +23,11 @@ beforeAll(async () => {
 
 function entity(initial = [], prefix = "record") {
   const records = initial.map(item => structuredClone(item));
-  const matches = (record, query = {}) => Object.entries(query).every(([key, value]) => record[key] === value);
+  const matches = (record, query = {}) => Object.entries(query).every(([key, value]) => (
+    value && typeof value === "object" && Object.hasOwn(value, "$in")
+      ? value.$in.some(candidate => candidate === record[key])
+      : record[key] === value
+  ));
   return {
     records,
     async list() { return records.map(item => structuredClone(item)); },
@@ -341,6 +345,11 @@ describe("planningApi dienstsamenstelling", () => {
     const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
     entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
+    let assignmentValidationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      assignmentValidationCalls += 1;
+      return {};
+    };
 
     const result = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
@@ -361,6 +370,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShift.records).toHaveLength(1);
     expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(assignmentValidationCalls).toBe(2);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -369,6 +379,71 @@ describe("planningApi dienstsamenstelling", () => {
         undoable: false,
       }),
     ]);
+  });
+
+  it("stelt een taakdienst samen en wijzigt die zonder globale segment- of dienstlijsten", async () => {
+    const demand = occurrence("occurrence-targeted-composition", "object-1", "06:00", "20:00", 840);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-targeted", name: "Gerichte Beveiliger", status: "active" });
+    entities.PlanningShift.records.push({
+      id: "shift-unrelated",
+      source_key: "manual:unrelated",
+      source_type: "manual",
+      service_date: "2026-08-17",
+      start_time: "00:00",
+      end_time: "01:00",
+      status: "draft",
+      revision: 1,
+    });
+    entities.PlanningShiftTaskSegment.records.push({
+      id: "segment-unrelated",
+      shift_id: "shift-unrelated",
+      task_occurrence_id: "occurrence-unrelated",
+      start_date: "2026-08-17",
+      end_date: "2026-08-17",
+      start_time: "00:00",
+      end_time: "01:00",
+      status: "draft",
+      revision: 1,
+    });
+    const segmentFilter = entities.PlanningShiftTaskSegment.filter.bind(entities.PlanningShiftTaskSegment);
+    const shiftFilter = entities.PlanningShift.filter.bind(entities.PlanningShift);
+    const segmentQueries = [];
+    const shiftQueries = [];
+    entities.PlanningShiftTaskSegment.filter = async (query, ...args) => {
+      segmentQueries.push(structuredClone(query));
+      return segmentFilter(query, ...args);
+    };
+    entities.PlanningShift.filter = async (query, ...args) => {
+      shiftQueries.push(structuredClone(query));
+      return shiftFilter(query, ...args);
+    };
+    entities.PlanningShiftTaskSegment.list = async () => {
+      throw new Error("globale segmentlijst mag niet nodig zijn");
+    };
+    entities.PlanningShift.list = async () => {
+      throw new Error("globale dienstlijst mag niet nodig zijn");
+    };
+
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-targeted",
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "14:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("targeted-compose-and-assign"));
+    const occurrenceBeforeResize = await entities.PlanningTaskOccurrence.get(demand.id);
+    const resized = await backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: occurrenceBeforeResize.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    }, context("targeted-resize"));
+
+    expect(resized.shift).toMatchObject({ start_time: "06:00", end_time: "12:00" });
+    expect(entities.PlanningShiftTaskSegment.records.find(item => item.id === "segment-unrelated"))
+      .toMatchObject({ status: "draft" });
+    expect(segmentQueries).toContainEqual({ task_occurrence_id: { $in: [demand.id] } });
+    expect(shiftQueries.some(query => query.id?.$in?.includes(composed.shift.id))).toBe(true);
   });
 
   it("plant en auditeert een taak als het uitvoerende bedrijf nog niet is gekoppeld", async () => {

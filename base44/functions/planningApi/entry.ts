@@ -359,6 +359,7 @@ async function casUpdate(
 }
 
 const PLANNING_RESOURCE_LEASE_MS = 2 * 60 * 1000;
+const PLANNING_LEASE_RENEWAL_CONCURRENCY = 8;
 const PLANNING_IDEMPOTENCY_CLAIM_MS = 2 * 60 * 1000;
 const IDEMPOTENCY_REGISTRY_KEY = 'idempotency_registry:v2';
 const MAX_COMPOSED_SHIFT_MINUTES = 24 * 60;
@@ -664,7 +665,7 @@ async function renewPlanningResourceLeases(
   user: LooseRecord,
   leases: LooseRecord[],
 ) {
-  for (const lease of leases) {
+  const renewLease = async (lease: LooseRecord) => {
     let renewed = false;
     for (let attempt = 0; attempt < 5 && !renewed; attempt += 1) {
       const coordinator = await requireRecord(base44, 'PlanningMutationCoordinator', lease.coordinatorId, 'Planningcoordinator');
@@ -692,6 +693,30 @@ async function renewPlanningResourceLeases(
         if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
       }
     }
+  };
+  const renewalResults: PromiseSettledResult<void>[] = new Array(leases.length);
+  let nextLeaseIndex = 0;
+  const renewNextLease = async () => {
+    while (nextLeaseIndex < leases.length) {
+      const leaseIndex = nextLeaseIndex;
+      nextLeaseIndex += 1;
+      try {
+        await renewLease(leases[leaseIndex]);
+        renewalResults[leaseIndex] = { status: 'fulfilled', value: undefined };
+      } catch (error) {
+        renewalResults[leaseIndex] = { status: 'rejected', reason: error };
+      }
+    }
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(PLANNING_LEASE_RENEWAL_CONCURRENCY, leases.length) },
+    renewNextLease,
+  ));
+  const firstFailure = renewalResults.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (firstFailure) {
+    throw firstFailure.reason;
   }
 }
 
@@ -3374,11 +3399,38 @@ async function composeShift(
     };
   }
 
-  const [allSegments, allParentShifts] = await Promise.all([
-    listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
-    listAllRecords(base44.asServiceRole.entities.PlanningShift),
+  const segmentEntity = base44.asServiceRole.entities.PlanningShiftTaskSegment;
+  const relevantSegmentReads = [
+    filterAllRecords(
+      segmentEntity,
+      { task_occurrence_id: { $in: affectedOccurrenceIds } },
+      '-start_date',
+    ),
+  ];
+  if (shift?.id) {
+    // A recovery/update can carry historical segments that are no longer in
+    // the requested set. Keep those available for the replace/remove phase.
+    relevantSegmentReads.push(filterAllRecords(segmentEntity, { shift_id: shift.id }, '-start_date'));
+  }
+  const relevantSegments = uniqueRecords(
+    (await Promise.all(relevantSegmentReads)).flat(),
+    item => String(item.id),
+  );
+  const relevantParentShiftIds = uniqueStrings([
+    ...relevantSegments.map(item => item.shift_id),
+    shift?.id,
   ]);
-  const otherActiveSegments = activeTaskSegments(allSegments, allParentShifts).filter((item: LooseRecord) =>
+  const fetchedParentShifts = relevantParentShiftIds.length
+    ? await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShift,
+        { id: { $in: relevantParentShiftIds } },
+      )
+    : [];
+  const relevantParentShifts = uniqueRecords(
+    [...fetchedParentShifts, ...(shift ? [shift] : [])],
+    item => String(item.id),
+  );
+  const otherActiveSegments = activeTaskSegments(relevantSegments, relevantParentShifts).filter((item: LooseRecord) =>
     (!shift || String(item.shift_id) !== String(shift.id))
     && occurrenceById.has(String(item.task_occurrence_id))
   );
@@ -3553,7 +3605,6 @@ async function composeShift(
   };
 
   let requestedAssignmentBefore: LooseRecord | null = null;
-  let requestedAssignmentEligibility: LooseRecord | null = null;
   if (composeAndAssignMode) {
     requestedAssignmentBefore = shift
       ? await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex)
@@ -3585,21 +3636,6 @@ async function composeShift(
         });
       }
     }
-    const suppliedAssignmentWarnings = normalizeSuppliedWarnings(body);
-    if (objectIds.length > 1) suppliedAssignmentWarnings.push(warning(
-      'multi_object_shift_review',
-      'warning',
-      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
-      'planner',
-      { object_ids: objectIds },
-    ));
-    requestedAssignmentEligibility = await evaluateAssignmentWarnings(
-      base44,
-      { ...(shift || {}), ...shiftPayload, id: shift?.id || `pending:${sourceKey}` },
-      requestedPersonnel as LooseRecord,
-      requestedAssignmentBefore?.id || null,
-      suppliedAssignmentWarnings,
-    );
   }
 
   const reservedOccurrences: LooseRecord[] = [];
@@ -3691,7 +3727,7 @@ async function composeShift(
   }
   if (composeAndAssignMode) composeAndAssignState.shiftId = shift.id;
 
-  const previousSegments = allSegments.filter((item: LooseRecord) =>
+  const previousSegments = relevantSegments.filter((item: LooseRecord) =>
     String(item.shift_id) === String(shift.id) && item.status !== 'removed'
   );
   for (const segment of previousSegments) {

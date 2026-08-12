@@ -11,7 +11,7 @@ LOC gebruikt een vraaggestuurde planning in drie afzonderlijke lagen:
 2. **Dienstindeling** - een of meer operationele diensten en taaksegmenten die de klanttaak afdekken.
 3. **Personeelsbezetting** - de medewerker die een dienst uitvoert.
 
-De objectweergave wordt een taakgestuurde kaartmatrix: de klanttaak blijft als vaste bronkaart zichtbaar en dienst-/medewerkerkaarten worden daarbinnen gevormd. Na de eerste planning klapt alleen die taakkaart uit tot een lokale verticale tijdverdeling. De planning mag de klanttaak niet verplaatsen, verlengen of dupliceren. Een bronwijziging gebeurt uitsluitend in het objectdossier.
+De objectweergave wordt een taakgestuurde kaartmatrix. Alleen nog ongedekte klantvraag verschijnt als taakkaart; gevormde uren verschijnen als zelfstandige diensten over de volledige celbreedte. Een gedeeltelijk afgedekte taak kan daardoor meerdere open taakkaarten en meerdere diensten naast elkaar in chronologische volgorde hebben. Zodra alle gevraagde uren zijn gevormd, verdwijnt de taakkaart volledig. De planning mag de klanttaak niet verplaatsen, verlengen of dupliceren. Een bronwijziging gebeurt uitsluitend in het objectdossier.
 
 Dit bouwt voort op [Planningmatrix V2](./planning-matrix-v2.md), met een door de gebruiker gekozen oriëntatiecorrectie: in objectweergave staan objecten verticaal als rijen links en dagen horizontaal als kolommen boven. Medewerkers blijven in de vaste rechterwerkvoorraad. De medewerkerweergave behoudt de omgekeerde sleepstroom met medewerkers horizontaal en dagen verticaal.
 
@@ -58,24 +58,25 @@ Er is één kaartweergave; een globale 00:00-24:00-tijdlijn en een transposeknop
 - De matrix scrollt horizontaal door dagen en verticaal door objecten.
 - De medewerkerwerkvoorraad rechts blijft buiten deze matrixscroll.
 - Een ongeplande taak is een compacte kaart met taaknaam, exact venster, tijddekking en bezetting.
-- Na een geslaagde medewerkerdrop klapt precies die kaart in-place uit. Maximaal één taakkaart is tegelijk geopend.
-- De lokale verticale tijdrail loopt uitsluitend van taakstart tot taakeinde, bijvoorbeeld 06:00-20:00, en toont daarin open delen en gevormde diensten.
-- Een geplande of volledig afgedekte taak blijft als bronkaart zichtbaar; gekoppelde diensten worden niet nogmaals als losse kaarten ernaast getoond.
+- Na een geslaagde medewerkerdrop wordt het geraakte open interval direct vervangen door een zelfstandige dienst. De overige open intervallen blijven met hun exacte tijden als taakkaarten zichtbaar.
+- De lokale verticale tijdrail wordt vanuit één zelfstandige dienst geopend en loopt uitsluitend van taakstart tot taakeinde, bijvoorbeeld 06:00-20:00. De dienst kan daarin via verticale grepen korter of langer worden gemaakt.
+- Een volledig afgedekte taak heeft in de matrix geen taakkaart meer. Alleen de gevormde diensten blijven zichtbaar; een onbemande dienst behoudt daarin een expliciete open bezettingsplaats.
+- Open taakkaarten en diensten gebruiken beide de volledige celbreedte en staan op starttijd gesorteerd. De dienst is nooit genest in een taakkaart.
 - Een taak korter dan het minimale klikvlak krijgt een groter bedieningsvlak, terwijl begin-/eindlabels de echte tijd blijven aangeven.
 - Nachttaken verschijnen als twee dagsneden met dezelfde occurrence- en dienstidentiteit.
 - Compactmodus verkleint gesloten kaarten, maar verbergt een geopende lokale tijdverdeling niet.
 
 ## Visuele lagen en toestanden
 
-Een taakoverlay houdt een smalle vaste taakrail zichtbaar met taaknaam, bestelde tijd en objectcontext. Dienstkaarten liggen ingesprongen boven de overlay zodat de bronvraag herkenbaar blijft.
+De matrix scheidt vraag en uitvoering zonder dubbele visuele containers: een open taakkaart staat voor nog te vormen klanturen, een zelfstandige dienst voor reeds gevormde uren. Taaknaam, object en exacte tijden blijven op beide typen zichtbaar zodat de herkomst herkenbaar blijft.
 
 | Toestand | Betekenis | Weergave |
 | --- | --- | --- |
-| `unplanned` | Geen dienstsegment gevormd | Lichte gearceerde taakoverlay, label `Nog niet verdeeld` |
-| `partial` | Een deel van de vereiste minuten is verdeeld | Open deel gearceerd, teller `6u / 14u` |
-| `open_service` | Dienstsegment bestaat, medewerker ontbreekt | Witte kaart met stippellijn en label `Open dienst` |
-| `needs_staffing` | Tijddekking compleet, een of meer diensten zijn open | Volledige taakomtrek, amber personeelsbadge |
-| `ready` | Tijddekking en personeelsbezetting compleet | Groene check en label `Volledig ingepland` |
+| `unplanned` | Geen dienstsegment gevormd | Volle-breedte taakkaart met exact open interval en label `Open` |
+| `partial` | Een deel van de vereiste minuten is verdeeld | Alleen ieder resterend open interval als taakkaart, naast zelfstandige diensten |
+| `open_service` | Dienstsegment bestaat, medewerker ontbreekt | Zelfstandige volle-breedte dienst met amber open bezettingsplaats |
+| `needs_staffing` | Tijddekking compleet, een of meer diensten zijn open | Geen taakkaart; alleen zelfstandige dienst(en) met open plaats |
+| `ready` | Tijddekking en personeelsbezetting compleet | Geen taakkaart; zelfstandige bemande dienst(en) met publicatiestatus |
 | `warning` | Geldige conceptplanning met aandachtspunt | Amber icoon met lokale uitleg |
 | `blocked` | Mutatie schendt een harde regel | Rood verbodssymbool; drop wordt niet opgeslagen |
 | `source_changed` | Brontaak wijzigde na dienstvorming | Badge `Bron gewijzigd`, herstelactie vereist |
@@ -87,9 +88,9 @@ Status mag nooit alleen door kleur worden overgebracht. Iedere status heeft teks
 
 ### Medewerker naar ongedekte taak
 
-1. Bij het starten van de drag markeert LOC alleen compatibele taakkaarten en open intervallen binnen een reeds geopende kaart.
+1. Bij het starten van de drag markeert LOC alleen compatibele open taakkaarten en open plaatsen in bestaande diensten.
 2. Incompatibele doelen worden gedimd. Hover of toetsenbordfocus verklaart de reden, bijvoorbeeld overlap, afwezigheid of ontbrekende kwalificatie.
-3. Boven een compacte taakkaart toont LOC het eerstvolgende veilige voorstel; binnen een geopende kaart toont het exacte open interval de ghostkaart met medewerker, start, einde, duur en resterende dekking.
+3. Boven een open taakkaart toont LOC voor het exacte interval de ghostdienst met medewerker, start, einde, duur en resterende dekking.
 4. Loslaten voert `compose_and_assign` uit: dienst vormen, segment reserveren, regels controleren en medewerker toewijzen in één serveractie.
 5. Na succes verschijnt een korte undo-toast. Bij conflict blijft de taak ongewijzigd en wordt de actuele planning herladen.
 
@@ -135,10 +136,10 @@ De preview toont de resulterende diensten vóór bevestiging. Tijddekking kan da
 
 ## Resizen en overdrachten
 
-### Losse kaart
+### Zelfstandige dienst
 
 - Boven- en onderrand hebben duidelijke resizegrepen.
-- Resizen blijft binnen de taakoverlay en mag niet door een ander segment heen lopen.
+- Resizen gebeurt in de uitklapbare lokale tijdrail van de dienst, blijft binnen het taakvenster en mag niet door een ander segment heen lopen.
 - Live tekst toont bijvoorbeeld `06:00-12:00 · 6u · 8u taak resteert`.
 - Een korter segment maakt de taak opnieuw gedeeltelijk open.
 - Een verlenging kan nooit meer unieke minuten claimen dan nog vereist zijn.
@@ -169,7 +170,7 @@ Dienst 15:30-23:30 - Noor
 `- 18:30-23:30  Rondetaken - Objecten 2, 3 en 4
 ```
 
-- In objectweergave verschijnt ieder lokaal taaksegment in zijn eigen taakoverlay, met dezelfde dienst-id en een kettingicoon.
+- In objectweergave verschijnt ieder lokaal taaksegment als zelfstandige dienst in de bijbehorende object-/dagcel, met dezelfde dienst-id en een kettingicoon.
 - Hover of focus op één fragment markeert alle fragmenten van dezelfde dienst.
 - In medewerkerweergave verschijnt de dienst eenmaal, met interne taakstroken in chronologische volgorde.
 - Een drop naast een bestaande dienst biedt `Nieuwe dienst` en `Toevoegen aan dienst HH:MM-HH:MM`.
@@ -218,7 +219,7 @@ Waarschuwen volgens bedrijfsinstellingen:
 - **Publicatie:** een wijziging aan een gepubliceerde dienst wordt concept en veroorzaakt pas na herpublicatie een medewerkerbericht.
 - **Gelijktijdige planners:** behoud intent/idempotency key bij retry; laat geen half gevormde dienst of bezetting achter.
 - **Offline/netwerkfout:** toon pending status, voorkom een tweede drop en bied veilige retry met dezelfde intent.
-- **Volledige tijddekking zonder medewerker:** behoud de taak in de personeelswerkvoorraad als expliciete bezettingsactie.
+- **Volledige tijddekking zonder medewerker:** verberg de taakkaart in de matrix, behoud de zelfstandige dienst met open plaats en behoud de taak in de personeelswerkvoorraad als expliciete bezettingsactie.
 - **Flexibele taak vol:** ongebruikte minuten van het toegestane `time_window` zijn geen open gat.
 - **Meervoudige bezetting:** iedere vereiste positie krijgt een eigen dekkingsbaan; overbezetting boven de klantvraag wordt geblokkeerd.
 - **Touch:** resizen gebruikt grotere grepen en een bevestigende tijdbalk; drag is nooit de enige bedieningsroute.
@@ -231,7 +232,7 @@ Waarschuwen volgens bedrijfsinstellingen:
 2. Jan naar de taak slepen toont en maakt standaard `06:00-14:00`.
 3. De onderrand naar 12:00 resizen levert `6u / 14u` en open deel `12:00-20:00`.
 4. Sara op het open deel slepen maakt exact `12:00-20:00`.
-5. De taak wordt `ready`; een derde standaarddrop is geblokkeerd.
+5. De laatste open taakkaart verdwijnt; alleen de twee zelfstandige diensten blijven staan en een derde standaarddrop is geblokkeerd.
 6. De gedeelde grens naar 13:00 slepen wijzigt beide diensten atomair en behoudt volledige dekking.
 
 ### Korte ronde binnen venster
@@ -246,14 +247,14 @@ Waarschuwen volgens bedrijfsinstellingen:
 1. Noor werkt `15:30-18:15` op Object 1.
 2. Een taak van Object 2 wordt naast de dienst gedropt.
 3. LOC biedt nieuwe dienst of toevoegen aan bestaande dienst en toont de overgangscontrole.
-4. Na koppelen verschijnt in medewerkerweergave één dienst met geordende taak-/reisstroken; in objectweergave blijven de brontaken afzonderlijk zichtbaar.
+4. Na koppelen verschijnt in medewerkerweergave één dienst met geordende taak-/reisstroken; in objectweergave verschijnen de lokale dienstsegmenten zelfstandig en blijven alleen eventueel ongedekte taakdelen als taakkaart zichtbaar.
 
 ## Fasering
 
 ### Fase 1 - taakgestuurde kaartmatrix
 
-- objectrijen met dagkolommen en blijvend zichtbare brontaken;
-- compacte taakkaart en lokale verticale tijdverdeling;
+- objectrijen met dagkolommen, taakkaarten uitsluitend voor open uren en zelfstandige volle-breedte diensten voor gevormde uren;
+- exacte open-intervallen en een vanuit de dienst uitklapbare lokale verticale tijdrail;
 - 8-uursvoorstel en 5-minutensnap;
 - medewerkerdrag met ghostkaart en `compose_and_assign`;
 - losse resizegrepen;

@@ -32,6 +32,7 @@ import {
   ShiftActionDialog,
 } from "@/components/planning/PlanningDialogs";
 import { invokePlanningApi } from "@/components/planning/planningApiClient";
+import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 import {
   createPlanningMutationIntentRegistry,
   createPlanningMutationKey,
@@ -149,6 +150,75 @@ function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, e
   };
 }
 
+function serviceEditorKey(shiftId, segmentId, serviceDate) {
+  if (!shiftId || !segmentId || !serviceDate) return null;
+  return `${shiftId}:${segmentId}:${serviceDate}`;
+}
+
+function optimisticCompositionRecords({ key, occurrence, personnelItem = null, segment }) {
+  const shiftId = `pending-shift-${key}`;
+  const segmentId = `pending-segment-${key}`;
+  const assignmentId = personnelItem ? `pending-assignment-${key}` : null;
+  const shift = normalizePlanningShift({
+    id: shiftId,
+    revision: 1,
+    source_type: "task",
+    source_id: occurrence.object_task_definition_id || null,
+    status: "draft",
+    service_name_snapshot: `${occurrence.task_name_snapshot || "Taak"} · ${occurrence.object_name_snapshot || "Object"}`,
+    service_date: segment.start_date,
+    end_date: segment.end_date === segment.start_date ? null : segment.end_date,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    required_count: 1,
+    customer_id: occurrence.customer_id || null,
+    customer_ids: occurrence.customer_id ? [occurrence.customer_id] : [],
+    object_id: occurrence.object_id || null,
+    object_ids: occurrence.object_id ? [occurrence.object_id] : [],
+    object_name_snapshot: occurrence.object_name_snapshot || null,
+    customer_name_snapshot: occurrence.customer_name_snapshot || null,
+    task_occurrence_ids: [occurrence.id],
+    _optimistic_pending: true,
+  });
+  const taskSegment = {
+    id: segmentId,
+    revision: 1,
+    shift_id: shiftId,
+    task_occurrence_id: occurrence.id,
+    customer_id: occurrence.customer_id || null,
+    object_id: occurrence.object_id || null,
+    customer_name_snapshot: occurrence.customer_name_snapshot || null,
+    object_name_snapshot: occurrence.object_name_snapshot || null,
+    task_name_snapshot: occurrence.task_name_snapshot || "Taak",
+    task_type: occurrence.task_type || null,
+    start_date: segment.start_date,
+    end_date: segment.end_date,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    status: "draft",
+    sequence_index: 0,
+    _optimistic_pending: true,
+  };
+  const assignment = personnelItem ? normalizePlanningAssignment({
+    id: assignmentId,
+    revision: 1,
+    planning_shift_id: shiftId,
+    shift_id: shiftId,
+    personnel_id: personnelItem.id,
+    personnel_name: personnelName(personnelItem),
+    slot_index: 0,
+    status: "draft",
+    warnings: [],
+    _optimistic_pending: true,
+  }) : null;
+  return {
+    key,
+    shifts: [shift],
+    segments: [taskSegment],
+    assignments: assignment ? [assignment] : [],
+  };
+}
+
 function mutationMessage(error) {
   if (Number(error?.status) === 409) return `${error.message} De planning is opnieuw geladen.`;
   return error?.message || "De planningactie kon niet worden uitgevoerd.";
@@ -209,7 +279,8 @@ export default function Planning() {
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [sidePanelMode, setSidePanelMode] = useState("tasks");
-  const [expandedTaskCardKey, setExpandedTaskCardKey] = useState(null);
+  const [expandedServiceKey, setExpandedServiceKey] = useState(null);
+  const [pendingMatrixChanges, setPendingMatrixChanges] = useState([]);
   const [composer, setComposer] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -254,7 +325,7 @@ export default function Planning() {
     setCustomPeriodStart(toDateKey(nextPeriod.start));
     setCustomPeriodEnd(toDateKey(nextPeriod.end));
     setSelectedShiftId(null);
-    setExpandedTaskCardKey(null);
+    setExpandedServiceKey(null);
   }, [searchParams, searchParamsKey]);
 
   useEffect(() => {
@@ -354,19 +425,35 @@ export default function Planning() {
     staleTime: 60_000,
   });
 
-  const refreshPlanning = async () => {
-    await Promise.all([
+  const refreshPlanning = async ({ includePublications = false } = {}) => {
+    const requests = [
       queryClient.invalidateQueries({ queryKey: ["planning-shifts"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-assignments"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-task-occurrences"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-task-segments"] }),
-      queryClient.invalidateQueries({ queryKey: ["planning-publications"] }),
-    ]);
+    ];
+    if (includePublications) {
+      requests.push(queryClient.invalidateQueries({ queryKey: ["planning-publications"] }));
+    }
+    await Promise.all(requests);
+  };
+
+  const reconcilePlanningResult = (result, options = {}) => {
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart,
+      periodEnd,
+      result,
+      ...options,
+    });
+  };
+
+  const refreshPlanningInBackground = options => {
+    void refreshPlanning(options).catch(() => undefined);
   };
 
   const bootstrapMutation = useMutation({
     mutationFn: payload => invokePlanningApi({ action: "bootstrap_range", ...payload }),
-    onSuccess: refreshPlanning,
+    onSuccess: () => refreshPlanningInBackground(),
     onError: error => {
       toast({
         variant: "destructive",
@@ -409,11 +496,43 @@ export default function Planning() {
     shift.status !== "cancelled"
     && planningShiftOverlapsRange(shift, periodStart, periodEnd)
   )), [allShifts, periodEnd, periodStart]);
+  const shiftsInRangeById = useMemo(
+    () => new Map(shiftsInRange.map(shift => [String(shift.id), shift])),
+    [shiftsInRange],
+  );
   const ownedShiftsInRange = useMemo(() => shiftsInRange.filter(shift => (
     planningShiftOwnedByRange(shift, periodStart, periodEnd)
   )), [periodEnd, periodStart, shiftsInRange]);
   const shiftIdsInRange = useMemo(() => new Set(shiftsInRange.map(shift => String(shift.id))), [shiftsInRange]);
   const assignmentsInRange = useMemo(() => assignments.filter(item => shiftIdsInRange.has(String(item.planning_shift_id))), [assignments, shiftIdsInRange]);
+  const activeAssignmentsInRange = useMemo(() => activeAssignments(assignmentsInRange), [assignmentsInRange]);
+  const assignmentsInRangeByShift = useMemo(() => {
+    const grouped = new Map();
+    activeAssignmentsInRange.forEach(assignment => {
+      const key = String(assignment.planning_shift_id || assignment.shift_id);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(assignment);
+    });
+    return grouped;
+  }, [activeAssignmentsInRange]);
+  const activeTaskSegmentsByShift = useMemo(() => {
+    const grouped = new Map();
+    taskSegments.filter(item => item.status !== "removed").forEach(segment => {
+      const key = String(segment.shift_id);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(segment);
+    });
+    return grouped;
+  }, [taskSegments]);
+  const activeTaskSegmentsByOccurrence = useMemo(() => {
+    const grouped = new Map();
+    taskSegments.filter(item => item.status !== "removed").forEach(segment => {
+      const key = String(segment.task_occurrence_id);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(segment);
+    });
+    return grouped;
+  }, [taskSegments]);
   const ownedShiftIdsInRange = useMemo(() => new Set(ownedShiftsInRange.map(shift => String(shift.id))), [ownedShiftsInRange]);
   const ownedAssignmentsInRange = useMemo(() => assignmentsInRange.filter(item => (
     ownedShiftIdsInRange.has(String(item.planning_shift_id))
@@ -427,13 +546,19 @@ export default function Planning() {
   )), [periodEnd, periodStart, taskOccurrencesInRange]);
   const occurrencePlanningStates = useMemo(() => new Map(taskOccurrencesInRange.map(occurrence => [
     String(occurrence.id),
-    getOccurrencePlanningState({
-      occurrence,
-      segments: taskSegments,
-      shifts: shiftsInRange,
-      assignments: assignmentsInRange,
-    }),
-  ])), [assignmentsInRange, shiftsInRange, taskOccurrencesInRange, taskSegments]);
+    (() => {
+      const occurrenceSegments = activeTaskSegmentsByOccurrence.get(String(occurrence.id)) || [];
+      const occurrenceShifts = [...new Set(occurrenceSegments.map(item => String(item.shift_id)))]
+        .map(id => shiftsInRangeById.get(id))
+        .filter(Boolean);
+      return getOccurrencePlanningState({
+        occurrence,
+        segments: occurrenceSegments,
+        shifts: occurrenceShifts,
+        assignments: occurrenceShifts.flatMap(shift => assignmentsInRangeByShift.get(String(shift.id)) || []),
+      });
+    })(),
+  ])), [activeTaskSegmentsByOccurrence, assignmentsInRangeByShift, shiftsInRangeById, taskOccurrencesInRange]);
   const visibleTaskOccurrences = useMemo(() => taskOccurrencesInRange.filter(item => {
     if (customerFilter !== "all" && String(item.customer_id) !== String(customerFilter)) return false;
     const state = occurrencePlanningStates.get(String(item.id));
@@ -448,35 +573,33 @@ export default function Planning() {
     if (statusFilter === "partial") return state?.readiness === "needs_staffing";
     if (statusFilter === "vacant") return state?.readiness !== "ready";
     if (statusFilter === "draft") return state?.linkedShiftIds.some(shiftId => {
-      const shift = shiftsInRange.find(itemShift => String(itemShift.id) === shiftId);
-      return shift?.status === "draft" || assignmentsInRange.some(assignment => (
-        String(assignment.planning_shift_id) === shiftId && assignment.status === "draft"
-      ));
+      const shift = shiftsInRangeById.get(String(shiftId));
+      return shift?.status === "draft" || (assignmentsInRangeByShift.get(String(shiftId)) || [])
+        .some(assignment => assignment.status === "draft");
     });
     if (statusFilter === "planned") return state?.readiness === "ready";
     if (statusFilter === "published") return state?.readiness === "ready"
       && state.linkedShiftIds.length > 0
       && state.linkedShiftIds.every(shiftId => (
-        shiftsInRange.find(shift => String(shift.id) === shiftId)?.status === "published"
+        shiftsInRangeById.get(String(shiftId))?.status === "published"
       ));
     if (statusFilter === "warnings") {
       if (!item.security_plan_revision_id || !item.security_plan_snapshot?.published_revision) return true;
-      return state?.linkedShiftIds.some(shiftId => assignmentsInRange.some(assignment => (
-        String(assignment.planning_shift_id) === shiftId && assignmentWarnings(assignment).length > 0
-      )));
+      return state?.linkedShiftIds.some(shiftId => (
+        assignmentsInRangeByShift.get(String(shiftId)) || []
+      ).some(assignment => assignmentWarnings(assignment).length > 0));
     }
     return true;
-  }), [assignmentsInRange, customerFilter, occurrencePlanningStates, search, shiftsInRange, statusFilter, taskOccurrencesInRange]);
+  }), [assignmentsInRangeByShift, customerFilter, occurrencePlanningStates, search, shiftsInRangeById, statusFilter, taskOccurrencesInRange]);
   const visibleWorkQueueCount = useMemo(() => visibleTaskOccurrences.filter(occurrence => (
     occurrencePlanningStates.get(String(occurrence.id))?.readiness !== "ready"
   )).length, [occurrencePlanningStates, visibleTaskOccurrences]);
 
   const filteredShifts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
-    const active = activeAssignments(assignmentsInRange);
     return shiftsInRange.filter(shift => {
       const object = objectsById.get(String(shift.object_id || ""));
-      const shiftSegments = taskSegments.filter(item => item.status !== "removed" && String(item.shift_id) === String(shift.id));
+      const shiftSegments = activeTaskSegmentsByShift.get(String(shift.id)) || [];
       if (customerFilter !== "all") {
         const shiftCustomerIds = new Set([
           shift.customer_id,
@@ -486,7 +609,7 @@ export default function Planning() {
         ].filter(Boolean).map(String));
         if (!shiftCustomerIds.has(String(customerFilter))) return false;
       }
-      const shiftAssignments = active.filter(item => String(item.planning_shift_id) === String(shift.id));
+      const shiftAssignments = assignmentsInRangeByShift.get(String(shift.id)) || [];
       const required = Math.max(1, Number(shift.required_count || 1));
       const warnings = shiftAssignments.flatMap(assignmentWarnings);
       const compositionWarnings = Array.isArray(shift.service_context_snapshot?.composition_warnings)
@@ -509,14 +632,42 @@ export default function Planning() {
       ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
     });
   }, [
-    assignmentsInRange,
+    activeTaskSegmentsByShift,
+    assignmentsInRangeByShift,
     customerFilter,
     objectsById,
     search,
     shiftsInRange,
     statusFilter,
-    taskSegments,
   ]);
+  const pendingMatrixShifts = useMemo(
+    () => pendingMatrixChanges.flatMap(item => item.shifts || []),
+    [pendingMatrixChanges],
+  );
+  const pendingMatrixAssignments = useMemo(
+    () => pendingMatrixChanges.flatMap(item => item.assignments || []),
+    [pendingMatrixChanges],
+  );
+  const pendingMatrixSegments = useMemo(
+    () => pendingMatrixChanges.flatMap(item => item.segments || []),
+    [pendingMatrixChanges],
+  );
+  const matrixShifts = useMemo(
+    () => [...filteredShifts, ...pendingMatrixShifts],
+    [filteredShifts, pendingMatrixShifts],
+  );
+  const matrixCoverageShifts = useMemo(
+    () => [...shiftsInRange, ...pendingMatrixShifts],
+    [pendingMatrixShifts, shiftsInRange],
+  );
+  const matrixAssignments = useMemo(
+    () => [...assignmentsInRange, ...pendingMatrixAssignments],
+    [assignmentsInRange, pendingMatrixAssignments],
+  );
+  const matrixSegments = useMemo(
+    () => [...taskSegments, ...pendingMatrixSegments],
+    [pendingMatrixSegments, taskSegments],
+  );
 
   const selectedShift = useMemo(
     () => allShifts.find(shift => String(shift.id) === String(selectedShiftId)) || null,
@@ -534,9 +685,9 @@ export default function Planning() {
     const workObjectIds = new Set([
       ...visibleTaskOccurrences.map(item => item.object_id),
       ...filteredShifts.flatMap(shift => [shift.object_id, ...(shift.object_ids || [])]),
-      ...taskSegments
-        .filter(segment => segment.status !== "removed" && visibleShiftIds.has(String(segment.shift_id)))
-        .map(segment => segment.object_id),
+      ...[...visibleShiftIds].flatMap(shiftId => (
+        activeTaskSegmentsByShift.get(shiftId) || []
+      ).map(segment => segment.object_id)),
     ].filter(Boolean).map(String));
     return objects.filter(object => {
       if (customerFilter !== "all" && String(object.customer_id) !== String(customerFilter)) return false;
@@ -546,7 +697,7 @@ export default function Planning() {
         .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
       return directMatch || workObjectIds.has(String(object.id));
     });
-  }, [customerFilter, filteredShifts, objects, search, taskSegments, visibleTaskOccurrences]);
+  }, [activeTaskSegmentsByShift, customerFilter, filteredShifts, objects, search, visibleTaskOccurrences]);
   const matrixPersonnel = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
     if (!query) return activePersonnel;
@@ -595,8 +746,8 @@ export default function Planning() {
 
   const runActionMutation = useMutation({
     mutationFn: payload => invokePlanningApi(payload),
-    onError: async error => {
-      if (Number(error?.status) === 409) await refreshPlanning();
+    onError: error => {
+      if (Number(error?.status) === 409) refreshPlanningInBackground();
       toast({
         variant: "destructive",
         title: "Planningactie niet opgeslagen",
@@ -611,6 +762,14 @@ export default function Planning() {
     const result = await runActionMutation.mutateAsync(request);
     mutationIntents.current.clear(scope, request.idempotency_key);
     return result;
+  };
+
+  const addPendingMatrixChange = change => {
+    setPendingMatrixChanges(current => [...current.filter(item => item.key !== change.key), change]);
+  };
+
+  const removePendingMatrixChange = key => {
+    setPendingMatrixChanges(current => current.filter(item => item.key !== key));
   };
 
   const rememberUndo = (result, description) => {
@@ -661,20 +820,43 @@ export default function Planning() {
       ...warningContext,
     });
     const name = personnelName(personnelItem);
-    const result = await runIntentMutation("assign", "planning-assign", {
-      action: "assign",
-      shift_id: shift.id,
-      slot_index: slotIndex,
-      personnel_id: personnelItem.id,
-      personnel_name: name,
-      warnings,
-      expected_shift_revision: Number(shift.revision || 1),
+    const pendingKey = createPlanningMutationKey("pending-assignment");
+    addPendingMatrixChange({
+      key: pendingKey,
+      shifts: [],
+      segments: [],
+      assignments: [normalizePlanningAssignment({
+        id: `pending-assignment-${pendingKey}`,
+        planning_shift_id: shift.id,
+        shift_id: shift.id,
+        personnel_id: personnelItem.id,
+        personnel_name: name,
+        slot_index: slotIndex,
+        status: "draft",
+        warnings,
+        _optimistic_pending: true,
+      })],
     });
-    await refreshPlanning();
-    const description = `${name} is eenmalig ingepland op ${shift.name}.`;
-    rememberUndo(result, description);
-    setLiveMessage(description);
-    setSelectedShiftId(null);
+    try {
+      const result = await runIntentMutation("assign", "planning-assign", {
+        action: "assign",
+        shift_id: shift.id,
+        slot_index: slotIndex,
+        personnel_id: personnelItem.id,
+        personnel_name: name,
+        warnings,
+        expected_shift_revision: Number(shift.revision || 1),
+      });
+      reconcilePlanningResult(result);
+      refreshPlanningInBackground();
+      const description = `${name} is eenmalig ingepland op ${shift.name}.`;
+      rememberUndo(result, description);
+      setLiveMessage(description);
+      setSelectedShiftId(null);
+      return result;
+    } finally {
+      removePendingMatrixChange(pendingKey);
+    }
   };
 
   const handleCandidateAssign = candidate => executeAssignment(
@@ -692,7 +874,8 @@ export default function Planning() {
       assignment_id: assignment.id,
       expected_shift_revision: Number(shift.revision || 1),
     });
-    await refreshPlanning();
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name}.`;
     rememberUndo(result, description);
     setLiveMessage(description);
@@ -711,22 +894,31 @@ export default function Planning() {
         Number(item.expectedShiftRevision || 1),
       ),
     });
-    await refreshPlanning();
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     setUndoStack(current => current.filter(entry => entry.auditEventId !== item.auditEventId));
     const message = result?.message || `Ongedaan gemaakt: ${item.description}`;
     setLiveMessage(message);
     toast({ title: "Planning hersteld", description: message });
   };
 
-  const finishTimelineAssignment = async (result, occurrence, personnelItem, serviceDate) => {
+  const finishTimelineAssignment = (result, occurrence, personnelItem, serviceDate) => {
     setStatusFilter("all");
-    await refreshPlanning();
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     const warnings = assignmentWarnings(result.assignment);
     const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
     const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
     toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Dienst gemaakt en ingepland", description });
     setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
-    setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
+    const resultSegment = (result.segments || []).find(item => (
+      String(item.task_occurrence_id) === String(occurrence.id)
+    ));
+    setExpandedServiceKey(serviceEditorKey(
+      result.shift?.id,
+      resultSegment?.id,
+      serviceDate || resultSegment?.start_date || occurrence.service_date,
+    ));
     setLiveMessage(description);
     return result;
   };
@@ -735,52 +927,76 @@ export default function Planning() {
     if (!occurrence || !personnelItem || runActionMutation.isPending) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
     if (!segment) return;
-    const result = await runIntentMutation(
-      `timeline-compose-and-assign:${occurrence.id}`,
-      "timeline-compose-and-assign",
-      {
-        action: "compose_and_assign",
-        personnel_id: personnelItem.id,
-        personnel_name: personnelName(personnelItem),
-        slot_index: 0,
-        required_count: 1,
-        assignment_source: "object_timeline_gap_drop",
-        expected_occurrence_revisions: {
-          [occurrence.id]: Number(occurrence.revision || 1),
+    const pendingKey = createPlanningMutationKey("pending-task-service");
+    addPendingMatrixChange(optimisticCompositionRecords({
+      key: pendingKey,
+      occurrence,
+      personnelItem,
+      segment,
+    }));
+    try {
+      const result = await runIntentMutation(
+        `timeline-compose-and-assign:${occurrence.id}`,
+        "timeline-compose-and-assign",
+        {
+          action: "compose_and_assign",
+          personnel_id: personnelItem.id,
+          personnel_name: personnelName(personnelItem),
+          slot_index: 0,
+          required_count: 1,
+          assignment_source: "object_timeline_gap_drop",
+          expected_occurrence_revisions: {
+            [occurrence.id]: Number(occurrence.revision || 1),
+          },
+          segments: [segment],
         },
-        segments: [segment],
-      },
-    );
-    return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+      );
+      return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+    } finally {
+      removePendingMatrixChange(pendingKey);
+    }
   };
 
   const createOpenOccurrenceSlice = async ({ occurrence, serviceDate, startTime, endTime }) => {
     if (!occurrence || runActionMutation.isPending) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
     if (!segment) return;
-    const result = await runIntentMutation(`timeline-open-shift:${occurrence.id}`, "timeline-open-shift", {
-      action: "compose_shift",
-      required_count: 1,
-      expected_occurrence_revisions: {
-        [occurrence.id]: Number(occurrence.revision || 1),
-      },
-      segments: [segment],
-    });
-    setStatusFilter("all");
-    await refreshPlanning();
-    const description = `Open dienst ${startTime}–${endTime} is gevormd binnen ${occurrence.task_name_snapshot || "de taak"}. Sleep nu een medewerker naar de open plaats.`;
-    toast({ title: "Open dienst gemaakt", description });
-    setSelectedShiftId(result.shift?.id || null);
-    setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
-    setSidePanelMode("employees");
-    setLiveMessage(description);
-    return result;
+    const pendingKey = createPlanningMutationKey("pending-open-task-service");
+    addPendingMatrixChange(optimisticCompositionRecords({ key: pendingKey, occurrence, segment }));
+    try {
+      const result = await runIntentMutation(`timeline-open-shift:${occurrence.id}`, "timeline-open-shift", {
+        action: "compose_shift",
+        required_count: 1,
+        expected_occurrence_revisions: {
+          [occurrence.id]: Number(occurrence.revision || 1),
+        },
+        segments: [segment],
+      });
+      setStatusFilter("all");
+      reconcilePlanningResult(result);
+      refreshPlanningInBackground();
+      const resultSegment = (result.segments || []).find(item => (
+        String(item.task_occurrence_id) === String(occurrence.id)
+      ));
+      const description = `Open dienst ${startTime}–${endTime} is gevormd binnen ${occurrence.task_name_snapshot || "de taak"}. Sleep nu een medewerker naar de open plaats.`;
+      toast({ title: "Open dienst gemaakt", description });
+      setSelectedShiftId(result.shift?.id || null);
+      setExpandedServiceKey(serviceEditorKey(
+        result.shift?.id,
+        resultSegment?.id,
+        serviceDate || resultSegment?.start_date || occurrence.service_date,
+      ));
+      setSidePanelMode("employees");
+      setLiveMessage(description);
+      return result;
+    } finally {
+      removePendingMatrixChange(pendingKey);
+    }
   };
 
   const resizeTimelineTaskSegment = async ({ occurrence, serviceDate, shift, segment, startDate, endDate, startTime, endTime }) => {
     if (!shift || !segment || runActionMutation.isPending) return;
-    const activeSegments = taskSegments
-      .filter(item => item.status !== "removed" && String(item.shift_id) === String(shift.id))
+    const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
     const occurrenceIds = [...new Set(activeSegments.map(item => String(item.task_occurrence_id)))];
     const occurrenceById = new Map(taskOccurrences.map(item => [String(item.id), item]));
@@ -803,10 +1019,18 @@ export default function Planning() {
     });
     const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
     setStatusFilter("all");
-    await refreshPlanning();
+    reconcilePlanningResult(result, { replaceShiftSegments: true });
+    refreshPlanningInBackground();
     const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
     toast({ title: "Diensttijd aangepast", description });
-    if (occurrence?.id) setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || startDate}`);
+    const resultSegment = (result.segments || []).find(item => (
+      String(item.task_occurrence_id) === String(occurrence?.id)
+    )) || result.segments?.[0];
+    setExpandedServiceKey(serviceEditorKey(
+      result.shift?.id || shift.id,
+      resultSegment?.id || segment.id,
+      serviceDate || resultSegment?.start_date || startDate,
+    ));
     setLiveMessage(description);
     return result;
   };
@@ -831,9 +1055,15 @@ export default function Planning() {
       });
 
       if (openShiftTarget) {
-        const targetShift = shiftsInRange.find(shift => String(shift.id) === openShiftTarget.shiftId);
+        const targetShift = shiftsInRangeById.get(String(openShiftTarget.shiftId));
         await executeAssignment(targetShift, personnelItem, openShiftTarget.slotIndex);
-        setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
+        const targetSegment = (activeTaskSegmentsByShift.get(String(openShiftTarget.shiftId)) || [])
+          .find(item => String(item.task_occurrence_id) === String(occurrence.id));
+        setExpandedServiceKey(serviceEditorKey(
+          targetShift?.id,
+          targetSegment?.id,
+          serviceDate || targetSegment?.start_date || occurrence.service_date,
+        ));
         return;
       }
       const description = `${personnelName(personnelItem)} is al gekoppeld of er is op ${serviceDate} geen vrije dienst die volledig binnen deze kalenderdag valt. Open een nachtdienst expliciet om de volledige inzet te beoordelen.`;
@@ -857,18 +1087,33 @@ export default function Planning() {
       return;
     }
 
-    const result = await runIntentMutation("matrix-compose-and-assign", "matrix-compose-and-assign", {
-      action: "compose_and_assign",
-      personnel_id: personnelItem.id,
-      personnel_name: personnelName(personnelItem),
-      slot_index: 0,
-      assignment_source: perspective === "object" ? "object_matrix_drop" : "employee_matrix_drop",
-      expected_occurrence_revisions: {
-        [occurrence.id]: Number(occurrence.revision || 1),
-      },
-      segments,
-    });
-    return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+    const pendingKey = createPlanningMutationKey("pending-task-service");
+    addPendingMatrixChange(optimisticCompositionRecords({
+      key: pendingKey,
+      occurrence,
+      personnelItem,
+      segment: segments[0],
+    }));
+    try {
+      const result = await runIntentMutation(
+        `matrix-compose-and-assign:${occurrence.id}`,
+        "matrix-compose-and-assign",
+        {
+          action: "compose_and_assign",
+          personnel_id: personnelItem.id,
+          personnel_name: personnelName(personnelItem),
+          slot_index: 0,
+          assignment_source: perspective === "object" ? "object_matrix_drop" : "employee_matrix_drop",
+          expected_occurrence_revisions: {
+            [occurrence.id]: Number(occurrence.revision || 1),
+          },
+          segments,
+        },
+      );
+      return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
+    } finally {
+      removePendingMatrixChange(pendingKey);
+    }
   };
 
   const openOccurrenceStaffing = occurrence => {
@@ -959,7 +1204,8 @@ export default function Planning() {
       end_time: payload.end_time,
       expected_shift_revision: Number(payload.shift.revision || 1),
     });
-    await refreshPlanning();
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     const description = action === "copy"
       ? `${payload.shift.name} is zonder medewerkers gekopieerd naar ${payload.service_date}.`
       : `${payload.shift.name} is verplaatst naar ${payload.service_date}.`;
@@ -978,7 +1224,8 @@ export default function Planning() {
 
   const handleCompositionSave = async payload => {
     const result = await runActionMutation.mutateAsync(payload);
-    await refreshPlanning();
+    reconcilePlanningResult(result, { replaceShiftSegments: Boolean(composer?.shift) });
+    refreshPlanningInBackground();
     const description = `${result.shift?.service_name_snapshot || result.shift?.name || "Dienst"} is als concept opgeslagen met ${result.segments?.length || 0} taaksegmenten.`;
     toast({
       title: composer?.shift ? "Dienstinhoud bijgewerkt" : "Conceptdienst samengesteld",
@@ -991,8 +1238,7 @@ export default function Planning() {
   };
 
   const handleCancelTaskShift = async shift => {
-    const occurrenceIds = [...new Set(taskSegments
-      .filter(segment => segment.status !== "removed" && String(segment.shift_id) === String(shift.id))
+    const occurrenceIds = [...new Set((activeTaskSegmentsByShift.get(String(shift.id)) || [])
       .map(segment => String(segment.task_occurrence_id)))];
     const result = await runActionMutation.mutateAsync({
       action: "cancel_task_shift",
@@ -1004,7 +1250,8 @@ export default function Planning() {
         Number(taskOccurrences.find(occurrence => String(occurrence.id) === id)?.revision || 1),
       ])),
     });
-    await refreshPlanning();
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     const description = `${shift.name || "Conceptdienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
     toast({ title: "Conceptdienst verwijderd", description });
     setSelectedShiftId(null);
@@ -1022,7 +1269,7 @@ export default function Planning() {
         : []
     ));
     const vacantCount = ownedShiftsInRange.reduce((count, shift) => {
-      const assigned = active.filter(item => String(item.planning_shift_id) === String(shift.id)).length;
+      const assigned = (assignmentsInRangeByShift.get(String(shift.id)) || []).length;
       return count + Math.max(0, Math.max(1, Number(shift.required_count || 1)) - assigned);
     }, 0);
     const coverage = taskCoverageSummary(ownedTaskOccurrencesInRange, taskSegments, shiftsInRange);
@@ -1051,7 +1298,7 @@ export default function Planning() {
       staffingOnlyCount,
       securityPlanWarningCount,
     };
-  }, [occurrencePlanningStates, ownedAssignmentsInRange, ownedShiftsInRange, ownedTaskOccurrencesInRange, shiftsInRange, taskSegments]);
+  }, [assignmentsInRangeByShift, occurrencePlanningStates, ownedAssignmentsInRange, ownedShiftsInRange, ownedTaskOccurrencesInRange, shiftsInRange, taskSegments]);
   const publicationStats = useMemo(() => {
     const taskCoverage = taskCoverageSummary(ownedTaskOccurrencesInRange, taskSegments, shiftsInRange);
     const securityPlanWarningCount = ownedTaskOccurrencesInRange.filter(occurrence => (
@@ -1092,7 +1339,7 @@ export default function Planning() {
     },
     onSuccess: async result => {
       mutationIntents.current.clear("publish");
-      await refreshPlanning();
+      await refreshPlanning({ includePublications: true });
       setPublishOpen(false);
       setUndoStack([]);
       const message = `Versie ${result?.publication?.version || result?.version || ""} is gepubliceerd voor ${rangeLabel}.`;
@@ -1120,7 +1367,7 @@ export default function Planning() {
       setAnchorDate(current => addDays(current, direction * step));
     }
     setSelectedShiftId(null);
-    setExpandedTaskCardKey(null);
+    setExpandedServiceKey(null);
   };
 
   const updateCustomPeriod = (nextStartValue, nextEndValue) => {
@@ -1133,7 +1380,7 @@ export default function Planning() {
     setCustomPeriodEnd(toDateKey(nextRange.end));
     setAnchorDate(nextRange.start);
     setSelectedShiftId(null);
-    setExpandedTaskCardKey(null);
+    setExpandedServiceKey(null);
   };
 
   const goToToday = () => {
@@ -1145,7 +1392,7 @@ export default function Planning() {
     }
     setAnchorDate(today);
     setSelectedShiftId(null);
-    setExpandedTaskCardKey(null);
+    setExpandedServiceKey(null);
   };
 
   const isLoading = [
@@ -1156,7 +1403,7 @@ export default function Planning() {
     personnelQuery,
     objectsQuery,
     routesQuery,
-  ].some(query => query.isLoading) || bootstrapMutation.isPending;
+  ].some(query => query.isLoading);
   const loadError = [
     shiftsQuery.error,
     assignmentsQuery.error,
@@ -1172,7 +1419,7 @@ export default function Planning() {
         onPerspectiveChange={nextPerspective => {
           setPerspective(nextPerspective);
           setSelectedShiftId(null);
-          setExpandedTaskCardKey(null);
+          setExpandedServiceKey(null);
         }}
         compactMode={compactMode}
         onCompactModeChange={setCompactMode}
@@ -1232,20 +1479,19 @@ export default function Planning() {
               compact={compactMode}
               zoom={planningZoom}
               days={range.days}
-              shifts={filteredShifts}
-              coverageShifts={shiftsInRange}
-              assignments={assignmentsInRange}
-              segments={taskSegments}
+              shifts={matrixShifts}
+              coverageShifts={matrixCoverageShifts}
+              assignments={matrixAssignments}
+              segments={matrixSegments}
               occurrences={visibleTaskOccurrences}
               personnel={matrixPersonnel}
               objects={matrixObjects}
               routes={routes}
               customers={customers}
               selectedShiftId={selectedShiftId}
-              expandedTaskCardKey={expandedTaskCardKey}
-              onExpandedTaskCardChange={setExpandedTaskCardKey}
+              expandedServiceKey={expandedServiceKey}
+              onExpandedServiceChange={setExpandedServiceKey}
               onSelectOccurrence={occurrence => openTaskComposer({ occurrence })}
-              onFillStaffing={openOccurrenceStaffing}
               onSelectShift={shift => {
                 setSelectedShiftId(shift.id);
                 setSidePanelMode(perspective === "object" ? "employees" : "tasks");
@@ -1259,7 +1505,7 @@ export default function Planning() {
                 idempotencyKey: createPlanningMutationKey("cancel-task-shift"),
               })}
               onCreateOpenTaskSlice={payload => createOpenOccurrenceSlice(payload).catch(() => undefined)}
-              onResizeTaskSegment={payload => resizeTimelineTaskSegment(payload).catch(() => undefined)}
+              onResizeTaskSegment={resizeTimelineTaskSegment}
               mutationPending={runActionMutation.isPending}
               taskOccurrenceCount={visibleTaskOccurrences.length}
               isLoading={isLoading}
@@ -1327,7 +1573,7 @@ export default function Planning() {
             setPerspective("employee");
             setSidePanelMode("tasks");
             setSelectedShiftId(null);
-            setExpandedTaskCardKey(null);
+            setExpandedServiceKey(null);
           }}
           className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground"
         >

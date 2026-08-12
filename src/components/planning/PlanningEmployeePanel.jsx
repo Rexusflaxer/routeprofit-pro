@@ -69,7 +69,7 @@ function selectedShiftTiming(shift) {
   };
 }
 
-function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes }) {
+const CandidateCard = React.memo(function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes }) {
   const [expanded, setExpanded] = useState(false);
   const name = personnelName(candidate.personnel);
   const critical = Number(candidate.criticalCount || 0);
@@ -196,7 +196,7 @@ function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign,
       )}
     </Draggable>
   );
-}
+});
 
 export default function PlanningEmployeePanel({
   selectedShift,
@@ -210,6 +210,24 @@ export default function PlanningEmployeePanel({
 }) {
   const [search, setSearch] = useState("");
   const shiftTiming = useMemo(() => selectedShiftTiming(selectedShift), [selectedShift]);
+  const qualificationsByPersonnel = useMemo(() => {
+    const grouped = new Map();
+    qualifications.forEach(item => {
+      const key = String(item.personnel_id || "");
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(item);
+    });
+    return grouped;
+  }, [qualifications]);
+  const passesByPersonnel = useMemo(() => {
+    const grouped = new Map();
+    securityPasses.forEach(item => {
+      const key = String(item.personnel_id || "");
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(item);
+    });
+    return grouped;
+  }, [securityPasses]);
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
     if (!query) return candidates;
@@ -301,8 +319,8 @@ export default function PlanningEmployeePanel({
                 selectedShift={selectedShift}
                 shiftTiming={shiftTiming}
                 onAssign={onAssign}
-                qualifications={qualifications.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}
-                passes={securityPasses.filter(item => String(item.personnel_id) === String(candidate.personnel.id))}
+                qualifications={qualificationsByPersonnel.get(String(candidate.personnel.id)) || []}
+                passes={passesByPersonnel.get(String(candidate.personnel.id)) || []}
               />
             )) : (
               <div className="m-2 rounded-md border border-dashed border-border bg-card p-4 text-center">
