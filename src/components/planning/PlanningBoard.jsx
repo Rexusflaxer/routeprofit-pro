@@ -15,7 +15,8 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  *   accepts PERSONNEL; a cross-day shift opens full-shift confirmation.
  *
  * Open task intervals remain cards. Planned coverage is rendered as a
- * standalone full-width service block whose time editor can expand in place.
+ * standalone full-width service block with direct resize handles on its
+ * upper and lower edge.
  * Legacy props such as `view`, `weeks`, `customers` and
  * `taskOccurrenceCount` remain safe to pass; week/custom-period behavior is
  * expressed entirely by the `days` collection.
@@ -34,8 +35,6 @@ export default function PlanningBoard({
   objects = [],
   routes = [],
   selectedShiftId,
-  expandedServiceKey,
-  onExpandedServiceChange,
   onSelectOccurrence,
   onSelectShift,
   onUnassign,
@@ -74,8 +73,6 @@ export default function PlanningBoard({
       objects={objects}
       routes={routes}
       selectedShiftId={selectedShiftId}
-      expandedServiceKey={expandedServiceKey}
-      onExpandedServiceChange={onExpandedServiceChange}
       onSelectOccurrence={onSelectOccurrence}
       onSelectShift={onSelectShift}
       onUnassign={onUnassign}

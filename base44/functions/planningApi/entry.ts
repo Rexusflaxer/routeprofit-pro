@@ -363,6 +363,7 @@ const PLANNING_LEASE_RENEWAL_CONCURRENCY = 8;
 const PLANNING_IDEMPOTENCY_CLAIM_MS = 2 * 60 * 1000;
 const IDEMPOTENCY_REGISTRY_KEY = 'idempotency_registry:v2';
 const MAX_COMPOSED_SHIFT_MINUTES = 24 * 60;
+const MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES = 12 * 60;
 
 function coordinatorOrder(left: LooseRecord, right: LooseRecord) {
   const createdOrder = String(left.created_date || '').localeCompare(String(right.created_date || ''));
@@ -2990,6 +2991,12 @@ async function composeShift(
   const compositionEnvelopeMinutes = (
     normalizedSegments.at(-1)!._interval.end - normalizedSegments[0]._interval.start
   );
+  if (composeAndAssignMode && compositionEnvelopeMinutes > MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES) {
+    throw new ApiError(409, 'Een automatisch ingeplande dienst mag maximaal 12 uur beslaan', {
+      duration_minutes: compositionEnvelopeMinutes,
+      maximum_duration_minutes: MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES,
+    });
+  }
   if (compositionEnvelopeMinutes > MAX_COMPOSED_SHIFT_MINUTES) {
     throw new ApiError(409, 'Een samengestelde dienst mag maximaal 24 uur beslaan', {
       duration_minutes: compositionEnvelopeMinutes,

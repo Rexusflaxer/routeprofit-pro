@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_AUTOMATIC_TASK_SERVICE_MINUTES,
   buildTimelineResizeCompositionPayload,
   clockToTimelineMinutes,
   getSuggestedTaskTimelineAllocation,
@@ -101,7 +102,7 @@ describe("taakvraag en voorgestelde tijdlijndekking", () => {
     });
   });
 
-  it("splitst 06:00-20:00 standaard in een voorstel van acht uur en daarna zes uur", () => {
+  it("splitst 06:00-20:00 standaard in maximaal twaalf uur en daarna twee uur", () => {
     const first = getSuggestedTaskTimelineAllocation({
       occurrence: reception,
       serviceDate: reception.service_date,
@@ -110,17 +111,17 @@ describe("taakvraag en voorgestelde tijdlijndekking", () => {
     });
     expect(first).toMatchObject({
       startTime: "06:00",
-      endTime: "14:00",
-      durationMinutes: 480,
+      endTime: "18:00",
+      durationMinutes: 720,
       segment: {
         start_date: "2026-08-15",
         end_date: "2026-08-15",
         start_time: "06:00",
-        end_time: "14:00",
+        end_time: "18:00",
       },
     });
 
-    const morning = segment({ id: "segment-morning", shiftId: "shift-morning" });
+    const morning = segment({ id: "segment-morning", shiftId: "shift-morning", end: "18:00" });
     const second = getSuggestedTaskTimelineAllocation({
       occurrence: reception,
       serviceDate: reception.service_date,
@@ -128,9 +129,9 @@ describe("taakvraag en voorgestelde tijdlijndekking", () => {
       shifts: [{ id: "shift-morning", status: "draft" }],
     });
     expect(second).toMatchObject({
-      startTime: "14:00",
+      startTime: "18:00",
       endTime: "20:00",
-      durationMinutes: 360,
+      durationMinutes: 120,
     });
     expect(getTaskTimelineGaps({
       occurrence: reception,
@@ -138,11 +139,84 @@ describe("taakvraag en voorgestelde tijdlijndekking", () => {
       segments: [morning],
       shifts: [{ id: "shift-morning", status: "draft" }],
     })).toEqual([expect.objectContaining({
-      startMinute: 840,
+      startMinute: 1080,
       endMinute: 1200,
-      durationMinutes: 360,
-      allocatableMinutes: 360,
+      durationMinutes: 120,
+      allocatableMinutes: 120,
     })]);
+  });
+
+  it("verdeelt een 24/7-taak in twee automatische diensten van twaalf uur", () => {
+    const fullDay = {
+      ...reception,
+      id: "occurrence-full-day",
+      service_date: "2026-08-15",
+      end_date: "2026-08-16",
+      window_start_time: "00:00",
+      window_end_time: "00:00",
+      required_minutes: 1440,
+    };
+    expect(MAX_AUTOMATIC_TASK_SERVICE_MINUTES).toBe(720);
+    const first = getSuggestedTaskTimelineAllocation({
+      occurrence: fullDay,
+      serviceDate: "2026-08-15",
+      preferredMinutes: 24 * 60,
+    });
+    expect(first).toMatchObject({
+      startTime: "00:00",
+      endTime: "12:00",
+      durationMinutes: 720,
+      segment: {
+        start_date: "2026-08-15",
+        end_date: "2026-08-15",
+        start_time: "00:00",
+        end_time: "12:00",
+      },
+    });
+
+    const firstSegment = segment({
+      id: "segment-full-day-first",
+      shiftId: "shift-full-day-first",
+      occurrenceId: fullDay.id,
+      start: "00:00",
+      end: "12:00",
+    });
+    const second = getSuggestedTaskTimelineAllocation({
+      occurrence: fullDay,
+      serviceDate: "2026-08-15",
+      segments: [firstSegment],
+      shifts: [{ id: "shift-full-day-first", status: "draft" }],
+    });
+    expect(second).toMatchObject({
+      startTime: "12:00",
+      endTime: "24:00",
+      durationMinutes: 720,
+      segment: {
+        start_date: "2026-08-15",
+        end_date: "2026-08-16",
+        start_time: "12:00",
+        end_time: "00:00",
+      },
+    });
+
+    const secondSegment = segment({
+      id: "segment-full-day-second",
+      shiftId: "shift-full-day-second",
+      occurrenceId: fullDay.id,
+      start: "12:00",
+      end: "00:00",
+      startDate: "2026-08-15",
+      endDate: "2026-08-16",
+    });
+    expect(getTaskTimelineGaps({
+      occurrence: fullDay,
+      serviceDate: "2026-08-15",
+      segments: [firstSegment, secondSegment],
+      shifts: [
+        { id: "shift-full-day-first", status: "draft" },
+        { id: "shift-full-day-second", status: "draft" },
+      ],
+    })).toEqual([]);
   });
 
   it("behoudt een korte brand- en sluitronde exact op 22:00-22:25", () => {

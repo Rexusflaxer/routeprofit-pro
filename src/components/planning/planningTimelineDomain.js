@@ -8,7 +8,8 @@ import {
 
 export const TIMELINE_DAY_MINUTES = 24 * 60;
 export const DEFAULT_TIMELINE_SNAP_MINUTES = 5;
-export const DEFAULT_SUGGESTED_ALLOCATION_MINUTES = 8 * 60;
+export const MAX_AUTOMATIC_TASK_SERVICE_MINUTES = 12 * 60;
+export const DEFAULT_SUGGESTED_ALLOCATION_MINUTES = MAX_AUTOMATIC_TASK_SERVICE_MINUTES;
 
 const CLOCK_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 
@@ -243,8 +244,8 @@ export function getTaskTimelineGaps({ occurrence, serviceDate, segments = [], sh
 }
 
 /**
- * Suggest the next service segment. Long continuous gaps default to eight
- * hours, while a shorter gap or flexible required duration is kept exact.
+ * Suggest the next service segment. Automatic employee assignment never
+ * exceeds twelve hours; a shorter gap or flexible duration is kept exact.
  */
 export function getSuggestedTaskTimelineAllocation({
   occurrence,
@@ -255,7 +256,10 @@ export function getSuggestedTaskTimelineAllocation({
 } = {}) {
   const preferred = Math.max(
     DEFAULT_TIMELINE_SNAP_MINUTES,
-    Math.trunc(finiteNumber(preferredMinutes) || DEFAULT_SUGGESTED_ALLOCATION_MINUTES),
+    Math.min(
+      MAX_AUTOMATIC_TASK_SERVICE_MINUTES,
+      Math.trunc(finiteNumber(preferredMinutes) || DEFAULT_SUGGESTED_ALLOCATION_MINUTES),
+    ),
   );
   const gap = getTaskTimelineGaps({ occurrence, serviceDate, segments, shifts })[0];
   if (!gap) return null;

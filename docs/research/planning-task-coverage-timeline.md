@@ -59,12 +59,12 @@ Er is één kaartweergave; een globale 00:00-24:00-tijdlijn en een transposeknop
 - De medewerkerwerkvoorraad rechts blijft buiten deze matrixscroll.
 - Een ongeplande taak is een compacte kaart met taaknaam, exact venster, tijddekking en bezetting.
 - Na een geslaagde medewerkerdrop wordt het geraakte open interval direct vervangen door een zelfstandige dienst. De overige open intervallen blijven met hun exacte tijden als taakkaarten zichtbaar.
-- De lokale verticale tijdrail wordt vanuit één zelfstandige dienst geopend en loopt uitsluitend van taakstart tot taakeinde, bijvoorbeeld 06:00-20:00. De dienst kan daarin via verticale grepen korter of langer worden gemaakt.
+- Een zelfstandige enkelvoudige taakdienst heeft direct op de boven- en onderrand een resizegreep. De kaart klapt niet uit; slepen verandert de tijd in dezelfde compacte matrix.
 - Een volledig afgedekte taak heeft in de matrix geen taakkaart meer. Alleen de gevormde diensten blijven zichtbaar; een onbemande dienst behoudt daarin een expliciete open bezettingsplaats.
 - Open taakkaarten en diensten gebruiken beide de volledige celbreedte en staan op starttijd gesorteerd. De dienst is nooit genest in een taakkaart.
 - Een taak korter dan het minimale klikvlak krijgt een groter bedieningsvlak, terwijl begin-/eindlabels de echte tijd blijven aangeven.
 - Nachttaken verschijnen als twee dagsneden met dezelfde occurrence- en dienstidentiteit.
-- Compactmodus verkleint gesloten kaarten, maar verbergt een geopende lokale tijdverdeling niet.
+- Compactmodus behoudt de randgrepen en exacte tijden zonder een tweede tijdweergave te openen.
 
 ## Visuele lagen en toestanden
 
@@ -96,16 +96,16 @@ Status mag nooit alleen door kleur worden overgebracht. Iedere status heeft teks
 
 ### Standaardduur en plaatsingsalgoritme
 
-De UX-standaard voor een nieuw dienstsegment is **8 uur**. Dit is een aanpasbare planningsvoorkeur en geen CAO- of wettelijke regel.
+Een medewerkerdrop op een open taak vormt automatisch maximaal **12 uur**. Dit is een veiligheidsgrens voor automatische dienstvorming en geen CAO- of wettelijke uitspraak; handmatig gevormde open diensten houden hun afzonderlijke compositieregels.
 
 Voor een `continuous` taak kiest de ghostkaart:
 
 1. het geraakte, nog ongedekte aaneengesloten interval;
 2. als start standaard het begin van dat interval;
-3. als einde de eerste van: einde medewerkerbeschikbaarheid, einde ongedekt interval of `start + 8 uur`;
-4. als het gehele resterende interval maximaal 8 uur duurt, exact het volledige restant.
+3. als einde de eerste van: einde medewerkerbeschikbaarheid, einde ongedekt interval of `start + 12 uur`;
+4. als het gehele resterende interval maximaal 12 uur duurt, exact het volledige restant.
 
-Voor `06:00-20:00` ontstaat daardoor standaard `06:00-14:00`; het restant wordt `14:00-20:00`. De planner kan de overdracht vervolgens naar bijvoorbeeld 12:00 verplaatsen.
+Voor `06:00-20:00` ontstaat daardoor standaard `06:00-18:00`; het restant wordt `18:00-20:00`. De planner kan de onderrand direct naar bijvoorbeeld 12:00 slepen, waarna `12:00-20:00` opnieuw als open taakkaart verschijnt. Een 24/7-taak wordt zo automatisch voorgesteld als `00:00-12:00` en daarna `12:00-24:00`.
 
 Voor `time_window` bepaalt de verticale drop-positie de voorgestelde start, afgerond volgens het snapcontract. LOC houdt de vereiste duur intact en begrenst het segment binnen het toegestane venster.
 
@@ -123,7 +123,7 @@ Beschikbaarheid mag een voorstel verkorten, maar een harde beschikbaarheids- of 
 
 ## Snel een open dienst vormen
 
-Een ongedekt taakdeel heeft naast drag-and-drop een zichtbare actie `+ Open dienst`. Deze actie gebruikt hetzelfde 8-uursvoorstel, maar maakt geen medewerkerstoewijzing.
+Een ongedekt taakdeel heeft naast drag-and-drop een zichtbare actie `+ Open dienst`. Deze actie gebruikt hetzelfde 12-uursvoorstel, maar maakt geen medewerkerstoewijzing.
 
 De aanvullende actie `Dienstindeling maken` biedt:
 
@@ -139,7 +139,7 @@ De preview toont de resulterende diensten vóór bevestiging. Tijddekking kan da
 ### Zelfstandige dienst
 
 - Boven- en onderrand hebben duidelijke resizegrepen.
-- Resizen gebeurt in de uitklapbare lokale tijdrail van de dienst, blijft binnen het taakvenster en mag niet door een ander segment heen lopen.
+- Resizen gebeurt rechtstreeks aan de rand van de zelfstandige dienstkaart; de kaart kan niet worden uitgeklapt. De rand blijft binnen het taakvenster en mag niet door een ander segment heen lopen.
 - Live tekst toont bijvoorbeeld `06:00-12:00 · 6u · 8u taak resteert`.
 - Een korter segment maakt de taak opnieuw gedeeltelijk open.
 - Een verlenging kan nooit meer unieke minuten claimen dan nog vereist zijn.
@@ -222,14 +222,14 @@ Waarschuwen volgens bedrijfsinstellingen:
 - **Volledige tijddekking zonder medewerker:** verberg de taakkaart in de matrix, behoud de zelfstandige dienst met open plaats en behoud de taak in de personeelswerkvoorraad als expliciete bezettingsactie.
 - **Flexibele taak vol:** ongebruikte minuten van het toegestane `time_window` zijn geen open gat.
 - **Meervoudige bezetting:** iedere vereiste positie krijgt een eigen dekkingsbaan; overbezetting boven de klantvraag wordt geblokkeerd.
-- **Touch:** resizen gebruikt grotere grepen en een bevestigende tijdbalk; drag is nooit de enige bedieningsroute.
+- **Touch:** resizen gebruikt grotere randgrepen en een bevestigende tijdbadge; drag is nooit de enige bedieningsroute.
 
 ## Toetsbare kernscenario's
 
 ### Lange receptietaak
 
 1. Receptie `06:00-20:00`, `continuous`, start als `0u / 14u`.
-2. Jan naar de taak slepen toont en maakt standaard `06:00-14:00`.
+2. Jan naar de taak slepen toont en maakt standaard `06:00-18:00`.
 3. De onderrand naar 12:00 resizen levert `6u / 14u` en open deel `12:00-20:00`.
 4. Sara op het open deel slepen maakt exact `12:00-20:00`.
 5. De laatste open taakkaart verdwijnt; alleen de twee zelfstandige diensten blijven staan en een derde standaarddrop is geblokkeerd.
@@ -254,8 +254,8 @@ Waarschuwen volgens bedrijfsinstellingen:
 ### Fase 1 - taakgestuurde kaartmatrix
 
 - objectrijen met dagkolommen, taakkaarten uitsluitend voor open uren en zelfstandige volle-breedte diensten voor gevormde uren;
-- exacte open-intervallen en een vanuit de dienst uitklapbare lokale verticale tijdrail;
-- 8-uursvoorstel en 5-minutensnap;
+- exacte open-intervallen en directe resizegrepen op de dienstkaart, zonder uitklapweergave;
+- harde automatische 12-uursgrens en 5-minutensnap;
 - medewerkerdrag met ghostkaart en `compose_and_assign`;
 - losse resizegrepen;
 - gescheiden tijd- en personeelsstatus;
