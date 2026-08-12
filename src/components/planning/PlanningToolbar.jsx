@@ -6,9 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  ArrowRightLeft,
-  Clock3,
-  LayoutGrid,
   Minimize2,
   Rows3,
   Search,
@@ -34,11 +31,6 @@ const PERSPECTIVES = [
 const VIEWS = [
   { value: "week", label: "Week" },
   { value: "period", label: "Periode" },
-];
-
-const PLANNING_LAYOUTS = [
-  { value: "timeline", label: "Tijdlijn", icon: Clock3 },
-  { value: "cards", label: "Kaarten", icon: LayoutGrid },
 ];
 
 function Segment({ options, value, onChange, ariaLabel }) {
@@ -73,10 +65,6 @@ function Segment({ options, value, onChange, ariaLabel }) {
 export default function PlanningToolbar({
   perspective,
   onPerspectiveChange,
-  orientation,
-  onOrientationChange,
-  planningLayout = "timeline",
-  onPlanningLayoutChange,
   compactMode,
   onCompactModeChange,
   zoomValue,
@@ -136,24 +124,6 @@ export default function PlanningToolbar({
           onChange={onPerspectiveChange}
           ariaLabel="Planningperspectief"
         />
-        <Segment
-          options={PLANNING_LAYOUTS}
-          value={planningLayout}
-          onChange={onPlanningLayoutChange}
-          ariaLabel="Planningindeling"
-        />
-        {planningLayout === "cards" && (
-          <Button
-            variant={orientation === "days_horizontal" ? "secondary" : "outline"}
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            onClick={() => onOrientationChange(orientation === "days_horizontal" ? "resources_horizontal" : "days_horizontal")}
-            aria-label="Horizontale en verticale matrixweergave wisselen"
-            title="Rijen en kolommen wisselen"
-          >
-            <ArrowRightLeft className="h-3.5 w-3.5" />
-          </Button>
-        )}
         <Segment
           options={VIEWS}
           value={normalizedView}

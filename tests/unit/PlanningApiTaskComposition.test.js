@@ -371,6 +371,114 @@ describe("planningApi dienstsamenstelling", () => {
     ]);
   });
 
+  it("plant en auditeert een taak als het uitvoerende bedrijf nog niet is gekoppeld", async () => {
+    const demand = occurrence("occurrence-reception-unresolved-company", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
+    entities.SurveillanceObject.records[0].default_operating_company_id = null;
+    entities.SurveillanceObject.records[0].contract_assignment_policy = "strict_contract_match";
+    const payload = {
+      personnel_id: "personnel-1",
+      assignment_source: "object_matrix_drag",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    };
+    const mutationContext = context("compose-and-assign-unresolved-company");
+
+    const result = await backend.composeAndAssign(base44, user, payload, mutationContext);
+
+    expect(result.shift).toMatchObject({
+      company_id: null,
+      contract_assignment_policy: "allow_manual_review",
+      status: "draft",
+    });
+    expect(result.shift.service_context_snapshot.composition_warnings).toContainEqual(expect.objectContaining({
+      code: "operating_company_unresolved",
+      severity: "warning",
+      details: expect.objectContaining({ object_ids: ["object-1"] }),
+    }));
+    expect(result.segments).toEqual([
+      expect.objectContaining({ company_id: null, task_occurrence_id: demand.id }),
+    ]);
+    expect(result.assignment).toMatchObject({ personnel_id: "personnel-1", status: "draft" });
+    expect(entities.PlanningAuditEvent.records).toEqual([
+      expect.objectContaining({ action: "compose_and_assign", shift_id: result.shift.id }),
+    ]);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", remaining_minutes: 0 });
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.planning_composition_reservation).toBeUndefined();
+
+    const replay = await backend.composeAndAssign(base44, user, payload, mutationContext);
+    expect(replay.idempotent).toBe(true);
+    expect(entities.PlanningShift.records).toHaveLength(1);
+    expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(1);
+  });
+
+  it("maakt een open conceptdienst zonder bedrijfskoppeling", async () => {
+    const demand = occurrence("occurrence-round-unresolved-company", "object-1", "22:00", "22:25", 25);
+    const { base44, entities } = setup([demand]);
+    entities.SurveillanceObject.records[0].default_operating_company_id = null;
+
+    const result = await backend.composeShift(base44, user, {
+      required_count: 1,
+      segments: [{ task_occurrence_id: demand.id, start_time: "22:00", end_time: "22:25" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-open-unresolved-company"));
+
+    expect(result.shift).toMatchObject({
+      company_id: null,
+      contract_assignment_policy: "allow_manual_review",
+      required_count: 1,
+      status: "draft",
+    });
+    expect(result.composition_warnings).toContainEqual(expect.objectContaining({
+      code: "operating_company_unresolved",
+    }));
+    expect(result.assignments).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toEqual([
+      expect.objectContaining({ action: "compose_shift", shift_id: result.shift.id }),
+    ]);
+  });
+
+  it("neemt een bekend bedrijf niet over als een ander object nog unresolved is", async () => {
+    const reception = {
+      ...occurrence("occurrence-reception-partial-company", "object-1", "08:00", "12:00", 240),
+      company_id: "company-1",
+    };
+    const round = {
+      ...occurrence("occurrence-round-partial-company", "object-2", "12:00", "13:00", 60),
+      company_id: null,
+    };
+    const { base44, entities } = setup([reception, round]);
+    entities.SurveillanceObject.records[1].default_operating_company_id = null;
+
+    const result = await backend.composeShift(base44, user, {
+      segments: [
+        { task_occurrence_id: reception.id, start_time: "08:00", end_time: "12:00" },
+        { task_occurrence_id: round.id, start_time: "12:00", end_time: "13:00" },
+      ],
+      expected_occurrence_revisions: { [reception.id]: 1, [round.id]: 1 },
+    }, context("compose-partial-company-context"));
+
+    expect(result.shift).toMatchObject({
+      company_id: null,
+      object_ids: ["object-1", "object-2"],
+      contract_assignment_policy: "allow_manual_review",
+    });
+    expect(result.composition_warnings).toContainEqual(expect.objectContaining({
+      code: "operating_company_unresolved",
+      details: expect.objectContaining({
+        object_ids: ["object-2"],
+        configured_company_ids: ["company-1"],
+      }),
+    }));
+  });
+
   it("laat bij een vooraf ontbrekende medewerker geen lege dienst of reservering achter", async () => {
     const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
@@ -390,28 +498,43 @@ describe("planningApi dienstsamenstelling", () => {
     expect(unchangedOccurrence.metadata?.planning_composition_reservation).toBeUndefined();
   });
 
-  it("kan na coordinator-initialisatie direct opnieuw proberen zonder occurrence-revisiondrift", async () => {
-    const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
-    const { base44, entities } = setup([demand]);
+  it("kan na een bedrijfsconflict direct opnieuw proberen zonder occurrence-revisiondrift", async () => {
+    const morning = occurrence("occurrence-reception-company-retry", "object-1", "08:00", "12:00", 240);
+    const afternoon = occurrence("occurrence-round-company-retry", "object-2", "12:00", "16:00", 240);
+    const { base44, entities } = setup([morning, afternoon]);
     entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
-    entities.SurveillanceObject.records[0].default_operating_company_id = null;
+    entities.SurveillanceObject.records[1].default_operating_company_id = "company-2";
     const payload = {
       personnel_id: "personnel-1",
-      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
-      expected_occurrence_revisions: { [demand.id]: 1 },
+      segments: [
+        { task_occurrence_id: morning.id, start_time: "08:00", end_time: "12:00" },
+        { task_occurrence_id: afternoon.id, start_time: "12:00", end_time: "16:00" },
+      ],
+      expected_occurrence_revisions: { [morning.id]: 1, [afternoon.id]: 1 },
     };
-    const retryContext = context("compose-retry-after-coordinator-init");
+    const retryContext = context("compose-retry-after-company-conflict");
 
     await expect(backend.composeAndAssign(base44, user, payload, retryContext))
-      .rejects.toMatchObject({ status: 409 });
+      .rejects.toMatchObject({
+        status: 409,
+        message: "Taken van verschillende uitvoerende bedrijven kunnen niet in één dienst",
+        details: { company_ids: ["company-1", "company-2"] },
+      });
     expect(entities.PlanningMutationCoordinator.records.length).toBeGreaterThanOrEqual(2);
-    const unchangedOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
-    expect(unchangedOccurrence.revision).toBe(1);
-    expect(unchangedOccurrence.metadata?.planning_composition_reservation).toBeUndefined();
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningShiftTaskSegment.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toEqual([]);
+    for (const demand of [morning, afternoon]) {
+      const unchangedOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+      expect(unchangedOccurrence.revision).toBe(1);
+      expect(unchangedOccurrence.metadata?.planning_composition_reservation).toBeUndefined();
+    }
 
-    entities.SurveillanceObject.records[0].default_operating_company_id = "company-1";
+    entities.SurveillanceObject.records[1].default_operating_company_id = "company-1";
     const recovered = await backend.composeAndAssign(base44, user, payload, retryContext);
     expect(recovered.shift.status).toBe("draft");
+    expect(recovered.shift.company_id).toBe("company-1");
     expect(recovered.assignment.personnel_id).toBe("personnel-1");
   });
 

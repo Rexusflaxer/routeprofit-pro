@@ -82,6 +82,8 @@ function boardProps(overrides = {}) {
     routes: [],
     customers: [{ id: "customer-1", name: "Klant 1" }],
     selectedShiftId: null,
+    expandedTaskCardKey: null,
+    onExpandedTaskCardChange: vi.fn(),
     onSelectOccurrence: vi.fn(),
     onFillStaffing: vi.fn(),
     onSelectShift: vi.fn(),
@@ -127,10 +129,6 @@ function toolbarProps(overrides = {}) {
   return {
     perspective: "object",
     onPerspectiveChange: vi.fn(),
-    orientation: "resources_horizontal",
-    onOrientationChange: vi.fn(),
-    planningLayout: "timeline",
-    onPlanningLayoutChange: vi.fn(),
     view: "week",
     onViewChange: vi.fn(),
     rangeLabel: "17 – 23 augustus 2026",
@@ -157,7 +155,7 @@ function toolbarProps(overrides = {}) {
 }
 
 describe("Planning matrix", () => {
-  it("toont in tijdlijnmodus de klanttaak als vaste 24-uursvraag met een exact open dienstvoorstel", () => {
+  it("toont uitsluitend de kaartmatrix en houdt een ongevormde klanttaak compact", () => {
     const longOccurrence = {
       ...occurrence,
       id: "occurrence-long-reception",
@@ -166,21 +164,21 @@ describe("Planning matrix", () => {
       required_minutes: 840,
     };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence] })} />,
+      <PlanningBoard {...boardProps({ occurrences: [longOccurrence] })} />,
     );
 
-    expect(screen.getByRole("table", { name: "Planning per object" })).toHaveAttribute("data-planning-layout", "timeline");
-    expect(screen.getByText("00:00")).toBeInTheDocument();
-    expect(screen.getByText("24:00")).toBeInTheDocument();
-    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-long-reception"]');
-    expect(overlay).toHaveAttribute("data-timeline-task-overlay", "true");
-    expect(within(overlay).getByText("06:00–20:00")).toBeInTheDocument();
-    expect(within(overlay).getByText("Taak nog niet verdeeld")).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-long-reception:2026-08-17:0360:0840"]')).toBeInTheDocument();
-    expect(within(overlay).getByRole("button", { name: /open dienst maken/i })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Planning per object" })).toHaveAttribute("data-planning-layout", "cards");
+    expect(screen.queryByText("00:00")).not.toBeInTheDocument();
+    expect(screen.queryByText("24:00")).not.toBeInTheDocument();
+    const card = container.querySelector('[data-task-occurrence-id="occurrence-long-reception"]');
+    expect(card).not.toHaveAttribute("data-inline-time-editor");
+    expect(within(card).getByText("06:00–20:00")).toBeInTheDocument();
+    expect(within(card).getByText("Nog niet gepland")).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-droppable-id", "occurrence:occurrence-long-reception:2026-08-17");
+    expect(container.querySelector('[data-task-time-rail="true"]')).not.toBeInTheDocument();
   });
 
-  it("maakt via de snelle actie exact de voorgestelde eerste dienst van maximaal acht uur", () => {
+  it("klapt een gedeeltelijk gevormde taakkaart open en stelt maximaal acht uur voor het resterende deel voor", () => {
     const onCreateOpenTaskSlice = vi.fn();
     const longOccurrence = {
       ...occurrence,
@@ -189,21 +187,48 @@ describe("Planning matrix", () => {
       window_end_time: "20:00",
       required_minutes: 840,
     };
-    renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence], onCreateOpenTaskSlice })} />,
+    const firstShift = {
+      ...shift,
+      id: "shift-open-service-first-part",
+      source_type: "task",
+      start_time: "06:00",
+      end_time: "12:00",
+    };
+    const firstSegment = {
+      id: "segment-open-service-first-part",
+      shift_id: firstShift.id,
+      task_occurrence_id: longOccurrence.id,
+      object_id: longOccurrence.object_id,
+      start_date: longOccurrence.service_date,
+      end_date: longOccurrence.end_date,
+      start_time: "06:00",
+      end_time: "12:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        occurrences: [longOccurrence],
+        shifts: [firstShift],
+        segments: [firstSegment],
+        expandedTaskCardKey: `${longOccurrence.id}:2026-08-17`,
+        onCreateOpenTaskSlice,
+      })} />,
     );
 
+    const card = container.querySelector(`[data-task-occurrence-id="${longOccurrence.id}"]`);
+    expect(card).toHaveAttribute("data-inline-time-editor", "true");
+    expect(within(card).getByRole("region", { name: /tijdverdeling voor receptiedienst/i })).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-open-service:2026-08-17:0720:1200"]')).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /open dienst maken/i }));
     expect(onCreateOpenTaskSlice).toHaveBeenCalledWith({
       occurrence: longOccurrence,
       serviceDate: "2026-08-17",
-      startTime: "06:00",
-      endTime: "14:00",
+      startTime: "12:00",
+      endTime: "20:00",
     });
   });
 
-  it("behoudt een korte brand- en sluitronde als exact sleepbaar taakvenster", () => {
-    const onCreateOpenTaskSlice = vi.fn();
+  it("geeft een korte brand- en sluitronde een bedienbare inline tijdrail zonder de exacte tijd te verliezen", () => {
     const shortOccurrence = {
       ...occurrence,
       id: "occurrence-fire-round",
@@ -212,24 +237,43 @@ describe("Planning matrix", () => {
       window_end_time: "22:25",
       required_minutes: 25,
     };
+    const shortShift = {
+      ...shift,
+      id: "shift-fire-round",
+      source_type: "task",
+      start_time: "22:00",
+      end_time: "22:25",
+    };
+    const shortSegment = {
+      id: "segment-fire-round",
+      shift_id: shortShift.id,
+      task_occurrence_id: shortOccurrence.id,
+      object_id: shortOccurrence.object_id,
+      start_date: shortOccurrence.service_date,
+      end_date: shortOccurrence.end_date,
+      start_time: "22:00",
+      end_time: "22:25",
+      status: "draft",
+    };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [shortOccurrence], onCreateOpenTaskSlice })} />,
+      <PlanningBoard {...boardProps({
+        occurrences: [shortOccurrence],
+        shifts: [shortShift],
+        segments: [shortSegment],
+        expandedTaskCardKey: `${shortOccurrence.id}:2026-08-17`,
+      })} />,
     );
 
-    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-fire-round"]');
-    expect(parseFloat(overlay.style.top)).toBeCloseTo(22 * 32, 4);
-    expect(within(overlay).getByText("22:00–22:25")).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-fire-round:2026-08-17:1320:1345"]')).toBeInTheDocument();
-    fireEvent.click(within(overlay).getByRole("button", { name: "Open dienst maken 22:00–22:25" }));
-    expect(onCreateOpenTaskSlice).toHaveBeenCalledWith({
-      occurrence: shortOccurrence,
-      serviceDate: "2026-08-17",
-      startTime: "22:00",
-      endTime: "22:25",
-    });
+    const card = container.querySelector('[data-task-occurrence-id="occurrence-fire-round"]');
+    const rail = within(card).getByRole("region", { name: /tijdverdeling voor brand- en sluitronde/i })
+      .querySelector('[data-task-time-rail="true"]');
+    expect(rail).toHaveStyle({ height: "126px" });
+    expect(within(card).getAllByText("22:00–22:25", { exact: false }).length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-segment-id="segment-fire-round"]')).toHaveAttribute("data-timeline-exact-height");
+    expect(screen.getByRole("slider", { name: /begintijd van avonddienst aanpassen/i })).toHaveAttribute("aria-orientation", "vertical");
   });
 
-  it("houdt een korte taak vlak voor middernacht volledig binnen het dagcanvas", () => {
+  it("houdt een korte taak vlak voor middernacht volledig binnen de lokale kaarttijdrail", () => {
     const midnightOccurrence = {
       ...occurrence,
       id: "occurrence-midnight-round",
@@ -239,14 +283,40 @@ describe("Planning matrix", () => {
       end_date: "2026-08-18",
       required_minutes: 10,
     };
+    const midnightShift = {
+      ...shift,
+      id: "shift-midnight-round",
+      source_type: "task",
+      start_time: "23:50",
+      end_time: "00:00",
+      end_date: "2026-08-18",
+    };
+    const midnightSegment = {
+      id: "segment-midnight-round",
+      shift_id: midnightShift.id,
+      task_occurrence_id: midnightOccurrence.id,
+      object_id: midnightOccurrence.object_id,
+      start_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "23:50",
+      end_time: "00:00",
+      status: "draft",
+    };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [midnightOccurrence] })} />,
+      <PlanningBoard {...boardProps({
+        occurrences: [midnightOccurrence],
+        shifts: [midnightShift],
+        segments: [midnightSegment],
+        expandedTaskCardKey: `${midnightOccurrence.id}:2026-08-17`,
+      })} />,
     );
 
-    const overlay = container.querySelector('[data-task-occurrence-id="occurrence-midnight-round"]');
-    const canvas = overlay.closest("[data-timeline-day-canvas]");
-    expect(parseFloat(overlay.style.top) + parseFloat(overlay.style.height)).toBeLessThanOrEqual(parseFloat(canvas.style.height));
-    expect(within(overlay).getByText("23:50–24:00")).toBeInTheDocument();
+    const card = container.querySelector('[data-task-occurrence-id="occurrence-midnight-round"]');
+    const rail = card.querySelector('[data-task-time-rail="true"]');
+    const segmentCard = card.querySelector('[data-segment-id="segment-midnight-round"]');
+    expect(rail).toHaveStyle({ height: "126px" });
+    expect(parseFloat(segmentCard.style.top) + parseFloat(segmentCard.style.height)).toBeLessThanOrEqual(parseFloat(rail.style.height));
+    expect(within(card).getAllByText("23:50–24:00", { exact: false }).length).toBeGreaterThan(0);
   });
 
   it("projecteert een nachttaak op beide kalenderdagen zonder klantvraag te verliezen", () => {
@@ -261,15 +331,16 @@ describe("Planning matrix", () => {
     };
     const { container } = renderInDragContext(
       <PlanningBoard {...boardProps({
-        layout: "timeline",
         days: [serviceDay, new Date(2026, 7, 18, 12)],
         occurrences: [overnightOccurrence],
       })} />,
     );
 
     expect(container.querySelectorAll('[data-task-occurrence-id="occurrence-overnight"]')).toHaveLength(2);
-    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-17:1320:1440"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-overnight:2026-08-18:0000:0360"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-overnight:2026-08-17"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-droppable-id="occurrence:occurrence-overnight:2026-08-18"]')).toBeInTheDocument();
+    expect(screen.getByText(/22:00–24:00 · loopt door/i)).toBeInTheDocument();
+    expect(screen.getByText(/00:00–06:00 · vervolg/i)).toBeInTheDocument();
   });
 
   it("behoudt bij resize van de eerste nachthelft het oorspronkelijke einde op de volgende dag", () => {
@@ -304,11 +375,11 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     renderInDragContext(<PlanningBoard {...boardProps({
-      layout: "timeline",
       days: [serviceDay, new Date(2026, 7, 18, 12)],
       occurrences: [overnightOccurrence],
       shifts: [overnightShift],
       segments: [overnightSegment],
+      expandedTaskCardKey: `${overnightOccurrence.id}:2026-08-17`,
       onResizeTaskSegment,
     })} />);
 
@@ -316,6 +387,8 @@ describe("Planning matrix", () => {
     fireEvent.keyDown(startHandle, { key: "ArrowDown" });
     fireEvent.keyDown(startHandle, { key: "Enter" });
     expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      occurrence: overnightOccurrence,
+      serviceDate: "2026-08-17",
       startDate: "2026-08-17",
       startTime: "22:05",
       endDate: "2026-08-18",
@@ -355,11 +428,11 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     renderInDragContext(<PlanningBoard {...boardProps({
-      layout: "timeline",
       days: [serviceDay, new Date(2026, 7, 18, 12)],
       occurrences: [overnightOccurrence],
       shifts: [overnightShift],
       segments: [overnightSegment],
+      expandedTaskCardKey: `${overnightOccurrence.id}:2026-08-18`,
       onResizeTaskSegment,
     })} />);
 
@@ -368,6 +441,8 @@ describe("Planning matrix", () => {
     fireEvent.keyDown(endHandle, { key: "ArrowUp" });
     fireEvent.keyDown(endHandle, { key: "Enter" });
     expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      occurrence: overnightOccurrence,
+      serviceDate: "2026-08-18",
       startDate: "2026-08-17",
       startTime: "22:00",
       endDate: "2026-08-18",
@@ -402,14 +477,19 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", occurrences: [longOccurrence], shifts: [firstShift], segments: [firstSegment] })} />,
+      <PlanningBoard {...boardProps({
+        occurrences: [longOccurrence],
+        shifts: [firstShift],
+        segments: [firstSegment],
+        expandedTaskCardKey: `${longOccurrence.id}:2026-08-17`,
+      })} />,
     );
 
     expect(container.querySelector('[data-droppable-id="occurrence-gap:occurrence-split-reception:2026-08-17:0720:1200"]')).toBeInTheDocument();
     expect(container.querySelector('[data-segment-id="segment-first-half"]')).toHaveTextContent(/06:00–12:00/);
   });
 
-  it("houdt een volledig afgedekte klanttaak zichtbaar onder de bemande dienst", () => {
+  it("houdt een volledig afgedekte klanttaak zichtbaar en nest de bemande dienst zonder duplicaat", () => {
     const coveredShift = { ...shift, id: "shift-timeline-covered", source_type: "task", start_time: "08:00", end_time: "16:00" };
     const coveredSegment = {
       id: "segment-timeline-covered",
@@ -424,12 +504,20 @@ describe("Planning matrix", () => {
     };
     const coveredAssignment = { ...assignment, planning_shift_id: coveredShift.id };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [coveredShift], segments: [coveredSegment], assignments: [coveredAssignment] })} />,
+      <PlanningBoard {...boardProps({
+        shifts: [coveredShift],
+        segments: [coveredSegment],
+        assignments: [coveredAssignment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+      })} />,
     );
 
-    expect(container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`)).toBeInTheDocument();
-    expect(container.querySelector('[data-segment-id="segment-timeline-covered"]')).toHaveTextContent("Anna Beveiliger");
-    expect(container.querySelector(`[data-timeline-gap^="${occurrence.id}:"]`)).not.toBeInTheDocument();
+    const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
+    expect(taskCard).toHaveAttribute("data-inline-time-editor", "true");
+    expect(taskCard).toHaveTextContent("Volledig gepland");
+    expect(taskCard.querySelector('[data-segment-id="segment-timeline-covered"]')).toHaveTextContent("Anna Beveiliger");
+    expect(taskCard.querySelector(`[data-timeline-gap^="${occurrence.id}:"]`)).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-shift-id="shift-timeline-covered"]')).toHaveLength(1);
   });
 
   it("maakt een gevormde maar onbemande dienst tot een expliciete medewerkersdropzone", () => {
@@ -446,7 +534,11 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [openShift], segments: [openSegment] })} />,
+      <PlanningBoard {...boardProps({
+        shifts: [openShift],
+        segments: [openSegment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+      })} />,
     );
 
     expect(container.querySelector('[data-segment-id="segment-timeline-open"]')).toHaveTextContent("Open dienst");
@@ -468,7 +560,12 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [resizeShift], segments: [resizeSegment], onResizeTaskSegment })} />,
+      <PlanningBoard {...boardProps({
+        shifts: [resizeShift],
+        segments: [resizeSegment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        onResizeTaskSegment,
+      })} />,
     );
 
     const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
@@ -478,8 +575,71 @@ describe("Planning matrix", () => {
     expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
       shift: resizeShift,
       segment: resizeSegment,
+      occurrence,
+      serviceDate: "2026-08-17",
       startTime: "08:00",
       endTime: "15:55",
+    }));
+  });
+
+  it("berekent pointer-resize uit de werkelijk gerenderde railhoogte bij vijftig procent CSS-zoom", () => {
+    const onResizeTaskSegment = vi.fn();
+    const resizeShift = {
+      ...shift,
+      id: "shift-pointer-resize-zoom",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "16:00",
+    };
+    const resizeSegment = {
+      id: "segment-pointer-resize-zoom",
+      shift_id: resizeShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        zoom: 0.5,
+        shifts: [resizeShift],
+        segments: [resizeSegment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        onResizeTaskSegment,
+      })} />,
+    );
+
+    const rail = container.querySelector('[data-task-time-rail="true"]');
+    expect(rail).toHaveAttribute("data-timeline-duration-minutes", "480");
+    expect(rail).toHaveStyle({ height: "272px" });
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 236,
+      left: 0,
+      right: 200,
+      width: 200,
+      height: 136,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    });
+
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    fireEvent.pointerDown(endHandle, { button: 0, clientY: 236 });
+    fireEvent.pointerMove(window, { clientY: 168 });
+    fireEvent.pointerUp(window, { clientY: 168 });
+
+    expect(onResizeTaskSegment).toHaveBeenCalledTimes(1);
+    expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      occurrence,
+      serviceDate: "2026-08-17",
+      shift: resizeShift,
+      segment: resizeSegment,
+      startTime: "08:00",
+      endTime: "12:00",
     }));
   });
 
@@ -498,7 +658,12 @@ describe("Planning matrix", () => {
       status: "draft",
     };
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ layout: "timeline", shifts: [resizeShift], segments: [resizeSegment], onResizeTaskSegment })} />,
+      <PlanningBoard {...boardProps({
+        shifts: [resizeShift],
+        segments: [resizeSegment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        onResizeTaskSegment,
+      })} />,
     );
 
     const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
@@ -509,21 +674,90 @@ describe("Planning matrix", () => {
     expect(onResizeTaskSegment).not.toHaveBeenCalled();
   });
 
-  it("toont objecten horizontaal, dagen verticaal en taakvoorkomens als expliciete dropzones", () => {
+  it("laat iedere actieve medewerker van een meervoudig bezette inline dienst afzonderlijk vrijmaken", async () => {
+    const onUnassign = vi.fn();
+    const multiShift = {
+      ...shift,
+      id: "shift-inline-multiple-assignments",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "16:00",
+      required_count: 2,
+    };
+    const multiSegment = {
+      id: "segment-inline-multiple-assignments",
+      shift_id: multiShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    const annaAssignment = {
+      ...assignment,
+      id: "assignment-inline-anna",
+      planning_shift_id: multiShift.id,
+      slot_index: 0,
+    };
+    const borisAssignment = {
+      ...assignment,
+      id: "assignment-inline-boris",
+      planning_shift_id: multiShift.id,
+      personnel_id: "personnel-boris",
+      personnel_name: "Boris Beveiliger",
+      slot_index: 1,
+    };
+    const removedAssignment = {
+      ...assignment,
+      id: "assignment-inline-removed",
+      planning_shift_id: multiShift.id,
+      personnel_id: "personnel-removed",
+      personnel_name: "Verwijderde medewerker",
+      slot_index: 2,
+      status: "removed",
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        shifts: [multiShift],
+        segments: [multiSegment],
+        assignments: [annaAssignment, borisAssignment, removedAssignment],
+        expandedTaskCardKey: `${occurrence.id}:2026-08-17`,
+        onUnassign,
+      })} />,
+    );
+
+    const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
+    expect(taskCard).toHaveTextContent("Anna Beveiliger +1");
+    expect(taskCard).toHaveTextContent("2/2 bezet");
+    const manageButton = within(taskCard).getByRole("button", { name: "2 medewerkers beheren" });
+
+    fireEvent.pointerDown(manageButton, { button: 0, ctrlKey: false });
+    expect(screen.queryByRole("menuitem", { name: "Verwijderde medewerker vrijmaken" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Anna Beveiliger vrijmaken" }));
+    expect(onUnassign).toHaveBeenNthCalledWith(1, multiShift, annaAssignment);
+
+    fireEvent.pointerDown(manageButton, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Boris Beveiliger vrijmaken" }));
+    expect(onUnassign).toHaveBeenNthCalledWith(2, multiShift, borisAssignment);
+  });
+
+  it("toont objecten als vaste rijen links, dagen als kolommen boven en taakvoorkomens als dropzones", () => {
     const { container } = renderInDragContext(<PlanningBoard {...boardProps()} />);
 
-    expect(screen.getByRole("table", { name: "Planning per object" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /Object 1/i })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /Object 2/i })).toBeInTheDocument();
-    expect(screen.getByRole("rowheader")).toHaveTextContent(/17 aug/i);
+    expect(screen.getByRole("table", { name: "Planning per object" })).toHaveAttribute("data-planning-layout", "cards");
+    expect(screen.getByRole("rowheader", { name: /Object 1/i })).toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: /Object 2/i })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /17 aug/i })).toBeInTheDocument();
     expect(screen.getByText("Receptiedienst")).toBeInTheDocument();
     expect(container.querySelector('[data-droppable-id="occurrence:occurrence-reception:2026-08-17"]')).toBeInTheDocument();
 
     const scrollContainer = screen.getByTestId("planning-matrix-scroll");
     expect(scrollContainer).toHaveClass("overflow-auto");
     expect(container.querySelectorAll(".overflow-auto")).toHaveLength(1);
-    expect(screen.getByRole("columnheader", { name: /Object 1/i })).toHaveClass("sticky", "top-0");
-    expect(screen.getByRole("rowheader")).toHaveClass("sticky", "left-0");
+    expect(screen.getByRole("columnheader", { name: /17 aug/i })).toHaveClass("sticky", "top-0");
+    expect(screen.getByRole("rowheader", { name: /Object 1/i })).toHaveClass("sticky", "left-0");
   });
 
   it("toont medewerkers horizontaal met bezetting en een TASK-dropzone per medewerker en dag", () => {
@@ -568,7 +802,7 @@ describe("Planning matrix", () => {
     expect(screen.queryByRole("columnheader", { name: /Nieuwe medewerker/i })).not.toBeInTheDocument();
   });
 
-  it("toont volledig afgedekte taakvraag niet dubbel naast de gekoppelde dienst", () => {
+  it("houdt een volledig afgedekte bronkaart compact zichtbaar en opent de geneste dienst op verzoek", () => {
     const coveredShift = { ...shift, id: "shift-covered", name: "Geplande receptiedienst", start_time: "08:00", end_time: "16:00" };
     const coveredSegment = {
       id: "segment-covered",
@@ -584,14 +818,20 @@ describe("Planning matrix", () => {
       object_name_snapshot: occurrence.object_name_snapshot,
       status: "draft",
     };
+    const onExpandedTaskCardChange = vi.fn();
     const { container } = renderInDragContext(
-      <PlanningBoard {...boardProps({ shifts: [coveredShift], segments: [coveredSegment] })} />,
+      <PlanningBoard {...boardProps({ shifts: [coveredShift], segments: [coveredSegment], onExpandedTaskCardChange })} />,
     );
 
-    expect(container.querySelector(`[data-shift-id="${coveredShift.id}"]`)).toBeInTheDocument();
-    expect(container.querySelector(`[data-segment-id="${coveredSegment.id}"]`)).toBeInTheDocument();
-    expect(container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`)).not.toBeInTheDocument();
-    expect(container.querySelector(`[data-droppable-id="occurrence:${occurrence.id}:2026-08-17"]`)).not.toBeInTheDocument();
+    const taskCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
+    expect(taskCard).toBeInTheDocument();
+    expect(taskCard).toHaveTextContent("Volledig gepland");
+    expect(taskCard).toHaveTextContent("1 dienst");
+    expect(taskCard).not.toHaveAttribute("data-inline-time-editor");
+    expect(container.querySelector(`[data-shift-id="${coveredShift.id}"]`)).not.toBeInTheDocument();
+    expect(container.querySelector(`[data-segment-id="${coveredSegment.id}"]`)).not.toBeInTheDocument();
+    fireEvent.click(within(taskCard).getByRole("button", { name: /Receptiedienst/i }));
+    expect(onExpandedTaskCardChange).toHaveBeenCalledWith(`${occurrence.id}:2026-08-17`);
   });
 
   it("projecteert een samengestelde dienst per object en segmentdatum, inclusief het nachtsegment", () => {
@@ -823,10 +1063,10 @@ describe("Planning matrix", () => {
       <PlanningBoard {...boardProps({ objects: archivedObjects, occurrences: [archivedOccurrence, conceptOccurrence] })} />,
     );
 
-    expect(screen.getByRole("columnheader", { name: /Snapshotlocatie West/i })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /Snapshotlocatie Concept/i })).toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: /Leeg gearchiveerd object/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: /Leeg conceptobject/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: /Snapshotlocatie West/i })).toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: /Snapshotlocatie Concept/i })).toBeInTheDocument();
+    expect(screen.queryByRole("rowheader", { name: /Leeg gearchiveerd object/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("rowheader", { name: /Leeg conceptobject/i })).not.toBeInTheDocument();
     expect(container.querySelector('[data-droppable-id="occurrence:occurrence-archived-object:2026-08-17"]')).toBeInTheDocument();
     expect(container.querySelector('[data-droppable-id="occurrence:occurrence-concept-object:2026-08-17"]')).toBeInTheDocument();
   });
@@ -1080,18 +1320,12 @@ describe("Planning matrix-bediening", () => {
     expect(onCustomEndChange).toHaveBeenCalledWith("2026-08-25");
   });
 
-  it("wisselt expliciet tussen tijdlijn en kaarten en verbergt transponeren in de tijdlijn", () => {
-    const onPlanningLayoutChange = vi.fn();
-    const props = toolbarProps({ onPlanningLayoutChange, planningLayout: "timeline" });
-    const { rerender } = render(<PlanningToolbar {...props} />);
+  it("biedt uitsluitend kaartweergave en geen handmatige transposebediening", () => {
+    render(<PlanningToolbar {...toolbarProps()} />);
 
-    expect(screen.getByRole("button", { name: "Tijdlijn" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Tijdlijn" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Kaarten" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /matrixweergave wisselen/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Kaarten" }));
-    expect(onPlanningLayoutChange).toHaveBeenCalledWith("cards");
-
-    rerender(<PlanningToolbar {...props} planningLayout="cards" />);
-    expect(screen.getByRole("button", { name: "Kaarten" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /matrixweergave wisselen/i })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Planningindeling" })).not.toBeInTheDocument();
   });
 });

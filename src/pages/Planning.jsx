@@ -42,7 +42,6 @@ import {
   getAssignmentWarnings,
   getOccurrencePlanningState,
   getOccurrenceOpenStaffingShift,
-  getOccurrenceRemainingAllocationRanges,
   getSafeOccurrenceDropServiceDate,
   getOccurrenceStaffingTarget,
   getPlanningRange,
@@ -67,7 +66,6 @@ import {
 
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
-const VALID_PLANNING_LAYOUTS = new Set(["timeline", "cards"]);
 const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
@@ -126,20 +124,6 @@ function makeMaps(objects, customers) {
 function rangeLabelFor(view, range) {
   if (view === "week" && range.days.length === 1) return dayLabel.format(range.start);
   return `${dateLabel.format(range.start)} – ${dateLabel.format(range.end)}`;
-}
-
-function clockValue(date) {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function occurrenceSegmentsForRemainingWork(occurrence, segments, shifts, serviceDate) {
-  return getOccurrenceRemainingAllocationRanges(occurrence, segments, shifts, serviceDate).map(range => ({
-    task_occurrence_id: occurrence.id,
-    start_date: toDateKey(range.start),
-    end_date: toDateKey(range.end),
-    start_time: clockValue(range.start),
-    end_time: clockValue(range.end),
-  }));
 }
 
 function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime) {
@@ -204,9 +188,6 @@ export default function Planning() {
   const initialPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
     ? searchParams.get("perspective")
     : "object";
-  const initialPlanningLayout = VALID_PLANNING_LAYOUTS.has(searchParams.get("layout"))
-    ? searchParams.get("layout")
-    : "timeline";
   const initialPeriod = getPlanningRange(initialDate, "period", {
     periodStart: searchParams.get("from"),
     periodEnd: searchParams.get("to"),
@@ -218,8 +199,6 @@ export default function Planning() {
   const [customPeriodStart, setCustomPeriodStart] = useState(toDateKey(initialPeriod.start));
   const [customPeriodEnd, setCustomPeriodEnd] = useState(toDateKey(initialPeriod.end));
   const [perspective, setPerspective] = useState(initialPerspective);
-  const [planningLayout, setPlanningLayout] = useState(initialPlanningLayout);
-  const [matrixOrientation, setMatrixOrientation] = useState("resources_horizontal");
   const [compactMode, setCompactMode] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(2);
   const planningZoom = PLANNING_ZOOM_LEVELS[zoomIndex];
@@ -230,6 +209,7 @@ export default function Planning() {
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [sidePanelMode, setSidePanelMode] = useState("tasks");
+  const [expandedTaskCardKey, setExpandedTaskCardKey] = useState(null);
   const [composer, setComposer] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -262,9 +242,6 @@ export default function Planning() {
     const nextPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
       ? searchParams.get("perspective")
       : "object";
-    const nextPlanningLayout = VALID_PLANNING_LAYOUTS.has(searchParams.get("layout"))
-      ? searchParams.get("layout")
-      : "timeline";
     const nextPeriod = getPlanningRange(nextDate, "period", {
       periodStart: searchParams.get("from"),
       periodEnd: searchParams.get("to"),
@@ -274,10 +251,10 @@ export default function Planning() {
     setAnchorDate(nextDate);
     setView(nextView);
     setPerspective(nextPerspective);
-    setPlanningLayout(nextPlanningLayout);
     setCustomPeriodStart(toDateKey(nextPeriod.start));
     setCustomPeriodEnd(toDateKey(nextPeriod.end));
     setSelectedShiftId(null);
+    setExpandedTaskCardKey(null);
   }, [searchParams, searchParamsKey]);
 
   useEffect(() => {
@@ -289,7 +266,7 @@ export default function Planning() {
     next.set("date", toDateKey(anchorDate));
     next.set("view", view);
     next.set("perspective", perspective);
-    next.set("layout", planningLayout);
+    next.delete("layout");
     if (view === "period") {
       next.set("from", periodStart);
       next.set("to", periodEnd);
@@ -301,7 +278,7 @@ export default function Planning() {
     if (nextSearchKey === searchParamsKey) return;
     lastWrittenSearchKey.current = nextSearchKey;
     setSearchParams(next, { replace: true });
-  }, [anchorDate, periodEnd, periodStart, perspective, planningLayout, searchParams, searchParamsKey, setSearchParams, view]);
+  }, [anchorDate, periodEnd, periodStart, perspective, searchParams, searchParamsKey, setSearchParams, view]);
 
   const shiftsQuery = useQuery({
     queryKey: ["planning-shifts", periodStart, periodEnd],
@@ -741,13 +718,15 @@ export default function Planning() {
     toast({ title: "Planning hersteld", description: message });
   };
 
-  const finishTimelineAssignment = async (result, occurrence, personnelItem) => {
+  const finishTimelineAssignment = async (result, occurrence, personnelItem, serviceDate) => {
+    setStatusFilter("all");
     await refreshPlanning();
     const warnings = assignmentWarnings(result.assignment);
     const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
     const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
     toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Dienst gemaakt en ingepland", description });
     setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
+    setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
     setLiveMessage(description);
     return result;
   };
@@ -772,7 +751,7 @@ export default function Planning() {
         segments: [segment],
       },
     );
-    return finishTimelineAssignment(result, occurrence, personnelItem);
+    return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
   };
 
   const createOpenOccurrenceSlice = async ({ occurrence, serviceDate, startTime, endTime }) => {
@@ -787,16 +766,18 @@ export default function Planning() {
       },
       segments: [segment],
     });
+    setStatusFilter("all");
     await refreshPlanning();
     const description = `Open dienst ${startTime}–${endTime} is gevormd binnen ${occurrence.task_name_snapshot || "de taak"}. Sleep nu een medewerker naar de open plaats.`;
     toast({ title: "Open dienst gemaakt", description });
     setSelectedShiftId(result.shift?.id || null);
+    setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
     setSidePanelMode("employees");
     setLiveMessage(description);
     return result;
   };
 
-  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime }) => {
+  const resizeTimelineTaskSegment = async ({ occurrence, serviceDate, shift, segment, startDate, endDate, startTime, endTime }) => {
     if (!shift || !segment || runActionMutation.isPending) return;
     const activeSegments = taskSegments
       .filter(item => item.status !== "removed" && String(item.shift_id) === String(shift.id))
@@ -821,9 +802,11 @@ export default function Planning() {
       nextEndTime: endTime,
     });
     const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
+    setStatusFilter("all");
     await refreshPlanning();
     const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
     toast({ title: "Diensttijd aangepast", description });
+    if (occurrence?.id) setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || startDate}`);
     setLiveMessage(description);
     return result;
   };
@@ -850,6 +833,7 @@ export default function Planning() {
       if (openShiftTarget) {
         const targetShift = shiftsInRange.find(shift => String(shift.id) === openShiftTarget.shiftId);
         await executeAssignment(targetShift, personnelItem, openShiftTarget.slotIndex);
+        setExpandedTaskCardKey(`${occurrence.id}:${serviceDate || occurrence.service_date}`);
         return;
       }
       const description = `${personnelName(personnelItem)} is al gekoppeld of er is op ${serviceDate} geen vrije dienst die volledig binnen deze kalenderdag valt. Open een nachtdienst expliciet om de volledige inzet te beoordelen.`;
@@ -858,17 +842,13 @@ export default function Planning() {
       return;
     }
 
-    const timelineSuggestion = planningLayout === "timeline"
-      ? getSuggestedTaskTimelineAllocation({
-          occurrence,
-          serviceDate,
-          segments: taskSegments,
-          shifts: shiftsInRange,
-        })
-      : null;
-    const segments = planningLayout === "timeline"
-      ? (timelineSuggestion?.segment ? [timelineSuggestion.segment] : [])
-      : occurrenceSegmentsForRemainingWork(occurrence, taskSegments, shiftsInRange, serviceDate);
+    const timelineSuggestion = getSuggestedTaskTimelineAllocation({
+      occurrence,
+      serviceDate,
+      segments: taskSegments,
+      shifts: shiftsInRange,
+    });
+    const segments = timelineSuggestion?.segment ? [timelineSuggestion.segment] : [];
     if (segments.length === 0) {
       toast({
         title: "Geen open taakdeel op deze dag",
@@ -888,7 +868,7 @@ export default function Planning() {
       },
       segments,
     });
-    return finishTimelineAssignment(result, occurrence, personnelItem);
+    return finishTimelineAssignment(result, occurrence, personnelItem, serviceDate);
   };
 
   const openOccurrenceStaffing = occurrence => {
@@ -1140,6 +1120,7 @@ export default function Planning() {
       setAnchorDate(current => addDays(current, direction * step));
     }
     setSelectedShiftId(null);
+    setExpandedTaskCardKey(null);
   };
 
   const updateCustomPeriod = (nextStartValue, nextEndValue) => {
@@ -1152,6 +1133,7 @@ export default function Planning() {
     setCustomPeriodEnd(toDateKey(nextRange.end));
     setAnchorDate(nextRange.start);
     setSelectedShiftId(null);
+    setExpandedTaskCardKey(null);
   };
 
   const goToToday = () => {
@@ -1163,6 +1145,7 @@ export default function Planning() {
     }
     setAnchorDate(today);
     setSelectedShiftId(null);
+    setExpandedTaskCardKey(null);
   };
 
   const isLoading = [
@@ -1189,11 +1172,8 @@ export default function Planning() {
         onPerspectiveChange={nextPerspective => {
           setPerspective(nextPerspective);
           setSelectedShiftId(null);
+          setExpandedTaskCardKey(null);
         }}
-        orientation={matrixOrientation}
-        onOrientationChange={setMatrixOrientation}
-        planningLayout={planningLayout}
-        onPlanningLayoutChange={setPlanningLayout}
         compactMode={compactMode}
         onCompactModeChange={setCompactMode}
         zoomValue={Math.round(planningZoom * 100)}
@@ -1249,8 +1229,6 @@ export default function Planning() {
           <ResizablePanel defaultSize={76} minSize={56}>
             <PlanningBoard
               perspective={perspective}
-              orientation={matrixOrientation}
-              layout={planningLayout}
               compact={compactMode}
               zoom={planningZoom}
               days={range.days}
@@ -1264,6 +1242,8 @@ export default function Planning() {
               routes={routes}
               customers={customers}
               selectedShiftId={selectedShiftId}
+              expandedTaskCardKey={expandedTaskCardKey}
+              onExpandedTaskCardChange={setExpandedTaskCardKey}
               onSelectOccurrence={occurrence => openTaskComposer({ occurrence })}
               onFillStaffing={openOccurrenceStaffing}
               onSelectShift={shift => {
@@ -1347,6 +1327,7 @@ export default function Planning() {
             setPerspective("employee");
             setSidePanelMode("tasks");
             setSelectedShiftId(null);
+            setExpandedTaskCardKey(null);
           }}
           className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground"
         >

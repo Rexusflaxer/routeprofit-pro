@@ -5,22 +5,22 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  * Full-screen planning projection.
  *
  * The page owns data loading and mutations. This board only projects the
- * supplied range in one of two matrices and exposes typed drop targets through
- * PlanningMatrix:
+ * supplied range in the card matrix and exposes typed drop targets through
+ * PlanningMatrix. Object view keeps objects as rows and days as columns;
+ * employee view keeps employees as columns and days as rows:
  * - object: occurrence:<occurrenceId>:<YYYY-MM-DD> accepts a PERSONNEL
  *   draggable and limits composition to that visible day slice;
  * - employee: employee-day:<personnelId>:<YYYY-MM-DD> accepts a TASK draggable;
  * - object slots: slot:<shiftId>:<slotIndex>:<YYYY-MM-DD>:<resourceKey>
  *   accepts PERSONNEL; a cross-day shift opens full-shift confirmation.
  *
+ * Planned task cards can expand in place to a task-local vertical time editor.
  * Legacy props such as `view`, `weeks`, `customers` and
  * `taskOccurrenceCount` remain safe to pass; week/custom-period behavior is
  * expressed entirely by the `days` collection.
  */
 export default function PlanningBoard({
   perspective,
-  orientation = "resources_horizontal",
-  layout = "cards",
   compact,
   zoom,
   days = [],
@@ -33,6 +33,8 @@ export default function PlanningBoard({
   objects = [],
   routes = [],
   selectedShiftId,
+  expandedTaskCardKey,
+  onExpandedTaskCardChange,
   onSelectOccurrence,
   onFillStaffing,
   onSelectShift,
@@ -60,8 +62,6 @@ export default function PlanningBoard({
   return (
     <PlanningMatrix
       perspective={perspective}
-      orientation={orientation}
-      layout={layout}
       compact={compact}
       zoom={zoom}
       days={days}
@@ -74,6 +74,8 @@ export default function PlanningBoard({
       objects={objects}
       routes={routes}
       selectedShiftId={selectedShiftId}
+      expandedTaskCardKey={expandedTaskCardKey}
+      onExpandedTaskCardChange={onExpandedTaskCardChange}
       onSelectOccurrence={onSelectOccurrence}
       onFillStaffing={onFillStaffing}
       onSelectShift={onSelectShift}
