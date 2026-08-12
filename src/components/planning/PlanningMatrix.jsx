@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Droppable } from "@hello-pangea/dnd";
 import {
   AlertTriangle,
@@ -16,6 +16,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import PlanningZoomControls from "@/components/planning/PlanningZoomControls";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const dayFormatter = new Intl.DateTimeFormat("nl-NL", { weekday: "short", day: "numeric", month: "short" });
+const MATRIX_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 
 function dateKey(date) {
   const year = date.getFullYear();
@@ -766,13 +768,23 @@ export default function PlanningMatrix({
     });
     return map;
   }, [assignments, days, shiftsById]);
+  const [zoomIndex, setZoomIndex] = useState(2);
+  const zoom = MATRIX_ZOOM_LEVELS[zoomIndex];
 
   return (
-    <div
-      className="h-full min-h-0 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
-      data-testid="planning-matrix-scroll"
-    >
-      <table className="min-w-max table-fixed border-separate border-spacing-0" aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}>
+    <div className="relative h-full min-h-0">
+      <PlanningZoomControls
+        value={Math.round(zoom * 100)}
+        onZoomOut={() => setZoomIndex(current => Math.max(0, current - 1))}
+        onZoomIn={() => setZoomIndex(current => Math.min(MATRIX_ZOOM_LEVELS.length - 1, current + 1))}
+        canZoomOut={zoomIndex > 0}
+        canZoomIn={zoomIndex < MATRIX_ZOOM_LEVELS.length - 1}
+      />
+      <div
+        className="h-full min-h-0 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
+        data-testid="planning-matrix-scroll"
+      >
+      <table style={{ zoom }} className="min-w-max table-fixed border-separate border-spacing-0" aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}>
         {perspective === "employee" ? (
           <>
             <thead>
@@ -873,6 +885,7 @@ export default function PlanningMatrix({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
