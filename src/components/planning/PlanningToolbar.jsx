@@ -5,9 +5,13 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
+  Eye,
   Filter,
+  Loader2,
   Minimize2,
+  Pencil,
   Rows3,
+  Save,
   Search,
   Users,
 } from "lucide-react";
@@ -95,9 +99,18 @@ export default function PlanningToolbar({
   onCustomerFilterChange,
   customers,
   warningCount,
+  editing = false,
+  draftChangeCount = 0,
+  onStartEditing,
+  onSaveDraft,
+  saveDraftDisabled = false,
+  isSavingDraft = false,
   onPublish,
   publishDisabled,
   isPublishing,
+  periodOptions = [],
+  selectedPeriodId,
+  onPeriodChange,
 }) {
   const normalizedView = view === "period" || view === "custom" ? "period" : "week";
   const selectedPeriodStart = periodStart || customStart || "";
@@ -107,7 +120,7 @@ export default function PlanningToolbar({
 
   return (
     <header className="shrink-0 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
         <div className="mr-1 flex min-w-[150px] items-center gap-2">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
             <CalendarRange className="h-4 w-4" />
@@ -174,18 +187,68 @@ export default function PlanningToolbar({
           </div>
         )}
 
-        <Button
-          className={cn("h-8 shrink-0 gap-1.5 px-3 text-[12px]", warningCount === 0 && "ml-auto")}
-          onClick={onPublish}
-          disabled={publishDisabled || isPublishing}
-        >
-          <CalendarDays className="h-3.5 w-3.5" />
-          {isPublishing ? "Publiceren…" : "Publiceren"}
-        </Button>
+        <div className={cn("flex shrink-0 items-center gap-1.5", warningCount === 0 && "ml-auto")}>
+          <span className={cn(
+            "hidden h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold xl:inline-flex",
+            editing
+              ? "border-amber-300/70 bg-amber-50 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200"
+              : "border-border bg-card text-muted-foreground",
+          )}>
+            {editing ? <Pencil className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            {editing ? `Concept${draftChangeCount > 0 ? ` · ${draftChangeCount}` : ""}` : "Roosterweergave"}
+          </span>
+          {editing ? (
+            <>
+              <Button
+                variant="outline"
+                className="h-8 shrink-0 gap-1.5 px-3 text-[12px]"
+                onClick={onSaveDraft}
+                disabled={saveDraftDisabled || isSavingDraft || isPublishing}
+              >
+                {isSavingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {isSavingDraft ? "Opslaan…" : "Concept opslaan"}
+              </Button>
+              <Button
+                className="h-8 shrink-0 gap-1.5 px-3 text-[12px]"
+                onClick={onPublish}
+                disabled={publishDisabled || isPublishing || isSavingDraft}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                {isPublishing ? "Publiceren…" : "Controleren & publiceren"}
+              </Button>
+            </>
+          ) : (
+            <Button
+              className="h-8 shrink-0 gap-1.5 px-3 text-[12px]"
+              onClick={onStartEditing}
+              disabled={isPublishing}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Rooster bewerken
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="mt-2 flex min-w-0 items-center gap-2">
-        {normalizedView === "period" && (
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+        {normalizedView === "period" && periodOptions.length > 0 && (
+          <Select value={selectedPeriodId} onValueChange={onPeriodChange}>
+            <SelectTrigger className="h-8 w-[245px] shrink-0 bg-card text-[12px]" aria-label="Beveiligingsperiode">
+              <CalendarRange className="mr-1.5 h-3.5 w-3.5 text-primary" />
+              <SelectValue placeholder="Kies een beveiligingsperiode" />
+            </SelectTrigger>
+            <SelectContent>
+              {periodOptions.map(period => (
+                <SelectItem key={period.id} value={period.id}>
+                  <span className="font-medium">{period.label}</span>
+                  {period.dateLabel ? <span className="ml-1.5 text-muted-foreground">· {period.dateLabel}</span> : null}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {normalizedView === "period" && periodOptions.length === 0 && (
           <div className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-card p-1" aria-label="Aangepaste periode">
             <label className="flex items-center gap-1">
               <span className="pl-1 text-[10px] font-medium text-muted-foreground">Van</span>

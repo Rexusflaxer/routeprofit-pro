@@ -45,6 +45,7 @@ import {
 import {
   addDays,
   buildCandidateRanking,
+  formatMinutesAsHours,
   getAssignmentWarnings,
   getOccurrencePlanningState,
   getOccurrenceOpenStaffingShift,
@@ -69,12 +70,21 @@ import {
   buildTimelineResizeCompositionPayload,
   getSuggestedTaskTimelineAllocation,
 } from "@/components/planning/planningTimelineDomain";
+import {
+  CAO_PB_PLANNING_PERIODS_2026,
+  getAdjacentCaoPbPlanningPeriod,
+  getCaoPbPlanningPeriodByKey,
+  getCaoPbPlanningRange,
+  resolveCaoPbPlanningPeriod,
+} from "@/components/planning/planningCaoPeriodDomain";
+import { findSamePersonnelAdjacentShiftMerge } from "@/components/planning/planningAdjacentShiftMerge";
 
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
 const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
+const compactDateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
 
 function personnelName(personnel) {
   return personnel?.name
@@ -108,6 +118,12 @@ function normalizePlanningAssignment(assignment) {
   };
 }
 
+function overlayPlanningRecords(baseRecords, overlayRecords) {
+  const records = new Map((baseRecords || []).map(record => [String(record.id), record]));
+  (overlayRecords || []).forEach(record => records.set(String(record.id), record));
+  return [...records.values()];
+}
+
 function activeAssignments(assignments) {
   return assignments.filter(item => item.status !== "removed");
 }
@@ -127,7 +143,10 @@ function makeMaps(objects, customers) {
   };
 }
 
-function rangeLabelFor(view, range) {
+function rangeLabelFor(view, range, caoPeriod = null) {
+  if (view === "period" && caoPeriod) {
+    return `${caoPeriod.label} · ${compactDateLabel.format(range.start)} – ${compactDateLabel.format(range.end)}`;
+  }
   if (view === "week" && range.days.length === 1) return dayLabel.format(range.start);
   return `${dateLabel.format(range.start)} – ${dateLabel.format(range.end)}`;
 }
@@ -249,6 +268,23 @@ async function filterAllEntityRecords(entity, query, sort) {
   throw new Error("De dataset is te groot om veilig in één planningsoverzicht te laden.");
 }
 
+async function filterEntityRecordsForShiftIds(entity, shiftIds, sort, additionalQuery = {}) {
+  const uniqueShiftIds = [...new Set((shiftIds || []).map(String).filter(Boolean))];
+  if (uniqueShiftIds.length === 0) return [];
+  const chunks = [];
+  for (let index = 0; index < uniqueShiftIds.length; index += 200) {
+    chunks.push(uniqueShiftIds.slice(index, index + 200));
+  }
+  const records = new Map();
+  for (let index = 0; index < chunks.length; index += 4) {
+    const batch = await Promise.all(chunks.slice(index, index + 4).map(ids => (
+      filterAllEntityRecords(entity, { ...additionalQuery, shift_id: { $in: ids } }, sort)
+    )));
+    batch.flat().forEach(record => records.set(String(record.id), record));
+  }
+  return [...records.values()];
+}
+
 export default function Planning() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -264,12 +300,18 @@ export default function Planning() {
     periodEnd: searchParams.get("to"),
     maxDays: 63,
   });
+  const initialCaoPeriod = getCaoPbPlanningPeriodByKey(searchParams.get("period"))
+    || resolveCaoPbPlanningPeriod(searchParams.get("from"))
+    || resolveCaoPbPlanningPeriod(initialDate);
 
   const [anchorDate, setAnchorDate] = useState(initialDate);
   const [view, setView] = useState(initialView);
   const [customPeriodStart, setCustomPeriodStart] = useState(toDateKey(initialPeriod.start));
   const [customPeriodEnd, setCustomPeriodEnd] = useState(toDateKey(initialPeriod.end));
+  const [selectedCaoPeriodId, setSelectedCaoPeriodId] = useState(initialCaoPeriod?.key || "");
   const [perspective, setPerspective] = useState(initialPerspective);
+  const [editing, setEditing] = useState(false);
+  const [savedDraftNotice, setSavedDraftNotice] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(2);
   const planningZoom = PLANNING_ZOOM_LEVELS[zoomIndex];
@@ -297,14 +339,23 @@ export default function Planning() {
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
 
-  const range = useMemo(() => getPlanningRange(anchorDate, view, {
-    periodStart: customPeriodStart,
-    periodEnd: customPeriodEnd,
-    maxDays: 63,
-  }), [anchorDate, customPeriodEnd, customPeriodStart, view]);
-  const rangeLabel = rangeLabelFor(view, range);
+  const selectedCaoPeriod = useMemo(
+    () => getCaoPbPlanningPeriodByKey(selectedCaoPeriodId),
+    [selectedCaoPeriodId],
+  );
+  const range = useMemo(() => {
+    if (view === "period" && selectedCaoPeriod) return getCaoPbPlanningRange(selectedCaoPeriod);
+    return getPlanningRange(anchorDate, view, {
+      periodStart: customPeriodStart,
+      periodEnd: customPeriodEnd,
+      maxDays: 63,
+    });
+  }, [anchorDate, customPeriodEnd, customPeriodStart, selectedCaoPeriod, view]);
+  const rangeLabel = rangeLabelFor(view, range, selectedCaoPeriod);
   const periodStart = toDateKey(range.start);
   const periodEnd = toDateKey(range.end);
+  const planningContextStart = toDateKey(addDays(periodStart, -7));
+  const planningContextEnd = toDateKey(addDays(periodEnd, 7));
   const bootstrapStart = getPlanningTaskOccurrenceBootstrapStart(periodStart) || periodStart;
   const searchParamsKey = searchParams.toString();
 
@@ -324,13 +375,18 @@ export default function Planning() {
       periodEnd: searchParams.get("to"),
       maxDays: 63,
     });
+    const nextCaoPeriod = getCaoPbPlanningPeriodByKey(searchParams.get("period"))
+      || resolveCaoPbPlanningPeriod(searchParams.get("from"))
+      || resolveCaoPbPlanningPeriod(nextDate);
     hydratingFromUrl.current = true;
     setAnchorDate(nextDate);
     setView(nextView);
     setPerspective(nextPerspective);
     setCustomPeriodStart(toDateKey(nextPeriod.start));
     setCustomPeriodEnd(toDateKey(nextPeriod.end));
+    setSelectedCaoPeriodId(nextCaoPeriod?.key || "");
     setSelectedShiftId(null);
+    setEditing(false);
   }, [searchParams, searchParamsKey]);
 
   useEffect(() => {
@@ -346,32 +402,43 @@ export default function Planning() {
     if (view === "period") {
       next.set("from", periodStart);
       next.set("to", periodEnd);
+      if (selectedCaoPeriod) next.set("period", selectedCaoPeriod.key);
+      else next.delete("period");
     } else {
       next.delete("from");
       next.delete("to");
+      next.delete("period");
     }
     const nextSearchKey = next.toString();
     if (nextSearchKey === searchParamsKey) return;
     lastWrittenSearchKey.current = nextSearchKey;
     setSearchParams(next, { replace: true });
-  }, [anchorDate, periodEnd, periodStart, perspective, searchParams, searchParamsKey, setSearchParams, view]);
+  }, [anchorDate, periodEnd, periodStart, perspective, searchParams, searchParamsKey, selectedCaoPeriod, setSearchParams, view]);
 
   const shiftsQuery = useQuery({
     queryKey: ["planning-shifts", periodStart, periodEnd],
     queryFn: () => filterAllEntityRecords(
       base44.entities.PlanningShift,
-      getPlanningShiftRangeQuery(periodStart, periodEnd),
+      getPlanningShiftRangeQuery(planningContextStart, planningContextEnd),
       "-service_date",
     ),
     staleTime: 15_000,
   });
+  const planningContextShiftIds = useMemo(
+    () => (shiftsQuery.data || []).map(shift => String(shift.id)).sort(),
+    [shiftsQuery.data],
+  );
+  const planningContextShiftKey = planningContextShiftIds.join("|");
   const assignmentsQuery = useQuery({
-    queryKey: ["planning-assignments"],
-    queryFn: () => filterAllEntityRecords(
+    queryKey: ["planning-assignments", periodStart, periodEnd, planningContextShiftKey],
+    queryFn: () => filterEntityRecordsForShiftIds(
       base44.entities.PlanningAssignment,
-      { status: { $ne: "removed" } },
+      planningContextShiftIds,
       "-updated_date",
+      { status: { $ne: "removed" } },
     ),
+    enabled: !shiftsQuery.isLoading,
+    placeholderData: previous => previous || [],
     staleTime: 10_000,
   });
   const taskOccurrencesQuery = useQuery({
@@ -384,12 +451,15 @@ export default function Planning() {
     staleTime: 10_000,
   });
   const taskSegmentsQuery = useQuery({
-    queryKey: ["planning-task-segments"],
-    queryFn: () => filterAllEntityRecords(
+    queryKey: ["planning-task-segments", periodStart, periodEnd, planningContextShiftKey],
+    queryFn: () => filterEntityRecordsForShiftIds(
       base44.entities.PlanningShiftTaskSegment,
-      { status: { $ne: "removed" } },
+      planningContextShiftIds,
       "-start_date",
+      { status: { $ne: "removed" } },
     ),
+    enabled: !shiftsQuery.isLoading,
+    placeholderData: previous => previous || [],
     staleTime: 10_000,
   });
   const personnelQuery = useQuery({
@@ -455,6 +525,9 @@ export default function Planning() {
   useEffect(() => {
     const scheduler = createPlanningRefreshScheduler({
       refresh: options => refreshPlanningRef.current?.(options),
+      // Mutation responses update the visible cache immediately. Delay the
+      // consistency pass so rapid planning never turns into a refetch storm.
+      delayMs: 8_000,
     });
     refreshScheduler.current = scheduler;
     return () => {
@@ -727,19 +800,19 @@ export default function Planning() {
     [pendingMatrixChanges],
   );
   const matrixShifts = useMemo(
-    () => [...filteredShifts, ...pendingMatrixShifts],
+    () => overlayPlanningRecords(filteredShifts, pendingMatrixShifts),
     [filteredShifts, pendingMatrixShifts],
   );
   const matrixCoverageShifts = useMemo(
-    () => [...shiftsInRange, ...pendingMatrixShifts],
+    () => overlayPlanningRecords(shiftsInRange, pendingMatrixShifts),
     [pendingMatrixShifts, shiftsInRange],
   );
   const matrixAssignments = useMemo(
-    () => [...assignmentsInRange, ...pendingMatrixAssignments],
+    () => overlayPlanningRecords(assignmentsInRange, pendingMatrixAssignments),
     [assignmentsInRange, pendingMatrixAssignments],
   );
   const matrixSegments = useMemo(
-    () => [...taskSegments, ...pendingMatrixSegments],
+    () => overlayPlanningRecords(taskSegments, pendingMatrixSegments),
     [pendingMatrixSegments, taskSegments],
   );
 
@@ -992,7 +1065,7 @@ export default function Planning() {
   };
 
   const handleUndo = async (item = undoStack[0]) => {
-    if (!item) return;
+    if (!editing || !item) return;
     const currentShift = allShifts.find(shift => String(shift.id) === String(item.shiftId));
     const result = await runIntentMutation("undo", "planning-undo", {
       action: "undo",
@@ -1029,6 +1102,65 @@ export default function Planning() {
     if (!occurrence || !personnelItem) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
     if (!segment) return;
+    const adjacentMerge = findSamePersonnelAdjacentShiftMerge({
+      occurrenceId: occurrence.id,
+      personnelId: personnelItem.id,
+      proposedSegment: segment,
+      shifts: shiftsInRange,
+      segments: taskSegments,
+      assignments: assignmentsInRange,
+    });
+    if (adjacentMerge.status === "merge") {
+      const { shift, segment: existingSegment, mergedSegment } = adjacentMerge.candidate;
+      const pendingKey = createPlanningMutationKey("pending-adjacent-service-merge");
+      addPendingMatrixChange({
+        key: pendingKey,
+        shifts: [{
+          ...shift,
+          service_date: mergedSegment.start_date,
+          end_date: mergedSegment.end_date === mergedSegment.start_date ? null : mergedSegment.end_date,
+          start_time: mergedSegment.start_time,
+          end_time: mergedSegment.end_time,
+          duration_minutes: adjacentMerge.candidate.durationMinutes,
+          _optimistic_pending: true,
+        }],
+        segments: [{
+          ...existingSegment,
+          ...mergedSegment,
+          duration_minutes: adjacentMerge.candidate.durationMinutes,
+          _optimistic_pending: true,
+        }],
+        assignments: [],
+      });
+      try {
+        return await resizeTimelineTaskSegment({
+          shift,
+          segment: existingSegment,
+          startDate: mergedSegment.start_date,
+          endDate: mergedSegment.end_date,
+          startTime: mergedSegment.start_time,
+          endTime: mergedSegment.end_time,
+          notification: {
+            title: "Aansluitende tijd samengevoegd",
+            description: `${personnelName(personnelItem)} blijft aaneengesloten ingepland van ${mergedSegment.start_time} tot ${mergedSegment.end_time}. Er is geen tweede dienst gemaakt.`,
+          },
+        });
+      } finally {
+        removePendingMatrixChange(pendingKey);
+      }
+    }
+    if (adjacentMerge.reason === "merged_shift_exceeds_automatic_limit") {
+      const description = `${personnelName(personnelItem)} staat al op een aansluitende dienst. Samenvoegen zou ${formatMinutesAsHours(adjacentMerge.durationMinutes)} worden; automatisch plannen stopt bij 12 uur. Kies een andere medewerker voor het open taakdeel.`;
+      toast({ variant: "destructive", title: "Dienst zou langer dan 12 uur worden", description });
+      setLiveMessage(description);
+      return null;
+    }
+    if (adjacentMerge.status === "ambiguous") {
+      const description = "Dit taakdeel sluit aan op twee bestaande diensten van dezelfde medewerker. Pas eerst één grens aan, zodat LOC geen onduidelijke derde dienst maakt.";
+      toast({ variant: "destructive", title: "Aansluiting is niet eenduidig", description });
+      setLiveMessage(description);
+      return null;
+    }
     const releasePendingResources = acquirePendingResources([
       `occurrence:${occurrence.id}`,
       `personnel:${personnelItem.id}`,
@@ -1109,7 +1241,7 @@ export default function Planning() {
     }
   };
 
-  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime }) => {
+  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime, notification = null }) => {
     if (!shift || !segment) return;
     const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
@@ -1142,8 +1274,9 @@ export default function Planning() {
       setStatusFilter("all");
       reconcilePlanningResult(result, { replaceShiftSegments: true });
       refreshPlanningInBackground();
-      const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
-      toast({ title: "Diensttijd aangepast", description });
+      const description = notification?.description
+        || `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
+      toast({ title: notification?.title || "Diensttijd aangepast", description });
       setLiveMessage(description);
       return result;
     } finally {
@@ -1337,6 +1470,7 @@ export default function Planning() {
   };
 
   const handleDragEnd = result => {
+    if (!editing) return;
     const drop = resolvePlanningDrop(result);
     if (!drop) return;
 
@@ -1415,6 +1549,7 @@ export default function Planning() {
   };
 
   const openTaskComposer = ({ shift = null, occurrence = null } = {}) => {
+    if (!editing) return;
     setComposer({ shift, occurrence });
     setSidePanelMode("tasks");
   };
@@ -1538,6 +1673,9 @@ export default function Planning() {
       mutationIntents.current.clear("publish");
       await refreshPlanning({ includePublications: true });
       setPublishOpen(false);
+      setEditing(false);
+      setSavedDraftNotice(false);
+      setSelectedShiftId(null);
       setUndoStack([]);
       const message = `Versie ${result?.publication?.version || result?.version || ""} is gepubliceerd voor ${rangeLabel}.`;
       setLiveMessage(message);
@@ -1553,16 +1691,12 @@ export default function Planning() {
   });
 
   const changePeriod = direction => {
-    const step = view === "week" ? 7 : Math.max(1, range.days.length);
-    if (view === "period") {
-      const nextStart = addDays(range.start, direction * step);
-      const nextEnd = addDays(range.end, direction * step);
-      setCustomPeriodStart(toDateKey(nextStart));
-      setCustomPeriodEnd(toDateKey(nextEnd));
-      setAnchorDate(nextStart);
-    } else {
-      setAnchorDate(current => addDays(current, direction * step));
-    }
+    if (view === "period" && selectedCaoPeriod) {
+      const nextPeriod = getAdjacentCaoPbPlanningPeriod(selectedCaoPeriod, direction);
+      if (!nextPeriod) return;
+      setSelectedCaoPeriodId(nextPeriod.key);
+      setAnchorDate(parseDateKey(nextPeriod.start_date));
+    } else setAnchorDate(current => addDays(current, direction * 7));
     setSelectedShiftId(null);
   };
 
@@ -1581,9 +1715,13 @@ export default function Planning() {
   const goToToday = () => {
     const today = parseDateKey(new Date());
     if (view === "period") {
-      const dayCount = Math.max(1, range.days.length);
-      setCustomPeriodStart(toDateKey(today));
-      setCustomPeriodEnd(toDateKey(addDays(today, dayCount - 1)));
+      const currentCaoPeriod = resolveCaoPbPlanningPeriod(today);
+      if (currentCaoPeriod) setSelectedCaoPeriodId(currentCaoPeriod.key);
+      else {
+        const dayCount = Math.max(1, range.days.length);
+        setCustomPeriodStart(toDateKey(today));
+        setCustomPeriodEnd(toDateKey(addDays(today, dayCount - 1)));
+      }
     }
     setAnchorDate(today);
     setSelectedShiftId(null);
@@ -1624,10 +1762,11 @@ export default function Planning() {
         view={view}
         onViewChange={nextView => {
           if (nextView === "period" && view !== "period") {
-            const nextStart = range.start;
-            setCustomPeriodStart(toDateKey(nextStart));
-            setCustomPeriodEnd(toDateKey(addDays(nextStart, 27)));
-            setAnchorDate(nextStart);
+            const nextCaoPeriod = resolveCaoPbPlanningPeriod(anchorDate)
+              || resolveCaoPbPlanningPeriod(range.start)
+              || CAO_PB_PLANNING_PERIODS_2026[0];
+            setSelectedCaoPeriodId(nextCaoPeriod.key);
+            setAnchorDate(parseDateKey(nextCaoPeriod.start_date));
           }
           setView(nextView);
           setSelectedShiftId(null);
@@ -1638,6 +1777,19 @@ export default function Planning() {
         periodDayCount={range.days.length}
         onPeriodStartChange={value => updateCustomPeriod(value, periodEnd)}
         onPeriodEndChange={value => updateCustomPeriod(periodStart, value)}
+        periodOptions={CAO_PB_PLANNING_PERIODS_2026.map(period => ({
+          id: period.key,
+          label: period.label,
+          dateLabel: `${compactDateLabel.format(parseDateKey(period.start_date))} – ${compactDateLabel.format(parseDateKey(period.end_date))}`,
+        }))}
+        selectedPeriodId={selectedCaoPeriod?.key || ""}
+        onPeriodChange={periodId => {
+          const period = getCaoPbPlanningPeriodByKey(periodId);
+          if (!period) return;
+          setSelectedCaoPeriodId(period.key);
+          setAnchorDate(parseDateKey(period.start_date));
+          setSelectedShiftId(null);
+        }}
         onPrevious={() => changePeriod(-1)}
         onToday={goToToday}
         onNext={() => changePeriod(1)}
@@ -1649,6 +1801,25 @@ export default function Planning() {
         onCustomerFilterChange={setCustomerFilter}
         customers={customers}
         warningCount={planningStats.warningCount}
+        editing={editing}
+        draftChangeCount={planningStats.draftShiftCount + planningStats.draftAssignmentCount}
+        onStartEditing={() => {
+          setEditing(true);
+          setSavedDraftNotice(false);
+          setSelectedShiftId(null);
+          setSidePanelMode(perspective === "object" ? "employees" : "tasks");
+          setLiveMessage("Bewerkstand geopend. Wijzigingen worden als concept bewaard en zijn pas na publiceren definitief zichtbaar.");
+        }}
+        onSaveDraft={() => {
+          setEditing(false);
+          setSavedDraftNotice(true);
+          setSelectedShiftId(null);
+          const description = "Het conceptrooster is opgeslagen. Je bekijkt nu weer het volledige rooster.";
+          setLiveMessage(description);
+          toast({ title: "Concept opgeslagen", description });
+        }}
+        saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0}
+        isSavingDraft={runActionMutation.isPending}
         onPublish={() => {
           mutationIntents.current.clear("publish");
           setPublishOpen(true);
@@ -1666,8 +1837,9 @@ export default function Planning() {
 
       <DragDropContext onDragEnd={handleDragEnd}>
         <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-          <ResizablePanel defaultSize={76} minSize={56}>
+          <ResizablePanel id="planning-board" order={1} defaultSize={editing ? 76 : 100} minSize={editing ? 56 : 100}>
             <PlanningBoard
+              editable={editing}
               perspective={perspective}
               compact={compactMode}
               zoom={planningZoom}
@@ -1704,8 +1876,8 @@ export default function Planning() {
               isLoading={isLoading}
             />
           </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={24} minSize={19} maxSize={38}>
+          {editing && <ResizableHandle id="planning-sidebar-handle" withHandle />}
+          {editing && <ResizablePanel id="planning-sidebar" order={2} defaultSize={24} minSize={19} maxSize={38}>
             <PlanningSidePanel
               perspective={perspective}
               mode={sidePanelMode}
@@ -1739,7 +1911,7 @@ export default function Planning() {
                 pendingResourceKeys: matrixPendingResourceKeys,
               }}
             />
-          </ResizablePanel>
+          </ResizablePanel>}
         </ResizablePanelGroup>
       </DragDropContext>
 
@@ -1765,6 +1937,8 @@ export default function Planning() {
         <button
           type="button"
           onClick={() => {
+            setEditing(true);
+            setSavedDraftNotice(false);
             setPerspective("employee");
             setSidePanelMode("tasks");
             setSelectedShiftId(null);
@@ -1783,15 +1957,15 @@ export default function Planning() {
             </div>
           </>
         )}
-        {undoStack.length > 0 && (
+        {editing && undoStack.length > 0 && (
           <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => handleUndo().catch(() => undefined)}>
             <RotateCcw className="h-3 w-3" />
             Ongedaan maken
           </Button>
         )}
         <div className="ml-auto flex items-center gap-1">
-          <Cloud className="h-3 w-3 text-emerald-600" />
-          Concept automatisch opgeslagen
+          {editing ? <Save className="h-3 w-3 text-amber-600" /> : <Cloud className="h-3 w-3 text-emerald-600" />}
+          {editing ? "Concept bewerken · wijzigingen worden direct veilig opgeslagen" : savedDraftNotice ? "Concept opgeslagen" : "Roosterweergave"}
         </div>
         <span className="sr-only" aria-live="polite">{liveMessage}</span>
       </footer>
