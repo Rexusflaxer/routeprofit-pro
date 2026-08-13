@@ -25,9 +25,9 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
             aria-label={name}
           >
-            <span className="min-w-0 truncate text-[13px] font-semibold leading-tight text-foreground" title={compactName(name)}>{compactName(name)}</span>
+            <span className="min-w-0 truncate text-[24px] font-bold leading-none tracking-tight text-primary" title={compactName(name)}>{compactName(name)}</span>
             {warningCount > 0 && (
-              <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-300" aria-label={`${warningCount} waarschuwingen`} />
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-label={`${warningCount} waarschuwingen`} />
             )}
           </button>
         </TooltipTrigger>
