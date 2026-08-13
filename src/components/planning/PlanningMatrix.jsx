@@ -19,7 +19,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,16 +65,6 @@ function personnelName(personnel) {
       .filter(Boolean)
       .join(" ")
     || "Onbekende medewerker";
-}
-
-function nameInitials(name) {
-  return String(name || "?")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => part[0])
-    .join("")
-    .toUpperCase();
 }
 
 function assignmentIdentity(assignment, personnelById, fallbackPersonnel = null) {
@@ -336,24 +326,12 @@ function ShiftSlot({
     >
       {assignment ? (
         <>
-          <Avatar className={cn("shrink-0 rounded-md border border-primary/15", compact ? "h-6 w-6" : "h-7 w-7")}>
-            <AvatarImage src={identity.photoUrl || undefined} alt={`Profielfoto van ${identity.name}`} className="object-cover object-top" />
-            <AvatarFallback className={cn("rounded-md bg-primary/10 font-bold text-primary", compact ? "text-[8px]" : "text-[9px]")}>
-              {nameInitials(identity.name)}
-            </AvatarFallback>
-          </Avatar>
-          <button
-            type="button"
+          <CompactEmployeeIdentity
+            name={identity.name}
+            photoUrl={identity.photoUrl}
             disabled={disabled}
             onClick={onSelect}
-            className={cn(
-              "min-w-0 flex-1 whitespace-normal break-words text-left font-semibold leading-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait",
-              compact ? "text-[10px]" : "text-[11px]",
-            )}
-            title={identity.name}
-          >
-            {identity.name}
-          </button>
+          />
           {editable && (
             <button
               type="button"
@@ -876,12 +854,11 @@ function MatrixShiftBlock({
         <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
-            <span className={cn(
-              "min-w-0 text-[10px] font-semibold text-muted-foreground",
-              !embeddedInLane && "break-words text-foreground",
-            )}>
-              {embeddedInLane ? "Dienst" : shift.name || shift.service_name_snapshot || "Dienst"}
-            </span>
+            {!embeddedInLane && (
+              <span className="min-w-0 break-words text-[10px] font-semibold text-foreground">
+                {shift.name || shift.service_name_snapshot || "Dienst"}
+              </span>
+            )}
             {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Dienst wordt opgeslagen" />}
             {isResizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
@@ -960,7 +937,12 @@ function MatrixShiftBlock({
           />
         ))}
       </div>
-      {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings} waarschuwingen</p>}
+      {warnings > 0 && (
+        <AlertTriangle
+          className="mt-1 h-3 w-3 text-amber-600 dark:text-amber-300"
+          aria-label={`${warnings} waarschuwingen`}
+        />
+      )}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
         <ServiceCardResizeHandle
           edge="end"
@@ -1317,29 +1299,28 @@ function EmployeeAssignmentBlock({
   return (
     <article aria-busy={disabled ? "true" : "false"} className="rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)]" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <div className="flex items-start gap-2">
-        <Avatar className="h-8 w-8 shrink-0 rounded-md border border-primary/15">
-          <AvatarImage src={identity.photoUrl || undefined} alt={`Profielfoto van ${identity.name}`} className="object-cover object-top" />
-          <AvatarFallback className="rounded-md bg-primary/10 text-[9px] font-bold text-primary">
-            {nameInitials(identity.name)}
-          </AvatarFallback>
-        </Avatar>
-        <button type="button" disabled={disabled} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
-          <span className="block whitespace-normal break-words text-[11px] font-semibold leading-tight text-foreground">{identity.name}</span>
-          <span className="mt-1 block text-[10px] font-semibold tabular-nums text-foreground">
-            {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
-            {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
-          </span>
-          <span className="compact-hide mt-0.5 block break-words text-[9px] text-muted-foreground">
-            {shift.name || shift.service_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "Dienst")}
-          </span>
-        </button>
+        <CompactEmployeeIdentity
+          name={identity.name}
+          photoUrl={identity.photoUrl}
+          disabled={disabled}
+          onClick={onSelect}
+        />
         {editable && (
           <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>
             <UserMinus className="h-3 w-3" />
           </button>
         )}
       </div>
-      {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings}</p>}
+      <button type="button" disabled={disabled} onClick={onSelect} className="mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
+        <span className="block text-[10px] font-semibold tabular-nums text-foreground">
+          {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
+          {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
+        </span>
+        <span className="compact-hide mt-0.5 block break-words text-[9px] text-muted-foreground">
+          {shift.name || shift.service_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "")}
+        </span>
+      </button>
+      {warnings > 0 && <AlertTriangle className="mt-1 h-3 w-3 text-amber-600 dark:text-amber-300" aria-label={`${warnings} waarschuwingen`} />}
     </article>
   );
 }
