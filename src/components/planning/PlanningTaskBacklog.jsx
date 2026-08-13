@@ -48,7 +48,7 @@ function statusClass(status, readiness) {
   return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300";
 }
 
-function OccurrenceCardContent({ occurrence, coverage, planningState, projection, selectedShift, onCreate, onAdd, onFillStaffing, dragEnabled, dragIndex, dragProvided, isDragging }) {
+function OccurrenceCardContent({ occurrence, coverage, planningState, projection, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
   const percentage = coverage.requiredMinutes > 0
     ? Math.min(100, Math.round((coverage.allocatedMinutes / coverage.requiredMinutes) * 100))
     : 0;
@@ -59,6 +59,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       {...(dragProvided?.draggableProps || {})}
       data-task-draggable-id={dragEnabled ? `task:${occurrence.id}` : undefined}
       data-task-draggable-index={dragEnabled ? dragIndex : undefined}
+      aria-busy={disabled ? "true" : "false"}
       className={cn(
         "rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow",
         isDragging && "z-50 shadow-xl ring-2 ring-primary/25",
@@ -72,8 +73,9 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
         ) : dragEnabled ? (
           <button
             type="button"
+            disabled={disabled}
             {...(dragProvided?.dragHandleProps || {})}
-            className="mt-0.5 flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/15 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="mt-0.5 flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/15 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
             aria-label={`${occurrence.task_name_snapshot || "Taak"} slepen`}
             title="Sleep deze taak naar een medewerker op een dag binnen het taakvenster"
           >
@@ -105,18 +107,18 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       {coverage.status !== "full" && (
         <div className="mt-2 flex flex-wrap justify-end gap-1.5">
           {selectedShift?.source_type === "task" && selectedShift.service_date === occurrence.service_date && (
-            <Button variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => onAdd(occurrence)}>
+            <Button disabled={disabled || selectedShiftPending} variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => onAdd(occurrence)}>
               <Plus className="h-3 w-3" /> Aan deze dienst
             </Button>
           )}
-          <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => onCreate(occurrence)}>
+          <Button disabled={disabled} size="sm" className="h-7 px-2 text-[10px]" onClick={() => onCreate(occurrence)}>
             Nieuwe dienst <ChevronRight className="h-3 w-3" />
           </Button>
         </div>
       )}
       {coverage.status === "full" && planningState?.readiness === "needs_staffing" && planningState.openSlots > 0 && (
         <div className="mt-2 flex justify-end">
-          <Button size="sm" className="h-7 px-2 text-[10px]" onClick={() => onFillStaffing?.(occurrence)}>
+          <Button disabled={disabled} size="sm" className="h-7 px-2 text-[10px]" onClick={() => onFillStaffing?.(occurrence)}>
             <UserRoundPlus className="h-3 w-3" /> Bezetting invullen
           </Button>
         </div>
@@ -128,7 +130,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
 function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   if (!enableTaskDrag) return <OccurrenceCardContent {...props} dragEnabled={false} />;
   return (
-    <Draggable draggableId={`task:${props.occurrence.id}`} index={index} isDragDisabled={props.planningState?.readiness === "ready"}>
+    <Draggable draggableId={`task:${props.occurrence.id}`} index={index} isDragDisabled={props.planningState?.readiness === "ready" || props.disabled}>
       {(provided, snapshot) => (
         <OccurrenceCardContent {...props} dragEnabled dragIndex={index} dragProvided={provided} isDragging={snapshot.isDragging} />
       )}
@@ -136,7 +138,7 @@ function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   );
 }
 
-function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, onCreateShift, onAddToShift, onFillStaffing }) {
+function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing }) {
   if (groups.length === 0) {
     return (
       <div className="m-2 rounded-lg border border-dashed border-border bg-card p-5 text-center">
@@ -160,6 +162,7 @@ function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, o
             index={itemIndexById.get(String(item.occurrence.id))}
             enableTaskDrag={enableTaskDrag}
             selectedShift={selectedShift}
+            selectedShiftPending={selectedShiftPending}
             onCreate={onCreateShift}
             onAdd={onAddToShift}
             onFillStaffing={onFillStaffing}
@@ -183,6 +186,7 @@ export default function PlanningTaskBacklog({
   onClearShift,
   enableTaskDrag = false,
   periodStart = null,
+  pendingResourceKeys = null,
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("work");
@@ -209,6 +213,8 @@ export default function PlanningTaskBacklog({
       coverage: planningState.coverage,
       planningState,
       projection: getTaskOccurrenceDayProjection(occurrence, projectionDate),
+      disabled: pendingResourceKeys instanceof Set
+        && pendingResourceKeys.has(`occurrence:${occurrence.id}`),
     };
   }).filter(item => {
     if (status === "work" && item.planningState.readiness === "ready") return false;
@@ -220,7 +226,7 @@ export default function PlanningTaskBacklog({
       item.occurrence.object_name_snapshot,
       item.occurrence.customer_name_snapshot,
     ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
-  }), [assignments, occurrences, periodStart, search, segments, shifts, status]);
+  }), [assignments, occurrences, pendingResourceKeys, periodStart, search, segments, shifts, status]);
   const groups = useMemo(() => [...new Set(items.map(item => item.projection?.date || item.occurrence.service_date))]
     .sort()
     .map(date => ({ date, items: items.filter(item => (item.projection?.date || item.occurrence.service_date) === date) })), [items]);
@@ -230,6 +236,11 @@ export default function PlanningTaskBacklog({
   const selectedSegments = selectedShift
     ? sortTaskSegments(segments.filter(segment => String(segment.shift_id) === String(selectedShift.id)))
     : [];
+  const selectedShiftPending = Boolean(
+    selectedShift
+    && pendingResourceKeys instanceof Set
+    && pendingResourceKeys.has(`shift:${selectedShift.id}`),
+  );
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-muted/20" aria-label="Taakwerkvoorraad">
@@ -253,7 +264,7 @@ export default function PlanningTaskBacklog({
       </div>
 
       {selectedShift?.source_type === "task" && (
-        <div className="shrink-0 border-b border-border bg-primary/[0.04] p-3">
+        <div className="shrink-0 border-b border-border bg-primary/[0.04] p-3" aria-busy={selectedShiftPending ? "true" : "false"}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-[11px] font-semibold">{selectedShift.name}</p>
@@ -263,7 +274,13 @@ export default function PlanningTaskBacklog({
               <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={onClearShift} aria-label="Doeldienst wissen">
                 <X className="h-3 w-3" /> Doel wissen
               </Button>
-              <Button variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => onEditShift(selectedShift)}>
+              <Button
+                disabled={selectedShiftPending}
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                onClick={() => onEditShift(selectedShift)}
+              >
                 <Layers3 className="h-3 w-3" /> Inhoud bewerken
               </Button>
             </div>
@@ -280,6 +297,7 @@ export default function PlanningTaskBacklog({
                 itemIndexById={itemIndexById}
                 enableTaskDrag
                 selectedShift={selectedShift}
+                selectedShiftPending={selectedShiftPending}
                 onCreateShift={onCreateShift}
                 onAddToShift={onAddToShift}
                 onFillStaffing={onFillStaffing}
@@ -295,6 +313,7 @@ export default function PlanningTaskBacklog({
             itemIndexById={itemIndexById}
             enableTaskDrag={false}
             selectedShift={selectedShift}
+            selectedShiftPending={selectedShiftPending}
             onCreateShift={onCreateShift}
             onAddToShift={onAddToShift}
             onFillStaffing={onFillStaffing}

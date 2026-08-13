@@ -126,6 +126,58 @@ function setup(occurrences) {
 const user = { id: "admin-1", role: "admin", name: "Planner" };
 const context = key => ({ idempotencyKey: key, correlationId: key });
 
+async function createAdjacentAssignedTaskShifts({
+  demand,
+  base44,
+  entities,
+  prefix = "shared-boundary",
+}) {
+  entities.Personnel.records.push(
+    { id: `${prefix}-early-personnel`, name: "Vroege Beveiliger", status: "active" },
+    { id: `${prefix}-late-personnel`, name: "Late Beveiliger", status: "active" },
+  );
+  const early = await backend.composeAndAssign(base44, user, {
+    personnel_id: `${prefix}-early-personnel`,
+    segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "14:00" }],
+    expected_occurrence_revisions: { [demand.id]: 1 },
+  }, context(`${prefix}-compose-early`));
+  const afterEarly = await entities.PlanningTaskOccurrence.get(demand.id);
+  const late = await backend.composeAndAssign(base44, user, {
+    personnel_id: `${prefix}-late-personnel`,
+    segments: [{ task_occurrence_id: demand.id, start_time: "14:00", end_time: "18:00" }],
+    expected_occurrence_revisions: { [demand.id]: afterEarly.revision },
+  }, context(`${prefix}-compose-late`));
+  const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+  return {
+    early,
+    late,
+    currentOccurrence,
+    body: {
+      action: "resize_shared_task_boundary",
+      task_occurrence_id: demand.id,
+      left_shift_id: early.shift.id,
+      left_segment_id: early.segments[0].id,
+      right_shift_id: late.shift.id,
+      right_segment_id: late.segments[0].id,
+      boundary_date: demand.service_date,
+      boundary_time: "15:00",
+      expected_shift_revisions: {
+        [early.shift.id]: early.shift.revision,
+        [late.shift.id]: late.shift.revision,
+      },
+      expected_segment_revisions: {
+        [early.segments[0].id]: early.segments[0].revision,
+        [late.segments[0].id]: late.segments[0].revision,
+      },
+      expected_assignment_revisions: {
+        [early.assignment.id]: early.assignment.revision,
+        [late.assignment.id]: late.assignment.revision,
+      },
+      expected_occurrence_revision: currentOccurrence.revision,
+    },
+  };
+}
+
 function addCarryInPublicationFixture(entities, externalShiftStatus) {
   const demand = withPublishedSecurityPlan({
     ...occurrence("occurrence-reception-carry-in", "object-1", "22:00", "06:00", 480),
@@ -1458,6 +1510,573 @@ describe("planningApi dienstsamenstelling", () => {
       assignments: entities.PlanningAssignment.records,
     }).toEqual(businessStateBeforeOverlap);
     expect(evening.shift.start_time).toBe("12:00");
+  });
+
+  it("verplaatst één gedeelde taakgrens atomair en behoudt beide medewerkers zonder gat of overlap", async () => {
+    const demand = occurrence("occurrence-reception-shared-boundary", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-success",
+    });
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const shiftCount = entities.PlanningShift.records.length;
+    const segmentCount = entities.PlanningShiftTaskSegment.records.length;
+    const assignmentIds = entities.PlanningAssignment.records.map(item => item.id).sort();
+
+    const result = await backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-success-resize"),
+    );
+
+    expect(result.shifts).toEqual([
+      expect.objectContaining({
+        id: fixture.early.shift.id,
+        start_time: "10:00",
+        end_time: "15:00",
+        duration_minutes: 300,
+        status: "draft",
+      }),
+      expect.objectContaining({
+        id: fixture.late.shift.id,
+        start_time: "15:00",
+        end_time: "18:00",
+        duration_minutes: 180,
+        status: "draft",
+      }),
+    ]);
+    expect(result.segments).toEqual([
+      expect.objectContaining({
+        id: fixture.early.segments[0].id,
+        start_time: "10:00",
+        end_time: "15:00",
+        duration_minutes: 300,
+      }),
+      expect.objectContaining({
+        id: fixture.late.segments[0].id,
+        start_time: "15:00",
+        end_time: "18:00",
+        duration_minutes: 180,
+      }),
+    ]);
+    expect(result.assignments.map(item => item.id).sort()).toEqual(assignmentIds);
+    expect(result.assignments.map(item => item.personnel_id).sort()).toEqual([
+      "shared-boundary-success-early-personnel",
+      "shared-boundary-success-late-personnel",
+    ]);
+    expect(validationCalls).toBe(2);
+    expect(entities.PlanningShift.records).toHaveLength(shiftCount);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(segmentCount);
+    expect(entities.PlanningAssignment.records.map(item => item.id).sort()).toEqual(assignmentIds);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 480, remaining_minutes: 0 });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toEqual([expect.objectContaining({
+        resource_type: "PlanningTaskOccurrence",
+        resource_id: demand.id,
+        actor_user_id: user.id,
+        idempotency_key: "shared-boundary-success-resize",
+        metadata: expect.objectContaining({
+          affected_shift_ids: [fixture.early.shift.id, fixture.late.shift.id],
+          affected_segment_ids: [fixture.early.segments[0].id, fixture.late.segments[0].id],
+        }),
+      })]);
+  });
+
+  it("replayt dezelfde gedeelde grens zonder extra audit of revisiewijzigingen", async () => {
+    const demand = occurrence("occurrence-reception-shared-replay", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-replay",
+    });
+    const mutation = context("shared-boundary-replay-resize");
+    const first = await backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation);
+    const stateAfterFirst = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+
+    const replay = await backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation);
+
+    expect(replay).toMatchObject({ ok: true, idempotent: true, audit_event_id: first.audit_event_id });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(stateAfterFirst);
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toHaveLength(1);
+  });
+
+  it("compacteert voltooide herstelmetadata zodat herhaald grensschuiven niet recursief groeit", async () => {
+    const demand = occurrence("occurrence-reception-shared-compact", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-compact",
+    });
+
+    await backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-compact-first"),
+    );
+    const afterFirst = await entities.PlanningTaskOccurrence.get(demand.id);
+    const firstState = afterFirst.metadata.shared_boundary_mutation;
+    expect(firstState).toMatchObject({ phase: "completed", boundary_time: "15:00" });
+    expect(firstState.before_state).toBeUndefined();
+    expect(firstState.target_state).toBeUndefined();
+
+    const leftShift = await entities.PlanningShift.get(fixture.early.shift.id);
+    const rightShift = await entities.PlanningShift.get(fixture.late.shift.id);
+    const leftSegment = await entities.PlanningShiftTaskSegment.get(fixture.early.segments[0].id);
+    const rightSegment = await entities.PlanningShiftTaskSegment.get(fixture.late.segments[0].id);
+    const assignments = entities.PlanningAssignment.records.filter(item => item.status !== "removed");
+    await backend.resizeSharedTaskBoundary(base44, user, {
+      ...fixture.body,
+      boundary_time: "14:30",
+      expected_shift_revisions: {
+        [leftShift.id]: leftShift.revision,
+        [rightShift.id]: rightShift.revision,
+      },
+      expected_segment_revisions: {
+        [leftSegment.id]: leftSegment.revision,
+        [rightSegment.id]: rightSegment.revision,
+      },
+      expected_assignment_revisions: Object.fromEntries(assignments.map(item => [item.id, item.revision])),
+      expected_occurrence_revision: afterFirst.revision,
+    }, context("shared-boundary-compact-second"));
+
+    const afterSecond = await entities.PlanningTaskOccurrence.get(demand.id);
+    const secondState = afterSecond.metadata.shared_boundary_mutation;
+    expect(secondState).toMatchObject({ phase: "completed", boundary_time: "14:30" });
+    expect(secondState.before_state).toBeUndefined();
+    expect(secondState.target_state).toBeUndefined();
+    expect(JSON.stringify(secondState).length).toBeLessThan(2_000);
+    expect(JSON.stringify(secondState)).not.toContain("shared-boundary-compact-first");
+  });
+
+  it("herstelt na een late auditstoring met dezelfde key zonder dubbele writes", async () => {
+    const demand = occurrence("occurrence-reception-shared-recovery", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-recovery",
+    });
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failed = false;
+    entities.PlanningAuditEvent.create = async data => {
+      if (!failed && data.action === "resize_shared_task_boundary") {
+        failed = true;
+        throw new Error("tijdelijke gedeelde-grens-auditstoring");
+      }
+      return originalAuditCreate(data);
+    };
+    const mutation = context("shared-boundary-recovery-resize");
+
+    await expect(backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation))
+      .rejects.toThrow("tijdelijke gedeelde-grens-auditstoring");
+    const stateBeforeRecovery = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+    });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toHaveLength(0);
+
+    const recovered = await backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation);
+
+    expect(recovered).toMatchObject({ ok: true, boundary: { date: "2026-08-17", time: "15:00" } });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+    }).toEqual(stateBeforeRecovery);
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.shared_boundary_mutation)
+      .toMatchObject({ phase: "completed", effective_view: "target", audit_event_id: expect.any(String) });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toHaveLength(1);
+  });
+
+  it("vervolgt met dezelfde key na een gedeeltelijke boundary-write zonder overlap of dubbele records", async () => {
+    const demand = occurrence("occurrence-reception-shared-partial", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-partial",
+    });
+    const originalSegmentUpdate = entities.PlanningShiftTaskSegment.updateMany
+      .bind(entities.PlanningShiftTaskSegment);
+    let failOnce = true;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (
+        failOnce
+        && query.id === fixture.late.segments[0].id
+        && update.$set?.start_time === "15:00"
+      ) {
+        failOnce = false;
+        return { success: true, updated: 0 };
+      }
+      return originalSegmentUpdate(query, update);
+    };
+    const mutation = context("shared-boundary-partial-resize");
+
+    await expect(backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation))
+      .rejects.toMatchObject({ status: 409 });
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.planning_composition_reservation)
+      .toMatchObject({
+        action: "resize_shared_task_boundary",
+        idempotency_key: mutation.idempotencyKey,
+        status: "pending",
+      });
+    expect((await entities.PlanningShift.get(fixture.late.shift.id)).start_time).toBe("15:00");
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    ).allocated_minutes).toBe(480);
+
+    const recovered = await backend.resizeSharedTaskBoundary(base44, user, fixture.body, mutation);
+
+    expect(recovered.shifts).toEqual([
+      expect.objectContaining({ start_time: "10:00", end_time: "15:00" }),
+      expect.objectContaining({ start_time: "15:00", end_time: "18:00" }),
+    ]);
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+    expect(entities.PlanningAssignment.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toHaveLength(1);
+  });
+
+  it("herstelt met een nieuwe context na een fout tussen beide segmentwrites", async () => {
+    const demand = occurrence("occurrence-reception-shared-mid-segment", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-mid-segment",
+    });
+    const originalUpdate = entities.PlanningShiftTaskSegment.updateMany
+      .bind(entities.PlanningShiftTaskSegment);
+    let boundaryWriteAttempts = 0;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (update.$set?.metadata?.shared_boundary_mutation?.idempotency_key === "shared-boundary-mid-segment-resize") {
+        boundaryWriteAttempts += 1;
+        if (boundaryWriteAttempts === 2) return { success: true, updated: 0 };
+      }
+      return originalUpdate(query, update);
+    };
+
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-mid-segment-resize"),
+    )).rejects.toMatchObject({ status: 409 });
+    expect(boundaryWriteAttempts).toBe(2);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "partial", allocated_minutes: 420, remaining_minutes: 60 });
+
+    const repaired = await backend.repairSharedTaskBoundary(
+      base44,
+      user,
+      { task_occurrence_id: demand.id },
+      context("new-browser-boundary-repair"),
+    );
+
+    expect(repaired).toMatchObject({ ok: true, repaired: true, boundary: { time: "15:00" } });
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 480, remaining_minutes: 0 });
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.shared_boundary_mutation)
+      .toMatchObject({ phase: "completed", effective_view: "target" });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toEqual([expect.objectContaining({ idempotency_key: "shared-boundary-mid-segment-resize" })]);
+  });
+
+  it("herstelt een onafgeronde grens automatisch bij bootstrap vanuit een nieuwe sessie", async () => {
+    const demand = occurrence("occurrence-reception-shared-bootstrap-repair", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-bootstrap-repair",
+    });
+    const originalUpdate = entities.PlanningShiftTaskSegment.updateMany
+      .bind(entities.PlanningShiftTaskSegment);
+    let boundaryWriteAttempts = 0;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (update.$set?.metadata?.shared_boundary_mutation?.idempotency_key === "shared-boundary-bootstrap-resize") {
+        boundaryWriteAttempts += 1;
+        if (boundaryWriteAttempts === 2) return { success: true, updated: 0 };
+      }
+      return originalUpdate(query, update);
+    };
+
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-bootstrap-resize"),
+    )).rejects.toMatchObject({ status: 409 });
+
+    const bootstrapped = await backend.bootstrapRange(base44, user, {
+      period_start: demand.service_date,
+      period_end: demand.service_date,
+    }, context("fresh-session-bootstrap-repair"));
+
+    expect(bootstrapped.repaired_shared_boundary_occurrence_ids).toEqual([demand.id]);
+    expect(bootstrapped.pending_shared_boundary_repairs).toEqual([]);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 480, remaining_minutes: 0 });
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.shared_boundary_mutation)
+      .toMatchObject({ phase: "completed", effective_view: "target" });
+  });
+
+  it("weigert herstel als hetzelfde assignmentslot intussen aan een andere medewerker hoort", async () => {
+    const demand = occurrence("occurrence-reception-shared-assignment-fence", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-assignment-fence",
+    });
+    const originalUpdate = entities.PlanningShiftTaskSegment.updateMany
+      .bind(entities.PlanningShiftTaskSegment);
+    let boundaryWriteAttempts = 0;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (update.$set?.metadata?.shared_boundary_mutation?.idempotency_key === "shared-boundary-assignment-fence-resize") {
+        boundaryWriteAttempts += 1;
+        if (boundaryWriteAttempts === 2) return { success: true, updated: 0 };
+      }
+      return originalUpdate(query, update);
+    };
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-assignment-fence-resize"),
+    )).rejects.toMatchObject({ status: 409 });
+    const reusedSlot = entities.PlanningAssignment.records.find(item => item.id === fixture.late.assignment.id);
+    reusedSlot.personnel_id = "replacement-personnel";
+    reusedSlot.revision += 1;
+
+    await expect(backend.repairSharedTaskBoundary(
+      base44,
+      user,
+      { task_occurrence_id: demand.id },
+      context("fresh-session-assignment-fence-repair"),
+    )).rejects.toMatchObject({
+      status: 409,
+      details: { code: "BOUNDARY_RECOVERY_ASSIGNMENTS_CHANGED" },
+    });
+  });
+
+  it("weigert herstel als de duurzame doelprojectie niet meer bij de opgeslagen hash past", async () => {
+    const demand = occurrence("occurrence-reception-shared-hash-fence", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-hash-fence",
+    });
+    const originalUpdate = entities.PlanningShiftTaskSegment.updateMany
+      .bind(entities.PlanningShiftTaskSegment);
+    let boundaryWriteAttempts = 0;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (update.$set?.metadata?.shared_boundary_mutation?.idempotency_key === "shared-boundary-hash-fence-resize") {
+        boundaryWriteAttempts += 1;
+        if (boundaryWriteAttempts === 2) return { success: true, updated: 0 };
+      }
+      return originalUpdate(query, update);
+    };
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-hash-fence-resize"),
+    )).rejects.toMatchObject({ status: 409 });
+    const storedOccurrence = entities.PlanningTaskOccurrence.records.find(item => item.id === demand.id);
+    storedOccurrence.metadata.shared_boundary_mutation.target_state.segments[0].end_time = "16:00";
+
+    await expect(backend.repairSharedTaskBoundary(
+      base44,
+      user,
+      { task_occurrence_id: demand.id },
+      context("fresh-session-hash-fence-repair"),
+    )).rejects.toMatchObject({
+      status: 409,
+      details: { code: "BOUNDARY_RECOVERY_TARGET_HASH_MISMATCH" },
+    });
+  });
+
+  it("herstelt een auditfout met een nieuwe browserkey en bewaart de oorspronkelijke auditidentiteit", async () => {
+    const demand = occurrence("occurrence-reception-shared-new-key-audit", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-new-key-audit",
+    });
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failOnce && data.action === "resize_shared_task_boundary") {
+        failOnce = false;
+        throw new Error("audit tijdelijk niet beschikbaar");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-new-key-audit-resize"),
+    )).rejects.toThrow("audit tijdelijk niet beschikbaar");
+    const repaired = await backend.repairSharedTaskBoundary(
+      base44,
+      user,
+      { task_occurrence_id: demand.id },
+      context("fresh-tab-audit-repair"),
+    );
+
+    expect(repaired).toMatchObject({ ok: true, repaired: true });
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toEqual([expect.objectContaining({
+        idempotency_key: "shared-boundary-new-key-audit-resize",
+        metadata: expect.objectContaining({ recovered_by_user_id: user.id }),
+      })]);
+  });
+
+  it("dedupliceert audit-herstel wanneer opslag slaagt maar het auditantwoord wegvalt", async () => {
+    const demand = occurrence("occurrence-reception-shared-audit-transport", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-audit-transport",
+    });
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      const created = await originalAuditCreate(data);
+      if (failOnce && data.action === "resize_shared_task_boundary") {
+        failOnce = false;
+        throw new Error("auditantwoord verloren");
+      }
+      return created;
+    };
+
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-audit-transport-resize"),
+    )).rejects.toThrow("auditantwoord verloren");
+    await backend.repairSharedTaskBoundary(
+      base44,
+      user,
+      { task_occurrence_id: demand.id },
+      context("fresh-process-audit-transport-repair"),
+    );
+
+    expect(entities.PlanningAuditEvent.records.filter(item => item.action === "resize_shared_task_boundary"))
+      .toHaveLength(1);
+    expect((await entities.PlanningTaskOccurrence.get(demand.id)).metadata?.shared_boundary_mutation)
+      .toMatchObject({ phase: "completed", audit_event_id: expect.any(String) });
+  });
+
+  it("weigert een te korte, stale of geleasede gedeelde grens zonder businesswijzigingen", async () => {
+    const demand = occurrence("occurrence-reception-shared-rejected", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const fixture = await createAdjacentAssignedTaskShifts({
+      demand,
+      base44,
+      entities,
+      prefix: "shared-boundary-rejected",
+    });
+    const baseline = () => structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+      audits: entities.PlanningAuditEvent.records,
+    });
+
+    const beforeTooShort = baseline();
+    await expect(backend.resizeSharedTaskBoundary(base44, user, {
+      ...fixture.body,
+      boundary_time: "17:58",
+    }, context("shared-boundary-too-short"))).rejects.toMatchObject({ status: 409 });
+    expect(baseline()).toEqual(beforeTooShort);
+
+    const beforeStale = baseline();
+    await expect(backend.resizeSharedTaskBoundary(base44, user, {
+      ...fixture.body,
+      expected_shift_revisions: {
+        ...fixture.body.expected_shift_revisions,
+        [fixture.early.shift.id]: fixture.early.shift.revision + 1,
+      },
+    }, context("shared-boundary-stale"))).rejects.toMatchObject({ status: 409 });
+    expect(baseline()).toEqual(beforeStale);
+
+    const occurrenceCoordinator = entities.PlanningMutationCoordinator.records.find(item => (
+      item.resource_type === "task_occurrence" && item.resource_id === demand.id
+    ));
+    occurrenceCoordinator.lease = {
+      token: "foreign-shared-boundary-token",
+      status: "pending",
+      idempotency_key: "foreign-shared-boundary",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const beforeLease = baseline();
+    await expect(backend.resizeSharedTaskBoundary(
+      base44,
+      user,
+      fixture.body,
+      context("shared-boundary-foreign-lease"),
+    )).rejects.toMatchObject({ status: 409 });
+    expect(baseline()).toEqual(beforeLease);
   });
 
   it("fencet bij full replacement zowel verwijderde als blijvende taakuitvoeringen", async () => {

@@ -104,6 +104,65 @@ describe("planning mutation query-cache reconciliation", () => {
     ]);
   });
 
+  it("verwerkt een autoritatieve grensmutatie voor meerdere diensten in één cache-update", () => {
+    const queryClient = createQueryClient();
+    const shiftsKey = ["planning-shifts", periodStart, periodEnd];
+    queryClient.setQueryData(shiftsKey, [
+      { id: "shift-early", start_time: "10:00", end_time: "14:00", revision: 2 },
+      { id: "shift-late", start_time: "14:00", end_time: "18:00", revision: 3 },
+      { id: "shift-untouched", start_time: "18:00", end_time: "22:00", revision: 1 },
+    ]);
+    queryClient.setQueryData(["planning-assignments"], [
+      { id: "assignment-early", shift_id: "shift-early", status: "draft" },
+      { id: "assignment-late-old", shift_id: "shift-late", status: "draft" },
+      { id: "assignment-untouched", shift_id: "shift-untouched", status: "draft" },
+    ]);
+    queryClient.setQueryData(["planning-task-segments"], [
+      { id: "segment-early-old", shift_id: "shift-early", start_time: "10:00", end_time: "14:00" },
+      { id: "segment-late-old", shift_id: "shift-late", start_time: "14:00", end_time: "18:00" },
+      { id: "segment-untouched", shift_id: "shift-untouched", start_time: "18:00", end_time: "22:00" },
+    ]);
+
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart,
+      periodEnd,
+      replaceShiftSegments: true,
+      result: {
+        shifts: [
+          { id: "shift-early", end_time: "15:00", revision: 3 },
+          { id: "shift-late", start_time: "15:00", revision: 4 },
+        ],
+        assignments: [
+          { id: "assignment-early", shift_id: "shift-early", status: "draft", revision: 3 },
+          { id: "assignment-late", shift_id: "shift-late", status: "draft", revision: 1 },
+        ],
+        removed_assignment_ids: ["assignment-late-old"],
+        segments: [
+          { id: "segment-early", shift_id: "shift-early", start_time: "10:00", end_time: "15:00" },
+          { id: "segment-late", shift_id: "shift-late", start_time: "15:00", end_time: "18:00" },
+        ],
+        removed_segment_ids: ["segment-early-old", "segment-late-old"],
+      },
+    });
+
+    expect(queryClient.getQueryData(shiftsKey)).toEqual([
+      { id: "shift-early", start_time: "10:00", end_time: "15:00", revision: 3 },
+      { id: "shift-late", start_time: "15:00", end_time: "18:00", revision: 4 },
+      { id: "shift-untouched", start_time: "18:00", end_time: "22:00", revision: 1 },
+    ]);
+    expect(queryClient.getQueryData(["planning-assignments"])).toEqual([
+      { id: "assignment-early", shift_id: "shift-early", status: "draft", revision: 3 },
+      { id: "assignment-late-old", shift_id: "shift-late", status: "removed" },
+      { id: "assignment-untouched", shift_id: "shift-untouched", status: "draft" },
+      { id: "assignment-late", shift_id: "shift-late", status: "draft", revision: 1 },
+    ]);
+    expect(queryClient.getQueryData(["planning-task-segments"])).toEqual([
+      { id: "segment-untouched", shift_id: "shift-untouched", start_time: "18:00", end_time: "22:00" },
+      { id: "segment-early", shift_id: "shift-early", start_time: "10:00", end_time: "15:00" },
+      { id: "segment-late", shift_id: "shift-late", start_time: "15:00", end_time: "18:00" },
+    ]);
+  });
+
   it("markeert verwijderde assignment- en segmentrecords als removed", () => {
     const queryClient = createQueryClient();
     queryClient.setQueryData(["planning-assignments"], [

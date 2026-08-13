@@ -10,6 +10,8 @@ export const TIMELINE_DAY_MINUTES = 24 * 60;
 export const DEFAULT_TIMELINE_SNAP_MINUTES = 5;
 export const MAX_AUTOMATIC_TASK_SERVICE_MINUTES = 12 * 60;
 export const DEFAULT_SUGGESTED_ALLOCATION_MINUTES = MAX_AUTOMATIC_TASK_SERVICE_MINUTES;
+export const TASK_LANE_MIN_HEIGHT_PX = 64;
+export const TASK_LANE_MAX_HEIGHT_PX = 288;
 
 const CLOCK_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 
@@ -135,6 +137,45 @@ export function timelineMinutesToClock(value) {
 }
 
 /**
+ * Keep a complete task lane compact while preserving proportional geometry.
+ * The returned height belongs to the whole demand window, never to one card.
+ */
+export function getTaskTimelineLaneHeight(durationMinutes, { compact = false } = {}) {
+  const duration = Math.max(0, finiteNumber(durationMinutes) || 0);
+  const minimum = compact ? 52 : TASK_LANE_MIN_HEIGHT_PX;
+  const maximum = compact ? 216 : TASK_LANE_MAX_HEIGHT_PX;
+  const pixelsPerMinute = compact ? 0.18 : 0.25;
+  return Math.round(Math.max(minimum, Math.min(maximum, duration * pixelsPerMinute)));
+}
+
+/** Map a pointer position in a rendered lane to a snapped wall-clock minute. */
+export function timelineMinuteFromLanePointer({
+  clientY,
+  laneTop,
+  laneHeight,
+  startMinute,
+  endMinute,
+  minMinute = startMinute,
+  maxMinute = endMinute,
+  snapMinutes = DEFAULT_TIMELINE_SNAP_MINUTES,
+} = {}) {
+  const height = finiteNumber(laneHeight);
+  const start = finiteNumber(startMinute);
+  const end = finiteNumber(endMinute);
+  const pointer = finiteNumber(clientY);
+  const top = finiteNumber(laneTop);
+  if (height === null || height <= 0 || start === null || end === null || end <= start || pointer === null || top === null) {
+    return null;
+  }
+  const ratio = Math.max(0, Math.min(1, (pointer - top) / height));
+  return snapTimelineMinute(start + ratio * (end - start), {
+    stepMinutes: snapMinutes,
+    minMinute,
+    maxMinute,
+  });
+}
+
+/**
  * Project any shift-like record onto one local calendar day. Geometry uses
  * wall-clock minutes while `elapsedMinutes` retains DST-aware elapsed time.
  */
@@ -204,12 +245,41 @@ export function getTaskTimelineDemand(occurrence, serviceDate) {
  * gaps disappear as soon as the required duration has been allocated even if
  * part of the allowed visual window remains empty.
  */
-export function getTaskTimelineGaps({ occurrence, serviceDate, segments = [], shifts = null } = {}) {
+export function getTaskTimelineGaps({
+  occurrence,
+  serviceDate,
+  segments = [],
+  shifts = null,
+  previewIntervalsBySegmentId = null,
+} = {}) {
   const demand = getTaskTimelineDemand(occurrence, serviceDate);
   if (!demand) return [];
   const relevantSegments = activeOccurrenceSegments(occurrence, segments, shifts);
+  let previewDurationDelta = 0;
   const usedOnDay = relevantSegments
-    .map(segment => getTimelineDayProjection(segmentIntervalRecord(segment), serviceDate))
+    .map(segment => {
+      const projection = getTimelineDayProjection(segmentIntervalRecord(segment), serviceDate);
+      if (!projection) return null;
+      const preview = previewIntervalsBySegmentId instanceof Map
+        ? previewIntervalsBySegmentId.get(String(segment.id))
+        : previewIntervalsBySegmentId?.[String(segment.id)];
+      if (!preview) return projection;
+      const startMinute = finiteNumber(preview.startMinute) ?? projection.startMinute;
+      const endMinute = finiteNumber(preview.endMinute) ?? projection.endMinute;
+      const baseStart = Math.max(demand.startMinute, projection.startMinute);
+      const baseEnd = Math.min(demand.endMinute, projection.endMinute);
+      const clampedStart = Math.max(demand.startMinute, Math.min(demand.endMinute, startMinute));
+      const clampedEnd = Math.max(clampedStart, Math.min(demand.endMinute, endMinute));
+      previewDurationDelta += (clampedEnd - clampedStart) - Math.max(0, baseEnd - baseStart);
+      return {
+        ...projection,
+        startMinute: clampedStart,
+        endMinute: clampedEnd,
+        startTime: timelineMinutesToClock(clampedStart),
+        endTime: timelineMinutesToClock(clampedEnd),
+        visualDurationMinutes: clampedEnd - clampedStart,
+      };
+    })
     .filter(Boolean)
     .map(projection => ({
       startMinute: Math.max(demand.startMinute, projection.startMinute),
@@ -218,7 +288,7 @@ export function getTaskTimelineGaps({ occurrence, serviceDate, segments = [], sh
     .filter(interval => interval.endMinute > interval.startMinute);
   const uncovered = subtractMinuteIntervals(demand.startMinute, demand.endMinute, usedOnDay);
   const coverage = getTaskOccurrenceCoverage(occurrence, relevantSegments);
-  let flexibleMinutesLeft = Math.max(0, coverage.remainingMinutes);
+  let flexibleMinutesLeft = Math.max(0, coverage.remainingMinutes - previewDurationDelta);
 
   return uncovered.flatMap((gap, index) => {
     const durationMinutes = gap.endMinute - gap.startMinute;

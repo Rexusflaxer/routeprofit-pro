@@ -10,6 +10,7 @@
         "compose_shift",
         "compose_and_assign",
         "update_shift_composition",
+        "resize_shared_task_boundary",
         "cancel_task_shift",
         "assign",
         "unassign",
