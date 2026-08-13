@@ -57,7 +57,7 @@ const CONTEXT_SECTIONS = [
   },
 ];
 
-function LOQLogo({ className = "h-5 w-auto", forceLight = false }) {
+function LOQLogo({ className = "h-5 w-auto" }) {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -67,7 +67,7 @@ function LOQLogo({ className = "h-5 w-auto", forceLight = false }) {
 
   return (
     <img
-      src={forceLight || resolvedTheme === "dark" ? LOGO_LIGHT : LOGO_DARK}
+      src={resolvedTheme === "dark" ? LOGO_LIGHT : LOGO_DARK}
       alt="LOQ"
       className={className}
     />
@@ -190,7 +190,7 @@ function ContextNavigation({ currentPageName, onNavigate, onSearchOpen, collapse
             {collapsed ? (
               <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1f7aff] text-white text-[12px] font-bold">L</div>
             ) : (
-              <LOQLogo className="h-7 w-auto max-w-[104px]" forceLight={currentPageName === "Planning"} />
+              <LOQLogo className="h-7 w-auto max-w-[104px]" />
             )}
           </Link>
           <button type="button" onClick={onSearchOpen} aria-label="Globaal zoeken" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground">
@@ -327,7 +327,7 @@ function AppShell({ children, currentPageName }) {
 
   return (
     <div
-      className={`${isPlanningWorkspace ? "dark h-screen overflow-hidden bg-[#0b1322] text-slate-100" : "min-h-screen overflow-x-hidden bg-background/55 text-foreground backdrop-blur-[2px]"} antialiased`}
+      className={`${isPlanningWorkspace ? "h-screen overflow-hidden" : "min-h-screen overflow-x-hidden"} bg-background/55 text-foreground antialiased backdrop-blur-[2px]`}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeaveApp}
     >
@@ -338,7 +338,7 @@ function AppShell({ children, currentPageName }) {
       <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border/70 bg-background/70 shadow-sm backdrop-blur-2xl lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <LOQLogo className="h-5 w-auto max-w-[74px]" forceLight={isPlanningWorkspace} />
+            <LOQLogo className="h-5 w-auto max-w-[74px]" />
             <button type="button" onClick={() => openGlobalSearch()} aria-label="Globaal zoeken" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Search className="h-4 w-4" /></button>
           </div>
           <Button
