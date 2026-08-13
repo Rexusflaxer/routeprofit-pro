@@ -22,7 +22,7 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             type="button"
             disabled={disabled}
             onClick={onClick}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
             aria-label={name}
           >
             <span className="min-w-0 truncate text-[24px] font-bold leading-none tracking-tight text-primary" title={compactName(name)}>{compactName(name)}</span>

@@ -218,7 +218,7 @@ function OpenTaskIntervalCard({
       style={style}
       className={cn(
         "group/open-task w-full rounded-lg border border-rose-200 border-l-[3px] border-l-rose-400 bg-card px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.035)] transition-colors dark:border-rose-900/70 dark:border-l-rose-600",
-        embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 bg-rose-50/55 px-2 py-1.5 shadow-none dark:bg-rose-950/20",
+        embeddedInLane && "absolute flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 bg-rose-50/55 px-2 py-1.5 shadow-none hover:bg-rose-100/70 dark:bg-rose-950/20 dark:hover:bg-rose-950/35",
         coverage?.status === "partial" && !embeddedInLane && "border-amber-200 border-l-amber-500 dark:border-amber-900/70 dark:border-l-amber-600",
         editable && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.08] ring-2 ring-inset ring-primary/25",
@@ -228,7 +228,7 @@ function OpenTaskIntervalCard({
         <button
           type="button"
           disabled={!editable}
-          className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", embeddedInLane && "flex h-full items-center cursor-pointer")}
           onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
         >
           <span className="flex min-w-0 items-start justify-between gap-2">
@@ -238,7 +238,7 @@ function OpenTaskIntervalCard({
                 !embeddedInLane && "break-words",
                 embeddedInLane && "text-rose-700 dark:text-rose-300",
               )}>
-                {embeddedInLane ? "Open taakdeel" : occurrence.task_name_snapshot || "Open taak"}
+                {embeddedInLane ? "Nog in te plannen" : occurrence.task_name_snapshot || "Open taak"}
               </span>
               <span className={cn("mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground", embeddedInLane && "sr-only")}>
                 <Clock3 className="h-3 w-3 shrink-0" />
@@ -649,12 +649,12 @@ function TaskBoundaryHandle({
           onCancel?.();
         }
       }}
-      className="absolute left-11 z-40 flex h-6 w-[calc(100%_-_2.75rem)] -translate-y-1/2 touch-none cursor-row-resize items-center justify-center [@media(pointer:coarse)]:h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
+      className="group/boundary absolute left-11 z-40 flex h-7 w-[calc(100%_-_2.75rem)] -translate-y-1/2 touch-none cursor-row-resize items-center justify-center [@media(pointer:coarse)]:h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
       style={{ top: `${top}%` }}
       title="Slepen · pijltjes 5 min · Shift 60 min · Enter opslaan"
     >
-      <span className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-primary/45" />
-      <span className="pointer-events-none relative flex h-2 w-12 items-center justify-center rounded-full border border-primary/30 bg-background/95 text-primary shadow-sm">
+      <span className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-primary/35 transition-colors group-hover/boundary:bg-primary/70" />
+      <span className="pointer-events-none relative flex h-2.5 w-12 items-center justify-center rounded-full border border-primary/35 bg-background/95 text-primary shadow-sm transition-transform group-hover/boundary:scale-110">
         <GripHorizontal className="h-2.5 w-2.5" />
       </span>
     </button>
@@ -820,7 +820,7 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
-      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 pb-5 pt-5 shadow-none",
+      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 py-2.5 shadow-none transition-colors hover:bg-primary/[0.12]",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 dark:border-amber-800",
       shiftTimeOverlayClass(displayedStartTime),
