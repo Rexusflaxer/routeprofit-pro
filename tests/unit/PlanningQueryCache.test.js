@@ -75,6 +75,68 @@ describe("planning mutation query-cache reconciliation", () => {
     expect(queryClient.getQueryData(otherPeriodKey)).toEqual([{ id: "shift-other-period" }]);
   });
 
+  it("werkt alle actieve range-scoped assignment- en segmentqueries direct bij", () => {
+    const queryClient = createQueryClient();
+    const assignmentsKey = ["planning-assignments", periodStart, periodEnd, "shift-a|shift-b"];
+    const segmentsKey = ["planning-task-segments", periodStart, periodEnd, "shift-a|shift-b"];
+    queryClient.setQueryData(assignmentsKey, [{ id: "assignment-a", shift_id: "shift-a" }]);
+    queryClient.setQueryData(segmentsKey, [{ id: "segment-a", shift_id: "shift-a" }]);
+
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart,
+      periodEnd,
+      result: {
+        assignment: { id: "assignment-b", shift_id: "shift-b", status: "draft" },
+        segment: { id: "segment-b", shift_id: "shift-b", status: "draft" },
+      },
+    });
+
+    expect(queryClient.getQueryData(assignmentsKey)).toEqual([
+      { id: "assignment-a", shift_id: "shift-a" },
+      { id: "assignment-b", shift_id: "shift-b", status: "draft" },
+    ]);
+    expect(queryClient.getQueryData(segmentsKey)).toEqual([
+      { id: "segment-a", shift_id: "shift-a" },
+      { id: "segment-b", shift_id: "shift-b", status: "draft" },
+    ]);
+  });
+
+  it("ververst overlappende range-caches alleen voor records die daar al bestaan", () => {
+    const queryClient = createQueryClient();
+    const currentShiftKey = ["planning-shifts", periodStart, periodEnd];
+    const overlappingShiftKey = ["planning-shifts", "2026-08-16", "2026-08-22"];
+    const overlappingAssignmentsKey = [
+      "planning-assignments",
+      "2026-08-16",
+      "2026-08-22",
+      "shift-night",
+    ];
+    const otherAssignmentsKey = ["planning-assignments", "2026-09-01", "2026-09-28", "shift-other"];
+    queryClient.setQueryData(currentShiftKey, [{ id: "shift-night", end_time: "01:00", revision: 2 }]);
+    queryClient.setQueryData(overlappingShiftKey, [{ id: "shift-night", end_time: "01:00", revision: 2 }]);
+    queryClient.setQueryData(overlappingAssignmentsKey, []);
+    queryClient.setQueryData(otherAssignmentsKey, [{ id: "assignment-other", shift_id: "shift-other" }]);
+
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart,
+      periodEnd,
+      result: {
+        shift: { id: "shift-night", end_time: "02:00", revision: 3 },
+        assignment: { id: "assignment-night", shift_id: "shift-night", status: "draft" },
+      },
+    });
+
+    expect(queryClient.getQueryData(overlappingShiftKey)).toEqual([
+      { id: "shift-night", end_time: "02:00", revision: 3 },
+    ]);
+    expect(queryClient.getQueryData(overlappingAssignmentsKey)).toEqual([
+      { id: "assignment-night", shift_id: "shift-night", status: "draft" },
+    ]);
+    expect(queryClient.getQueryData(otherAssignmentsKey)).toEqual([
+      { id: "assignment-other", shift_id: "shift-other" },
+    ]);
+  });
+
   it("vervangt bij resize alleen de segmenten van de gewijzigde dienst", () => {
     const queryClient = createQueryClient();
     queryClient.setQueryData(["planning-task-segments"], [

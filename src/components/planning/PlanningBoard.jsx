@@ -23,6 +23,7 @@ import PlanningMatrix from "@/components/planning/PlanningMatrix";
  */
 export default function PlanningBoard({
   perspective,
+  editable = false,
   compact,
   zoom,
   days = [],
@@ -63,6 +64,7 @@ export default function PlanningBoard({
   return (
     <PlanningMatrix
       perspective={perspective}
+      editable={editable}
       compact={compact}
       zoom={zoom}
       days={days}

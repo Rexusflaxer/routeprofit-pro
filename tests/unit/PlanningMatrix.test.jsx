@@ -70,6 +70,7 @@ function renderInDragContext(ui) {
 function boardProps(overrides = {}) {
   return {
     perspective: "object",
+    editable: true,
     view: "week",
     days: [serviceDay],
     weeks: [[serviceDay]],
@@ -175,6 +176,113 @@ describe("Planning matrix", () => {
     expect(card).toHaveAttribute("data-open-task-interval", "06:00-20:00");
     expect(card).toHaveAttribute("data-droppable-id", "occurrence-gap:occurrence-long-reception:2026-08-17:0360:1080");
     expect(container.querySelector('[data-service-time-rail="true"]')).not.toBeInTheDocument();
+  });
+
+  it("opent standaard als rustig leesrooster en toont de medewerker als primaire dienstinformatie", () => {
+    const coveredShift = {
+      ...shift,
+      id: "shift-read-mode",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "16:00",
+    };
+    const coveredSegment = {
+      id: "segment-read-mode",
+      shift_id: coveredShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      task_name_snapshot: occurrence.task_name_snapshot,
+      status: "draft",
+    };
+    const coveredAssignment = {
+      ...assignment,
+      id: "assignment-read-mode",
+      planning_shift_id: coveredShift.id,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        editable: false,
+        shifts: [coveredShift],
+        segments: [coveredSegment],
+        assignments: [coveredAssignment],
+      })} />,
+    );
+
+    const table = screen.getByRole("table", { name: "Planning per object" });
+    const group = container.querySelector(`[data-task-coverage-group="${occurrence.id}"]`);
+    const service = container.querySelector(`[data-shift-id="${coveredShift.id}"]`);
+    expect(table).toHaveAttribute("data-editable", "false");
+    expect(group).toBeInTheDocument();
+    expect(within(group).getAllByText("Receptiedienst")).toHaveLength(1);
+    expect(within(service).getByText("Anna Beveiliger")).toBeInTheDocument();
+    expect(within(service).getByText("AB")).toBeInTheDocument();
+    expect(service).toHaveTextContent("08:00–16:00");
+    expect(container.querySelector("[data-droppable-id]")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-service-resize-edge]")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Acties voor Avonddienst" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Anna Beveiliger vrijmaken" })).not.toBeInTheDocument();
+  });
+
+  it("maakt in bewerkmodus dropzones, acties en bestaande resizegrepen opnieuw beschikbaar", () => {
+    const coveredShift = {
+      ...shift,
+      id: "shift-edit-mode",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "16:00",
+    };
+    const coveredSegment = {
+      id: "segment-edit-mode",
+      shift_id: coveredShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      task_name_snapshot: occurrence.task_name_snapshot,
+      status: "draft",
+    };
+    const coveredAssignment = {
+      ...assignment,
+      id: "assignment-edit-mode",
+      planning_shift_id: coveredShift.id,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        editable: true,
+        shifts: [coveredShift],
+        segments: [coveredSegment],
+        assignments: [coveredAssignment],
+      })} />,
+    );
+
+    expect(screen.getByRole("table", { name: "Planning per object" })).toHaveAttribute("data-editable", "true");
+    expect(container.querySelector('[data-droppable-id^="slot:shift-edit-mode:0:"]')).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-service-resize-edge]")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Acties voor Avonddienst" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Anna Beveiliger vrijmaken" })).toBeInTheDocument();
+  });
+
+  it("houdt een open taakdeel in leesmodus compact zonder herhaalde sleepinstructie", () => {
+    const onSelectOccurrence = vi.fn();
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({ editable: false, onSelectOccurrence })} />,
+    );
+
+    const openCard = container.querySelector(`[data-task-occurrence-id="${occurrence.id}"]`);
+    expect(openCard).toBeInTheDocument();
+    expect(within(openCard).getByText("Open")).toBeInTheDocument();
+    expect(within(openCard).getByText("8u nog niet ingepland")).toBeInTheDocument();
+    expect(openCard).not.toHaveAttribute("data-droppable-id");
+    fireEvent.click(within(openCard).getByRole("button", { name: /receptiedienst/i }));
+    expect(onSelectOccurrence).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sleep een medewerker/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open dienst maken/i })).not.toBeInTheDocument();
   });
 
   it("splitst een 24-uurs taak bij slepen in maximaal twaalf uur en toont daarna 12:00–24:00 als restkaart", () => {
@@ -597,7 +705,7 @@ describe("Planning matrix", () => {
     );
 
     const cell = container.querySelector('[data-matrix-cell="object:object-1:2026-08-17"]');
-    const lane = cell.querySelector(':scope > [data-task-coverage-lane]');
+    const lane = cell.querySelector('[data-task-coverage-lane]');
     const pieces = [...lane.querySelectorAll(':scope > article')]
       .sort((left, right) => Number.parseFloat(left.style.top) - Number.parseFloat(right.style.top));
     expect(pieces).toHaveLength(3);

@@ -19,6 +19,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +65,32 @@ function personnelName(personnel) {
       .filter(Boolean)
       .join(" ")
     || "Onbekende medewerker";
+}
+
+function nameInitials(name) {
+  return String(name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function assignmentIdentity(assignment, personnelById, fallbackPersonnel = null) {
+  const personnel = fallbackPersonnel
+    || personnelById?.get(String(assignment?.personnel_id || ""))
+    || null;
+  const name = assignment?.personnel_name
+    || assignment?.personnel_name_snapshot
+    || assignment?.employee_name
+    || personnelName(personnel);
+  const photoUrl = personnel?.photo_file_url
+    || assignment?.personnel_photo_file_url
+    || assignment?.personnel_photo_url
+    || assignment?.photo_file_url
+    || null;
+  return { name, photoUrl };
 }
 
 function activeAssignments(assignments) {
@@ -172,6 +199,7 @@ function OpenTaskIntervalCard({
   mutationPending,
   embeddedInLane = false,
   style,
+  editable = false,
 }) {
   const dropServiceDate = projection?.date || occurrence.service_date;
   const proposedEnd = gap.startMinute + Math.min(
@@ -183,125 +211,177 @@ function OpenTaskIntervalCard({
   const flexible = occurrence.execution_mode === "time_window";
   const coverage = planningState?.coverage;
 
+  const renderCard = ({ provided = null, isDraggingOver = false } = {}) => (
+    <article
+      ref={provided?.innerRef}
+      {...(provided?.droppableProps || {})}
+      data-droppable-id={editable ? droppableId : undefined}
+      data-task-occurrence-id={occurrence.id}
+      data-open-task-interval={`${gap.startTime}-${gap.endTime}`}
+      data-planning-item-kind="open-task"
+      data-planning-start-minute={gap.startMinute}
+      data-planning-width="full"
+      data-start-minute={gap.startMinute}
+      aria-busy={mutationPending ? "true" : "false"}
+      style={style}
+      className={cn(
+        "group/open-task w-full rounded-lg border border-rose-200 border-l-[3px] border-l-rose-400 bg-card px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.035)] transition-colors dark:border-rose-900/70 dark:border-l-rose-600",
+        embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 bg-rose-50/55 px-2 py-1.5 shadow-none dark:bg-rose-950/20",
+        coverage?.status === "partial" && !embeddedInLane && "border-amber-200 border-l-amber-500 dark:border-amber-900/70 dark:border-l-amber-600",
+        editable && "border-dashed",
+        isDraggingOver && "border-primary border-l-primary bg-primary/[0.08] ring-2 ring-inset ring-primary/25",
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <button
+          type="button"
+          disabled={!editable}
+          className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
+        >
+          <span className="flex min-w-0 items-start justify-between gap-2">
+            <span className="min-w-0">
+              <span className={cn(
+                "block text-[11px] font-semibold leading-tight text-foreground",
+                !embeddedInLane && "break-words",
+                embeddedInLane && "text-rose-700 dark:text-rose-300",
+              )}>
+                {embeddedInLane ? "Open taakdeel" : occurrence.task_name_snapshot || "Open taak"}
+              </span>
+              <span className="mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground">
+                <Clock3 className="h-3 w-3 shrink-0" />
+                {gap.startTime}–{gap.endTime}
+                {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
+              </span>
+            </span>
+            {!embeddedInLane && (
+              <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-950/45 dark:text-rose-300">
+                Open
+              </span>
+            )}
+          </span>
+          <span className="compact-hide mt-1.5 block text-[9px] font-medium text-muted-foreground" data-planning-dimensions="open-time">
+            {flexible
+              ? `${formatMinutesAsHours(gap.allocatableMinutes)} te plannen binnen dit venster`
+              : `${formatMinutesAsHours(gap.durationMinutes)} nog niet ingepland`}
+          </span>
+        </button>
+        {editable && (
+          <button
+            type="button"
+            disabled={mutationPending}
+            onClick={() => onCreateOpenTaskSlice?.({
+              occurrence,
+              serviceDate: dropServiceDate,
+              startTime: gap.startTime,
+              endTime: proposedEndTime,
+            })}
+            className="compact-hide inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm hover:border-primary/35 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Open dienst maken ${gap.startTime}–${proposedEndTime}`}
+            title={`Open dienst maken ${gap.startTime}–${proposedEndTime}`}
+          >
+            <Scissors className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {editable && isDraggingOver && (
+        <p className="compact-hide mt-1.5 flex items-center gap-1 border-t border-primary/15 pt-1.5 text-[9px] font-semibold text-primary">
+          <UserRoundPlus className="h-2.5 w-2.5" />
+          Loslaten voor dienst {gap.startTime}–{proposedEndTime}
+        </p>
+      )}
+      {provided && <div className="hidden">{provided.placeholder}</div>}
+    </article>
+  );
+
+  if (!editable) return renderCard();
+
   return (
     <Droppable
       droppableId={droppableId}
       type="PERSONNEL"
       isDropDisabled={mutationPending}
     >
-      {(provided, snapshot) => (
-        <article
-          ref={provided.innerRef}
-          {...provided.droppableProps}
-          data-droppable-id={droppableId}
-          data-task-occurrence-id={occurrence.id}
-          data-open-task-interval={`${gap.startTime}-${gap.endTime}`}
-          data-planning-item-kind="open-task"
-          data-planning-start-minute={gap.startMinute}
-          data-planning-width="full"
-          data-start-minute={gap.startMinute}
-          aria-busy={mutationPending ? "true" : "false"}
-          style={style}
-          className={cn(
-            "w-full rounded-md border border-dashed border-rose-300 bg-rose-50/75 p-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:border-rose-800 dark:bg-rose-950/30",
-            embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 p-1.5 shadow-none first:rounded-t-md last:rounded-b-md",
-            coverage?.status === "partial" && "border-amber-300 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/30",
-            snapshot.isDraggingOver && "border-primary bg-primary/10 ring-2 ring-primary/25",
-          )}
-        >
-          <div className="flex items-start gap-2">
-            <button
-              type="button"
-              className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => onSelectOccurrence?.(occurrence)}
-            >
-              <span className="flex min-w-0 items-start justify-between gap-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-[11px] font-semibold">{occurrence.task_name_snapshot || "Open taak"}</span>
-                  <span className="mt-0.5 flex items-center gap-1 text-[9px] font-medium tabular-nums text-muted-foreground">
-                    <Clock3 className="h-2.5 w-2.5" />
-                    {gap.startTime}–{gap.endTime}
-                    {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
-                  </span>
-                </span>
-                <span className="shrink-0 rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:text-rose-300">
-                  Open
-                </span>
-              </span>
-              <span className="compact-hide mt-1 block text-[9px] text-muted-foreground" data-planning-dimensions="open-time">
-                {flexible
-                  ? `${formatMinutesAsHours(gap.allocatableMinutes)} te plannen binnen dit venster`
-                  : `${formatMinutesAsHours(gap.durationMinutes)} nog niet ingepland`}
-              </span>
-            </button>
-            <button
-              type="button"
-              disabled={mutationPending}
-              onClick={() => onCreateOpenTaskSlice?.({
-                occurrence,
-                serviceDate: dropServiceDate,
-                startTime: gap.startTime,
-                endTime: proposedEndTime,
-              })}
-              className="compact-hide inline-flex h-7 w-7 shrink-0 items-center justify-center rounded bg-background/85 text-muted-foreground shadow-sm hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Open dienst maken ${gap.startTime}–${proposedEndTime}`}
-              title={`Open dienst maken ${gap.startTime}–${proposedEndTime}`}
-            >
-              <Scissors className="h-3 w-3" />
-            </button>
-          </div>
-          <p className="compact-hide mt-1.5 flex items-center gap-1 border-t border-current/10 pt-1.5 text-[9px] font-medium text-muted-foreground">
-            <UserRoundPlus className="h-2.5 w-2.5" />
-            {snapshot.isDraggingOver
-              ? `Loslaten voor dienst ${gap.startTime}–${proposedEndTime}`
-              : "Sleep een medewerker naar dit open taakdeel"}
-          </p>
-          <div className="hidden">{provided.placeholder}</div>
-        </article>
-      )}
+      {(provided, snapshot) => renderCard({ provided, isDraggingOver: snapshot.isDraggingOver })}
     </Droppable>
   );
 }
 
-function ShiftSlot({ shift, slotIndex, assignment, resourceKey, serviceDate, onSelect, onUnassign, disabled = false }) {
+function ShiftSlot({
+  shift,
+  slotIndex,
+  assignment,
+  personnelById,
+  resourceKey,
+  serviceDate,
+  onSelect,
+  onUnassign,
+  disabled = false,
+  editable = false,
+}) {
   const droppableId = `slot:${shift.id}:${slotIndex}:${serviceDate}:${encodeURIComponent(resourceKey)}`;
-  return (
-    <Droppable droppableId={droppableId} type="PERSONNEL" isDropDisabled={Boolean(assignment) || disabled}>
-      {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.droppableProps}
-          data-droppable-id={droppableId}
-          className={cn(
-            "flex min-h-7 items-center gap-1 rounded border px-1.5 py-1 text-[9px]",
-            assignment ? "border-border bg-background/85" : "border-dashed border-border bg-background/55 text-muted-foreground",
-            snapshot.isDraggingOver && "border-primary bg-primary/10 text-primary ring-2 ring-primary/25",
-          )}
-        >
-          {assignment ? (
-            <>
-              <button type="button" disabled={disabled} onClick={onSelect} className="min-w-0 flex-1 truncate text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
-                {assignment.personnel_name || assignment.personnel_name_snapshot || "Medewerker"}
-              </button>
-              <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-50" aria-label={`${assignment.personnel_name || "Medewerker"} vrijmaken`}>
-                <UserMinus className="h-2.5 w-2.5" />
-              </button>
-            </>
-          ) : (
+  const identity = assignment ? assignmentIdentity(assignment, personnelById) : null;
+  const renderSlot = ({ provided = null, isDraggingOver = false } = {}) => (
+    <div
+      ref={provided?.innerRef}
+      {...(provided?.droppableProps || {})}
+      data-droppable-id={editable ? droppableId : undefined}
+      className={cn(
+        "flex min-h-11 items-center gap-2 rounded-md border px-2 py-1.5",
+        assignment ? "border-primary/15 bg-primary/[0.045]" : "border-dashed border-border bg-background/55 text-muted-foreground",
+        isDraggingOver && "border-primary bg-primary/10 text-primary ring-2 ring-primary/25",
+      )}
+    >
+      {assignment ? (
+        <>
+          <Avatar className="h-7 w-7 shrink-0 rounded-md border border-primary/15">
+            <AvatarImage src={identity.photoUrl || undefined} alt={`Profielfoto van ${identity.name}`} className="object-cover object-top" />
+            <AvatarFallback className="rounded-md bg-primary/10 text-[9px] font-bold text-primary">
+              {nameInitials(identity.name)}
+            </AvatarFallback>
+          </Avatar>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onSelect}
+            className="min-w-0 flex-1 whitespace-normal break-words text-left text-[11px] font-semibold leading-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+            title={identity.name}
+          >
+            {identity.name}
+          </button>
+          {editable && (
             <button
               type="button"
               disabled={disabled}
-              onClick={onSelect}
-              className="flex min-w-0 flex-1 items-center gap-1 text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
-              aria-label={`Open plaats voor ${shift.name || shift.service_name_snapshot || "dienst"} bekijken`}
+              onClick={() => onUnassign?.(assignment)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-50"
+              aria-label={`${identity.name} vrijmaken`}
             >
-              <UserRoundPlus className="h-2.5 w-2.5" />
-              <span className="truncate">{snapshot.isDraggingOver ? "Loslaten" : "Open plaats"}</span>
+              <UserMinus className="h-3 w-3" />
             </button>
           )}
-          <div className="hidden">{provided.placeholder}</div>
-        </div>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled || !editable}
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[10px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-80"
+          aria-label={`Open plaats voor ${shift.name || shift.service_name_snapshot || "dienst"} bekijken`}
+        >
+          <UserRoundPlus className="h-3 w-3 shrink-0" />
+          <span className="break-words">{isDraggingOver ? "Loslaten" : "Open plaats"}</span>
+        </button>
       )}
+      {provided && <div className="hidden">{provided.placeholder}</div>}
+    </div>
+  );
+
+  if (!editable) return renderSlot();
+
+  return (
+    <Droppable droppableId={droppableId} type="PERSONNEL" isDropDisabled={Boolean(assignment) || disabled}>
+      {(provided, snapshot) => renderSlot({ provided, isDraggingOver: snapshot.isDraggingOver })}
     </Droppable>
   );
 }
@@ -613,6 +693,8 @@ function MatrixShiftBlock({
   onCancelComposition,
   onResizeTaskSegment,
   mutationPending,
+  personnelById,
+  editable = false,
   controlledInterval = null,
   embeddedInLane = false,
   suppressDirectResize = false,
@@ -752,8 +834,8 @@ function MatrixShiftBlock({
 
   return (
     <article className={cn(
-      "group/service relative w-full rounded-md border border-l-[3px] border-border border-l-primary bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
-      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] p-1.5 shadow-none",
+      "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
+      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] p-2 shadow-none",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
       isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
@@ -767,9 +849,10 @@ function MatrixShiftBlock({
       data-planning-width="full"
       data-segment-id={segmentProjections.length === 1 ? projectionSegment?.id : undefined}
       data-resize-saving={isResizeSaving ? "true" : "false"}
+      data-editable={editable ? "true" : "false"}
       style={style}
     >
-      {!suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
+      {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
           edge="start"
           startMinute={baseStartMinute}
@@ -786,24 +869,29 @@ function MatrixShiftBlock({
       )}
       <div className="flex items-start gap-1">
         <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
-          <span className="flex min-w-0 items-center gap-1">
+          <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
-            <span className="truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
+            <span className={cn(
+              "min-w-0 text-[10px] font-semibold text-muted-foreground",
+              !embeddedInLane && "break-words text-foreground",
+            )}>
+              {embeddedInLane ? "Dienst" : shift.name || shift.service_name_snapshot || "Dienst"}
+            </span>
             {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Dienst wordt opgeslagen" />}
             {isResizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
-          <span className="mt-0.5 block text-[9px] text-muted-foreground">
+          <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-foreground">
             {displayedStartTime}–{displayedEndTime}
             {continuesBefore ? " · vervolg" : continuesAfter ? " · loopt door" : crossesDate ? " +1" : ""}
             {linkedObjectCount > 1 ? ` · ${linkedObjectCount} objecten` : ""}
           </span>
-          {segmentProjections.length === 1 && (
+          {!embeddedInLane && segmentProjections.length === 1 && (
             <span className="compact-hide mt-0.5 block truncate text-[9px] font-medium text-primary">
               {projectionSegment.task_name_snapshot || projectionSegment.object_name_snapshot || "Taaksegment"}
             </span>
           )}
-          {segmentProjections.length > 1 && (
+          {!embeddedInLane && segmentProjections.length > 1 && (
             <span className="compact-hide mt-1 block space-y-0.5 border-t border-border/70 pt-1">
               {segmentProjections.map(({ segment, slice }, index) => (
                 <span
@@ -818,7 +906,7 @@ function MatrixShiftBlock({
             </span>
           )}
         </button>
-        {!isPending && <DropdownMenu>
+        {editable && !isPending && <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button disabled={mutationPending} variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`Acties voor ${shift.name || "dienst"}`}>
               <MoreHorizontal className="h-3 w-3" />
@@ -844,26 +932,30 @@ function MatrixShiftBlock({
         </DropdownMenu>}
       </div>
 
-      <p className="compact-hide mt-1.5 text-[9px] font-medium text-muted-foreground" data-planning-dimensions="time-staffing">
-        Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
-      </p>
-      <div className="mt-1 space-y-1">
+      {requiredCount > 1 && (
+        <p className="compact-hide mt-1.5 text-[9px] font-medium text-muted-foreground" data-planning-dimensions="time-staffing">
+          Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
+        </p>
+      )}
+      <div className="mt-1.5 space-y-1">
         {Array.from({ length: requiredCount }, (_, slotIndex) => (
           <ShiftSlot
             key={slotIndex}
             shift={shift}
             slotIndex={slotIndex}
             assignment={assignmentsBySlot.get(slotIndex) || null}
+            personnelById={personnelById}
             resourceKey={resourceKey}
             serviceDate={serviceDate}
             onSelect={onSelect}
             onUnassign={onUnassign}
             disabled={mutationPending || isPending}
+            editable={editable}
           />
         ))}
       </div>
       {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings} waarschuwingen</p>}
-      {!suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
+      {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
         <ServiceCardResizeHandle
           edge="end"
           startMinute={baseStartMinute}
@@ -906,6 +998,7 @@ function TaskCoverageLane({
   allOccurrenceSegments,
   coverageShifts,
   assignmentsByShift,
+  personnelById,
   resourceKey,
   selectedShiftId,
   onSelectOccurrence,
@@ -920,6 +1013,7 @@ function TaskCoverageLane({
   onResizeTaskBoundary,
   mutationPending,
   compact,
+  editable = false,
 }) {
   const laneRef = useRef(null);
   const demand = getTaskTimelineDemand(occurrence, serviceDate);
@@ -1028,8 +1122,14 @@ function TaskCoverageLane({
     top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
     height: `${((endMinute - startMinute) / duration) * 100}%`,
   });
-  const laneHeight = getTaskTimelineLaneHeight(duration, { compact });
+  const pieceCount = Math.max(1, baseServices.length + gaps.length);
+  const laneHeight = Math.max(
+    getTaskTimelineLaneHeight(duration, { compact }),
+    pieceCount * (compact ? 48 : 72),
+    compact ? 72 : 112,
+  );
   const isLaneBusy = mutationPending || resizeSaving;
+  const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
 
   const segmentPayload = (service, interval) => {
     const slice = service.projections[0]?.slice;
@@ -1090,96 +1190,148 @@ function TaskCoverageLane({
 
   return (
     <section
-      ref={laneRef}
-      className="relative isolate w-full overflow-hidden rounded-md border border-border bg-muted/25"
-      style={{ height: `${laneHeight}px` }}
-      data-task-coverage-lane={occurrence.id}
-      data-lane-start-minute={demand.startMinute}
-      data-lane-end-minute={demand.endMinute}
-      aria-label={`${occurrence.task_name_snapshot || "Taak"} ${demand.startTime}–${demand.endTime}`}
+      className="w-full overflow-hidden rounded-lg border border-border bg-card shadow-[0_1px_3px_rgba(15,23,42,0.045)]"
+      data-task-coverage-group={occurrence.id}
       aria-busy={isLaneBusy ? "true" : "false"}
     >
-      {baseServices.map(service => {
-        const interval = intervalFor(service);
-        return (
-          <MatrixShiftBlock
-            key={service.shift.id}
-            shift={service.shift}
-            projections={service.projections}
-            assignments={assignmentsByShift.get(String(service.shift.id)) || []}
-            segments={[service.segment]}
+      <button
+        type="button"
+        disabled={!editable}
+        onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
+        className="flex w-full items-start justify-between gap-2 border-b border-border/70 bg-muted/25 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <span className="min-w-0">
+          <span className="block break-words text-[11px] font-semibold leading-tight text-foreground">
+            {occurrence.task_name_snapshot || "Taak"}
+          </span>
+          <span className="mt-0.5 flex items-center gap-1 text-[9px] font-medium tabular-nums text-muted-foreground">
+            <Clock3 className="h-2.5 w-2.5 shrink-0" />
+            {demand.startTime}–{demand.endTime}
+          </span>
+        </span>
+        <span className={cn(
+          "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold",
+          openMinutes > 0
+            ? "bg-rose-50 text-rose-700 dark:bg-rose-950/45 dark:text-rose-300"
+            : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/45 dark:text-emerald-300",
+        )}>
+          {openMinutes > 0 ? `${formatMinutesAsHours(openMinutes)} open` : "Ingepland"}
+        </span>
+      </button>
+      <div
+        ref={laneRef}
+        className="relative isolate w-full overflow-hidden bg-muted/15"
+        style={{ height: `${laneHeight}px` }}
+        data-task-coverage-lane={occurrence.id}
+        data-lane-start-minute={demand.startMinute}
+        data-lane-end-minute={demand.endMinute}
+        aria-label={`${occurrence.task_name_snapshot || "Taak"} ${demand.startTime}–${demand.endTime}`}
+        aria-busy={isLaneBusy ? "true" : "false"}
+      >
+        {baseServices.map(service => {
+          const interval = intervalFor(service);
+          return (
+            <MatrixShiftBlock
+              key={service.shift.id}
+              shift={service.shift}
+              projections={service.projections}
+              assignments={assignmentsByShift.get(String(service.shift.id)) || []}
+              personnelById={personnelById}
+              segments={[service.segment]}
+              occurrence={occurrence}
+              allOccurrenceSegments={allOccurrenceSegments}
+              resourceKey={`${resourceKey}:shift:${service.shift.id}`}
+              serviceDate={serviceDate}
+              selected={String(selectedShiftId || "") === String(service.shift.id)}
+              onSelect={() => onSelectShift?.(service.shift)}
+              onUnassign={assignment => onUnassign?.(service.shift, assignment)}
+              onMove={onMove}
+              onCopy={onCopy}
+              onEditComposition={onEditComposition}
+              onCancelComposition={onCancelComposition}
+              onResizeTaskSegment={onResizeTaskSegment}
+              mutationPending={isLaneBusy}
+              editable={editable}
+              controlledInterval={interval}
+              embeddedInLane
+              suppressDirectResize
+              externalResizeSaving={resizeSaving && Boolean(previewIntervals?.[String(service.segment.id)])}
+              elementId={service.elementId}
+              style={pieceStyle(interval.startMinute, interval.endMinute)}
+            />
+          );
+        })}
+        {gaps.map(gap => (
+          <OpenTaskIntervalCard
+            key={`${gap.startMinute}-${gap.endMinute}`}
             occurrence={occurrence}
-            allOccurrenceSegments={allOccurrenceSegments}
-            resourceKey={`${resourceKey}:shift:${service.shift.id}`}
-            serviceDate={serviceDate}
-            selected={String(selectedShiftId || "") === String(service.shift.id)}
-            onSelect={() => onSelectShift?.(service.shift)}
-            onUnassign={assignment => onUnassign?.(service.shift, assignment)}
-            onMove={onMove}
-            onCopy={onCopy}
-            onEditComposition={onEditComposition}
-            onCancelComposition={onCancelComposition}
-            onResizeTaskSegment={onResizeTaskSegment}
+            planningState={planningState}
+            projection={projection}
+            gap={gap}
+            onSelectOccurrence={onSelectOccurrence}
+            onCreateOpenTaskSlice={onCreateOpenTaskSlice}
             mutationPending={isLaneBusy}
-            controlledInterval={interval}
+            editable={editable}
             embeddedInLane
-            suppressDirectResize
-            externalResizeSaving={resizeSaving && Boolean(previewIntervals?.[String(service.segment.id)])}
-            elementId={service.elementId}
-            style={pieceStyle(interval.startMinute, interval.endMinute)}
+            style={pieceStyle(gap.startMinute, gap.endMinute)}
           />
-        );
-      })}
-      {gaps.map(gap => (
-        <OpenTaskIntervalCard
-          key={`${gap.startMinute}-${gap.endMinute}`}
-          occurrence={occurrence}
-          planningState={planningState}
-          projection={projection}
-          gap={gap}
-          onSelectOccurrence={onSelectOccurrence}
-          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
-          mutationPending={isLaneBusy}
-          embeddedInLane
-          style={pieceStyle(gap.startMinute, gap.endMinute)}
-        />
-      ))}
-      {boundaries.map(boundary => (
-        <TaskBoundaryHandle
-          key={boundary.id}
-          boundary={boundary}
-          demand={demand}
-          laneRef={laneRef}
-          previewMinute={shownPreview?.boundaryId === boundary.id ? shownPreview.minute : null}
-          onPreview={minute => setActivePreview(previewForBoundary(boundary, minute))}
-          onCommit={minute => commitBoundary(boundary, minute)}
-          onCancel={() => setActivePreview(null)}
-          disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
-        />
-      ))}
+        ))}
+        {editable && boundaries.map(boundary => (
+          <TaskBoundaryHandle
+            key={boundary.id}
+            boundary={boundary}
+            demand={demand}
+            laneRef={laneRef}
+            previewMinute={shownPreview?.boundaryId === boundary.id ? shownPreview.minute : null}
+            onPreview={minute => setActivePreview(previewForBoundary(boundary, minute))}
+            onCommit={minute => commitBoundary(boundary, minute)}
+            onCancel={() => setActivePreview(null)}
+            disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
+          />
+        ))}
+      </div>
     </section>
   );
 }
 
-function EmployeeAssignmentBlock({ shift, assignment, segments, projectionSlice, onSelect, onUnassign, disabled = false }) {
+function EmployeeAssignmentBlock({
+  shift,
+  assignment,
+  personnel,
+  segments,
+  projectionSlice,
+  onSelect,
+  onUnassign,
+  disabled = false,
+  editable = false,
+}) {
   const warnings = shiftWarningCount(shift, [assignment]);
   const activeSegments = segments.filter(item => item.status !== "removed");
+  const identity = assignmentIdentity(assignment, null, personnel);
   return (
-    <article aria-busy={disabled ? "true" : "false"} className="rounded-md border border-border bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" data-shift-id={shift.id}>
-      <div className="flex items-start gap-1">
+    <article aria-busy={disabled ? "true" : "false"} className="rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)]" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
+      <div className="flex items-start gap-2">
+        <Avatar className="h-8 w-8 shrink-0 rounded-md border border-primary/15">
+          <AvatarImage src={identity.photoUrl || undefined} alt={`Profielfoto van ${identity.name}`} className="object-cover object-top" />
+          <AvatarFallback className="rounded-md bg-primary/10 text-[9px] font-bold text-primary">
+            {nameInitials(identity.name)}
+          </AvatarFallback>
+        </Avatar>
         <button type="button" disabled={disabled} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
-          <span className="block truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
-          <span className="mt-0.5 block text-[9px] text-muted-foreground">
+          <span className="block whitespace-normal break-words text-[11px] font-semibold leading-tight text-foreground">{identity.name}</span>
+          <span className="mt-1 block text-[10px] font-semibold tabular-nums text-foreground">
             {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
             {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
           </span>
-          <span className="compact-hide mt-0.5 block truncate text-[9px] text-muted-foreground">
-            {shift.object_name || shift.object_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "Samengestelde of mobiele dienst")}
+          <span className="compact-hide mt-0.5 block break-words text-[9px] text-muted-foreground">
+            {shift.name || shift.service_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "Dienst")}
           </span>
         </button>
-        <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${shift.name || "Dienst"} vrijmaken`}>
-          <UserMinus className="h-3 w-3" />
-        </button>
+        {editable && (
+          <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>
+            <UserMinus className="h-3 w-3" />
+          </button>
+        )}
       </div>
       {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings}</p>}
     </article>
@@ -1308,6 +1460,7 @@ function ObjectDayCell({
   coverageSegmentsByOccurrence,
   coverageShiftsByOccurrence,
   assignmentsByShift,
+  personnelById,
   segmentsByShift,
   selectedShiftId,
   onSelectOccurrence,
@@ -1323,6 +1476,7 @@ function ObjectDayCell({
   mutationPending,
   pendingResourceKeys,
   compact,
+  editable,
 }) {
   const cellOccurrences = sortByStart(occurrences, item => item.projection?.startTime || item.occurrence?.window_start_time);
   const occurrenceById = new Map(cellOccurrences.map(item => [String(item.occurrence.id), item]));
@@ -1436,6 +1590,7 @@ function ObjectDayCell({
               allOccurrenceSegments={coverageSegmentsByOccurrence.get(occurrenceId) || []}
               coverageShifts={coverageShiftsByOccurrence.get(occurrenceId) || []}
               assignmentsByShift={assignmentsByShift}
+              personnelById={personnelById}
               resourceKey={`${resource.key}:${dayKey}:occurrence:${occurrenceId}`}
               selectedShiftId={selectedShiftId}
               onSelectOccurrence={onSelectOccurrence}
@@ -1450,6 +1605,7 @@ function ObjectDayCell({
               onResizeTaskBoundary={onResizeTaskBoundary}
               mutationPending={lanePending}
               compact={compact}
+              editable={editable}
             />
           );
         }
@@ -1463,6 +1619,7 @@ function ObjectDayCell({
               gap={item.gap}
               onSelectOccurrence={onSelectOccurrence}
               onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+              editable={editable}
               mutationPending={isPlanningResourcePending(
                 pendingResourceKeys,
                 mutationPending,
@@ -1483,6 +1640,7 @@ function ObjectDayCell({
             shift={shift}
             projections={projections}
             assignments={assignmentsByShift.get(String(shift.id)) || []}
+            personnelById={personnelById}
             segments={activeShiftSegments}
             occurrence={occurrenceContext}
             allOccurrenceSegments={projectionSegment
@@ -1498,6 +1656,7 @@ function ObjectDayCell({
             onEditComposition={onEditComposition}
             onCancelComposition={onCancelComposition}
             onResizeTaskSegment={onResizeTaskSegment}
+            editable={editable}
             mutationPending={isPlanningResourcePending(
               pendingResourceKeys,
               mutationPending,
@@ -1512,57 +1671,76 @@ function ObjectDayCell({
   );
 }
 
-function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSelectShift, onUnassign, mutationPending, pendingResourceKeys }) {
+function EmployeeDayCell({
+  resource,
+  dayKey,
+  placements,
+  segmentsByShift,
+  onSelectShift,
+  onUnassign,
+  mutationPending,
+  pendingResourceKeys,
+  editable,
+}) {
   const droppableId = `employee-day:${resource.id}:${dayKey}`;
   const cellPending = isPlanningResourcePending(
     pendingResourceKeys,
     mutationPending,
     `personnel:${resource.id}`,
   );
+  const renderCell = ({ provided = null, isDraggingOver = false } = {}) => (
+    <div
+      ref={provided?.innerRef}
+      {...(provided?.droppableProps || {})}
+      data-droppable-id={editable ? droppableId : undefined}
+      data-matrix-cell={`${resource.key}:${dayKey}`}
+      aria-busy={cellPending ? "true" : "false"}
+      className={cn(
+        "min-h-[112px] space-y-1.5 p-2 transition-colors",
+        isDraggingOver && "bg-primary/[0.08] ring-2 ring-inset ring-primary/35",
+      )}
+    >
+      {sortByStart(placements, item => item.slice?.startTime || item.shift.start_time).map(({ shift, assignment, slice }) => {
+        const shiftSegments = segmentsByShift.get(String(shift.id)) || [];
+        const placementPending = isPlanningResourcePending(
+          pendingResourceKeys,
+          mutationPending,
+          `personnel:${resource.id}`,
+          `shift:${shift.id}`,
+          ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
+        );
+        return (
+          <EmployeeAssignmentBlock
+            key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
+            shift={shift}
+            assignment={assignment}
+            personnel={resource.personnel}
+            segments={shiftSegments}
+            projectionSlice={slice}
+            onSelect={() => onSelectShift?.(shift)}
+            onUnassign={item => onUnassign?.(shift, item)}
+            disabled={placementPending}
+            editable={editable}
+          />
+        );
+      })}
+      {placements.length === 0 && (
+        <p className={cn(
+          "flex min-h-12 items-center justify-center rounded-md border border-dashed border-transparent px-2 text-center text-[9px] text-muted-foreground/60",
+          isDraggingOver && "border-primary/40 text-primary",
+        )}>
+          {isDraggingOver ? "Loslaten om taak bij medewerker te plannen" : editable ? "Sleep hier een open taak" : "Geen dienst"}
+        </p>
+      )}
+      {provided?.placeholder}
+    </div>
+  );
+
+  if (!editable) return renderCell();
+
   return (
     <Droppable droppableId={droppableId} type="TASK" isDropDisabled={cellPending}>
-      {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.droppableProps}
-          data-droppable-id={droppableId}
-          data-matrix-cell={`${resource.key}:${dayKey}`}
-          aria-busy={cellPending ? "true" : "false"}
-          className={cn(
-            "min-h-[112px] space-y-1.5 p-2 transition-colors",
-            snapshot.isDraggingOver && "bg-primary/[0.08] ring-2 ring-inset ring-primary/35",
-          )}
-        >
-          {sortByStart(placements, item => item.slice?.startTime || item.shift.start_time).map(({ shift, assignment, slice }) => {
-            const shiftSegments = segmentsByShift.get(String(shift.id)) || [];
-            const placementPending = isPlanningResourcePending(
-              pendingResourceKeys,
-              mutationPending,
-              `personnel:${resource.id}`,
-              `shift:${shift.id}`,
-              ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
-            );
-            return (
-              <EmployeeAssignmentBlock
-                key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
-                shift={shift}
-                assignment={assignment}
-                segments={shiftSegments}
-                projectionSlice={slice}
-                onSelect={() => onSelectShift?.(shift)}
-                onUnassign={item => onUnassign?.(shift, item)}
-                disabled={placementPending}
-              />
-            );
-          })}
-          {placements.length === 0 && (
-            <p className={cn("flex min-h-12 items-center justify-center rounded border border-dashed border-transparent px-2 text-center text-[9px] text-muted-foreground/60", snapshot.isDraggingOver && "border-primary/40 text-primary")}>
-              {snapshot.isDraggingOver ? "Loslaten om taak bij medewerker te plannen" : "Sleep hier een open taak"}
-            </p>
-          )}
-          {provided.placeholder}
-        </div>
-      )}
+      {(provided, snapshot) => renderCell({ provided, isDraggingOver: snapshot.isDraggingOver })}
     </Droppable>
   );
 }
@@ -1578,6 +1756,7 @@ function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSele
  */
 export default function PlanningMatrix({
   perspective,
+  editable = false,
   compact = false,
   zoom = 1,
   days,
@@ -1605,6 +1784,7 @@ export default function PlanningMatrix({
 }) {
   const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
   const shiftsById = useMemo(() => new Map(shifts.map(item => [String(item.id), item])), [shifts]);
+  const personnelById = useMemo(() => new Map(personnel.map(item => [String(item.id), item])), [personnel]);
   const assignmentsByShift = useMemo(() => {
     const map = new Map();
     activeAssignments(assignments).forEach(item => appendToMap(map, String(item.planning_shift_id || item.shift_id), item));
@@ -1750,6 +1930,7 @@ export default function PlanningMatrix({
         onUnassign={onUnassign}
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
+        editable={editable}
       />
     ) : (
       <ObjectDayCell
@@ -1760,6 +1941,7 @@ export default function PlanningMatrix({
         coverageSegmentsByOccurrence={coverageSegmentsByOccurrence}
         coverageShiftsByOccurrence={coverageShiftsByOccurrence}
         assignmentsByShift={assignmentsByShift}
+        personnelById={personnelById}
         segmentsByShift={segmentsByShift}
         selectedShiftId={selectedShiftId}
         onSelectOccurrence={onSelectOccurrence}
@@ -1775,6 +1957,7 @@ export default function PlanningMatrix({
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
         compact={compact}
+        editable={editable}
       />
     );
   };
@@ -1793,6 +1976,7 @@ export default function PlanningMatrix({
         )}
         aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}
         data-planning-layout="cards"
+        data-editable={editable ? "true" : "false"}
       >
         {orientation === "resources_horizontal" ? (
           <>
