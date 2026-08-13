@@ -217,7 +217,7 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-[10px] border border-rose-300/80 border-l-[3px] border-l-rose-500 bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--destructive)/0.10)_100%)] px-2.5 py-2 text-left shadow-[0_6px_18px_hsl(var(--destructive)/0.09),inset_0_1px_0_hsl(var(--primary-foreground)/0.65)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-rose-400 hover:shadow-[0_9px_24px_hsl(var(--destructive)/0.14)] dark:border-rose-800/70",
+        "group/open-task w-full rounded-lg border border-rose-300/55 border-l-2 border-l-rose-500 bg-rose-50/55 px-2.5 py-2 text-left shadow-none backdrop-blur-md transition-colors hover:border-rose-400/70 hover:bg-rose-50/75 dark:border-rose-800/55 dark:bg-rose-950/20 dark:hover:bg-rose-950/30",
         embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[linear-gradient(135deg,hsl(var(--destructive)/0.04),hsl(var(--destructive)/0.11))] px-2 py-1.5 shadow-none hover:bg-destructive/15",
         editable && !embeddedInLane && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.12] ring-2 ring-inset ring-primary/25",
@@ -233,7 +233,7 @@ function OpenTaskIntervalCard({
           <span className="flex min-w-0 items-start justify-between gap-2">
             <span className="min-w-0">
               <span className={cn(
-                "block text-[11px] font-semibold leading-tight text-foreground",
+                "block text-[11px] font-medium leading-tight text-foreground",
                 !embeddedInLane && "break-words",
                 embeddedInLane && "text-rose-700 dark:text-rose-300",
               )}>

@@ -61,10 +61,10 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       data-task-draggable-index={dragEnabled ? dragIndex : undefined}
       aria-busy={disabled ? "true" : "false"}
       className={cn(
-        "rounded-[10px] border-l-[3px] p-2.5 transition-[border-color,box-shadow,transform] hover:-translate-y-px",
+        "rounded-lg border-l-2 p-2.5 transition-colors",
         needsWork
-          ? "border border-rose-300/80 border-l-rose-500 bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--destructive)/0.10)_100%)] shadow-[0_6px_18px_hsl(var(--destructive)/0.09),inset_0_1px_0_hsl(var(--primary-foreground)/0.65)] hover:border-rose-400 hover:shadow-[0_9px_24px_hsl(var(--destructive)/0.14)] dark:border-rose-800/70"
-          : "border border-emerald-200/80 border-l-emerald-500 bg-card shadow-[0_4px_14px_rgba(15,23,42,0.05)] dark:border-emerald-900/70",
+          ? "border border-rose-300/55 border-l-rose-500 bg-rose-50/55 shadow-none backdrop-blur-md hover:border-rose-400/70 hover:bg-rose-50/75 dark:border-rose-800/55 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
+          : "border border-emerald-200/70 border-l-emerald-500 bg-card/70 shadow-none backdrop-blur-md dark:border-emerald-900/60",
         isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/25",
       )}
     >
@@ -90,7 +90,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] font-semibold">{occurrence.task_name_snapshot || "Taak"}</p>
+          <p className="truncate text-[12px] font-medium">{occurrence.task_name_snapshot || "Taak"}</p>
           <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
             {occurrence.object_name_snapshot || "Onbekend object"} · {projection?.startTime || occurrence.window_start_time}–{projection?.endTime || occurrence.window_end_time}
             {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
