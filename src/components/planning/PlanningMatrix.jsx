@@ -217,8 +217,8 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-lg border border-rose-300/55 border-l-2 border-l-rose-500 bg-rose-50/55 px-2.5 py-2 text-left shadow-none backdrop-blur-md transition-colors hover:border-rose-400/70 hover:bg-rose-50/75 dark:border-rose-800/55 dark:bg-rose-950/20 dark:hover:bg-rose-950/30",
-        embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[linear-gradient(135deg,hsl(var(--destructive)/0.04),hsl(var(--destructive)/0.11))] px-2 py-1.5 shadow-none hover:bg-destructive/15",
+        "group/open-task w-full rounded-lg border border-rose-300/35 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.20),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.72)_0%,rgba(255,241,242,0.52)_58%,rgba(254,205,211,0.32)_100%)] px-2.5 py-2 text-left shadow-[0_4px_16px_rgba(190,24,93,0.06)] backdrop-blur-xl backdrop-saturate-150 transition-colors hover:border-rose-400/50 dark:border-rose-700/35 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.20),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.72)_0%,rgba(76,5,25,0.42)_58%,rgba(136,19,55,0.24)_100%)]",
+        embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.22),transparent_48%),linear-gradient(145deg,rgba(255,255,255,0.46),rgba(255,228,230,0.32))] px-2 py-1.5 shadow-none backdrop-blur-xl dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.22),transparent_48%),linear-gradient(145deg,rgba(76,5,25,0.46),rgba(30,15,23,0.34))]",
         editable && !embeddedInLane && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.12] ring-2 ring-inset ring-primary/25",
       )}

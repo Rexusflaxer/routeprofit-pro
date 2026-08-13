@@ -63,7 +63,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       className={cn(
         "rounded-lg border-l-2 p-2.5 transition-colors",
         needsWork
-          ? "border border-rose-300/55 border-l-rose-500 bg-rose-50/55 shadow-none backdrop-blur-md hover:border-rose-400/70 hover:bg-rose-50/75 dark:border-rose-800/55 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
+          ? "border border-rose-300/35 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.20),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.72)_0%,rgba(255,241,242,0.52)_58%,rgba(254,205,211,0.32)_100%)] shadow-[0_4px_16px_rgba(190,24,93,0.06)] backdrop-blur-xl backdrop-saturate-150 hover:border-rose-400/50 dark:border-rose-700/35 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.20),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.72)_0%,rgba(76,5,25,0.42)_58%,rgba(136,19,55,0.24)_100%)]"
           : "border border-emerald-200/70 border-l-emerald-500 bg-card/70 shadow-none backdrop-blur-md dark:border-emerald-900/60",
         isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/25",
       )}
@@ -78,14 +78,14 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
             type="button"
             disabled={disabled}
             {...(dragProvided?.dragHandleProps || {})}
-            className="mt-0.5 flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/15 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
+            className="mt-0.5 flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md bg-rose-500/10 text-rose-600 backdrop-blur-sm hover:bg-rose-500/15 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40 dark:text-rose-300"
             aria-label={`${occurrence.task_name_snapshot || "Taak"} slepen`}
             title="Sleep deze taak naar een medewerker op een dag binnen het taakvenster"
           >
             <GripVertical className="h-3.5 w-3.5" />
           </button>
         ) : (
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-rose-500/10 text-rose-600 backdrop-blur-sm dark:text-rose-300">
             <ListTodo className="h-3.5 w-3.5" />
           </span>
         )}
