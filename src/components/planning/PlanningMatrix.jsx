@@ -21,7 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
 import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
-import { shiftTimeOverlayClass } from "@/components/planning/shiftAppearance";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -217,11 +217,11 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-lg border border-rose-200 border-l-[3px] border-l-rose-400 bg-card px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.035)] transition-colors dark:border-rose-900/70 dark:border-l-rose-600",
-        embeddedInLane && "absolute flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 bg-rose-50/55 px-2 py-1.5 shadow-none hover:bg-rose-100/70 dark:bg-rose-950/20 dark:hover:bg-rose-950/35",
-        coverage?.status === "partial" && !embeddedInLane && "border-amber-200 border-l-amber-500 dark:border-amber-900/70 dark:border-l-amber-600",
-        editable && "border-dashed",
-        isDraggingOver && "border-primary border-l-primary bg-primary/[0.08] ring-2 ring-inset ring-primary/25",
+        "group/open-task w-full rounded-[10px] border border-primary/20 border-l-[3px] border-l-primary bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-2.5 py-2 text-left shadow-[0_6px_18px_hsl(var(--primary)/0.08),inset_0_1px_0_hsl(var(--primary-foreground)/0.65)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-primary/35 hover:shadow-[0_9px_24px_hsl(var(--primary)/0.13)]",
+        embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[linear-gradient(135deg,hsl(var(--destructive)/0.04),hsl(var(--destructive)/0.11))] px-2 py-1.5 shadow-none hover:bg-destructive/15",
+        coverage?.status === "partial" && !embeddedInLane && "border-amber-300/70 border-l-amber-500",
+        editable && !embeddedInLane && "border-dashed",
+        isDraggingOver && "border-primary border-l-primary bg-primary/[0.12] ring-2 ring-inset ring-primary/25",
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
@@ -324,8 +324,14 @@ function ShiftSlot({
         "flex items-center",
         compact ? "min-h-8 gap-1.5 py-1" : "min-h-11 gap-2 py-1.5",
         visualVariant === "midnight" && "min-h-0 flex-1 py-0",
-        assignment ? "bg-transparent" : "rounded-md border border-dashed border-border bg-background/55 px-2 text-muted-foreground",
-        isDraggingOver && "rounded-md border border-primary bg-primary/10 px-2 text-primary ring-2 ring-primary/25",
+        assignment
+          ? "bg-transparent"
+          : visualVariant === "midnight"
+            ? "rounded-md border border-dashed border-white/20 bg-white/[0.07] px-2 text-white/70"
+            : "rounded-md border border-dashed border-border bg-background/55 px-2 text-muted-foreground",
+        isDraggingOver && (visualVariant === "midnight"
+          ? "rounded-md border border-white/45 bg-white/15 px-2 text-white ring-2 ring-white/20"
+          : "rounded-md border border-primary bg-primary/10 px-2 text-primary ring-2 ring-primary/25"),
       )}
     >
       {assignment ? (
@@ -822,13 +828,12 @@ function MatrixShiftBlock({
 
   return (
     <article className={cn(
-      "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
-      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-10 shadow-[0_8px_24px_rgba(15,23,42,0.24),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow] hover:brightness-110 hover:shadow-[0_10px_28px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.14)]",
-      shift.status === "draft" && "border-primary/35 border-l-primary",
-      currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 dark:border-amber-800",
-      !embeddedInLane && shiftTimeOverlayClass(displayedStartTime),
-      isPending && "animate-pulse border-primary/45",
-      selected && "border-primary ring-2 ring-primary/20",
+      "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
+      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col px-3 pb-3 pt-10 hover:translate-y-0",
+      shift.status === "draft" && "border-primary/60",
+      currentAssignments.length < requiredCount && "border-amber-300/80",
+      isPending && "animate-pulse border-primary/70",
+      selected && "border-primary ring-2 ring-primary/35 ring-offset-1 ring-offset-background",
     )}
       id={elementId}
       data-shift-id={shift.id}
@@ -862,7 +867,7 @@ function MatrixShiftBlock({
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             {!embeddedInLane && (
-              <span className="min-w-0 break-words text-[10px] font-semibold text-foreground">
+              <span className="min-w-0 break-words text-[10px] font-semibold text-white/80">
                 {shift.name || shift.service_name_snapshot || "Dienst"}
               </span>
             )}
@@ -871,23 +876,23 @@ function MatrixShiftBlock({
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
           {!embeddedInLane && (
-            <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-foreground">
+            <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-white">
               {displayedStartTime}–{displayedEndTime}
               {continuesBefore ? " · vervolg" : continuesAfter ? " · loopt door" : crossesDate ? " +1" : ""}
               {linkedObjectCount > 1 ? ` · ${linkedObjectCount} objecten` : ""}
             </span>
           )}
           {!embeddedInLane && segmentProjections.length === 1 && (
-            <span className="compact-hide mt-0.5 block truncate text-[9px] font-medium text-primary">
+            <span className="compact-hide mt-0.5 block truncate text-[9px] font-medium text-blue-200">
               {projectionSegment.task_name_snapshot || projectionSegment.object_name_snapshot || "Taaksegment"}
             </span>
           )}
           {!embeddedInLane && segmentProjections.length > 1 && (
-            <span className="compact-hide mt-1 block space-y-0.5 border-t border-border/70 pt-1">
+            <span className="compact-hide mt-1 block space-y-0.5 border-t border-white/10 pt-1">
               {segmentProjections.map(({ segment, slice }, index) => (
                 <span
                   key={`${segment.id || index}:${slice?.date || ""}`}
-                  className="flex min-w-0 items-center gap-1 text-[8px] text-muted-foreground"
+                  className="flex min-w-0 items-center gap-1 text-[8px] text-white/60"
                   data-segment-id={segment.id || undefined}
                 >
                   <span className="shrink-0 tabular-nums">{slice?.startTime || segment.start_time}–{slice?.endTime || segment.end_time}</span>
@@ -899,7 +904,7 @@ function MatrixShiftBlock({
         </button>
         {editable && !isPending && <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button disabled={mutationPending} variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`Acties voor ${shift.name || "dienst"}`}>
+            <Button disabled={mutationPending} variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-white/70 hover:bg-white/10 hover:text-white" aria-label={`Acties voor ${shift.name || "dienst"}`}>
               <MoreHorizontal className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
@@ -924,7 +929,7 @@ function MatrixShiftBlock({
       </div>
 
       {requiredCount > 1 && (
-        <p className="compact-hide mt-1.5 text-[9px] font-medium text-muted-foreground" data-planning-dimensions="time-staffing">
+        <p className="compact-hide mt-1.5 text-[9px] font-medium text-white/60" data-planning-dimensions="time-staffing">
           Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
         </p>
       )}
@@ -943,7 +948,7 @@ function MatrixShiftBlock({
             disabled={mutationPending || isPending}
             editable={editable}
             compact={embeddedInLane}
-            visualVariant={embeddedInLane ? "midnight" : "default"}
+            visualVariant="midnight"
           />
         ))}
       </div>
@@ -1184,7 +1189,7 @@ function TaskCoverageLane({
 
   return (
     <section
-      className="w-full overflow-hidden rounded-lg border border-border bg-card shadow-[0_1px_3px_rgba(15,23,42,0.045)]"
+      className="w-full overflow-hidden rounded-[10px] border border-primary/20 bg-card shadow-[0_7px_22px_hsl(var(--primary)/0.08)]"
       data-task-coverage-group={occurrence.id}
       aria-busy={isLaneBusy ? "true" : "false"}
     >
@@ -1192,7 +1197,7 @@ function TaskCoverageLane({
         type="button"
         disabled={!editable}
         onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
-        className="flex w-full items-start justify-between gap-2 border-b border-border/70 bg-muted/25 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full items-start justify-between gap-2 border-b border-primary/15 bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-2.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="min-w-0">
           <span className="block break-words text-[11px] font-semibold leading-tight text-foreground">
@@ -1211,7 +1216,7 @@ function TaskCoverageLane({
       </button>
       <div
         ref={laneRef}
-        className="relative isolate w-full overflow-hidden bg-muted/15"
+        className="relative isolate w-full overflow-hidden bg-primary/[0.025]"
         style={{ height: `${laneHeight}px` }}
         data-task-coverage-lane={occurrence.id}
         data-lane-start-minute={demand.startMinute}
@@ -1308,7 +1313,7 @@ function EmployeeAssignmentBlock({
   const activeSegments = segments.filter(item => item.status !== "removed");
   const identity = assignmentIdentity(assignment, null, personnel);
   return (
-    <article aria-busy={disabled ? "true" : "false"} className={cn("rounded-lg border border-border p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)]", shiftTimeOverlayClass(projectionSlice?.startTime || shift.start_time))} data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
+    <article aria-busy={disabled ? "true" : "false"} className="rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <div className="flex items-start gap-2">
         <CompactEmployeeIdentity
           name={identity.name}
@@ -1316,6 +1321,7 @@ function EmployeeAssignmentBlock({
           disabled={disabled}
           onClick={onSelect}
           warningCount={warnings}
+          variant="midnight"
         />
         {editable && (
           <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>
@@ -1324,11 +1330,11 @@ function EmployeeAssignmentBlock({
         )}
       </div>
       <button type="button" disabled={disabled} onClick={onSelect} className="mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
-        <span className="block text-[10px] font-semibold tabular-nums text-foreground">
+        <span className="block text-[10px] font-semibold tabular-nums text-white">
           {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
           {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
         </span>
-        <span className="compact-hide mt-0.5 block break-words text-[9px] text-muted-foreground">
+        <span className="compact-hide mt-0.5 block break-words text-[9px] text-white/60">
           {shift.name || shift.service_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "")}
         </span>
       </button>

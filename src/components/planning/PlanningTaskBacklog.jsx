@@ -61,8 +61,8 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       data-task-draggable-index={dragEnabled ? dragIndex : undefined}
       aria-busy={disabled ? "true" : "false"}
       className={cn(
-        "rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow",
-        isDragging && "z-50 shadow-xl ring-2 ring-primary/25",
+        "rounded-[10px] border border-primary/20 border-l-[3px] border-l-primary bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] p-2.5 shadow-[0_6px_18px_hsl(var(--primary)/0.08),inset_0_1px_0_hsl(var(--primary-foreground)/0.65)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-primary/35 hover:shadow-[0_9px_24px_hsl(var(--primary)/0.13)]",
+        isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/25",
       )}
     >
       <div className="flex items-start gap-2">
