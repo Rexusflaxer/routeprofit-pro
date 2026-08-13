@@ -318,6 +318,7 @@ function ShiftSlot({
   onUnassign,
   disabled = false,
   editable = false,
+  compact = false,
 }) {
   const droppableId = `slot:${shift.id}:${slotIndex}:${serviceDate}:${encodeURIComponent(resourceKey)}`;
   const identity = assignment ? assignmentIdentity(assignment, personnelById) : null;
@@ -327,16 +328,17 @@ function ShiftSlot({
       {...(provided?.droppableProps || {})}
       data-droppable-id={editable ? droppableId : undefined}
       className={cn(
-        "flex min-h-11 items-center gap-2 rounded-md border px-2 py-1.5",
+        "flex items-center rounded-md border",
+        compact ? "min-h-8 gap-1.5 px-1.5 py-1" : "min-h-11 gap-2 px-2 py-1.5",
         assignment ? "border-primary/15 bg-primary/[0.045]" : "border-dashed border-border bg-background/55 text-muted-foreground",
         isDraggingOver && "border-primary bg-primary/10 text-primary ring-2 ring-primary/25",
       )}
     >
       {assignment ? (
         <>
-          <Avatar className="h-7 w-7 shrink-0 rounded-md border border-primary/15">
+          <Avatar className={cn("shrink-0 rounded-md border border-primary/15", compact ? "h-6 w-6" : "h-7 w-7")}>
             <AvatarImage src={identity.photoUrl || undefined} alt={`Profielfoto van ${identity.name}`} className="object-cover object-top" />
-            <AvatarFallback className="rounded-md bg-primary/10 text-[9px] font-bold text-primary">
+            <AvatarFallback className={cn("rounded-md bg-primary/10 font-bold text-primary", compact ? "text-[8px]" : "text-[9px]")}>
               {nameInitials(identity.name)}
             </AvatarFallback>
           </Avatar>
@@ -344,7 +346,10 @@ function ShiftSlot({
             type="button"
             disabled={disabled}
             onClick={onSelect}
-            className="min-w-0 flex-1 whitespace-normal break-words text-left text-[11px] font-semibold leading-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+            className={cn(
+              "min-w-0 flex-1 whitespace-normal break-words text-left font-semibold leading-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait",
+              compact ? "text-[10px]" : "text-[11px]",
+            )}
             title={identity.name}
           >
             {identity.name}
@@ -835,7 +840,7 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
-      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] p-2 shadow-none",
+      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 py-1.5 shadow-none",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
       isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
@@ -951,6 +956,7 @@ function MatrixShiftBlock({
             onUnassign={onUnassign}
             disabled={mutationPending || isPending}
             editable={editable}
+            compact={embeddedInLane}
           />
         ))}
       </div>
@@ -1125,8 +1131,8 @@ function TaskCoverageLane({
   const pieceCount = Math.max(1, baseServices.length + gaps.length);
   const laneHeight = Math.max(
     getTaskTimelineLaneHeight(duration, { compact }),
-    pieceCount * (compact ? 48 : 72),
-    compact ? 72 : 112,
+    pieceCount * (compact ? 68 : 104),
+    compact ? 92 : 144,
   );
   const isLaneBusy = mutationPending || resizeSaving;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
