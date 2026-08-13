@@ -331,6 +331,7 @@ function ShiftSlot({
             photoUrl={identity.photoUrl}
             disabled={disabled}
             onClick={onSelect}
+            warningCount={assignmentWarningCount(assignment)}
           />
           {editable && (
             <button
@@ -688,7 +689,6 @@ function MatrixShiftBlock({
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
   const assignmentsBySlot = mapAssignmentsToSlots(currentAssignments, requiredCount);
-  const warnings = shiftWarningCount(shift, currentAssignments);
   const activeSegments = segments.filter(item => item.status !== "removed");
   const linkedObjectCount = new Set([
     ...(shift.object_ids || []),
@@ -818,7 +818,7 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
-      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 py-1.5 shadow-none",
+      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 pb-5 pt-5 shadow-none",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
       isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
@@ -835,6 +835,13 @@ function MatrixShiftBlock({
       data-editable={editable ? "true" : "false"}
       style={style}
     >
+      {embeddedInLane && (
+        <>
+          <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-semibold tabular-nums text-muted-foreground">{displayedStartTime}</span>
+          <span className="pointer-events-none absolute bottom-1 left-2 text-[9px] font-semibold tabular-nums text-muted-foreground">{displayedEndTime}</span>
+          <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>
+        </>
+      )}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
           edge="start"
@@ -863,11 +870,13 @@ function MatrixShiftBlock({
             {isResizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
-          <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-foreground">
-            {displayedStartTime}–{displayedEndTime}
-            {continuesBefore ? " · vervolg" : continuesAfter ? " · loopt door" : crossesDate ? " +1" : ""}
-            {linkedObjectCount > 1 ? ` · ${linkedObjectCount} objecten` : ""}
-          </span>
+          {!embeddedInLane && (
+            <span className="mt-0.5 block text-[10px] font-semibold tabular-nums text-foreground">
+              {displayedStartTime}–{displayedEndTime}
+              {continuesBefore ? " · vervolg" : continuesAfter ? " · loopt door" : crossesDate ? " +1" : ""}
+              {linkedObjectCount > 1 ? ` · ${linkedObjectCount} objecten` : ""}
+            </span>
+          )}
           {!embeddedInLane && segmentProjections.length === 1 && (
             <span className="compact-hide mt-0.5 block truncate text-[9px] font-medium text-primary">
               {projectionSegment.task_name_snapshot || projectionSegment.object_name_snapshot || "Taaksegment"}
@@ -937,12 +946,6 @@ function MatrixShiftBlock({
           />
         ))}
       </div>
-      {warnings > 0 && (
-        <AlertTriangle
-          className="mt-1 h-3 w-3 text-amber-600 dark:text-amber-300"
-          aria-label={`${warnings} waarschuwingen`}
-        />
-      )}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
         <ServiceCardResizeHandle
           edge="end"
@@ -1304,6 +1307,7 @@ function EmployeeAssignmentBlock({
           photoUrl={identity.photoUrl}
           disabled={disabled}
           onClick={onSelect}
+          warningCount={warnings}
         />
         {editable && (
           <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>

@@ -1,4 +1,5 @@
 import React from "react";
+import { AlertTriangle } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -6,11 +7,13 @@ function initials(name) {
   return String(name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
 }
 
-function lastName(name) {
-  return String(name || "Onbekend").trim().split(/\s+/).filter(Boolean).at(-1) || "Onbekend";
+function compactName(name) {
+  const parts = String(name || "Onbekend").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return parts[0] || "Onbekend";
+  return `${parts[0][0].toUpperCase()}. ${parts.at(-1)}`;
 }
 
-export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onClick }) {
+export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onClick, warningCount = 0 }) {
   return (
     <TooltipProvider delayDuration={250}>
       <Tooltip>
@@ -22,8 +25,10 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
             aria-label={name}
           >
-            <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded bg-primary/10 px-1 text-[8px] font-bold text-primary">{initials(name)}</span>
-            <span className="min-w-0 truncate text-[10px] font-semibold leading-tight text-foreground">{lastName(name)}</span>
+            <span className="min-w-0 truncate text-[10px] font-semibold leading-tight text-foreground">{compactName(name)}</span>
+            {warningCount > 0 && (
+              <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-300" aria-label={`${warningCount} waarschuwingen`} />
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="border border-border bg-popover p-2 text-popover-foreground shadow-lg">
