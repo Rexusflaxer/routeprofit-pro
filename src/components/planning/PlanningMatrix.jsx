@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
+import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
 import { shiftTimeOverlayClass } from "@/components/planning/shiftAppearance";
 import {
   DropdownMenu,
@@ -239,7 +240,7 @@ function OpenTaskIntervalCard({
               )}>
                 {embeddedInLane ? "Open taakdeel" : occurrence.task_name_snapshot || "Open taak"}
               </span>
-              <span className="mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground">
+              <span className={cn("mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground", embeddedInLane && "sr-only")}>
                 <Clock3 className="h-3 w-3 shrink-0" />
                 {gap.startTime}–{gap.endTime}
                 {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
@@ -648,7 +649,7 @@ function TaskBoundaryHandle({
           onCancel?.();
         }
       }}
-      className="absolute left-0 z-40 flex h-6 w-full -translate-y-1/2 touch-none cursor-row-resize items-center justify-center [@media(pointer:coarse)]:h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
+      className="absolute left-11 z-40 flex h-6 w-[calc(100%_-_2.75rem)] -translate-y-1/2 touch-none cursor-row-resize items-center justify-center [@media(pointer:coarse)]:h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
       style={{ top: `${top}%` }}
       title="Slepen · pijltjes 5 min · Shift 60 min · Enter opslaan"
     >
@@ -837,13 +838,7 @@ function MatrixShiftBlock({
       data-editable={editable ? "true" : "false"}
       style={style}
     >
-      {embeddedInLane && (
-        <>
-          <span className="pointer-events-none absolute left-2 top-1 text-[9px] font-semibold tabular-nums text-muted-foreground">{displayedStartTime}</span>
-          <span className="pointer-events-none absolute bottom-1 left-2 text-[9px] font-semibold tabular-nums text-muted-foreground">{displayedEndTime}</span>
-          <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>
-        </>
-      )}
+      {embeddedInLane && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
           edge="start"
@@ -1113,6 +1108,8 @@ function TaskCoverageLane({
   const duration = Math.max(1, demand.endMinute - demand.startMinute);
   const pieceStyle = (startMinute, endMinute) => ({
     top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
+    left: "44px",
+    width: "calc(100% - 44px)",
     height: `${((endMinute - startMinute) / duration) * 100}%`,
   });
   const pieceCount = Math.max(1, baseServices.length + gaps.length);
@@ -1221,6 +1218,13 @@ function TaskCoverageLane({
         aria-label={`${occurrence.task_name_snapshot || "Taak"} ${demand.startTime}–${demand.endTime}`}
         aria-busy={isLaneBusy ? "true" : "false"}
       >
+        <TimelineTimeScale
+          startMinute={demand.startMinute}
+          endMinute={demand.endMinute}
+          boundaryMinutes={boundaries.map(boundary => (
+            shownPreview?.boundaryId === boundary.id ? shownPreview.minute : boundary.minute
+          ))}
+        />
         {baseServices.map(service => {
           const interval = intervalFor(service);
           return (
