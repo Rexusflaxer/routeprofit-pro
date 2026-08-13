@@ -50,6 +50,11 @@ module.exports = {
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
   			},
+  			shift: {
+  				early: 'hsl(var(--shift-early))',
+  				evening: 'hsl(var(--shift-evening))',
+  				night: 'hsl(var(--shift-night))'
+  			},
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',

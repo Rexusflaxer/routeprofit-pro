@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
+import { shiftTimeOverlayClass } from "@/components/planning/shiftAppearance";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -318,10 +319,10 @@ function ShiftSlot({
       {...(provided?.droppableProps || {})}
       data-droppable-id={editable ? droppableId : undefined}
       className={cn(
-        "flex items-center rounded-md border",
-        compact ? "min-h-8 gap-1.5 px-1.5 py-1" : "min-h-11 gap-2 px-2 py-1.5",
-        assignment ? "border-primary/15 bg-primary/[0.045]" : "border-dashed border-border bg-background/55 text-muted-foreground",
-        isDraggingOver && "border-primary bg-primary/10 text-primary ring-2 ring-primary/25",
+        "flex items-center",
+        compact ? "min-h-8 gap-1.5 py-1" : "min-h-11 gap-2 py-1.5",
+        assignment ? "bg-transparent" : "rounded-md border border-dashed border-border bg-background/55 px-2 text-muted-foreground",
+        isDraggingOver && "rounded-md border border-primary bg-primary/10 px-2 text-primary ring-2 ring-primary/25",
       )}
     >
       {assignment ? (
@@ -820,8 +821,9 @@ function MatrixShiftBlock({
       "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
       embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 pb-5 pt-5 shadow-none",
       shift.status === "draft" && "border-primary/35 border-l-primary",
-      currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
-      isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
+      currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 dark:border-amber-800",
+      shiftTimeOverlayClass(displayedStartTime),
+      isPending && "animate-pulse border-primary/45",
       selected && "border-primary ring-2 ring-primary/20",
     )}
       id={elementId}
@@ -1300,7 +1302,7 @@ function EmployeeAssignmentBlock({
   const activeSegments = segments.filter(item => item.status !== "removed");
   const identity = assignmentIdentity(assignment, null, personnel);
   return (
-    <article aria-busy={disabled ? "true" : "false"} className="rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)]" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
+    <article aria-busy={disabled ? "true" : "false"} className={cn("rounded-lg border border-border p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)]", shiftTimeOverlayClass(projectionSlice?.startTime || shift.start_time))} data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <div className="flex items-start gap-2">
         <CompactEmployeeIdentity
           name={identity.name}
@@ -1324,7 +1326,6 @@ function EmployeeAssignmentBlock({
           {shift.name || shift.service_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "")}
         </span>
       </button>
-      {warnings > 0 && <AlertTriangle className="mt-1 h-3 w-3 text-amber-600 dark:text-amber-300" aria-label={`${warnings} waarschuwingen`} />}
     </article>
   );
 }
