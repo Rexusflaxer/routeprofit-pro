@@ -39,7 +39,7 @@ const VIEWS = [
 
 function Segment({ options, value, onChange, ariaLabel }) {
   return (
-    <div className="inline-flex h-8 items-center rounded-md border border-border bg-card p-0.5" role="group" aria-label={ariaLabel}>
+    <div className="inline-flex h-8 items-center rounded-lg border border-slate-600/60 bg-slate-950/35 p-0.5 shadow-inner" role="group" aria-label={ariaLabel}>
       {options.map(option => {
         const active = option.value === value;
         const Icon = option.icon;
@@ -53,8 +53,8 @@ function Segment({ options, value, onChange, ariaLabel }) {
             className={cn(
               "inline-flex h-7 items-center justify-center gap-1.5 rounded px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               active
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ? "bg-primary text-primary-foreground shadow-[0_0_18px_hsl(var(--primary)/0.28)]"
+                : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100",
             )}
           >
             {Icon && <Icon className="h-3.5 w-3.5" />}
@@ -119,10 +119,10 @@ export default function PlanningToolbar({
   const changePeriodEnd = onPeriodEndChange || onCustomEndChange;
 
   return (
-    <header className="shrink-0 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+    <header className="shrink-0 border-b border-slate-700/70 bg-[linear-gradient(135deg,#0B1220_0%,#10213A_58%,#0C1628_100%)] px-3 py-2 text-slate-100 shadow-[0_10px_30px_rgba(2,8,23,0.28)]">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
         <div className="mr-1 flex min-w-[150px] items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/15 text-primary shadow-[0_0_18px_hsl(var(--primary)/0.15)]">
             <CalendarRange className="h-4 w-4" />
           </div>
           <div className="min-w-0">
@@ -163,7 +163,7 @@ export default function PlanningToolbar({
           canZoomOut={canZoomOut}
         />
 
-        <div className="inline-flex h-8 items-center rounded-md border border-border bg-card">
+        <div className="inline-flex h-8 items-center rounded-lg border border-slate-600/60 bg-slate-950/35 shadow-inner">
           <Button variant="ghost" size="icon" className="h-7 w-7 rounded" onClick={onPrevious} aria-label="Vorige periode">
             <ChevronLeft className="h-3.5 w-3.5" />
           </Button>
@@ -230,7 +230,7 @@ export default function PlanningToolbar({
         </div>
       </div>
 
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+      <div className="-mx-3 -mb-2 mt-2 flex min-w-0 flex-wrap items-center gap-2 border-t border-slate-300 bg-slate-100 px-3 py-2 text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
         {normalizedView === "period" && periodOptions.length > 0 && (
           <Select value={selectedPeriodId} onValueChange={onPeriodChange}>
             <SelectTrigger className="h-8 w-[245px] shrink-0 bg-card text-[12px]" aria-label="Beveiligingsperiode">
@@ -282,13 +282,13 @@ export default function PlanningToolbar({
             value={search}
             onChange={event => onSearchChange(event.target.value)}
             placeholder="Zoek dienst, object of medewerker"
-            className="h-8 border-border bg-card pl-8 text-[12px]"
+            className="h-8 border-slate-300 bg-white pl-8 text-[12px] text-slate-900 placeholder:text-slate-500 shadow-sm"
             aria-label="Zoek in planning"
           />
         </div>
 
         <Select value={customerFilter} onValueChange={onCustomerFilterChange}>
-          <SelectTrigger className="h-8 w-[145px] bg-card text-[12px]" aria-label="Filter op klant">
+          <SelectTrigger className="h-8 w-[145px] border-slate-300 bg-white text-[12px] text-slate-900 shadow-sm" aria-label="Filter op klant">
             <SelectValue placeholder="Alle klanten" />
           </SelectTrigger>
           <SelectContent>
@@ -302,7 +302,7 @@ export default function PlanningToolbar({
         </Select>
 
         <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-          <SelectTrigger className="h-8 w-[132px] bg-card text-[12px]" aria-label="Filter op planningsstatus">
+          <SelectTrigger className="h-8 w-[132px] border-slate-300 bg-white text-[12px] text-slate-900 shadow-sm" aria-label="Filter op planningsstatus">
             <Filter className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
             <SelectValue />
           </SelectTrigger>

@@ -14,7 +14,7 @@ export default function PlanningSidePanel({ perspective, mode, onModeChange, tas
   if (fixedMode) {
     return (
       <aside
-        className="flex h-full min-h-0 flex-col border-l border-border bg-muted/20"
+        className="flex h-full min-h-0 flex-col border-l border-slate-700/70 bg-[#0e192a] shadow-[-10px_0_28px_rgba(2,8,23,0.22)]"
         data-panel-mode={fixedMode}
         aria-label={fixedMode === "tasks" ? "Taken om in te plannen" : "Beschikbare medewerkers"}
       >
@@ -26,8 +26,8 @@ export default function PlanningSidePanel({ perspective, mode, onModeChange, tas
   }
 
   return (
-    <Tabs value={mode} onValueChange={onModeChange} className="flex h-full min-h-0 flex-col border-l border-border bg-muted/20">
-      <div className="shrink-0 border-b border-border bg-card px-2 py-2">
+    <Tabs value={mode} onValueChange={onModeChange} className="flex h-full min-h-0 flex-col border-l border-slate-700/70 bg-[#0e192a] shadow-[-10px_0_28px_rgba(2,8,23,0.22)]">
+      <div className="shrink-0 border-b border-slate-700/70 bg-[#132238] px-2 py-2">
         <TabsList className="grid h-8 w-full grid-cols-2 rounded-md p-0.5">
           <TabsTrigger value="tasks" className="h-7 gap-1 rounded px-2 text-[10px]">
             <ListTodo className="h-3 w-3" /> Taken

@@ -18,9 +18,9 @@ export default function TimelineTimeScale({ startMinute, endMinute, boundaryMinu
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30" aria-hidden="true">
-      <span className="absolute inset-y-0 left-0 w-11 border-r border-border/70 bg-card/90" />
+      <span className="absolute inset-y-0 left-0 w-11 border-r border-slate-700/70 bg-[#0c1728]/95" />
       {hours.map(minute => (
-        <span key={`hour-${minute}`} className="absolute left-11 right-0 h-px bg-border/30" style={{ top: `${((minute - startMinute) / duration) * 100}%` }} />
+        <span key={`hour-${minute}`} className="absolute left-11 right-0 h-px bg-slate-500/15" style={{ top: `${((minute - startMinute) / duration) * 100}%` }} />
       ))}
       {markers.map(minute => {
         const position = ((minute - startMinute) / duration) * 100;

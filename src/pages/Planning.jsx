@@ -1745,7 +1745,7 @@ export default function Planning() {
   ].find(Boolean);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#0b1322] text-slate-100">
       <PlanningToolbar
         perspective={perspective}
         onPerspectiveChange={nextPerspective => {
@@ -1915,7 +1915,7 @@ export default function Planning() {
         </ResizablePanelGroup>
       </DragDropContext>
 
-      <footer className="flex h-9 shrink-0 items-center gap-3 border-t border-border bg-card px-3 text-[10px] text-muted-foreground">
+      <footer className="flex h-9 shrink-0 items-center gap-3 border-t border-slate-700/70 bg-[#0d1829]/95 px-3 text-[10px] text-slate-400 shadow-[0_-8px_24px_rgba(2,8,23,0.22)] backdrop-blur">
         <div className="flex items-center gap-1.5">
           {runActionMutation.isPending || publishMutation.isPending ? (
             <Loader2 className="h-3 w-3 animate-spin text-primary" />

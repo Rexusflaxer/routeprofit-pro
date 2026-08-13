@@ -61,7 +61,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       data-task-draggable-index={dragEnabled ? dragIndex : undefined}
       aria-busy={disabled ? "true" : "false"}
       className={cn(
-        "rounded-lg border border-border bg-card p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow",
+        "rounded-lg border border-slate-700/70 bg-[#142238] p-2.5 shadow-[0_6px_18px_rgba(2,8,23,0.18)] transition-all hover:border-primary/40 hover:bg-[#172944]",
         isDragging && "z-50 shadow-xl ring-2 ring-primary/25",
       )}
     >
@@ -243,7 +243,7 @@ export default function PlanningTaskBacklog({
   );
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-muted/20" aria-label="Taakwerkvoorraad">
+    <section className="flex h-full min-h-0 flex-col bg-[#0e192a]" aria-label="Taakwerkvoorraad">
       <div className="shrink-0 border-b border-border bg-card px-3 py-2.5">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -256,7 +256,7 @@ export default function PlanningTaskBacklog({
           <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Zoek taak, object of klant" className="h-8 bg-background pl-8 text-[11px]" aria-label="Zoek in taakwerkvoorraad" />
         </div>
-        <div className="mt-2 grid grid-cols-4 gap-1 rounded-md bg-muted p-1">
+        <div className="mt-2 grid grid-cols-4 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/35 p-1">
           {[["work", "Te doen"], ["open", "Open"], ["partial", "Deels/bezet"], ["all", "Alles"]].map(([value, label]) => (
             <button key={value} type="button" aria-pressed={status === value} onClick={() => setStatus(value)} className={cn("rounded px-1.5 py-1 text-[9px] font-medium", status === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>{label}</button>
           ))}

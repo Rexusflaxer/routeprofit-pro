@@ -217,8 +217,8 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-lg border border-rose-200 border-l-[3px] border-l-rose-400 bg-card px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.035)] transition-colors dark:border-rose-900/70 dark:border-l-rose-600",
-        embeddedInLane && "absolute flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 bg-rose-50/55 px-2 py-1.5 shadow-none hover:bg-rose-100/70 dark:bg-rose-950/20 dark:hover:bg-rose-950/35",
+        "group/open-task w-full rounded-lg border border-[#31547c] border-l-[3px] border-l-primary bg-[linear-gradient(145deg,#142238_0%,#182c49_100%)] px-2.5 py-2 text-left shadow-[0_8px_20px_rgba(2,8,23,0.2)] transition-all hover:border-primary/70 hover:brightness-110",
+        embeddedInLane && "absolute flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-primary bg-[#101d30]/95 px-2 py-1.5 shadow-none hover:bg-[#162945]",
         coverage?.status === "partial" && !embeddedInLane && "border-amber-200 border-l-amber-500 dark:border-amber-900/70 dark:border-l-amber-600",
         editable && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.08] ring-2 ring-inset ring-primary/25",
@@ -236,7 +236,7 @@ function OpenTaskIntervalCard({
               <span className={cn(
                 "block text-[11px] font-semibold leading-tight text-foreground",
                 !embeddedInLane && "break-words",
-                embeddedInLane && "text-rose-700 dark:text-rose-300",
+                embeddedInLane && "text-slate-100",
               )}>
                 {embeddedInLane ? "Nog in te plannen" : occurrence.task_name_snapshot || "Open taak"}
               </span>
@@ -247,12 +247,12 @@ function OpenTaskIntervalCard({
               </span>
             </span>
             {!embeddedInLane && (
-              <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-950/45 dark:text-rose-300">
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.07] px-2 py-0.5 text-[9px] font-semibold text-slate-300">
                 Open
               </span>
             )}
           </span>
-          <span className="compact-hide mt-1.5 block text-[9px] font-medium text-muted-foreground" data-planning-dimensions="open-time">
+          <span className="compact-hide mt-1.5 block text-[9px] font-medium text-slate-400" data-planning-dimensions="open-time">
             {flexible
               ? `${formatMinutesAsHours(gap.allocatableMinutes)} te plannen binnen dit venster`
               : `${formatMinutesAsHours(gap.durationMinutes)} nog niet ingepland`}
@@ -1184,7 +1184,7 @@ function TaskCoverageLane({
 
   return (
     <section
-      className="w-full overflow-hidden rounded-lg border border-border bg-card shadow-[0_1px_3px_rgba(15,23,42,0.045)]"
+      className="w-full overflow-hidden rounded-xl border border-primary/55 bg-[#0f1c30] shadow-[0_0_0_1px_hsl(var(--primary)/0.12),0_0_24px_hsl(var(--primary)/0.18)]"
       data-task-coverage-group={occurrence.id}
       aria-busy={isLaneBusy ? "true" : "false"}
     >
@@ -1192,7 +1192,7 @@ function TaskCoverageLane({
         type="button"
         disabled={!editable}
         onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
-        className="flex w-full items-start justify-between gap-2 border-b border-border/70 bg-muted/25 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full items-start justify-between gap-2 border-b border-slate-700/70 bg-[#152640] px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <span className="min-w-0">
           <span className="block break-words text-[11px] font-semibold leading-tight text-foreground">
@@ -1203,15 +1203,15 @@ function TaskCoverageLane({
         <span className={cn(
           "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold",
           openMinutes > 0
-            ? "bg-rose-50 text-rose-700 dark:bg-rose-950/45 dark:text-rose-300"
-            : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/45 dark:text-emerald-300",
+            ? "border border-white/10 bg-white/[0.07] text-slate-200"
+            : "border border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
         )}>
           {openMinutes > 0 ? `${formatMinutesAsHours(openMinutes)} open` : "Ingepland"}
         </span>
       </button>
       <div
         ref={laneRef}
-        className="relative isolate w-full overflow-hidden bg-muted/15"
+        className="relative isolate w-full overflow-hidden bg-[#0c1728]"
         style={{ height: `${laneHeight}px` }}
         data-task-coverage-lane={occurrence.id}
         data-lane-start-minute={demand.startMinute}
@@ -1963,7 +1963,7 @@ export default function PlanningMatrix({
   return (
     <div className="h-full min-h-0">
       <div
-        className="h-full min-h-0 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
+        className="h-full min-h-0 overflow-auto overscroll-contain bg-[#0b1322] [scrollbar-gutter:stable]"
         data-testid="planning-matrix-scroll"
       >
       <table
@@ -1999,7 +1999,7 @@ export default function PlanningMatrix({
                       <DayHeader day={day} />
                     </th>
                     {resources.map(resource => (
-                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-slate-700/60 bg-[#0b1525] align-top last:border-r-0">
                         {renderCell(resource, day)}
                       </td>
                     ))}
@@ -2012,7 +2012,7 @@ export default function PlanningMatrix({
           <>
             <thead>
               <tr>
-                <th scope="col" className="sticky left-0 top-0 z-50 w-[220px] min-w-[220px] border-b border-r border-border bg-card text-left shadow-[4px_4px_10px_rgba(15,23,42,0.04)]">
+                <th scope="col" className="sticky left-0 top-0 z-50 w-[220px] min-w-[220px] border-b border-r border-slate-700/70 bg-[#0d192b] text-left shadow-[4px_4px_18px_rgba(2,8,23,0.26)]">
                   <span className="block px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {perspective === "employee" ? "Medewerker" : "Object"}
                   </span>
@@ -2020,7 +2020,7 @@ export default function PlanningMatrix({
                 {days.map(day => {
                   const key = dateKey(day);
                   return (
-                    <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top text-left backdrop-blur last:border-r-0">
+                    <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-slate-700/70 bg-[#0d192b]/95 align-top text-left backdrop-blur last:border-r-0">
                       <DayHeader day={day} />
                     </th>
                   );
@@ -2030,13 +2030,13 @@ export default function PlanningMatrix({
             <tbody>
               {resources.map(resource => (
                 <tr key={resource.key}>
-                  <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
+                  <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-slate-700/70 bg-[#0d192b] align-top text-left shadow-[4px_0_18px_rgba(2,8,23,0.22)]">
                     <ResourceHeader resource={resource} perspective={perspective} />
                   </th>
                   {days.map(day => {
                     const key = dateKey(day);
                     return (
-                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
+                      <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-slate-700/60 bg-[#0b1525] align-top last:border-r-0">
                         {renderCell(resource, day)}
                       </td>
                     );
