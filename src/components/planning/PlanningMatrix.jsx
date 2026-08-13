@@ -311,6 +311,7 @@ function ShiftSlot({
   disabled = false,
   editable = false,
   compact = false,
+  visualVariant = "default",
 }) {
   const droppableId = `slot:${shift.id}:${slotIndex}:${serviceDate}:${encodeURIComponent(resourceKey)}`;
   const identity = assignment ? assignmentIdentity(assignment, personnelById) : null;
@@ -322,6 +323,7 @@ function ShiftSlot({
       className={cn(
         "flex items-center",
         compact ? "min-h-8 gap-1.5 py-1" : "min-h-11 gap-2 py-1.5",
+        visualVariant === "midnight" && "min-h-0 flex-1 py-0",
         assignment ? "bg-transparent" : "rounded-md border border-dashed border-border bg-background/55 px-2 text-muted-foreground",
         isDraggingOver && "rounded-md border border-primary bg-primary/10 px-2 text-primary ring-2 ring-primary/25",
       )}
@@ -334,7 +336,8 @@ function ShiftSlot({
             disabled={disabled}
             onClick={onSelect}
             warningCount={assignmentWarningCount(assignment)}
-          />
+            variant={visualVariant}
+            />
           {editable && (
             <button
               type="button"
@@ -820,10 +823,10 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[76px] w-full rounded-lg border border-l-[3px] border-border border-l-primary bg-card p-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.055)]",
-      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] px-2 py-2.5 shadow-none transition-colors hover:bg-primary/[0.12]",
+      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-10 shadow-[0_8px_24px_rgba(15,23,42,0.24),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow] hover:brightness-110 hover:shadow-[0_10px_28px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.14)]",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 dark:border-amber-800",
-      shiftTimeOverlayClass(displayedStartTime),
+      !embeddedInLane && shiftTimeOverlayClass(displayedStartTime),
       isPending && "animate-pulse border-primary/45",
       selected && "border-primary ring-2 ring-primary/20",
     )}
@@ -925,7 +928,7 @@ function MatrixShiftBlock({
           Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
         </p>
       )}
-      <div className="mt-1.5 space-y-1">
+      <div className={cn("mt-1.5 space-y-1", embeddedInLane && "mt-0 flex min-h-0 flex-1 flex-col justify-end")}>
         {Array.from({ length: requiredCount }, (_, slotIndex) => (
           <ShiftSlot
             key={slotIndex}
@@ -940,6 +943,7 @@ function MatrixShiftBlock({
             disabled={mutationPending || isPending}
             editable={editable}
             compact={embeddedInLane}
+            visualVariant={embeddedInLane ? "midnight" : "default"}
           />
         ))}
       </div>
