@@ -63,7 +63,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       className={cn(
         "rounded-lg border-l-2 p-2.5 transition-colors",
         needsWork
-          ? "border border-rose-300/30 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.14),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.50)_0%,rgba(255,241,242,0.34)_58%,rgba(254,205,211,0.18)_100%)] shadow-[0_4px_16px_rgba(190,24,93,0.05)] backdrop-blur-xl backdrop-saturate-150 hover:border-rose-400/45 dark:border-rose-700/30 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.14),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.50)_0%,rgba(76,5,25,0.28)_58%,rgba(136,19,55,0.16)_100%)]"
+          ? "border border-rose-300/20 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] shadow-none backdrop-blur-xl backdrop-saturate-150 hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]"
           : "border border-emerald-200/70 border-l-emerald-500 bg-card/70 shadow-none backdrop-blur-md dark:border-emerald-900/60",
         isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/25",
       )}

@@ -217,8 +217,8 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-lg border border-rose-300/30 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.14),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.50)_0%,rgba(255,241,242,0.34)_58%,rgba(254,205,211,0.18)_100%)] px-2.5 py-2 text-left shadow-[0_4px_16px_rgba(190,24,93,0.05)] backdrop-blur-xl backdrop-saturate-150 transition-colors hover:border-rose-400/45 dark:border-rose-700/30 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.14),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.50)_0%,rgba(76,5,25,0.28)_58%,rgba(136,19,55,0.16)_100%)]",
-        embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.16),transparent_48%),linear-gradient(145deg,rgba(255,255,255,0.34),rgba(255,228,230,0.20))] px-2 py-1.5 shadow-none backdrop-blur-xl dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.16),transparent_48%),linear-gradient(145deg,rgba(76,5,25,0.32),rgba(30,15,23,0.22))]",
+        "group/open-task w-full rounded-lg border border-rose-300/20 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] px-2.5 py-2 text-left shadow-none backdrop-blur-xl backdrop-saturate-150 transition-colors hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]",
+        embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.09),transparent_48%),linear-gradient(145deg,rgba(255,255,255,0.16),rgba(255,228,230,0.08))] px-2 py-1.5 shadow-none backdrop-blur-xl dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.09),transparent_48%),linear-gradient(145deg,rgba(76,5,25,0.15),rgba(30,15,23,0.09))]",
         editable && !embeddedInLane && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.12] ring-2 ring-inset ring-primary/25",
       )}
@@ -828,11 +828,11 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
-      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col px-3 pb-3 pt-10 hover:translate-y-0",
-      shift.status === "draft" && "border-primary/60",
-      currentAssignments.length < requiredCount && "border-amber-300/80",
+      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !bg-none px-3 pb-3 pt-10 !shadow-none hover:translate-y-0 hover:brightness-100",
+      shift.status === "draft" && !embeddedInLane && "border-primary/60",
+      currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
       isPending && "animate-pulse border-primary/70",
-      selected && "border-primary ring-2 ring-primary/35 ring-offset-1 ring-offset-background",
+      selected && !embeddedInLane && "border-primary ring-2 ring-primary/35 ring-offset-1 ring-offset-background",
     )}
       id={elementId}
       data-shift-id={shift.id}
