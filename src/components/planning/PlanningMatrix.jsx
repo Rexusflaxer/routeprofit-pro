@@ -1194,10 +1194,7 @@ function TaskCoverageLane({
           <span className="block break-words text-[11px] font-semibold leading-tight text-foreground">
             {occurrence.task_name_snapshot || "Taak"}
           </span>
-          <span className="mt-0.5 flex items-center gap-1 text-[9px] font-medium tabular-nums text-muted-foreground">
-            <Clock3 className="h-2.5 w-2.5 shrink-0" />
-            {demand.startTime}–{demand.endTime}
-          </span>
+
         </span>
         <span className={cn(
           "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold",
@@ -1224,6 +1221,7 @@ function TaskCoverageLane({
           boundaryMinutes={boundaries.map(boundary => (
             shownPreview?.boundaryId === boundary.id ? shownPreview.minute : boundary.minute
           ))}
+          openBoundaryMinutes={gaps.flatMap(gap => [gap.startMinute, gap.endMinute])}
         />
         {baseServices.map(service => {
           const interval = intervalFor(service);

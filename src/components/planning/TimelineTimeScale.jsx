@@ -5,8 +5,9 @@ function timeLabel(minute) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
-export default function TimelineTimeScale({ startMinute, endMinute, boundaryMinutes = [] }) {
+export default function TimelineTimeScale({ startMinute, endMinute, boundaryMinutes = [], openBoundaryMinutes = [] }) {
   const duration = Math.max(1, endMinute - startMinute);
+  const openBoundaries = new Set(openBoundaryMinutes);
   const markers = [...new Set([startMinute, ...boundaryMinutes, endMinute])]
     .filter(minute => minute >= startMinute && minute <= endMinute)
     .sort((left, right) => left - right);
@@ -18,7 +19,7 @@ export default function TimelineTimeScale({ startMinute, endMinute, boundaryMinu
         const edgeClass = minute === startMinute ? "translate-y-0" : minute === endMinute ? "-translate-y-full" : "-translate-y-1/2";
         return (
           <span key={minute} className={`absolute left-0 flex w-full items-center justify-end pr-1.5 ${edgeClass}`} style={{ top: `${position}%` }}>
-            <span className="text-[9px] font-bold tabular-nums text-primary">{timeLabel(minute)}</span>
+            <span className={`text-[9px] font-bold tabular-nums ${openBoundaries.has(minute) ? "text-rose-600 dark:text-rose-400" : "text-primary"}`}>{timeLabel(minute)}</span>
           </span>
         );
       })}
