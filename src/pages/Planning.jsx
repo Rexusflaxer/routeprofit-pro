@@ -33,6 +33,11 @@ import {
 } from "@/components/planning/PlanningDialogs";
 import { invokePlanningApi } from "@/components/planning/planningApiClient";
 import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
+import { createPlanningRefreshScheduler } from "@/components/planning/planningRefreshScheduler";
+import {
+  getSharedBoundaryRepairRetryDelay,
+  resolveEffectiveSharedBoundaryPlanning,
+} from "@/components/planning/planningRecoveryDomain";
 import {
   createPlanningMutationIntentRegistry,
   createPlanningMutationKey,
@@ -150,7 +155,7 @@ function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, e
   };
 }
 
-function optimisticCompositionRecords({ key, occurrence, personnelItem = null, segment }) {
+function optimisticCompositionRecords({ key, occurrence, personnelItem = null, segment, warnings = [] }) {
   const shiftId = `pending-shift-${key}`;
   const segmentId = `pending-segment-${key}`;
   const assignmentId = personnelItem ? `pending-assignment-${key}` : null;
@@ -159,6 +164,7 @@ function optimisticCompositionRecords({ key, occurrence, personnelItem = null, s
     revision: 1,
     source_type: "task",
     source_id: occurrence.object_task_definition_id || null,
+    company_id: occurrence.company_id || null,
     status: "draft",
     service_name_snapshot: `${occurrence.task_name_snapshot || "Taak"} · ${occurrence.object_name_snapshot || "Object"}`,
     service_date: segment.start_date,
@@ -203,7 +209,7 @@ function optimisticCompositionRecords({ key, occurrence, personnelItem = null, s
     personnel_name: personnelName(personnelItem),
     slot_index: 0,
     status: "draft",
-    warnings: [],
+    warnings,
     _optimistic_pending: true,
   }) : null;
   return {
@@ -215,7 +221,7 @@ function optimisticCompositionRecords({ key, occurrence, personnelItem = null, s
 }
 
 function mutationMessage(error) {
-  if (Number(error?.status) === 409) return `${error.message} De planning is opnieuw geladen.`;
+  if (Number(error?.status) === 409) return `${error.message} De planning wordt opnieuw geladen.`;
   return error?.message || "De planningactie kon niet worden uitgevoerd.";
 }
 
@@ -275,13 +281,19 @@ export default function Planning() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [sidePanelMode, setSidePanelMode] = useState("tasks");
   const [pendingMatrixChanges, setPendingMatrixChanges] = useState([]);
+  const [pendingResourceKeys, setPendingResourceKeys] = useState(() => new Set());
   const [composer, setComposer] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [liveMessage, setLiveMessage] = useState("");
   const lastBootstrapKey = useRef("");
+  const bootstrapRecoveryTimer = useRef(null);
+  const lastBoundaryRecoveryKey = useRef("");
   const mutationIntents = useRef(null);
   if (!mutationIntents.current) mutationIntents.current = createPlanningMutationIntentRegistry();
+  const refreshScheduler = useRef(null);
+  const refreshPlanningRef = useRef(null);
+  const pendingResourceKeysRef = useRef(new Set());
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
 
@@ -355,7 +367,11 @@ export default function Planning() {
   });
   const assignmentsQuery = useQuery({
     queryKey: ["planning-assignments"],
-    queryFn: () => listAllEntityRecords(base44.entities.PlanningAssignment, "-updated_date"),
+    queryFn: () => filterAllEntityRecords(
+      base44.entities.PlanningAssignment,
+      { status: { $ne: "removed" } },
+      "-updated_date",
+    ),
     staleTime: 10_000,
   });
   const taskOccurrencesQuery = useQuery({
@@ -369,7 +385,11 @@ export default function Planning() {
   });
   const taskSegmentsQuery = useQuery({
     queryKey: ["planning-task-segments"],
-    queryFn: () => listAllEntityRecords(base44.entities.PlanningShiftTaskSegment, "-start_date"),
+    queryFn: () => filterAllEntityRecords(
+      base44.entities.PlanningShiftTaskSegment,
+      { status: { $ne: "removed" } },
+      "-start_date",
+    ),
     staleTime: 10_000,
   });
   const personnelQuery = useQuery({
@@ -430,6 +450,18 @@ export default function Planning() {
     }
     await Promise.all(requests);
   };
+  refreshPlanningRef.current = refreshPlanning;
+
+  useEffect(() => {
+    const scheduler = createPlanningRefreshScheduler({
+      refresh: options => refreshPlanningRef.current?.(options),
+    });
+    refreshScheduler.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      if (refreshScheduler.current === scheduler) refreshScheduler.current = null;
+    };
+  }, []);
 
   const reconcilePlanningResult = (result, options = {}) => {
     applyPlanningMutationResultToCache(queryClient, {
@@ -441,12 +473,17 @@ export default function Planning() {
   };
 
   const refreshPlanningInBackground = options => {
-    void refreshPlanning(options).catch(() => undefined);
+    refreshScheduler.current?.schedule(options);
   };
 
   const bootstrapMutation = useMutation({
     mutationFn: payload => invokePlanningApi({ action: "bootstrap_range", ...payload }),
-    onSuccess: () => refreshPlanningInBackground(),
+    onSuccess: result => {
+      refreshPlanningInBackground();
+      if (result?.repaired_shared_boundary_occurrence_ids?.length) {
+        void refreshScheduler.current?.flush();
+      }
+    },
     onError: error => {
       toast({
         variant: "destructive",
@@ -464,16 +501,60 @@ export default function Planning() {
     // The mutation identity changes between renders; the range key is the intended trigger.
   }, [bootstrapStart, periodEnd]);
 
+  useEffect(() => {
+    if (bootstrapRecoveryTimer.current) {
+      globalThis.clearTimeout(bootstrapRecoveryTimer.current);
+      bootstrapRecoveryTimer.current = null;
+    }
+    const pendingRepairs = bootstrapMutation.data?.pending_shared_boundary_repairs || [];
+    if (bootstrapMutation.isPending || pendingRepairs.length === 0) return undefined;
+    const delay = getSharedBoundaryRepairRetryDelay(pendingRepairs);
+    bootstrapRecoveryTimer.current = globalThis.setTimeout(() => {
+      bootstrapRecoveryTimer.current = null;
+      bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+    }, delay);
+    return () => {
+      if (!bootstrapRecoveryTimer.current) return;
+      globalThis.clearTimeout(bootstrapRecoveryTimer.current);
+      bootstrapRecoveryTimer.current = null;
+    };
+  }, [bootstrapMutation.data, bootstrapMutation.isPending, bootstrapMutation.mutate, bootstrapStart, periodEnd]);
+
+  const effectivePlanningRecords = useMemo(() => resolveEffectiveSharedBoundaryPlanning({
+    shifts: shiftsQuery.data || [],
+    assignments: assignmentsQuery.data || [],
+    occurrences: taskOccurrencesQuery.data || [],
+    segments: taskSegmentsQuery.data || [],
+  }), [assignmentsQuery.data, shiftsQuery.data, taskOccurrencesQuery.data, taskSegmentsQuery.data]);
   const allShifts = useMemo(
-    () => (shiftsQuery.data || []).map(normalizePlanningShift),
-    [shiftsQuery.data],
+    () => effectivePlanningRecords.shifts.map(normalizePlanningShift),
+    [effectivePlanningRecords.shifts],
   );
   const assignments = useMemo(
-    () => (assignmentsQuery.data || []).map(normalizePlanningAssignment),
-    [assignmentsQuery.data],
+    () => effectivePlanningRecords.assignments.map(normalizePlanningAssignment),
+    [effectivePlanningRecords.assignments],
   );
-  const taskOccurrences = taskOccurrencesQuery.data || [];
-  const taskSegments = taskSegmentsQuery.data || [];
+  const taskOccurrences = effectivePlanningRecords.occurrences;
+  const taskSegments = effectivePlanningRecords.segments;
+  const matrixPendingResourceKeys = useMemo(() => new Set([
+    ...pendingResourceKeys,
+    ...effectivePlanningRecords.pendingResourceKeys,
+  ]), [effectivePlanningRecords.pendingResourceKeys, pendingResourceKeys]);
+  const pendingBoundaryRecoveryKey = [...effectivePlanningRecords.pendingOccurrenceIds]
+    .map(String)
+    .sort()
+    .join("|");
+  useEffect(() => {
+    if (!pendingBoundaryRecoveryKey) {
+      lastBoundaryRecoveryKey.current = "";
+      return;
+    }
+    if (bootstrapMutation.isPending) return;
+    const key = `${bootstrapStart}:${periodEnd}:${pendingBoundaryRecoveryKey}`;
+    if (lastBoundaryRecoveryKey.current === key) return;
+    lastBoundaryRecoveryKey.current = key;
+    bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+  }, [bootstrapMutation.isPending, bootstrapMutation.mutate, bootstrapStart, pendingBoundaryRecoveryKey, periodEnd]);
   const personnel = personnelQuery.data || [];
   const qualifications = qualificationsQuery.data || [];
   const absences = absencesQuery.data || [];
@@ -739,8 +820,13 @@ export default function Planning() {
 
   const runActionMutation = useMutation({
     mutationFn: payload => invokePlanningApi(payload),
-    onError: error => {
-      if (Number(error?.status) === 409) refreshPlanningInBackground();
+    onError: (error, variables) => {
+      if (variables?.action === "resize_shared_task_boundary") {
+        void refreshPlanning();
+        bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+      } else if (Number(error?.status) === 409) {
+        refreshPlanningInBackground();
+      }
       toast({
         variant: "destructive",
         title: "Planningactie niet opgeslagen",
@@ -763,6 +849,20 @@ export default function Planning() {
 
   const removePendingMatrixChange = key => {
     setPendingMatrixChanges(current => current.filter(item => item.key !== key));
+  };
+
+  const acquirePendingResources = keys => {
+    const normalized = [...new Set((keys || []).filter(Boolean).map(String))];
+    if (normalized.some(key => pendingResourceKeysRef.current.has(key))) return null;
+    normalized.forEach(key => pendingResourceKeysRef.current.add(key));
+    setPendingResourceKeys(new Set(pendingResourceKeysRef.current));
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      normalized.forEach(key => pendingResourceKeysRef.current.delete(key));
+      setPendingResourceKeys(new Set(pendingResourceKeysRef.current));
+    };
   };
 
   const rememberUndo = (result, description) => {
@@ -788,12 +888,18 @@ export default function Planning() {
 
   const executeAssignment = async (shift, personnelItem, requestedSlotIndex = null, candidateWarnings = null) => {
     if (!shift || !personnelItem) return;
+    const releasePendingResources = acquirePendingResources([
+      `shift:${shift.id}`,
+      `personnel:${personnelItem.id}`,
+    ]);
+    if (!releasePendingResources) return;
     const current = activeAssignments(assignments.filter(item => String(item.planning_shift_id) === String(shift.id)));
     if (current.some(item => String(item.personnel_id) === String(personnelItem.id))) {
       toast({
         title: "Medewerker is al ingepland",
         description: `${personnelName(personnelItem)} staat al op deze dienst en kan niet dubbel worden bezet.`,
       });
+      releasePendingResources();
       return;
     }
     const required = Math.max(1, Number(shift.required_count || 1));
@@ -805,6 +911,7 @@ export default function Planning() {
         title: "Dienst is volledig bezet",
         description: "Maak eerst een plaats vrij of vervang een bestaande medewerker.",
       });
+      releasePendingResources();
       return;
     }
     const warnings = candidateWarnings || getAssignmentWarnings({
@@ -849,6 +956,7 @@ export default function Planning() {
       return result;
     } finally {
       removePendingMatrixChange(pendingKey);
+      releasePendingResources();
     }
   };
 
@@ -860,18 +968,27 @@ export default function Planning() {
   );
 
   const handleUnassign = async (shift, assignment) => {
-    const result = await runIntentMutation("unassign", "planning-unassign", {
-      action: "unassign",
-      shift_id: shift.id,
-      slot_index: Number(assignment.slot_index || 0),
-      assignment_id: assignment.id,
-      expected_shift_revision: Number(shift.revision || 1),
-    });
-    reconcilePlanningResult(result);
-    refreshPlanningInBackground();
-    const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name}.`;
-    rememberUndo(result, description);
-    setLiveMessage(description);
+    const releasePendingResources = acquirePendingResources([
+      `shift:${shift.id}`,
+      `personnel:${assignment.personnel_id}`,
+    ]);
+    if (!releasePendingResources) return;
+    try {
+      const result = await runIntentMutation("unassign", "planning-unassign", {
+        action: "unassign",
+        shift_id: shift.id,
+        slot_index: Number(assignment.slot_index || 0),
+        assignment_id: assignment.id,
+        expected_shift_revision: Number(shift.revision || 1),
+      });
+      reconcilePlanningResult(result);
+      refreshPlanningInBackground();
+      const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name}.`;
+      rememberUndo(result, description);
+      setLiveMessage(description);
+    } finally {
+      releasePendingResources();
+    }
   };
 
   const handleUndo = async (item = undoStack[0]) => {
@@ -909,16 +1026,32 @@ export default function Planning() {
   };
 
   const composeAndAssignOccurrenceSlice = async ({ occurrence, personnelItem, serviceDate, startTime, endTime }) => {
-    if (!occurrence || !personnelItem || runActionMutation.isPending) return;
+    if (!occurrence || !personnelItem) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
     if (!segment) return;
+    const releasePendingResources = acquirePendingResources([
+      `occurrence:${occurrence.id}`,
+      `personnel:${personnelItem.id}`,
+    ]);
+    if (!releasePendingResources) return;
     const pendingKey = createPlanningMutationKey("pending-task-service");
-    addPendingMatrixChange(optimisticCompositionRecords({
+    const optimisticRecords = optimisticCompositionRecords({
       key: pendingKey,
       occurrence,
       personnelItem,
       segment,
+    });
+    const immediateWarnings = getAssignmentWarnings({
+      shift: optimisticRecords.shifts[0],
+      personnel: personnelItem,
+      ...warningContext,
+    });
+    optimisticRecords.assignments = optimisticRecords.assignments.map(item => ({
+      ...item,
+      warnings: immediateWarnings,
+      warning_snapshot: immediateWarnings,
     }));
+    addPendingMatrixChange(optimisticRecords);
     try {
       const result = await runIntentMutation(
         `timeline-compose-and-assign:${occurrence.id}`,
@@ -930,6 +1063,7 @@ export default function Planning() {
           slot_index: 0,
           required_count: 1,
           assignment_source: "object_timeline_gap_drop",
+          warnings: immediateWarnings,
           expected_occurrence_revisions: {
             [occurrence.id]: Number(occurrence.revision || 1),
           },
@@ -939,13 +1073,16 @@ export default function Planning() {
       return finishTimelineAssignment(result, occurrence, personnelItem);
     } finally {
       removePendingMatrixChange(pendingKey);
+      releasePendingResources();
     }
   };
 
   const createOpenOccurrenceSlice = async ({ occurrence, serviceDate, startTime, endTime }) => {
-    if (!occurrence || runActionMutation.isPending) return;
+    if (!occurrence) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
     if (!segment) return;
+    const releasePendingResources = acquirePendingResources([`occurrence:${occurrence.id}`]);
+    if (!releasePendingResources) return;
     const pendingKey = createPlanningMutationKey("pending-open-task-service");
     addPendingMatrixChange(optimisticCompositionRecords({ key: pendingKey, occurrence, segment }));
     try {
@@ -968,11 +1105,12 @@ export default function Planning() {
       return result;
     } finally {
       removePendingMatrixChange(pendingKey);
+      releasePendingResources();
     }
   };
 
   const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime }) => {
-    if (!shift || !segment || runActionMutation.isPending) return;
+    if (!shift || !segment) return;
     const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
     const occurrenceIds = [...new Set(activeSegments.map(item => String(item.task_occurrence_id)))];
@@ -994,14 +1132,92 @@ export default function Planning() {
       nextStartTime: startTime,
       nextEndTime: endTime,
     });
-    const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
-    setStatusFilter("all");
-    reconcilePlanningResult(result, { replaceShiftSegments: true });
-    refreshPlanningInBackground();
-    const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
-    toast({ title: "Diensttijd aangepast", description });
-    setLiveMessage(description);
-    return result;
+    const releasePendingResources = acquirePendingResources([
+      `shift:${shift.id}`,
+      ...occurrenceIds.map(id => `occurrence:${id}`),
+    ]);
+    if (!releasePendingResources) return;
+    try {
+      const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
+      setStatusFilter("all");
+      reconcilePlanningResult(result, { replaceShiftSegments: true });
+      refreshPlanningInBackground();
+      const description = `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
+      toast({ title: "Diensttijd aangepast", description });
+      setLiveMessage(description);
+      return result;
+    } finally {
+      releasePendingResources();
+    }
+  };
+
+  const resizeTimelineSharedBoundary = async ({
+    occurrence,
+    boundaryDate,
+    boundaryTime,
+    left,
+    right,
+  }) => {
+    if (!occurrence || !left?.shift || !left?.segment || !right?.shift || !right?.segment) return;
+
+    const currentOccurrence = taskOccurrences.find(item => String(item.id) === String(occurrence.id));
+    if (!currentOccurrence) {
+      const description = "De gekoppelde klanttaak is niet meer geladen. Ververs de planning en probeer het opnieuw.";
+      toast({ variant: "destructive", title: "Overdrachtsgrens kan niet worden aangepast", description });
+      setLiveMessage(description);
+      return;
+    }
+
+    const affectedShiftIds = new Set([String(left.shift.id), String(right.shift.id)]);
+    const affectedAssignments = activeAssignments(assignments).filter(assignment => (
+      affectedShiftIds.has(String(assignment.planning_shift_id || assignment.shift_id))
+    ));
+    const releasePendingResources = acquirePendingResources([
+      `occurrence:${currentOccurrence.id}`,
+      `shift:${left.shift.id}`,
+      `shift:${right.shift.id}`,
+      ...affectedAssignments.map(assignment => `personnel:${assignment.personnel_id}`),
+    ]);
+    if (!releasePendingResources) return;
+
+    try {
+      const result = await runIntentMutation(
+        `timeline-boundary:${currentOccurrence.id}:${left.segment.id}:${right.segment.id}`,
+        "timeline-shared-boundary",
+        {
+          action: "resize_shared_task_boundary",
+          task_occurrence_id: currentOccurrence.id,
+          left_shift_id: left.shift.id,
+          left_segment_id: left.segment.id,
+          right_shift_id: right.shift.id,
+          right_segment_id: right.segment.id,
+          boundary_date: boundaryDate,
+          boundary_time: boundaryTime,
+          expected_shift_revisions: {
+            [left.shift.id]: Number(left.shift.revision || 1),
+            [right.shift.id]: Number(right.shift.revision || 1),
+          },
+          expected_segment_revisions: {
+            [left.segment.id]: Number(left.segment.revision || 1),
+            [right.segment.id]: Number(right.segment.revision || 1),
+          },
+          expected_assignment_revisions: Object.fromEntries(affectedAssignments.map(assignment => [
+            assignment.id,
+            Number(assignment.revision || 1),
+          ])),
+          expected_occurrence_revision: Number(currentOccurrence.revision || 1),
+        },
+      );
+      setStatusFilter("all");
+      reconcilePlanningResult(result, { replaceShiftSegments: true });
+      refreshPlanningInBackground();
+      const description = `De overdracht staat nu op ${boundaryTime}; beide aansluitende diensten zijn in één keer aangepast.`;
+      toast({ title: "Overdrachtsgrens aangepast", description });
+      setLiveMessage(description);
+      return result;
+    } finally {
+      releasePendingResources();
+    }
   };
 
   const composeAndAssignOccurrence = async (occurrence, personnelItem, serviceDate) => {
@@ -1049,13 +1265,30 @@ export default function Planning() {
       return;
     }
 
+    const releasePendingResources = acquirePendingResources([
+      `occurrence:${occurrence.id}`,
+      `personnel:${personnelItem.id}`,
+    ]);
+    if (!releasePendingResources) return;
+
     const pendingKey = createPlanningMutationKey("pending-task-service");
-    addPendingMatrixChange(optimisticCompositionRecords({
+    const optimisticRecords = optimisticCompositionRecords({
       key: pendingKey,
       occurrence,
       personnelItem,
       segment: segments[0],
+    });
+    const immediateWarnings = getAssignmentWarnings({
+      shift: optimisticRecords.shifts[0],
+      personnel: personnelItem,
+      ...warningContext,
+    });
+    optimisticRecords.assignments = optimisticRecords.assignments.map(item => ({
+      ...item,
+      warnings: immediateWarnings,
+      warning_snapshot: immediateWarnings,
     }));
+    addPendingMatrixChange(optimisticRecords);
     try {
       const result = await runIntentMutation(
         `matrix-compose-and-assign:${occurrence.id}`,
@@ -1066,6 +1299,7 @@ export default function Planning() {
           personnel_name: personnelName(personnelItem),
           slot_index: 0,
           assignment_source: perspective === "object" ? "object_matrix_drop" : "employee_matrix_drop",
+          warnings: immediateWarnings,
           expected_occurrence_revisions: {
             [occurrence.id]: Number(occurrence.revision || 1),
           },
@@ -1075,6 +1309,7 @@ export default function Planning() {
       return finishTimelineAssignment(result, occurrence, personnelItem);
     } finally {
       removePendingMatrixChange(pendingKey);
+      releasePendingResources();
     }
   };
 
@@ -1103,7 +1338,7 @@ export default function Planning() {
 
   const handleDragEnd = result => {
     const drop = resolvePlanningDrop(result);
-    if (!drop || runActionMutation.isPending) return;
+    if (!drop) return;
 
     if (drop.kind === "compose_occurrence_slice_for_personnel") {
       const occurrence = taskOccurrencesInRange.find(item => String(item.id) === String(drop.occurrenceId));
@@ -1462,7 +1697,9 @@ export default function Planning() {
               })}
               onCreateOpenTaskSlice={payload => createOpenOccurrenceSlice(payload).catch(() => undefined)}
               onResizeTaskSegment={resizeTimelineTaskSegment}
-              mutationPending={runActionMutation.isPending}
+              onResizeTaskBoundary={resizeTimelineSharedBoundary}
+              mutationPending={publishMutation.isPending}
+              pendingResourceKeys={matrixPendingResourceKeys}
               taskOccurrenceCount={visibleTaskOccurrences.length}
               isLoading={isLoading}
             />
@@ -1481,6 +1718,7 @@ export default function Planning() {
                 assignments: assignmentsInRange,
                 periodStart,
                 selectedShift,
+                pendingResourceKeys: matrixPendingResourceKeys,
                 onCreateShift: occurrence => openTaskComposer({ occurrence }),
                 onAddToShift: occurrence => openTaskComposer({ shift: selectedShift, occurrence }),
                 onFillStaffing: openOccurrenceStaffing,
@@ -1498,6 +1736,7 @@ export default function Planning() {
                 personnelCount: activePersonnel.length,
                 qualifications,
                 securityPasses,
+                pendingResourceKeys: matrixPendingResourceKeys,
               }}
             />
           </ResizablePanel>

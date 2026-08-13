@@ -6,10 +6,12 @@ import {
   getSuggestedTaskTimelineAllocation,
   getTaskTimelineDemand,
   getTaskTimelineGaps,
+  getTaskTimelineLaneHeight,
   getTimelineDayProjection,
   layoutTimelineIntervalLanes,
   resizeTimelineInterval,
   snapTimelineMinute,
+  timelineMinuteFromLanePointer,
   timelineMinutesToClock,
 } from "@/components/planning/planningTimelineDomain";
 
@@ -303,6 +305,44 @@ describe("taakvraag en voorgestelde tijdlijndekking", () => {
 });
 
 describe("tijdlijninteractiegeometrie", () => {
+  it("schaalt één taaklane compact en vertaalt de visuele helft naar de tijdhelft", () => {
+    expect(getTaskTimelineLaneHeight(480)).toBe(120);
+    expect(getTaskTimelineLaneHeight(24 * 60)).toBe(288);
+    expect(getTaskTimelineLaneHeight(480, { compact: true })).toBe(86);
+    expect(timelineMinuteFromLanePointer({
+      clientY: 160,
+      laneTop: 100,
+      laneHeight: 120,
+      startMinute: 600,
+      endMinute: 1080,
+    })).toBe(840);
+    expect(timelineMinuteFromLanePointer({
+      clientY: 97,
+      laneTop: 100,
+      laneHeight: 120,
+      startMinute: 600,
+      endMinute: 1080,
+      minMinute: 605,
+      maxMinute: 1075,
+    })).toBe(605);
+  });
+
+  it("berekent open taakdelen direct uit voorlopige segmentgrenzen", () => {
+    const first = segment({ id: "segment-preview", shiftId: "shift-preview", end: "14:00" });
+    expect(getTaskTimelineGaps({
+      occurrence: reception,
+      serviceDate: reception.service_date,
+      segments: [first],
+      previewIntervalsBySegmentId: {
+        [first.id]: { startMinute: 360, endMinute: 720 },
+      },
+    })).toEqual([expect.objectContaining({
+      startTime: "12:00",
+      endTime: "20:00",
+      durationMinutes: 480,
+    })]);
+  });
+
   it("snapt op vijf minuten en begrenst een resize binnen taakgrenzen", () => {
     expect(snapTimelineMinute(722)).toBe(720);
     expect(snapTimelineMinute(723)).toBe(725);

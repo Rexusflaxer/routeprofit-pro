@@ -2,6 +2,12 @@ function records(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function resultRecords(result, pluralKey, singularKey) {
+  const plural = records(result?.[pluralKey]);
+  if (plural.length > 0) return plural;
+  return result?.[singularKey] ? [result[singularKey]] : [];
+}
+
 function upsertById(current, incoming) {
   const next = new Map(records(current).map(item => [String(item.id), item]));
   records(incoming).forEach(item => {
@@ -33,16 +39,15 @@ export function applyPlanningMutationResultToCache(queryClient, {
   if (!queryClient || !result) return;
   const shiftsKey = ["planning-shifts", periodStart, periodEnd];
   const occurrencesKey = ["planning-task-occurrences", periodStart, periodEnd];
+  const returnedShifts = resultRecords(result, "shifts", "shift");
+  const returnedAssignments = resultRecords(result, "assignments", "assignment");
+  const returnedSegments = resultRecords(result, "segments", "segment");
+  const returnedOccurrences = resultRecords(result, "task_occurrences", "task_occurrence");
 
-  if (result.shift) {
-    queryClient.setQueryData(shiftsKey, current => upsertById(current, [result.shift]));
+  if (returnedShifts.length > 0) {
+    queryClient.setQueryData(shiftsKey, current => upsertById(current, returnedShifts));
   }
 
-  const returnedAssignments = records(result.assignments).length > 0
-    ? result.assignments
-    : result.assignment
-      ? [result.assignment]
-      : [];
   if (returnedAssignments.length > 0 || records(result.removed_assignment_ids).length > 0) {
     queryClient.setQueryData(["planning-assignments"], current => markRemoved(
       upsertById(current, returnedAssignments),
@@ -50,19 +55,30 @@ export function applyPlanningMutationResultToCache(queryClient, {
     ));
   }
 
-  if (records(result.segments).length > 0 || records(result.removed_segment_ids).length > 0) {
+  if (returnedSegments.length > 0 || records(result.removed_segment_ids).length > 0) {
     queryClient.setQueryData(["planning-task-segments"], current => {
       let base = records(current);
-      if (replaceShiftSegments && result.shift?.id) {
-        base = base.filter(item => String(item.shift_id) !== String(result.shift.id));
+      if (replaceShiftSegments) {
+        const replacedShiftIds = new Set(returnedShifts
+          .map(item => item?.id)
+          .filter(value => value != null)
+          .map(String));
+        if (replacedShiftIds.size === 0) {
+          returnedSegments.forEach(item => {
+            if (item?.shift_id != null) replacedShiftIds.add(String(item.shift_id));
+          });
+        }
+        if (replacedShiftIds.size > 0) {
+          base = base.filter(item => !replacedShiftIds.has(String(item.shift_id)));
+        }
       }
-      return markRemoved(upsertById(base, result.segments), result.removed_segment_ids);
+      return markRemoved(upsertById(base, returnedSegments), result.removed_segment_ids);
     });
   }
 
-  if (records(result.task_occurrences).length > 0) {
-    queryClient.setQueryData(occurrencesKey, current => upsertById(current, result.task_occurrences));
+  if (returnedOccurrences.length > 0) {
+    queryClient.setQueryData(occurrencesKey, current => upsertById(current, returnedOccurrences));
   }
 }
 
-export const planningQueryCacheInternals = { markRemoved, upsertById };
+export const planningQueryCacheInternals = { markRemoved, resultRecords, upsertById };

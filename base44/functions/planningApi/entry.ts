@@ -275,6 +275,11 @@ async function assertNoForeignPendingMutation(
   }
 }
 
+function unresolvedSharedBoundaryMutation(record: LooseRecord | null | undefined) {
+  const state = record?.metadata?.shared_boundary_mutation;
+  return state && state.phase !== 'completed' ? state : null;
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -1799,11 +1804,13 @@ async function evaluateAssignmentWarnings(
   personnel: LooseRecord,
   currentAssignmentId: string | null,
   suppliedWarnings: LooseRecord[],
+  ignoredShiftIds: string[] = [],
 ) {
   const warnings: LooseRecord[] = [...suppliedWarnings];
   const coveredDates = planningIntervalDates(shift);
   let routingSnapshot: LooseRecord | null = null;
   let personnelContractId: string | null = null;
+  const ignoredShiftIdSet = new Set(uniqueStrings(ignoredShiftIds));
 
   if (personnel.status !== 'active' || personnel.is_active === false) {
     warnings.push(warning(
@@ -1820,7 +1827,9 @@ async function evaluateAssignmentWarnings(
     filterAllRecords(base44.asServiceRole.entities.PersonnelRestriction, { personnel_id: personnel.id }).catch(() => []),
   ]);
   const comparisonAssignments = personnelAssignments.filter((assignment: LooseRecord) =>
-    assignment.id !== currentAssignmentId && assignment.status !== 'removed'
+    assignment.id !== currentAssignmentId
+    && assignment.status !== 'removed'
+    && !ignoredShiftIdSet.has(String(assignment.shift_id))
   );
   const comparisonShifts = await Promise.all(
     uniqueStrings(comparisonAssignments.map((assignment: LooseRecord) => assignment.shift_id))
@@ -2049,7 +2058,7 @@ async function bootstrapRange(
     throw new ApiError(400, 'Een planningsrange mag maximaal 63 dagen bevatten');
   }
 
-  const [
+  let [
     executions,
     routes,
     tasks,
@@ -2076,6 +2085,45 @@ async function bootstrapRange(
     listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
     listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
   ]) as LooseRecord[][];
+  const repairedSharedBoundaryOccurrenceIds: string[] = [];
+  const pendingSharedBoundaryRepairs: LooseRecord[] = [];
+  for (const occurrence of existingOccurrences.filter((item: LooseRecord) => (
+    item.lifecycle_status === 'active'
+    && item.service_date <= periodEnd
+    && (item.end_date || item.service_date) >= periodStart
+    && unresolvedSharedBoundaryMutation(item)
+  ))) {
+    const boundaryState = occurrence.metadata.shared_boundary_mutation;
+    const recoveryKey = `boundary-repair:${await sha256(
+      boundaryState.operation_id || `${occurrence.id}:${boundaryState.idempotency_key}`,
+    )}`;
+    try {
+      const recovery = await repairSharedTaskBoundary(
+        base44,
+        user,
+        { action: REPAIR_SHARED_TASK_BOUNDARY_ACTION, task_occurrence_id: occurrence.id },
+        { idempotencyKey: recoveryKey, correlationId: context.correlationId },
+      );
+      if (recovery?.repaired) repairedSharedBoundaryOccurrenceIds.push(String(occurrence.id));
+    } catch (error) {
+      if (Number((error as any)?.status) === 409 && (error as any)?.details?.reservation_expires_at) {
+        pendingSharedBoundaryRepairs.push({
+          task_occurrence_id: String(occurrence.id),
+          retry_after: (error as any).details.reservation_expires_at,
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (repairedSharedBoundaryOccurrenceIds.length) {
+    [existingShifts, existingAssignments, existingOccurrences, existingTaskSegments] = await Promise.all([
+      listAllRecords(base44.asServiceRole.entities.PlanningShift),
+      listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
+      listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+      listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
+    ]);
+  }
   const routeById = new Map<string, LooseRecord>(routes.map((item: LooseRecord) => [String(item.id), item]));
   const taskById = new Map<string, LooseRecord>(tasks.map((item: LooseRecord) => [String(item.id), item]));
   const objectById = new Map<string, LooseRecord>(objects.map((item: LooseRecord) => [String(item.id), item]));
@@ -2614,6 +2662,9 @@ async function bootstrapRange(
     created_task_occurrence_ids: createdOccurrenceIds,
     refreshed_task_occurrence_ids: refreshedOccurrenceIds,
     superseded_task_occurrence_ids: supersededOccurrenceIds,
+    repaired_shared_boundary_occurrence_ids: repairedSharedBoundaryOccurrenceIds,
+    pending_shared_boundary_occurrence_ids: pendingSharedBoundaryRepairs.map(item => item.task_occurrence_id),
+    pending_shared_boundary_repairs: pendingSharedBoundaryRepairs,
   };
   await appendAudit(base44, user, {
     action: 'bootstrap_range',
@@ -2877,6 +2928,14 @@ async function composeShift(
       throw new ApiError(409, 'Een vervallen taakuitvoering kan niet worden ingepland', {
         task_occurrence_id: occurrence.id,
         lifecycle_status: occurrence.lifecycle_status,
+      });
+    }
+    const boundaryState = unresolvedSharedBoundaryMutation(occurrence);
+    if (boundaryState) {
+      throw new ApiError(409, 'Een eerdere gedeelde grens moet eerst automatisch worden hersteld', {
+        code: 'BOUNDARY_RECOVERY_REQUIRED',
+        task_occurrence_id: occurrence.id,
+        operation_id: boundaryState.operation_id || null,
       });
     }
   });
@@ -4153,6 +4212,1475 @@ async function composeShift(
     }
     throw error;
   }
+}
+
+const SHARED_TASK_BOUNDARY_ACTION = 'resize_shared_task_boundary';
+const REPAIR_SHARED_TASK_BOUNDARY_ACTION = 'repair_shared_task_boundary';
+
+function sharedBoundaryRecordProjection(record: LooseRecord) {
+  return {
+    id: record.id,
+    revision: revisionOf(record),
+    source_type: record.source_type || null,
+    shift_id: record.shift_id || null,
+    task_occurrence_id: record.task_occurrence_id || null,
+    service_date: record.service_date || null,
+    start_date: record.start_date || null,
+    end_date: record.end_date || null,
+    start_time: record.start_time || null,
+    end_time: record.end_time || null,
+    duration_minutes: Number(record.duration_minutes || 0),
+    status: record.status || null,
+  };
+}
+
+function sharedBoundaryAssignmentProjection(record: LooseRecord) {
+  return {
+    id: record.id,
+    revision: revisionOf(record),
+    shift_id: record.shift_id || record.planning_shift_id || null,
+    personnel_id: record.personnel_id || null,
+    slot_index: record.slot_index ?? null,
+    status: record.status || null,
+    warning_codes: normalizeArray(record.warning_codes),
+    warning_snapshot: normalizeArray(record.warning_snapshot),
+    has_critical_warnings: Boolean(record.has_critical_warnings),
+    contract_routing_snapshot: record.contract_routing_snapshot || null,
+    personnel_contract_id: record.personnel_contract_id || null,
+  };
+}
+
+function sharedBoundaryAssignmentIdentity(record: LooseRecord) {
+  return [
+    String(record.id || ''),
+    String(record.shift_id || record.planning_shift_id || ''),
+    String(record.personnel_id || ''),
+    String(record.slot_index ?? ''),
+  ].join(':');
+}
+
+async function sharedBoundaryTargetHash(targetState: LooseRecord) {
+  return sha256(stableStringify({
+    shifts: normalizeArray<LooseRecord>(targetState?.shifts).map(sharedBoundaryRecordProjection),
+    segments: normalizeArray<LooseRecord>(targetState?.segments).map(sharedBoundaryRecordProjection),
+    assignments: normalizeArray<LooseRecord>(targetState?.assignments).map(sharedBoundaryAssignmentProjection),
+  }));
+}
+
+function sharedBoundaryOccurrenceProjection(record: LooseRecord) {
+  return {
+    id: record.id,
+    revision: revisionOf(record),
+    service_date: record.service_date || null,
+    end_date: record.end_date || null,
+    required_minutes: Number(record.required_minutes || 0),
+    lifecycle_status: record.lifecycle_status || null,
+  };
+}
+
+function completedSharedBoundaryMutationState(
+  state: LooseRecord,
+  auditEventId: string,
+  additions: LooseRecord = {},
+) {
+  return {
+    schema_version: 2,
+    operation_id: state.operation_id,
+    idempotency_key: state.idempotency_key,
+    correlation_id: state.correlation_id,
+    request_hash: state.request_hash,
+    actor_user_id: state.actor_user_id || null,
+    task_occurrence_id: state.task_occurrence_id,
+    left_shift_id: state.left_shift_id,
+    right_shift_id: state.right_shift_id,
+    left_segment_id: state.left_segment_id,
+    right_segment_id: state.right_segment_id,
+    assignment_ids: uniqueStrings([
+      ...normalizeArray(state.assignment_ids),
+      ...normalizeArray<LooseRecord>(state.before_state?.assignments).map(item => item.id),
+    ]),
+    boundary_date: state.boundary_date,
+    boundary_time: state.boundary_time,
+    target_hash: state.target_hash || null,
+    phase: 'completed',
+    effective_view: 'target',
+    audit_event_id: auditEventId,
+    started_at: state.started_at || null,
+    applied_at: state.applied_at || null,
+    completed_at: nowIso(),
+    ...additions,
+  };
+}
+
+function sharedBoundaryBusinessProjectionMatches(record: LooseRecord, projection: LooseRecord) {
+  return [
+    'service_date',
+    'start_date',
+    'end_date',
+    'start_time',
+    'end_time',
+    'duration_minutes',
+    'status',
+  ].every(key => {
+    const current = key === 'duration_minutes'
+      ? Number(record[key] || 0)
+      : record[key] ?? null;
+    const expected = key === 'duration_minutes'
+      ? Number(projection[key] || 0)
+      : projection[key] ?? null;
+    return current === expected;
+  });
+}
+
+function sharedBoundaryOperationId(occurrenceId: string, context: ReturnType<typeof mutationContext>) {
+  return `${occurrenceId}:${context.idempotencyKey}`;
+}
+
+function sharedBoundaryStateForMutation(
+  occurrence: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const state = occurrence?.metadata?.shared_boundary_mutation;
+  if (!state || state.idempotency_key !== context.idempotencyKey) return null;
+  if (
+    state.request_hash !== requestHash
+    || state.actor_user_id !== (user.id || null)
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere gedeelde grensbewerking');
+  }
+  return state;
+}
+
+function sharedBoundaryMinute(date: string, time: string) {
+  return dateOrdinal(date) * 1440 + (parseClockMinutes(time) as number);
+}
+
+function sharedBoundaryShiftTiming(segment: LooseRecord) {
+  const interval = segmentInterval(segment);
+  if (!interval) throw new ApiError(409, 'Taaksegment heeft geen geldig positief interval');
+  if (interval.duration > MAX_COMPOSED_SHIFT_MINUTES) {
+    throw new ApiError(409, 'Een handmatig aangepaste dienst mag maximaal 24 uur beslaan', {
+      duration_minutes: interval.duration,
+      maximum_duration_minutes: MAX_COMPOSED_SHIFT_MINUTES,
+    });
+  }
+  return {
+    service_date: segment.start_date,
+    end_date: segment.end_date === segment.start_date ? null : segment.end_date,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    duration_minutes: interval.duration,
+  };
+}
+
+function buildSharedBoundaryPlan(
+  occurrence: LooseRecord,
+  leftShift: LooseRecord,
+  rightShift: LooseRecord,
+  leftSegment: LooseRecord,
+  rightSegment: LooseRecord,
+  boundaryDate: string,
+  boundaryTime: string,
+) {
+  if (occurrence.lifecycle_status !== 'active') {
+    throw new ApiError(409, 'Een vervallen taakuitvoering kan niet worden aangepast', {
+      task_occurrence_id: occurrence.id,
+      lifecycle_status: occurrence.lifecycle_status,
+    });
+  }
+  if (String(leftShift.id) === String(rightShift.id)) {
+    throw new ApiError(400, 'Een gedeelde grens vereist twee verschillende diensten');
+  }
+  for (const shift of [leftShift, rightShift]) {
+    if (shift.source_type !== 'task' || shift.status === 'cancelled') {
+      throw new ApiError(409, 'Alleen twee actieve diensten vanuit dezelfde objecttaak kunnen een grens delen', {
+        shift_id: shift.id,
+      });
+    }
+  }
+  if (
+    String(leftSegment.shift_id) !== String(leftShift.id)
+    || String(rightSegment.shift_id) !== String(rightShift.id)
+  ) {
+    throw new ApiError(409, 'Een taaksegment hoort niet bij de opgegeven dienst');
+  }
+  if (leftSegment.status === 'removed' || rightSegment.status === 'removed') {
+    throw new ApiError(409, 'Een verwijderd taaksegment kan niet worden aangepast');
+  }
+  if (
+    String(leftSegment.task_occurrence_id) !== String(occurrence.id)
+    || String(rightSegment.task_occurrence_id) !== String(occurrence.id)
+  ) {
+    throw new ApiError(409, 'Beide diensten moeten exact dezelfde actieve taakuitvoering vullen');
+  }
+  const leftInterval = segmentInterval(leftSegment);
+  const rightInterval = segmentInterval(rightSegment);
+  const occurrenceInterval = intervalFromParts(
+    occurrence.service_date,
+    occurrence.window_start_time,
+    occurrence.end_date,
+    occurrence.window_end_time,
+  );
+  if (!leftInterval || !rightInterval || !occurrenceInterval) {
+    throw new ApiError(409, 'De gedeelde taakgrens heeft een ongeldig tijdsinterval');
+  }
+  if (leftInterval.end !== rightInterval.start) {
+    throw new ApiError(409, 'Alleen exact aansluitende diensten kunnen met één gedeelde grens worden aangepast', {
+      left_end: `${leftSegment.end_date} ${leftSegment.end_time}`,
+      right_start: `${rightSegment.start_date} ${rightSegment.start_time}`,
+    });
+  }
+  const boundaryMinute = sharedBoundaryMinute(boundaryDate, boundaryTime);
+  if (boundaryMinute < occurrenceInterval.start || boundaryMinute > occurrenceInterval.end) {
+    throw new ApiError(409, 'De nieuwe grens valt buiten het toegestane taakvenster');
+  }
+  if (boundaryMinute === leftInterval.end) {
+    throw new ApiError(409, 'De gedeelde grens staat al op dit tijdstip');
+  }
+  if (boundaryMinute - leftInterval.start < 5 || rightInterval.end - boundaryMinute < 5) {
+    throw new ApiError(409, 'Beide diensten moeten na het verplaatsen minimaal 5 minuten duren', {
+      minimum_duration_minutes: 5,
+    });
+  }
+  const proposedLeftSegment = {
+    ...leftSegment,
+    end_date: boundaryDate,
+    end_time: boundaryTime,
+    duration_minutes: boundaryMinute - leftInterval.start,
+    status: 'draft',
+  };
+  const proposedRightSegment = {
+    ...rightSegment,
+    start_date: boundaryDate,
+    start_time: boundaryTime,
+    duration_minutes: rightInterval.end - boundaryMinute,
+    status: 'draft',
+  };
+  const proposedLeftInterval = segmentInterval(proposedLeftSegment);
+  const proposedRightInterval = segmentInterval(proposedRightSegment);
+  if (
+    !proposedLeftInterval
+    || !proposedRightInterval
+    || proposedLeftInterval.end !== proposedRightInterval.start
+    || proposedLeftInterval.start !== leftInterval.start
+    || proposedRightInterval.end !== rightInterval.end
+  ) {
+    throw new ApiError(409, 'De nieuwe gedeelde grens zou een gat of overlap veroorzaken');
+  }
+  const proposedLeftShift = {
+    ...leftShift,
+    ...sharedBoundaryShiftTiming(proposedLeftSegment),
+    status: 'draft',
+  };
+  const proposedRightShift = {
+    ...rightShift,
+    ...sharedBoundaryShiftTiming(proposedRightSegment),
+    status: 'draft',
+  };
+  return {
+    oldBoundaryMinute: leftInterval.end,
+    boundaryMinute,
+    proposedLeftSegment,
+    proposedRightSegment,
+    proposedLeftShift,
+    proposedRightShift,
+  };
+}
+
+async function resizeSharedTaskBoundary(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  requireMutationIdempotency(context, SHARED_TASK_BOUNDARY_ACTION);
+  const requestHash = await mutationRequestHash(SHARED_TASK_BOUNDARY_ACTION, body);
+  const occurrenceId = requireId(body, 'task_occurrence_id');
+  const replay = await findReplay(base44, SHARED_TASK_BOUNDARY_ACTION, context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, SHARED_TASK_BOUNDARY_ACTION);
+    const replayOccurrence = await requireRecord(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrenceId,
+      'Taakuitvoering',
+    );
+    if (unresolvedSharedBoundaryMutation(replayOccurrence)) {
+      const repairKey = `repair:${await sha256(`${occurrenceId}:${context.idempotencyKey}`)}`;
+      return repairSharedTaskBoundary(
+        base44,
+        user,
+        { action: REPAIR_SHARED_TASK_BOUNDARY_ACTION, task_occurrence_id: occurrenceId },
+        { idempotencyKey: repairKey, correlationId: context.correlationId },
+      );
+    }
+    return {
+      ...replayResult(replay),
+      task_occurrences: [replayOccurrence],
+    };
+  }
+
+  const leftShiftId = requireId(body, 'left_shift_id');
+  const rightShiftId = requireId(body, 'right_shift_id');
+  const leftSegmentId = requireId(body, 'left_segment_id');
+  const rightSegmentId = requireId(body, 'right_segment_id');
+  if (leftShiftId === rightShiftId || leftSegmentId === rightSegmentId) {
+    throw new ApiError(400, 'Een gedeelde grens vereist twee verschillende diensten en segmenten');
+  }
+  const boundaryDate = asDate(body.boundary_date, 'boundary_date');
+  const boundaryTime = asTime(body.boundary_time, 'boundary_time');
+
+  const [initialOccurrence, initialLeftShift, initialRightShift, initialLeftSegment, initialRightSegment] = await Promise.all([
+    requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering'),
+    requireRecord(base44, 'PlanningShift', leftShiftId, 'Vroege dienst'),
+    requireRecord(base44, 'PlanningShift', rightShiftId, 'Late dienst'),
+    requireRecord(base44, 'PlanningShiftTaskSegment', leftSegmentId, 'Vroeg taaksegment'),
+    requireRecord(base44, 'PlanningShiftTaskSegment', rightSegmentId, 'Laat taaksegment'),
+  ]);
+  const priorBoundaryState = unresolvedSharedBoundaryMutation(initialOccurrence);
+  if (priorBoundaryState && (
+    priorBoundaryState.idempotency_key !== context.idempotencyKey
+    || priorBoundaryState.request_hash !== requestHash
+    || priorBoundaryState.actor_user_id !== (user.id || null)
+  )) {
+    const recoveryKey = `boundary-repair:${await sha256(
+      priorBoundaryState.operation_id || `${occurrenceId}:${priorBoundaryState.idempotency_key}`,
+    )}`;
+    await repairSharedTaskBoundary(
+      base44,
+      user,
+      { action: REPAIR_SHARED_TASK_BOUNDARY_ACTION, task_occurrence_id: occurrenceId },
+      { idempotencyKey: recoveryKey, correlationId: context.correlationId },
+    );
+    throw new ApiError(409, 'Een eerdere gedeelde grens is hersteld; laad de planning opnieuw', {
+      code: 'PREVIOUS_BOUNDARY_RECOVERED',
+      task_occurrence_id: occurrenceId,
+      refresh_required: true,
+    });
+  }
+  const initialOwnedState = sharedBoundaryStateForMutation(
+    initialOccurrence,
+    context,
+    user,
+    requestHash,
+  );
+  const beforeState = initialOwnedState?.before_state || null;
+  const initialBasisLeftShift = beforeState?.shifts?.find((item: LooseRecord) => String(item.id) === leftShiftId)
+    || initialLeftShift;
+  const initialBasisRightShift = beforeState?.shifts?.find((item: LooseRecord) => String(item.id) === rightShiftId)
+    || initialRightShift;
+  const initialBasisLeftSegment = beforeState?.segments?.find((item: LooseRecord) => String(item.id) === leftSegmentId)
+    || initialLeftSegment;
+  const initialBasisRightSegment = beforeState?.segments?.find((item: LooseRecord) => String(item.id) === rightSegmentId)
+    || initialRightSegment;
+  const initialPlan = buildSharedBoundaryPlan(
+    initialOccurrence,
+    initialBasisLeftShift,
+    initialBasisRightShift,
+    initialBasisLeftSegment,
+    initialBasisRightSegment,
+    boundaryDate,
+    boundaryTime,
+  );
+  const [initialLeftSegments, initialRightSegments, initialLeftAssignments, initialRightAssignments] = await Promise.all([
+    filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: leftShiftId }),
+    filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: rightShiftId }),
+    filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: leftShiftId }),
+    filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: rightShiftId }),
+  ]);
+  if (
+    initialLeftSegments.filter(item => item.status !== 'removed').length !== 1
+    || initialRightSegments.filter(item => item.status !== 'removed').length !== 1
+  ) {
+    throw new ApiError(409, 'De gedeelde grens is alleen beschikbaar voor diensten met exact één actief taaksegment');
+  }
+  const initialAssignments = [...initialLeftAssignments, ...initialRightAssignments]
+    .filter(item => item.status !== 'removed');
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('task_occurrence', occurrenceId),
+    resourceCoordinatorDescriptor('shift_composition', leftShiftId),
+    resourceCoordinatorDescriptor('shift_composition', rightShiftId),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    initialAssignments.map(item => item.personnel_id),
+    [
+      initialBasisLeftShift,
+      initialBasisRightShift,
+      initialPlan.proposedLeftShift,
+      initialPlan.proposedRightShift,
+    ],
+  ));
+
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    let businessWriteStarted = false;
+    let reservedByThisAttempt = false;
+    try {
+      let [occurrence, leftShift, rightShift, leftSegment, rightSegment] = await Promise.all([
+        requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering'),
+        requireRecord(base44, 'PlanningShift', leftShiftId, 'Vroege dienst'),
+        requireRecord(base44, 'PlanningShift', rightShiftId, 'Late dienst'),
+        requireRecord(base44, 'PlanningShiftTaskSegment', leftSegmentId, 'Vroeg taaksegment'),
+        requireRecord(base44, 'PlanningShiftTaskSegment', rightSegmentId, 'Laat taaksegment'),
+      ]);
+      await Promise.all([
+        assertNoForeignPendingMutation(
+          base44,
+          leftShift,
+          context,
+          SHARED_TASK_BOUNDARY_ACTION,
+          user,
+          requestHash,
+        ),
+        assertNoForeignPendingMutation(
+          base44,
+          rightShift,
+          context,
+          SHARED_TASK_BOUNDARY_ACTION,
+          user,
+          requestHash,
+        ),
+      ]);
+
+      let ownedState = sharedBoundaryStateForMutation(occurrence, context, user, requestHash);
+      const reservation = occurrence.metadata?.planning_composition_reservation;
+      const ownsReservation = reservation?.idempotency_key === context.idempotencyKey
+        && reservation?.request_hash === requestHash
+        && reservation?.actor_user_id === (user.id || null);
+      if (ownsReservation && reservation.action !== SHARED_TASK_BOUNDARY_ACTION) {
+        throw new ApiError(409, 'idempotency_key hoort bij een andere taakreservering');
+      }
+      if (reservation && !ownsReservation && leaseIsActive(reservation)) {
+        throw new ApiError(409, 'Deze taakdekking wordt op dit moment door een andere planner gewijzigd', {
+          task_occurrence_id: occurrence.id,
+          reservation_expires_at: reservation.expires_at,
+        });
+      }
+      if (ownedState && (
+        String(ownedState.task_occurrence_id) !== occurrenceId
+        || String(ownedState.left_shift_id) !== leftShiftId
+        || String(ownedState.right_shift_id) !== rightShiftId
+        || String(ownedState.left_segment_id) !== leftSegmentId
+        || String(ownedState.right_segment_id) !== rightSegmentId
+        || ownedState.boundary_date !== boundaryDate
+        || ownedState.boundary_time !== boundaryTime
+      )) {
+        throw new ApiError(409, 'De bestaande herstelstaat hoort bij een andere gedeelde grens');
+      }
+
+      const lockedBeforeState = ownedState?.before_state || null;
+      const basisLeftShift = lockedBeforeState?.shifts?.find((item: LooseRecord) => String(item.id) === leftShiftId)
+        || leftShift;
+      const basisRightShift = lockedBeforeState?.shifts?.find((item: LooseRecord) => String(item.id) === rightShiftId)
+        || rightShift;
+      const basisLeftSegment = lockedBeforeState?.segments?.find((item: LooseRecord) => String(item.id) === leftSegmentId)
+        || leftSegment;
+      const basisRightSegment = lockedBeforeState?.segments?.find((item: LooseRecord) => String(item.id) === rightSegmentId)
+        || rightSegment;
+      const plan = buildSharedBoundaryPlan(
+        occurrence,
+        basisLeftShift,
+        basisRightShift,
+        basisLeftSegment,
+        basisRightSegment,
+        boundaryDate,
+        boundaryTime,
+      );
+      const [leftSegments, rightSegments, leftAssignments, rightAssignments] = await Promise.all([
+        filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: leftShiftId }),
+        filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: rightShiftId }),
+        filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: leftShiftId }),
+        filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: rightShiftId }),
+      ]);
+      if (
+        leftSegments.filter(item => item.status !== 'removed').length !== 1
+        || rightSegments.filter(item => item.status !== 'removed').length !== 1
+      ) {
+        throw new ApiError(409, 'Dienstinhoud is intussen gewijzigd; laad het rooster opnieuw');
+      }
+      const activeAssignments = [...leftAssignments, ...rightAssignments]
+        .filter(item => item.status !== 'removed');
+
+      if (!ownedState) {
+        const expectedShiftRevisions = body.expected_shift_revisions || {};
+        const expectedSegmentRevisions = body.expected_segment_revisions || {};
+        const expectedAssignmentRevisions = body.expected_assignment_revisions || {};
+        const expectedOccurrenceRevision = positiveInteger(
+          body.expected_occurrence_revision,
+          'expected_occurrence_revision',
+        );
+        for (const shift of [leftShift, rightShift]) {
+          const expected = positiveInteger(
+            expectedShiftRevisions[shift.id],
+            `expected_shift_revisions.${shift.id}`,
+          );
+          if (revisionOf(shift) !== expected) {
+            throw new ApiError(409, 'Planning is intussen gewijzigd', {
+              entity: 'PlanningShift',
+              id: shift.id,
+              expected_revision: expected,
+              current_revision: revisionOf(shift),
+            });
+          }
+        }
+        for (const segment of [leftSegment, rightSegment]) {
+          const expected = positiveInteger(
+            expectedSegmentRevisions[segment.id],
+            `expected_segment_revisions.${segment.id}`,
+          );
+          if (revisionOf(segment) !== expected) {
+            throw new ApiError(409, 'Taaksegment is intussen gewijzigd', {
+              entity: 'PlanningShiftTaskSegment',
+              id: segment.id,
+              expected_revision: expected,
+              current_revision: revisionOf(segment),
+            });
+          }
+        }
+        if (revisionOf(occurrence) !== expectedOccurrenceRevision) {
+          throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
+            entity: 'PlanningTaskOccurrence',
+            id: occurrence.id,
+            expected_revision: expectedOccurrenceRevision,
+            current_revision: revisionOf(occurrence),
+          });
+        }
+        const expectedAssignmentIds = Object.keys(expectedAssignmentRevisions).sort();
+        const activeAssignmentIds = activeAssignments.map(item => String(item.id)).sort();
+        if (stableStringify(expectedAssignmentIds) !== stableStringify(activeAssignmentIds)) {
+          throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw', {
+            expected_assignment_ids: expectedAssignmentIds,
+            current_assignment_ids: activeAssignmentIds,
+          });
+        }
+        for (const assignment of activeAssignments) {
+          const expected = positiveInteger(
+            expectedAssignmentRevisions[assignment.id],
+            `expected_assignment_revisions.${assignment.id}`,
+          );
+          if (revisionOf(assignment) !== expected) {
+            throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw', {
+              entity: 'PlanningAssignment',
+              id: assignment.id,
+              expected_revision: expected,
+              current_revision: revisionOf(assignment),
+            });
+          }
+        }
+      } else {
+        const beforeAssignmentIds = normalizeArray<LooseRecord>(ownedState.before_state?.assignments)
+          .filter(item => item.status !== 'removed')
+          .map(item => String(item.id))
+          .sort();
+        const currentAssignmentIds = activeAssignments.map(item => String(item.id)).sort();
+        if (stableStringify(beforeAssignmentIds) !== stableStringify(currentAssignmentIds)) {
+          throw new ApiError(409, 'Dienstbezetting is tijdens grensherstel gewijzigd');
+        }
+      }
+
+      const allOccurrenceSegments = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShiftTaskSegment,
+        { task_occurrence_id: occurrenceId },
+      );
+      const otherOccurrenceSegments = allOccurrenceSegments.filter(item => (
+        item.status !== 'removed'
+        && String(item.id) !== leftSegmentId
+        && String(item.id) !== rightSegmentId
+      ));
+      const otherParentShiftIds = uniqueStrings(otherOccurrenceSegments.map(item => item.shift_id));
+      const otherParentShifts = otherParentShiftIds.length
+        ? await filterAllRecords(base44.asServiceRole.entities.PlanningShift, { id: { $in: otherParentShiftIds } })
+        : [];
+      const proposedIntervals = [
+        segmentInterval(plan.proposedLeftSegment),
+        segmentInterval(plan.proposedRightSegment),
+      ].filter((item): item is NonNullable<typeof item> => item != null);
+      const otherIntervals = activeTaskSegments(otherOccurrenceSegments, otherParentShifts)
+        .map(segmentInterval)
+        .filter((item): item is NonNullable<typeof item> => item != null);
+      for (const proposed of proposedIntervals) {
+        if (otherIntervals.some(other => proposed.start < other.end && other.start < proposed.end)) {
+          throw new ApiError(409, 'De nieuwe grens overlapt een andere dienst binnen dezelfde taakuitvoering');
+        }
+      }
+      const allocatedMinutes = mergeMinuteIntervals([...proposedIntervals, ...otherIntervals])
+        .reduce((sum, interval) => sum + interval.end - interval.start, 0);
+      if (allocatedMinutes > Number(occurrence.required_minutes || 0)) {
+        throw new ApiError(409, 'De taakuitvoering zou meer minuten krijgen dan vereist', {
+          task_occurrence_id: occurrence.id,
+          allocated_minutes: allocatedMinutes,
+          required_minutes: Number(occurrence.required_minutes || 0),
+        });
+      }
+
+      let assignmentPatches = ownedState?.assignment_patches || null;
+      if (!assignmentPatches) {
+        assignmentPatches = {};
+        const proposedShiftById = new Map([
+          [leftShiftId, plan.proposedLeftShift],
+          [rightShiftId, plan.proposedRightShift],
+        ]);
+        for (const assignment of activeAssignments) {
+          const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+          const supplied = normalizeArray(assignment.warning_snapshot)
+            .filter((item: LooseRecord) => item.source === 'planner');
+          const eligibility = await evaluateAssignmentWarnings(
+            base44,
+            proposedShiftById.get(String(assignment.shift_id)) as LooseRecord,
+            personnel,
+            assignment.id,
+            supplied,
+            [leftShiftId, rightShiftId],
+          );
+          assignmentPatches[assignment.id] = {
+            status: 'draft',
+            warning_codes: eligibility.warning_codes,
+            warning_snapshot: eligibility.warning_snapshot,
+            has_critical_warnings: eligibility.has_critical_warnings,
+            contract_routing_snapshot: eligibility.contract_routing_snapshot,
+            personnel_contract_id: eligibility.personnel_contract_id,
+          };
+        }
+      }
+
+      if (!ownedState) {
+        const targetState = {
+          shifts: [plan.proposedLeftShift, plan.proposedRightShift].map(sharedBoundaryRecordProjection),
+          segments: [plan.proposedLeftSegment, plan.proposedRightSegment].map(sharedBoundaryRecordProjection),
+          assignments: activeAssignments.map(assignment => ({
+            ...assignment,
+            ...(assignmentPatches[assignment.id] || {}),
+          })).map(sharedBoundaryAssignmentProjection),
+        };
+        const mutationState = {
+          schema_version: 2,
+          operation_id: sharedBoundaryOperationId(occurrenceId, context),
+          idempotency_key: context.idempotencyKey,
+          correlation_id: context.correlationId,
+          request_hash: requestHash,
+          actor_user_id: user.id || null,
+          actor_snapshot: {
+            id: user.id || null,
+            name: actorName(user),
+            email: compact(user.email) || null,
+          },
+          task_occurrence_id: occurrenceId,
+          left_shift_id: leftShiftId,
+          right_shift_id: rightShiftId,
+          left_segment_id: leftSegmentId,
+          right_segment_id: rightSegmentId,
+          boundary_date: boundaryDate,
+          boundary_time: boundaryTime,
+          phase: 'prepared',
+          effective_view: 'before',
+          moving_later: plan.boundaryMinute > plan.oldBoundaryMinute,
+          started_at: nowIso(),
+          before_state: {
+            shifts: [leftShift, rightShift].map(sharedBoundaryRecordProjection),
+            segments: [leftSegment, rightSegment].map(sharedBoundaryRecordProjection),
+            assignments: activeAssignments.map(sharedBoundaryAssignmentProjection),
+            task_occurrence: sharedBoundaryOccurrenceProjection(occurrence),
+          },
+          assignment_ids: activeAssignments.map(item => item.id),
+          target_state: targetState,
+          target_hash: await sharedBoundaryTargetHash(targetState),
+          assignment_patches: assignmentPatches,
+        };
+        await renewPlanningResourceLeases(base44, user, leases);
+        occurrence = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          occurrence,
+          revisionOf(occurrence),
+          {
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(occurrence.metadata || {}),
+              shared_boundary_mutation: mutationState,
+              planning_composition_reservation: {
+                idempotency_key: context.idempotencyKey,
+                correlation_id: context.correlationId,
+                action: SHARED_TASK_BOUNDARY_ACTION,
+                request_hash: requestHash,
+                actor_user_id: user.id || null,
+                status: 'pending',
+                acquired_at: nowIso(),
+                expires_at: new Date(Date.now() + PLANNING_RESOURCE_LEASE_MS).toISOString(),
+              },
+            },
+          },
+        );
+        ownedState = mutationState;
+        reservedByThisAttempt = true;
+      }
+
+      const recordBoundaryMetadata = (record: LooseRecord, role: 'left' | 'right') => ({
+        ...(record.metadata || {}),
+        shared_boundary_mutation: {
+          operation_id: ownedState?.operation_id || sharedBoundaryOperationId(occurrenceId, context),
+          idempotency_key: context.idempotencyKey,
+          correlation_id: context.correlationId,
+          request_hash: requestHash,
+          actor_user_id: user.id || null,
+          task_occurrence_id: occurrenceId,
+          role,
+          boundary_date: boundaryDate,
+          boundary_time: boundaryTime,
+          phase: 'state_written_audit_pending',
+          updated_at: nowIso(),
+        },
+      });
+      const hasExactRecordMarker = (record: LooseRecord) => {
+        const marker = record.metadata?.shared_boundary_mutation;
+        if (!marker || marker.idempotency_key !== context.idempotencyKey) return false;
+        if (marker.request_hash !== requestHash || marker.actor_user_id !== (user.id || null)) {
+          throw new ApiError(409, 'Planningrecord hoort bij een andere gedeelde grensbewerking', {
+            id: record.id,
+          });
+        }
+        return true;
+      };
+      const segmentMatches = (record: LooseRecord, target: LooseRecord) => (
+        record.start_date === target.start_date
+        && record.end_date === target.end_date
+        && record.start_time === target.start_time
+        && record.end_time === target.end_time
+        && Number(record.duration_minutes) === Number(target.duration_minutes)
+        && record.status === 'draft'
+      );
+      const shiftMatches = (record: LooseRecord, target: LooseRecord) => (
+        record.service_date === target.service_date
+        && (record.end_date || null) === (target.end_date || null)
+        && record.start_time === target.start_time
+        && record.end_time === target.end_time
+        && Number(record.duration_minutes) === Number(target.duration_minutes)
+        && record.status === 'draft'
+      );
+      const writeSegment = async (record: LooseRecord, target: LooseRecord, role: 'left' | 'right') => {
+        if (hasExactRecordMarker(record)) {
+          if (!segmentMatches(record, target)) {
+            throw new ApiError(409, 'Herstelbaar taaksegment wijkt af van de bedoelde grens', { id: record.id });
+          }
+          return record;
+        }
+        businessWriteStarted = true;
+        await renewPlanningResourceLeases(base44, user, leases);
+        return casUpdate(base44, 'PlanningShiftTaskSegment', record, revisionOf(record), {
+          start_date: target.start_date,
+          end_date: target.end_date,
+          start_time: target.start_time,
+          end_time: target.end_time,
+          duration_minutes: target.duration_minutes,
+          status: 'draft',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: recordBoundaryMetadata(record, role),
+        });
+      };
+      const writeShift = async (record: LooseRecord, target: LooseRecord, role: 'left' | 'right') => {
+        if (hasExactRecordMarker(record)) {
+          if (!shiftMatches(record, target)) {
+            throw new ApiError(409, 'Herstelbare dienst wijkt af van de bedoelde grens', { id: record.id });
+          }
+          return record;
+        }
+        businessWriteStarted = true;
+        await renewPlanningResourceLeases(base44, user, leases);
+        return casUpdate(base44, 'PlanningShift', record, revisionOf(record), {
+          service_date: target.service_date,
+          end_date: target.end_date,
+          start_time: target.start_time,
+          end_time: target.end_time,
+          duration_minutes: target.duration_minutes,
+          status: 'draft',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...planningMutationMetadata(
+              record,
+              SHARED_TASK_BOUNDARY_ACTION,
+              context,
+              user,
+              requestHash,
+            ),
+            shared_boundary_mutation: recordBoundaryMetadata(record, role).shared_boundary_mutation,
+          },
+        });
+      };
+
+      const movingLater = plan.boundaryMinute > plan.oldBoundaryMinute;
+      if (movingLater) {
+        rightShift = await writeShift(rightShift, plan.proposedRightShift, 'right');
+        rightSegment = await writeSegment(rightSegment, plan.proposedRightSegment, 'right');
+        leftSegment = await writeSegment(leftSegment, plan.proposedLeftSegment, 'left');
+        leftShift = await writeShift(leftShift, plan.proposedLeftShift, 'left');
+      } else {
+        leftShift = await writeShift(leftShift, plan.proposedLeftShift, 'left');
+        leftSegment = await writeSegment(leftSegment, plan.proposedLeftSegment, 'left');
+        rightSegment = await writeSegment(rightSegment, plan.proposedRightSegment, 'right');
+        rightShift = await writeShift(rightShift, plan.proposedRightShift, 'right');
+      }
+
+      const updatedAssignments: LooseRecord[] = [];
+      for (const assignment of activeAssignments) {
+        const marker = assignment.metadata?.shared_boundary_mutation;
+        if (marker?.idempotency_key === context.idempotencyKey) {
+          if (marker.request_hash !== requestHash || marker.actor_user_id !== (user.id || null)) {
+            throw new ApiError(409, 'Toewijzing hoort bij een andere gedeelde grensbewerking', {
+              assignment_id: assignment.id,
+            });
+          }
+          updatedAssignments.push(assignment);
+          continue;
+        }
+        businessWriteStarted = true;
+        await renewPlanningResourceLeases(base44, user, leases);
+        updatedAssignments.push(await casUpdate(
+          base44,
+          'PlanningAssignment',
+          assignment,
+          revisionOf(assignment),
+          {
+            ...assignmentPatches[assignment.id],
+            metadata: {
+              ...(assignment.metadata || {}),
+              shared_boundary_mutation: {
+                operation_id: ownedState?.operation_id || sharedBoundaryOperationId(occurrenceId, context),
+                idempotency_key: context.idempotencyKey,
+                correlation_id: context.correlationId,
+                request_hash: requestHash,
+                actor_user_id: user.id || null,
+                boundary_date: boundaryDate,
+                boundary_time: boundaryTime,
+                phase: 'state_written_audit_pending',
+                updated_at: nowIso(),
+              },
+            },
+          },
+        ));
+      }
+
+      const committedByThisRequest = occurrence.metadata?.last_shared_boundary_idempotency_key === context.idempotencyKey
+        && occurrence.metadata?.last_shared_boundary_request_hash === requestHash
+        && occurrence.metadata?.last_shared_boundary_actor_user_id === (user.id || null);
+      if (!committedByThisRequest) {
+        const currentReservation = occurrence.metadata?.planning_composition_reservation;
+        if (
+          currentReservation?.idempotency_key !== context.idempotencyKey
+          || currentReservation?.request_hash !== requestHash
+          || currentReservation?.actor_user_id !== (user.id || null)
+        ) {
+          throw new ApiError(409, 'Taakreservering voor de gedeelde grens ontbreekt');
+        }
+        const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+        await renewPlanningResourceLeases(base44, user, leases);
+        occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...metadata,
+            shared_boundary_mutation: {
+              ...(metadata.shared_boundary_mutation || ownedState),
+              phase: 'applied_audit_pending',
+              effective_view: 'target',
+              applied_at: nowIso(),
+            },
+            last_shared_boundary_idempotency_key: context.idempotencyKey,
+            last_shared_boundary_correlation_id: context.correlationId,
+            last_shared_boundary_request_hash: requestHash,
+            last_shared_boundary_actor_user_id: user.id || null,
+            last_shared_boundary_completed_at: nowIso(),
+          },
+        });
+      }
+
+      const result = {
+        shifts: [leftShift, rightShift],
+        segments: [leftSegment, rightSegment],
+        assignments: updatedAssignments,
+        task_occurrences: [occurrence],
+        boundary: { date: boundaryDate, time: boundaryTime },
+      };
+      await renewPlanningResourceLeases(base44, user, leases);
+      const audit = await appendAudit(base44, user, {
+        action: SHARED_TASK_BOUNDARY_ACTION,
+        resource_type: 'PlanningTaskOccurrence',
+        resource_id: occurrence.id,
+        before_state: ownedState?.before_state || null,
+        after_state: result,
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: {
+          request_hash: requestHash,
+          operation_id: ownedState?.operation_id || sharedBoundaryOperationId(occurrenceId, context),
+          affected_shift_ids: [leftShiftId, rightShiftId],
+          affected_segment_ids: [leftSegmentId, rightSegmentId],
+          task_occurrence_id: occurrenceId,
+          boundary_date: boundaryDate,
+          boundary_time: boundaryTime,
+        },
+      });
+      const committedOccurrence = await requireRecord(
+        base44,
+        'PlanningTaskOccurrence',
+        occurrence.id,
+        'Taakuitvoering',
+      );
+      const committedState = committedOccurrence.metadata?.shared_boundary_mutation;
+      if (committedState?.phase !== 'completed') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        occurrence = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          committedOccurrence,
+          revisionOf(committedOccurrence),
+          {
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(committedOccurrence.metadata || {}),
+              shared_boundary_mutation: completedSharedBoundaryMutationState(
+                committedState || ownedState,
+                audit.id,
+              ),
+            },
+          },
+        );
+      } else {
+        occurrence = committedOccurrence;
+      }
+      return {
+        ok: true,
+        ...result,
+        task_occurrences: [occurrence],
+        audit_event_id: audit.id,
+        undoable: false,
+        undo_token: null,
+      };
+    } catch (error) {
+      if (reservedByThisAttempt && !businessWriteStarted) {
+        try {
+          const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+          const reservation = occurrence.metadata?.planning_composition_reservation;
+          if (
+            reservation?.idempotency_key === context.idempotencyKey
+            && reservation?.request_hash === requestHash
+            && reservation?.actor_user_id === (user.id || null)
+          ) {
+            const {
+              planning_composition_reservation: _reservation,
+              shared_boundary_mutation: _boundaryState,
+              ...metadata
+            } = occurrence.metadata || {};
+            await renewPlanningResourceLeases(base44, user, leases);
+            await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+              last_modified_by_user_id: user.id || null,
+              last_modified_at: nowIso(),
+              metadata: {
+                ...metadata,
+                last_shared_boundary_recovery_idempotency_key: context.idempotencyKey,
+                last_shared_boundary_recovery_request_hash: requestHash,
+                last_shared_boundary_recovery_actor_user_id: user.id || null,
+                last_shared_boundary_recovery_status: 'reservation_released',
+                last_shared_boundary_recovery_at: nowIso(),
+              },
+            });
+          }
+        } catch (cleanupError) {
+          if (error && typeof error === 'object') {
+            (error as any).details = {
+              ...((error as any).details || {}),
+              compensation_errors: [{
+                entity: 'PlanningTaskOccurrence',
+                id: occurrenceId,
+                message: (cleanupError as Error)?.message || String(cleanupError),
+              }],
+            };
+          }
+        }
+      }
+      throw error;
+    }
+  });
+}
+
+function sharedBoundaryTargetById(state: LooseRecord, collection: 'shifts' | 'segments', id: string) {
+  return normalizeArray<LooseRecord>(state.target_state?.[collection])
+    .find(item => String(item.id) === String(id)) || null;
+}
+
+function sharedBoundaryBeforeById(state: LooseRecord, collection: 'shifts' | 'segments', id: string) {
+  return normalizeArray<LooseRecord>(state.before_state?.[collection])
+    .find(item => String(item.id) === String(id)) || null;
+}
+
+function sharedBoundaryRecordPatch(target: LooseRecord, entityName: 'PlanningShift' | 'PlanningShiftTaskSegment') {
+  const fields = entityName === 'PlanningShift'
+    ? ['service_date', 'end_date', 'start_time', 'end_time', 'duration_minutes', 'status']
+    : ['start_date', 'end_date', 'start_time', 'end_time', 'duration_minutes', 'status'];
+  return Object.fromEntries(fields.map(field => [field, target[field] ?? null]));
+}
+
+function sharedBoundaryAssignmentMatches(record: LooseRecord, patch: LooseRecord) {
+  return [
+    'status',
+    'warning_codes',
+    'warning_snapshot',
+    'has_critical_warnings',
+    'contract_routing_snapshot',
+    'personnel_contract_id',
+  ].every(key => stableStringify(record[key] ?? null) === stableStringify(patch[key] ?? null));
+}
+
+function sharedBoundaryRepairConflict(
+  entity: string,
+  record: LooseRecord,
+  state: LooseRecord,
+) {
+  throw new ApiError(409, 'Gedeelde grens kan niet automatisch worden hersteld door een afwijkende tussenwijziging', {
+    code: 'BOUNDARY_RECOVERY_CONFLICT',
+    entity,
+    id: record.id,
+    operation_id: state.operation_id || null,
+  });
+}
+
+async function repairSharedTaskBoundary(
+  base44: LooseRecord,
+  recoveryUser: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  requireMutationIdempotency(context, REPAIR_SHARED_TASK_BOUNDARY_ACTION);
+  const occurrenceId = requireId(body, 'task_occurrence_id');
+  let initialOccurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+  let state = initialOccurrence.metadata?.shared_boundary_mutation;
+  if (!state) {
+    return { ok: true, repaired: false, task_occurrences: [initialOccurrence] };
+  }
+  if (state.phase === 'completed') {
+    const assignmentIds = uniqueStrings([
+      ...normalizeArray(state.assignment_ids),
+      ...normalizeArray<LooseRecord>(state.before_state?.assignments).map(item => item.id),
+    ]);
+    const [shifts, segments, assignments] = await Promise.all([
+      Promise.all(uniqueStrings([state.left_shift_id, state.right_shift_id]).map(id => (
+        requireRecord(base44, 'PlanningShift', id, 'Dienst')
+      ))),
+      Promise.all(uniqueStrings([state.left_segment_id, state.right_segment_id]).map(id => (
+        requireRecord(base44, 'PlanningShiftTaskSegment', id, 'Taaksegment')
+      ))),
+      Promise.all(assignmentIds.map(id => (
+        requireRecord(base44, 'PlanningAssignment', id, 'Toewijzing')
+      ))),
+    ]);
+    return {
+      ok: true,
+      repaired: false,
+      shifts,
+      segments,
+      assignments,
+      task_occurrences: [initialOccurrence],
+      boundary: { date: state.boundary_date, time: state.boundary_time },
+      audit_event_id: state.audit_event_id || null,
+      undoable: false,
+      undo_token: null,
+    };
+  }
+
+  const beforeLeftShift = sharedBoundaryBeforeById(state, 'shifts', state.left_shift_id);
+  const beforeRightShift = sharedBoundaryBeforeById(state, 'shifts', state.right_shift_id);
+  const beforeLeftSegment = sharedBoundaryBeforeById(state, 'segments', state.left_segment_id);
+  const beforeRightSegment = sharedBoundaryBeforeById(state, 'segments', state.right_segment_id);
+  if (!beforeLeftShift || !beforeRightShift || !beforeLeftSegment || !beforeRightSegment) {
+    throw new ApiError(409, 'Gedeelde grens mist een volledige duurzame herstelstaat', {
+      code: 'BOUNDARY_RECOVERY_STATE_INCOMPLETE',
+      task_occurrence_id: occurrenceId,
+    });
+  }
+  if (!state.target_state) {
+    const legacyPlan = buildSharedBoundaryPlan(
+      initialOccurrence,
+      beforeLeftShift,
+      beforeRightShift,
+      beforeLeftSegment,
+      beforeRightSegment,
+      state.boundary_date,
+      state.boundary_time,
+    );
+    state = {
+      ...state,
+      schema_version: 2,
+      operation_id: state.operation_id || `${occurrenceId}:${state.idempotency_key}`,
+      effective_view: state.phase === 'state_written_audit_pending' ? 'target' : 'before',
+      moving_later: legacyPlan.boundaryMinute > legacyPlan.oldBoundaryMinute,
+      target_state: {
+        shifts: [legacyPlan.proposedLeftShift, legacyPlan.proposedRightShift],
+        segments: [legacyPlan.proposedLeftSegment, legacyPlan.proposedRightSegment],
+        assignments: normalizeArray<LooseRecord>(state.before_state?.assignments).map(assignment => ({
+          ...assignment,
+          ...(state.assignment_patches?.[assignment.id] || {}),
+        })),
+      },
+    };
+  }
+  const computedTargetHash = await sharedBoundaryTargetHash(state.target_state);
+  if (state.target_hash && state.target_hash !== computedTargetHash) {
+    throw new ApiError(409, 'Duurzame doelstaat voor gedeelde grens is niet meer betrouwbaar', {
+      code: 'BOUNDARY_RECOVERY_TARGET_HASH_MISMATCH',
+      task_occurrence_id: occurrenceId,
+      operation_id: state.operation_id || null,
+    });
+  }
+  state = { ...state, target_hash: computedTargetHash };
+
+  const initialAssignments = normalizeArray<LooseRecord>(state.before_state?.assignments);
+  const targetLeftShift = sharedBoundaryTargetById(state, 'shifts', state.left_shift_id);
+  const targetRightShift = sharedBoundaryTargetById(state, 'shifts', state.right_shift_id);
+  const targetLeftSegment = sharedBoundaryTargetById(state, 'segments', state.left_segment_id);
+  const targetRightSegment = sharedBoundaryTargetById(state, 'segments', state.right_segment_id);
+  if (!targetLeftShift || !targetRightShift || !targetLeftSegment || !targetRightSegment) {
+    throw new ApiError(409, 'Gedeelde grens mist doelrecords voor duurzaam herstel', {
+      code: 'BOUNDARY_RECOVERY_TARGET_INCOMPLETE',
+      task_occurrence_id: occurrenceId,
+    });
+  }
+
+  const descriptorContext = {
+    idempotencyKey: context.idempotencyKey,
+    correlationId: context.correlationId,
+  };
+  const repairHash = await mutationRequestHash(REPAIR_SHARED_TASK_BOUNDARY_ACTION, {
+    task_occurrence_id: occurrenceId,
+    operation_id: state.operation_id,
+  });
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('task_occurrence', occurrenceId),
+    resourceCoordinatorDescriptor('shift_composition', state.left_shift_id),
+    resourceCoordinatorDescriptor('shift_composition', state.right_shift_id),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    initialAssignments.map(item => item.personnel_id),
+    [beforeLeftShift, beforeRightShift, targetLeftShift, targetRightShift],
+  ));
+
+  return withPlanningResourceLeases(
+    base44,
+    recoveryUser,
+    descriptorContext,
+    repairHash,
+    descriptors,
+    async leases => {
+      let occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+      let lockedState = occurrence.metadata?.shared_boundary_mutation;
+      if (!lockedState || (lockedState.operation_id || `${occurrenceId}:${lockedState.idempotency_key}`) !== state.operation_id) {
+        throw new ApiError(409, 'Gedeelde grensherstelstate is tijdens herstel vervangen', {
+          code: 'BOUNDARY_RECOVERY_OPERATION_CHANGED',
+          task_occurrence_id: occurrenceId,
+        });
+      }
+      if (lockedState.phase === 'completed') {
+        const assignmentIds = uniqueStrings([
+          ...normalizeArray(lockedState.assignment_ids),
+          ...normalizeArray<LooseRecord>(lockedState.before_state?.assignments).map(item => item.id),
+        ]);
+        const [shifts, segments, assignments] = await Promise.all([
+          Promise.all([lockedState.left_shift_id, lockedState.right_shift_id].map((id: string) => (
+            requireRecord(base44, 'PlanningShift', id, 'Dienst')
+          ))),
+          Promise.all([lockedState.left_segment_id, lockedState.right_segment_id].map((id: string) => (
+            requireRecord(base44, 'PlanningShiftTaskSegment', id, 'Taaksegment')
+          ))),
+          Promise.all(assignmentIds.map(id => (
+            requireRecord(base44, 'PlanningAssignment', id, 'Toewijzing')
+          ))),
+        ]);
+        return {
+          ok: true,
+          repaired: false,
+          shifts,
+          segments,
+          assignments,
+          task_occurrences: [occurrence],
+          boundary: { date: lockedState.boundary_date, time: lockedState.boundary_time },
+          audit_event_id: lockedState.audit_event_id || null,
+          undoable: false,
+          undo_token: null,
+        };
+      }
+      if (!lockedState.target_state) {
+        await renewPlanningResourceLeases(base44, recoveryUser, leases);
+        occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          last_modified_by_user_id: recoveryUser.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(occurrence.metadata || {}),
+            shared_boundary_mutation: state,
+          },
+        });
+        lockedState = state;
+      }
+      const lockedTargetHash = await sharedBoundaryTargetHash(lockedState.target_state);
+      if (
+        (Number(lockedState.schema_version || 0) >= 2 && !lockedState.target_hash)
+        || (lockedState.target_hash && lockedState.target_hash !== lockedTargetHash)
+      ) {
+        throw new ApiError(409, 'Duurzame doelstaat voor gedeelde grens is niet meer betrouwbaar', {
+          code: 'BOUNDARY_RECOVERY_TARGET_HASH_MISMATCH',
+          task_occurrence_id: occurrenceId,
+          operation_id: lockedState.operation_id || null,
+        });
+      }
+
+      let [leftShift, rightShift, leftSegment, rightSegment] = await Promise.all([
+        requireRecord(base44, 'PlanningShift', state.left_shift_id, 'Vroege dienst'),
+        requireRecord(base44, 'PlanningShift', state.right_shift_id, 'Late dienst'),
+        requireRecord(base44, 'PlanningShiftTaskSegment', state.left_segment_id, 'Vroeg taaksegment'),
+        requireRecord(base44, 'PlanningShiftTaskSegment', state.right_segment_id, 'Laat taaksegment'),
+      ]);
+      const currentAssignments = (await Promise.all([
+        filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: state.left_shift_id }),
+        filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: state.right_shift_id }),
+      ])).flat().filter(item => item.status !== 'removed');
+      const expectedAssignmentIdentities = initialAssignments
+        .map(sharedBoundaryAssignmentIdentity)
+        .sort();
+      const currentAssignmentIdentities = currentAssignments
+        .map(sharedBoundaryAssignmentIdentity)
+        .sort();
+      if (stableStringify(expectedAssignmentIdentities) !== stableStringify(currentAssignmentIdentities)) {
+        throw new ApiError(409, 'Dienstbezetting is tijdens gedeelde-grensherstel gewijzigd', {
+          code: 'BOUNDARY_RECOVERY_ASSIGNMENTS_CHANGED',
+          task_occurrence_id: occurrenceId,
+          expected_assignment_identities: expectedAssignmentIdentities,
+          current_assignment_identities: currentAssignmentIdentities,
+        });
+      }
+
+      const ensureTargetRecord = async (
+        entityName: 'PlanningShift' | 'PlanningShiftTaskSegment',
+        record: LooseRecord,
+        before: LooseRecord,
+        target: LooseRecord,
+        role: 'left' | 'right',
+      ) => {
+        if (sharedBoundaryBusinessProjectionMatches(record, target)) return record;
+        if (!sharedBoundaryBusinessProjectionMatches(record, before)) {
+          sharedBoundaryRepairConflict(entityName, record, lockedState);
+        }
+        await renewPlanningResourceLeases(base44, recoveryUser, leases);
+        return casUpdate(base44, entityName, record, revisionOf(record), {
+          ...sharedBoundaryRecordPatch(target, entityName),
+          last_modified_by_user_id: recoveryUser.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(record.metadata || {}),
+            ...(entityName === 'PlanningShift' ? {
+              planning_mutation: {
+                action: SHARED_TASK_BOUNDARY_ACTION,
+                idempotency_key: lockedState.idempotency_key,
+                correlation_id: lockedState.correlation_id,
+                actor_user_id: lockedState.actor_user_id || null,
+                request_hash: lockedState.request_hash,
+                phase: 'state_written_audit_pending',
+                started_at: lockedState.started_at || nowIso(),
+                updated_at: nowIso(),
+              },
+            } : {}),
+            shared_boundary_mutation: {
+              operation_id: lockedState.operation_id,
+              idempotency_key: lockedState.idempotency_key,
+              correlation_id: lockedState.correlation_id,
+              request_hash: lockedState.request_hash,
+              actor_user_id: lockedState.actor_user_id || null,
+              task_occurrence_id: occurrenceId,
+              role,
+              boundary_date: lockedState.boundary_date,
+              boundary_time: lockedState.boundary_time,
+              phase: 'state_written_audit_pending',
+              recovered_by_user_id: recoveryUser.id || null,
+              updated_at: nowIso(),
+            },
+          },
+        });
+      };
+
+      if (lockedState.moving_later !== false) {
+        rightShift = await ensureTargetRecord('PlanningShift', rightShift, beforeRightShift, targetRightShift, 'right');
+        rightSegment = await ensureTargetRecord('PlanningShiftTaskSegment', rightSegment, beforeRightSegment, targetRightSegment, 'right');
+        leftSegment = await ensureTargetRecord('PlanningShiftTaskSegment', leftSegment, beforeLeftSegment, targetLeftSegment, 'left');
+        leftShift = await ensureTargetRecord('PlanningShift', leftShift, beforeLeftShift, targetLeftShift, 'left');
+      } else {
+        leftShift = await ensureTargetRecord('PlanningShift', leftShift, beforeLeftShift, targetLeftShift, 'left');
+        leftSegment = await ensureTargetRecord('PlanningShiftTaskSegment', leftSegment, beforeLeftSegment, targetLeftSegment, 'left');
+        rightSegment = await ensureTargetRecord('PlanningShiftTaskSegment', rightSegment, beforeRightSegment, targetRightSegment, 'right');
+        rightShift = await ensureTargetRecord('PlanningShift', rightShift, beforeRightShift, targetRightShift, 'right');
+      }
+
+      const updatedAssignments: LooseRecord[] = [];
+      for (const beforeAssignment of initialAssignments) {
+        let assignment = await requireRecord(base44, 'PlanningAssignment', beforeAssignment.id, 'Toewijzing');
+        const patch = lockedState.assignment_patches?.[assignment.id] || {};
+        if (!sharedBoundaryAssignmentMatches(assignment, patch)) {
+          const unchanged = [
+            'shift_id',
+            'planning_shift_id',
+            'personnel_id',
+            'slot_index',
+            'status',
+            'warning_codes',
+            'warning_snapshot',
+            'has_critical_warnings',
+            'contract_routing_snapshot',
+            'personnel_contract_id',
+          ].every(key => stableStringify(assignment[key] ?? null) === stableStringify(beforeAssignment[key] ?? null));
+          if (!unchanged) sharedBoundaryRepairConflict('PlanningAssignment', assignment, lockedState);
+          await renewPlanningResourceLeases(base44, recoveryUser, leases);
+          assignment = await casUpdate(
+            base44,
+            'PlanningAssignment',
+            assignment,
+            revisionOf(assignment),
+            {
+              ...patch,
+              metadata: {
+                ...(assignment.metadata || {}),
+                shared_boundary_mutation: {
+                  operation_id: lockedState.operation_id,
+                  idempotency_key: lockedState.idempotency_key,
+                  correlation_id: lockedState.correlation_id,
+                  request_hash: lockedState.request_hash,
+                  actor_user_id: lockedState.actor_user_id || null,
+                  boundary_date: lockedState.boundary_date,
+                  boundary_time: lockedState.boundary_time,
+                  phase: 'state_written_audit_pending',
+                  recovered_by_user_id: recoveryUser.id || null,
+                  updated_at: nowIso(),
+                },
+              },
+            },
+          );
+        }
+        updatedAssignments.push(assignment);
+      }
+
+      const leftInterval = segmentInterval(leftSegment);
+      const rightInterval = segmentInterval(rightSegment);
+      if (!leftInterval || !rightInterval || leftInterval.end !== rightInterval.start) {
+        throw new ApiError(409, 'Herstelde gedeelde grens bevat nog een gat of overlap', {
+          code: 'BOUNDARY_RECOVERY_COVERAGE_INVALID',
+          task_occurrence_id: occurrenceId,
+        });
+      }
+
+      if (lockedState.effective_view !== 'target' || lockedState.phase === 'prepared') {
+        const { planning_composition_reservation: _reservation, ...metadata } = occurrence.metadata || {};
+        await renewPlanningResourceLeases(base44, recoveryUser, leases);
+        occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          last_modified_by_user_id: recoveryUser.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...metadata,
+            shared_boundary_mutation: {
+              ...lockedState,
+              phase: 'applied_audit_pending',
+              effective_view: 'target',
+              recovered_by_user_id: recoveryUser.id || null,
+              recovery_correlation_id: context.correlationId,
+              applied_at: nowIso(),
+            },
+            last_shared_boundary_idempotency_key: lockedState.idempotency_key,
+            last_shared_boundary_correlation_id: lockedState.correlation_id,
+            last_shared_boundary_request_hash: lockedState.request_hash,
+            last_shared_boundary_actor_user_id: lockedState.actor_user_id || null,
+            last_shared_boundary_completed_at: nowIso(),
+          },
+        });
+        lockedState = occurrence.metadata.shared_boundary_mutation;
+      }
+
+      const result = {
+        shifts: [leftShift, rightShift],
+        segments: [leftSegment, rightSegment],
+        assignments: updatedAssignments,
+        task_occurrences: [occurrence],
+        boundary: { date: lockedState.boundary_date, time: lockedState.boundary_time },
+      };
+      const priorAudits = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningAuditEvent,
+        { idempotency_key: lockedState.idempotency_key },
+        '-occurred_at',
+      );
+      let audit = priorAudits.find(item => (
+        item.action === SHARED_TASK_BOUNDARY_ACTION
+        && item.metadata?.request_hash === lockedState.request_hash
+      )) || null;
+      if (!audit) {
+        await renewPlanningResourceLeases(base44, recoveryUser, leases);
+        const originalActor = {
+          id: lockedState.actor_user_id || null,
+          name: lockedState.actor_snapshot?.name || null,
+          email: lockedState.actor_snapshot?.email || null,
+        };
+        audit = await appendAudit(base44, originalActor, {
+          action: SHARED_TASK_BOUNDARY_ACTION,
+          resource_type: 'PlanningTaskOccurrence',
+          resource_id: occurrenceId,
+          before_state: lockedState.before_state || null,
+          after_state: result,
+          correlation_id: lockedState.correlation_id,
+          idempotency_key: lockedState.idempotency_key,
+          undoable: false,
+          metadata: {
+            request_hash: lockedState.request_hash,
+            operation_id: lockedState.operation_id,
+            affected_shift_ids: [lockedState.left_shift_id, lockedState.right_shift_id],
+            affected_segment_ids: [lockedState.left_segment_id, lockedState.right_segment_id],
+            task_occurrence_id: occurrenceId,
+            boundary_date: lockedState.boundary_date,
+            boundary_time: lockedState.boundary_time,
+            recovered_by_user_id: recoveryUser.id || null,
+            recovery_correlation_id: context.correlationId,
+          },
+        });
+      }
+      if (!audit) {
+        throw new ApiError(500, 'Auditregistratie voor gedeelde grens kon niet worden bevestigd', {
+          code: 'BOUNDARY_RECOVERY_AUDIT_MISSING',
+          task_occurrence_id: occurrenceId,
+        });
+      }
+
+      occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+      lockedState = occurrence.metadata?.shared_boundary_mutation;
+      if (lockedState?.phase !== 'completed') {
+        await renewPlanningResourceLeases(base44, recoveryUser, leases);
+        occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+          last_modified_by_user_id: recoveryUser.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(occurrence.metadata || {}),
+            shared_boundary_mutation: completedSharedBoundaryMutationState(lockedState, audit.id, {
+              recovered_by_user_id: recoveryUser.id || null,
+              recovery_correlation_id: context.correlationId,
+            }),
+          },
+        });
+      }
+      return {
+        ok: true,
+        repaired: true,
+        ...result,
+        task_occurrences: [occurrence],
+        audit_event_id: audit.id,
+        undoable: false,
+        undo_token: null,
+      };
+    },
+  );
 }
 
 async function composeAndAssign(
@@ -6576,6 +8104,17 @@ async function publishPlanning(
       )
     )
   );
+  const unresolvedBoundaryOccurrence = occurrences.find((occurrence: LooseRecord) => (
+    unresolvedSharedBoundaryMutation(occurrence)
+  ));
+  if (unresolvedBoundaryOccurrence) {
+    const boundaryState = unresolvedSharedBoundaryMutation(unresolvedBoundaryOccurrence);
+    throw new ApiError(409, 'Planning kan niet worden gepubliceerd zolang een gedeelde grens wordt hersteld', {
+      code: 'BOUNDARY_RECOVERY_REQUIRED',
+      task_occurrence_id: unresolvedBoundaryOccurrence.id,
+      operation_id: boundaryState?.operation_id || null,
+    });
+  }
   const preflightRelevantOccurrences = preflightOccurrences.filter((occurrence: LooseRecord) => (
     preflightOccurrenceIdSet.has(String(occurrence.id))
   ));
@@ -6913,6 +8452,8 @@ export {
   publicationOccurrenceSnapshot,
   publicationShiftSnapshot,
   publicationTaskSegmentSnapshot,
+  repairSharedTaskBoundary,
+  resizeSharedTaskBoundary,
   renewPlanningResourceLeases,
   restoreAssignment,
   revisionOf,
@@ -6940,6 +8481,12 @@ Deno.serve(async (req) => {
     }
     if (action === 'compose_shift' || action === 'update_shift_composition') {
       return json(await composeShift(base44, user, body, context), action === 'compose_shift' ? 201 : 200);
+    }
+    if (action === SHARED_TASK_BOUNDARY_ACTION) {
+      return json(await resizeSharedTaskBoundary(base44, user, body, context));
+    }
+    if (action === REPAIR_SHARED_TASK_BOUNDARY_ACTION) {
+      return json(await repairSharedTaskBoundary(base44, user, body, context));
     }
     if (action === 'cancel_task_shift') return json(await cancelTaskShift(base44, user, body, context));
     if (action === 'assign') return json(await assignPersonnel(base44, user, body, context));

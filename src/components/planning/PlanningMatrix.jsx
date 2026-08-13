@@ -41,7 +41,9 @@ import {
   clockToTimelineMinutes,
   getTaskTimelineDemand,
   getTaskTimelineGaps,
+  getTaskTimelineLaneHeight,
   resizeTimelineInterval,
+  timelineMinuteFromLanePointer,
   timelineMinutesToClock,
 } from "@/components/planning/planningTimelineDomain";
 import { cn } from "@/lib/utils";
@@ -100,6 +102,12 @@ function sortByStart(items, getStart = item => item.start_time) {
 function appendToMap(map, key, value) {
   if (!map.has(key)) map.set(key, []);
   map.get(key).push(value);
+}
+
+function isPlanningResourcePending(pendingResourceKeys, fallback, ...keys) {
+  if (fallback) return true;
+  if (!(pendingResourceKeys instanceof Set)) return Boolean(fallback);
+  return keys.filter(Boolean).some(key => pendingResourceKeys.has(String(key)));
 }
 
 function clockLabel(date) {
@@ -162,6 +170,8 @@ function OpenTaskIntervalCard({
   onSelectOccurrence,
   onCreateOpenTaskSlice,
   mutationPending,
+  embeddedInLane = false,
+  style,
 }) {
   const dropServiceDate = projection?.date || occurrence.service_date;
   const proposedEnd = gap.startMinute + Math.min(
@@ -190,8 +200,11 @@ function OpenTaskIntervalCard({
           data-planning-start-minute={gap.startMinute}
           data-planning-width="full"
           data-start-minute={gap.startMinute}
+          aria-busy={mutationPending ? "true" : "false"}
+          style={style}
           className={cn(
             "w-full rounded-md border border-dashed border-rose-300 bg-rose-50/75 p-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-colors dark:border-rose-800 dark:bg-rose-950/30",
+            embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-400 p-1.5 shadow-none first:rounded-t-md last:rounded-b-md",
             coverage?.status === "partial" && "border-amber-300 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/30",
             snapshot.isDraggingOver && "border-primary bg-primary/10 ring-2 ring-primary/25",
           )}
@@ -368,6 +381,7 @@ function ServiceCardResizeHandle({
     if (disabled) return;
     if (event.key === "Escape") {
       event.preventDefault();
+      cleanupRef.current?.();
       onCancel?.();
       return;
     }
@@ -398,7 +412,10 @@ function ServiceCardResizeHandle({
       onPointerDown={handlePointerDown}
       onKeyDown={handleKeyDown}
       onBlur={() => {
-        if (preview) onCancel?.();
+        if (preview || cleanupRef.current) {
+          cleanupRef.current?.();
+          onCancel?.();
+        }
       }}
       className={cn(
         "absolute left-1/2 z-30 flex h-3 w-20 -translate-x-1/2 touch-none items-center justify-center text-primary/70 transition-colors hover:text-primary focus:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-35",
@@ -407,6 +424,171 @@ function ServiceCardResizeHandle({
       title={`${edge === "start" ? "Bovenrand" : "Onderrand"} slepen · pijltjes 5 min · Shift 60 min · Enter opslaan`}
     >
       <span className="flex h-1.5 w-12 items-center justify-center rounded-full border border-primary/25 bg-background/95 shadow-sm">
+        <GripHorizontal className="h-2.5 w-2.5" />
+      </span>
+    </button>
+  );
+}
+
+function TaskBoundaryHandle({
+  boundary,
+  demand,
+  laneRef,
+  previewMinute,
+  onPreview,
+  onCommit,
+  onCancel,
+  disabled,
+}) {
+  const cleanupRef = useRef(null);
+  const frameRef = useRef(null);
+  const value = previewMinute ?? boundary.minute;
+
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  const handlePointerDown = event => {
+    if (disabled || (event.button != null && event.button !== 0)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    cleanupRef.current?.();
+    let latest = value;
+    let lastClientY = Number(event.clientY) || 0;
+    const initialRect = laneRef.current?.getBoundingClientRect?.();
+    const demandDuration = Math.max(1, demand.endMinute - demand.startMinute);
+    const boundaryPixelY = initialRect
+      ? initialRect.top + ((value - demand.startMinute) / demandDuration) * initialRect.height
+      : lastClientY;
+    const grabOffsetY = lastClientY - boundaryPixelY;
+
+    const minuteForPointer = clientY => {
+      const rect = laneRef.current?.getBoundingClientRect?.();
+      if (!rect) return null;
+      return timelineMinuteFromLanePointer({
+        clientY: clientY - grabOffsetY,
+        laneTop: rect.top,
+        laneHeight: rect.height,
+        startMinute: demand.startMinute,
+        endMinute: demand.endMinute,
+        minMinute: boundary.minMinute,
+        maxMinute: boundary.maxMinute,
+      });
+    };
+    const flushPreview = () => {
+      frameRef.current = null;
+      const minute = minuteForPointer(lastClientY);
+      if (minute == null || minute === latest) return;
+      latest = minute;
+      onPreview?.(minute);
+    };
+    const cleanup = () => {
+      if (frameRef.current != null) {
+        window.cancelAnimationFrame?.(frameRef.current);
+        frameRef.current = null;
+      }
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
+      cleanupRef.current = null;
+    };
+    const move = pointerEvent => {
+      lastClientY = Number(pointerEvent.clientY) || 0;
+      if (frameRef.current != null) return;
+      if (window.requestAnimationFrame) frameRef.current = window.requestAnimationFrame(flushPreview);
+      else flushPreview();
+    };
+    const finish = pointerEvent => {
+      const finalClientY = Number(pointerEvent?.clientY);
+      if (Number.isFinite(finalClientY)) lastClientY = finalClientY;
+      if (frameRef.current != null) {
+        window.cancelAnimationFrame?.(frameRef.current);
+        frameRef.current = null;
+      }
+      flushPreview();
+      cleanup();
+      if (latest !== boundary.minute) onCommit?.(latest);
+      else onCancel?.();
+    };
+    const cancel = () => {
+      cleanup();
+      onCancel?.();
+    };
+
+    cleanupRef.current = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
+  };
+
+  const handleKeyDown = event => {
+    if (disabled) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cleanupRef.current?.();
+      onCancel?.();
+      return;
+    }
+    if (event.key === "Enter" && previewMinute != null && previewMinute !== boundary.minute) {
+      event.preventDefault();
+      onCommit?.(previewMinute);
+      return;
+    }
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      onPreview?.(event.key === "Home" ? boundary.minMinute : boundary.maxMinute);
+      return;
+    }
+    if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 60 : 5;
+    const next = Math.max(
+      boundary.minMinute,
+      Math.min(boundary.maxMinute, value + (event.key === "ArrowUp" ? -step : step)),
+    );
+    if (next !== value) onPreview?.(next);
+  };
+
+  const top = ((value - demand.startMinute) / Math.max(1, demand.endMinute - demand.startMinute)) * 100;
+  const leftLabel = boundary.left?.kind === "service"
+    ? `${boundary.left.startTime}–${timelineMinutesToClock(value)}`
+    : null;
+  const rightLabel = boundary.right?.kind === "service"
+    ? `${timelineMinutesToClock(value)}–${boundary.right.endTime}`
+    : null;
+  const description = [leftLabel, rightLabel].filter(Boolean).join("; ");
+
+  return (
+    <button
+      type="button"
+      role="slider"
+      aria-orientation="vertical"
+      aria-label={boundary.kind === "service-service"
+        ? "Grens tussen aansluitende diensten aanpassen"
+        : boundary.left?.kind === "service"
+          ? `Eindtijd van ${boundary.left.shift.name || boundary.left.shift.service_name_snapshot || "dienst"} aanpassen`
+          : `Begintijd van ${boundary.right?.shift.name || boundary.right?.shift.service_name_snapshot || "dienst"} aanpassen`}
+      aria-valuemin={Math.round(boundary.minMinute)}
+      aria-valuemax={Math.round(boundary.maxMinute)}
+      aria-valuenow={Math.round(value)}
+      aria-valuetext={`${timelineMinutesToClock(Math.round(value))}${description ? `. ${description}` : ""}`}
+      aria-controls={boundary.controlledIds.join(" ") || undefined}
+      data-task-boundary-kind={boundary.kind}
+      data-service-resize-edge={boundary.kind === "service-service" ? "shared" : boundary.left?.kind === "service" ? "end" : "start"}
+      disabled={disabled}
+      onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
+      onBlur={() => {
+        if (previewMinute != null || cleanupRef.current) {
+          cleanupRef.current?.();
+          onCancel?.();
+        }
+      }}
+      className="absolute left-0 z-40 flex h-6 w-full -translate-y-1/2 touch-none cursor-row-resize items-center justify-center [@media(pointer:coarse)]:h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
+      style={{ top: `${top}%` }}
+      title="Slepen · pijltjes 5 min · Shift 60 min · Enter opslaan"
+    >
+      <span className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-primary/45" />
+      <span className="pointer-events-none relative flex h-2 w-12 items-center justify-center rounded-full border border-primary/30 bg-background/95 text-primary shadow-sm">
         <GripHorizontal className="h-2.5 w-2.5" />
       </span>
     </button>
@@ -431,6 +613,12 @@ function MatrixShiftBlock({
   onCancelComposition,
   onResizeTaskSegment,
   mutationPending,
+  controlledInterval = null,
+  embeddedInLane = false,
+  suppressDirectResize = false,
+  externalResizeSaving = false,
+  elementId,
+  style,
 }) {
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
@@ -500,7 +688,7 @@ function MatrixShiftBlock({
   const [resizePreview, setResizePreview] = useState(null);
   const [committedResizePreview, setCommittedResizePreview] = useState(null);
   const [resizeSaving, setResizeSaving] = useState(false);
-  const shownResize = resizePreview || committedResizePreview;
+  const shownResize = controlledInterval || resizePreview || committedResizePreview;
   const displayedStartTime = shownResize
     ? timelineMinutesToClock(shownResize.startMinute)
     : baseStartTime;
@@ -508,6 +696,7 @@ function MatrixShiftBlock({
     ? timelineMinutesToClock(shownResize.endMinute)
     : baseEndTime;
   const isPending = shift._optimistic_pending === true;
+  const isResizeSaving = resizeSaving || externalResizeSaving;
 
   useEffect(() => {
     setResizePreview(null);
@@ -564,20 +753,23 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative w-full rounded-md border border-l-[3px] border-border border-l-primary bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+      embeddedInLane && "absolute min-h-0 overflow-hidden rounded-none border-0 border-l-[3px] p-1.5 shadow-none",
       shift.status === "draft" && "border-primary/35 border-l-primary",
       currentAssignments.length < requiredCount && "border-amber-300 border-l-amber-500 bg-amber-50/55 dark:border-amber-800 dark:bg-amber-950/25",
       isPending && "animate-pulse border-primary/45 bg-primary/[0.04]",
       selected && "border-primary ring-2 ring-primary/20",
     )}
+      id={elementId}
       data-shift-id={shift.id}
       data-service-block="true"
       data-planning-item-kind="service"
       data-planning-start-minute={timeValue(displayedStartTime)}
       data-planning-width="full"
       data-segment-id={segmentProjections.length === 1 ? projectionSegment?.id : undefined}
-      data-resize-saving={resizeSaving ? "true" : "false"}
+      data-resize-saving={isResizeSaving ? "true" : "false"}
+      style={style}
     >
-      {canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
+      {!suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
           edge="start"
           startMinute={baseStartMinute}
@@ -598,7 +790,7 @@ function MatrixShiftBlock({
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             <span className="truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
             {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Dienst wordt opgeslagen" />}
-            {resizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
+            {isResizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
           <span className="mt-0.5 block text-[9px] text-muted-foreground">
@@ -671,7 +863,7 @@ function MatrixShiftBlock({
         ))}
       </div>
       {warnings > 0 && <p className="mt-1 flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-2.5 w-2.5" /> {warnings} waarschuwingen</p>}
-      {canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
+      {!suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
         <ServiceCardResizeHandle
           edge="end"
           startMinute={baseStartMinute}
@@ -690,13 +882,292 @@ function MatrixShiftBlock({
   );
 }
 
-function EmployeeAssignmentBlock({ shift, assignment, segments, projectionSlice, onSelect, onUnassign }) {
+function taskLaneSegmentInterval(entry) {
+  const startTime = entry.projections[0]?.slice?.startTime
+    || entry.projections[0]?.segment?.start_time
+    || entry.shift.start_time;
+  const endTime = entry.projections.at(-1)?.slice?.endTime
+    || entry.projections.at(-1)?.segment?.end_time
+    || entry.shift.end_time;
+  return {
+    startMinute: clockToTimelineMinutes(startTime),
+    endMinute: clockToTimelineMinutes(endTime),
+    startTime,
+    endTime,
+  };
+}
+
+function TaskCoverageLane({
+  occurrence,
+  planningState,
+  projection,
+  serviceDate,
+  serviceEntries,
+  allOccurrenceSegments,
+  coverageShifts,
+  assignmentsByShift,
+  resourceKey,
+  selectedShiftId,
+  onSelectOccurrence,
+  onSelectShift,
+  onUnassign,
+  onMove,
+  onCopy,
+  onEditComposition,
+  onCancelComposition,
+  onCreateOpenTaskSlice,
+  onResizeTaskSegment,
+  onResizeTaskBoundary,
+  mutationPending,
+  compact,
+}) {
+  const laneRef = useRef(null);
+  const demand = getTaskTimelineDemand(occurrence, serviceDate);
+  const baseServices = serviceEntries.map(entry => ({
+    ...entry,
+    kind: "service",
+    segment: entry.projections[0]?.segment,
+    elementId: `planning-service-${occurrence.id}-${serviceDate}-${entry.projections[0]?.segment?.id || entry.shift.id}`,
+    ...taskLaneSegmentInterval(entry),
+  })).filter(item => item.segment?.id && item.startMinute != null && item.endMinute > item.startMinute);
+  const boundaries = [];
+
+  baseServices.forEach((service, index) => {
+    const previous = baseServices[index - 1] || null;
+    const next = baseServices[index + 1] || null;
+    const continuesBefore = Boolean(service.projections[0]?.slice?.continuesBefore);
+    const continuesAfter = Boolean(service.projections.at(-1)?.slice?.continuesAfter);
+    if (!continuesBefore && (!previous || previous.endMinute !== service.startMinute)) {
+      boundaries.push({
+        id: `${service.segment.id}:start`,
+        kind: "open-service",
+        minute: service.startMinute,
+        minMinute: previous ? previous.endMinute : demand?.startMinute,
+        maxMinute: service.endMinute - 5,
+        left: null,
+        right: service,
+        controlledIds: [service.elementId],
+      });
+    }
+    if (continuesAfter) return;
+    if (next?.startMinute === service.endMinute) {
+      boundaries.push({
+        id: `${service.segment.id}:end|${next.segment.id}:start`,
+        kind: "service-service",
+        minute: service.endMinute,
+        minMinute: service.startMinute + 5,
+        maxMinute: next.endMinute - 5,
+        left: service,
+        right: next,
+        controlledIds: [service.elementId, next.elementId],
+      });
+      return;
+    }
+    boundaries.push({
+      id: `${service.segment.id}:end`,
+      kind: "service-open",
+      minute: service.endMinute,
+      minMinute: service.startMinute + 5,
+      maxMinute: next ? next.startMinute : demand?.endMinute,
+      left: service,
+      right: null,
+      controlledIds: [service.elementId],
+    });
+  });
+
+  const [activePreview, setActivePreview] = useState(null);
+  const [committedPreview, setCommittedPreview] = useState(null);
+  const [resizeSaving, setResizeSaving] = useState(false);
+  const shownPreview = activePreview || committedPreview;
+  const previewIntervals = shownPreview?.overrides || null;
+
+  useEffect(() => {
+    setActivePreview(null);
+    setCommittedPreview(null);
+    setResizeSaving(false);
+  }, [occurrence.id, serviceDate]);
+
+  useEffect(() => {
+    if (!committedPreview) return;
+    const reconciled = Object.entries(committedPreview.overrides).every(([segmentId, interval]) => {
+      const service = baseServices.find(item => String(item.segment.id) === String(segmentId));
+      return service
+        && service.startMinute === interval.startMinute
+        && service.endMinute === interval.endMinute;
+    });
+    if (reconciled) setCommittedPreview(null);
+  }, [baseServices, committedPreview]);
+
+  if (!demand || baseServices.length === 0) return null;
+
+  const intervalFor = service => previewIntervals?.[String(service.segment.id)] || {
+    startMinute: service.startMinute,
+    endMinute: service.endMinute,
+  };
+  const previewForBoundary = (boundary, minute) => {
+    const overrides = {};
+    if (boundary.left) {
+      const interval = intervalFor(boundary.left);
+      overrides[String(boundary.left.segment.id)] = { ...interval, endMinute: minute };
+    }
+    if (boundary.right) {
+      const interval = intervalFor(boundary.right);
+      overrides[String(boundary.right.segment.id)] = { ...interval, startMinute: minute };
+    }
+    return { boundaryId: boundary.id, minute, overrides };
+  };
+  const gaps = getTaskTimelineGaps({
+    occurrence,
+    serviceDate,
+    segments: allOccurrenceSegments,
+    shifts: coverageShifts,
+    previewIntervalsBySegmentId: previewIntervals,
+  });
+  const duration = Math.max(1, demand.endMinute - demand.startMinute);
+  const pieceStyle = (startMinute, endMinute) => ({
+    top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
+    height: `${((endMinute - startMinute) / duration) * 100}%`,
+  });
+  const laneHeight = getTaskTimelineLaneHeight(duration, { compact });
+  const isLaneBusy = mutationPending || resizeSaving;
+
+  const segmentPayload = (service, interval) => {
+    const slice = service.projections[0]?.slice;
+    const startBoundary = slice?.continuesBefore
+      ? {
+          date: service.segment.start_date || service.segment.service_date || service.shift.service_date,
+          time: service.segment.start_time || service.shift.start_time,
+        }
+      : timelineBoundary(serviceDate, interval.startMinute);
+    const endBoundary = slice?.continuesAfter
+      ? {
+          date: service.segment.end_date || service.segment.start_date || service.shift.end_date || service.shift.service_date,
+          time: service.segment.end_time || service.shift.end_time,
+        }
+      : timelineBoundary(serviceDate, interval.endMinute);
+    return {
+      shift: service.shift,
+      segment: service.segment,
+      startDate: startBoundary.date,
+      endDate: endBoundary.date,
+      startTime: startBoundary.time,
+      endTime: endBoundary.time,
+    };
+  };
+
+  const commitBoundary = async (boundary, minute) => {
+    const preview = previewForBoundary(boundary, minute);
+    setActivePreview(null);
+    setCommittedPreview(preview);
+    setResizeSaving(true);
+    try {
+      let result;
+      if (boundary.kind === "service-service") {
+        const boundaryValue = timelineBoundary(serviceDate, minute);
+        result = await onResizeTaskBoundary?.({
+          occurrence,
+          serviceDate,
+          boundaryDate: boundaryValue.date,
+          boundaryTime: boundaryValue.time,
+          left: segmentPayload(boundary.left, preview.overrides[String(boundary.left.segment.id)]),
+          right: segmentPayload(boundary.right, preview.overrides[String(boundary.right.segment.id)]),
+        });
+      } else {
+        const service = boundary.left || boundary.right;
+        result = await onResizeTaskSegment?.({
+          occurrence,
+          serviceDate,
+          ...segmentPayload(service, preview.overrides[String(service.segment.id)]),
+        });
+      }
+      if (!result) setCommittedPreview(null);
+    } catch {
+      setCommittedPreview(null);
+    } finally {
+      setResizeSaving(false);
+    }
+  };
+
+  return (
+    <section
+      ref={laneRef}
+      className="relative isolate w-full overflow-hidden rounded-md border border-border bg-muted/25"
+      style={{ height: `${laneHeight}px` }}
+      data-task-coverage-lane={occurrence.id}
+      data-lane-start-minute={demand.startMinute}
+      data-lane-end-minute={demand.endMinute}
+      aria-label={`${occurrence.task_name_snapshot || "Taak"} ${demand.startTime}–${demand.endTime}`}
+      aria-busy={isLaneBusy ? "true" : "false"}
+    >
+      {baseServices.map(service => {
+        const interval = intervalFor(service);
+        return (
+          <MatrixShiftBlock
+            key={service.shift.id}
+            shift={service.shift}
+            projections={service.projections}
+            assignments={assignmentsByShift.get(String(service.shift.id)) || []}
+            segments={[service.segment]}
+            occurrence={occurrence}
+            allOccurrenceSegments={allOccurrenceSegments}
+            resourceKey={`${resourceKey}:shift:${service.shift.id}`}
+            serviceDate={serviceDate}
+            selected={String(selectedShiftId || "") === String(service.shift.id)}
+            onSelect={() => onSelectShift?.(service.shift)}
+            onUnassign={assignment => onUnassign?.(service.shift, assignment)}
+            onMove={onMove}
+            onCopy={onCopy}
+            onEditComposition={onEditComposition}
+            onCancelComposition={onCancelComposition}
+            onResizeTaskSegment={onResizeTaskSegment}
+            mutationPending={isLaneBusy}
+            controlledInterval={interval}
+            embeddedInLane
+            suppressDirectResize
+            externalResizeSaving={resizeSaving && Boolean(previewIntervals?.[String(service.segment.id)])}
+            elementId={service.elementId}
+            style={pieceStyle(interval.startMinute, interval.endMinute)}
+          />
+        );
+      })}
+      {gaps.map(gap => (
+        <OpenTaskIntervalCard
+          key={`${gap.startMinute}-${gap.endMinute}`}
+          occurrence={occurrence}
+          planningState={planningState}
+          projection={projection}
+          gap={gap}
+          onSelectOccurrence={onSelectOccurrence}
+          onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+          mutationPending={isLaneBusy}
+          embeddedInLane
+          style={pieceStyle(gap.startMinute, gap.endMinute)}
+        />
+      ))}
+      {boundaries.map(boundary => (
+        <TaskBoundaryHandle
+          key={boundary.id}
+          boundary={boundary}
+          demand={demand}
+          laneRef={laneRef}
+          previewMinute={shownPreview?.boundaryId === boundary.id ? shownPreview.minute : null}
+          onPreview={minute => setActivePreview(previewForBoundary(boundary, minute))}
+          onCommit={minute => commitBoundary(boundary, minute)}
+          onCancel={() => setActivePreview(null)}
+          disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
+        />
+      ))}
+    </section>
+  );
+}
+
+function EmployeeAssignmentBlock({ shift, assignment, segments, projectionSlice, onSelect, onUnassign, disabled = false }) {
   const warnings = shiftWarningCount(shift, [assignment]);
   const activeSegments = segments.filter(item => item.status !== "removed");
   return (
-    <article className="rounded-md border border-border bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" data-shift-id={shift.id}>
+    <article aria-busy={disabled ? "true" : "false"} className="rounded-md border border-border bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" data-shift-id={shift.id}>
       <div className="flex items-start gap-1">
-        <button type="button" onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <button type="button" disabled={disabled} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
           <span className="block truncate text-[10px] font-semibold">{shift.name || shift.service_name_snapshot || "Dienst"}</span>
           <span className="mt-0.5 block text-[9px] text-muted-foreground">
             {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
@@ -706,7 +1177,7 @@ function EmployeeAssignmentBlock({ shift, assignment, segments, projectionSlice,
             {shift.object_name || shift.object_name_snapshot || (activeSegments.length > 1 ? `${activeSegments.length} taken` : "Samengestelde of mobiele dienst")}
           </span>
         </button>
-        <button type="button" onClick={() => onUnassign?.(assignment)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`${shift.name || "Dienst"} vrijmaken`}>
+        <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${shift.name || "Dienst"} vrijmaken`}>
           <UserMinus className="h-3 w-3" />
         </button>
       </div>
@@ -848,7 +1319,10 @@ function ObjectDayCell({
   onCancelComposition,
   onCreateOpenTaskSlice,
   onResizeTaskSegment,
+  onResizeTaskBoundary,
   mutationPending,
+  pendingResourceKeys,
+  compact,
 }) {
   const cellOccurrences = sortByStart(occurrences, item => item.projection?.startTime || item.occurrence?.window_start_time);
   const occurrenceById = new Map(cellOccurrences.map(item => [String(item.occurrence.id), item]));
@@ -858,8 +1332,42 @@ function ObjectDayCell({
     if (!groupedShifts.has(shiftId)) groupedShifts.set(shiftId, { shift: projection.shift, projections: [] });
     groupedShifts.get(shiftId).projections.push(projection);
   });
+  const laneServicesByOccurrence = new Map();
+  [...groupedShifts.values()].forEach(entry => {
+    const activeShiftSegments = segmentsByShift.get(String(entry.shift.id)) || [];
+    const segmentProjections = entry.projections.filter(item => item.segment);
+    const segment = segmentProjections.length === 1 ? segmentProjections[0].segment : null;
+    const occurrenceItem = segment
+      ? occurrenceById.get(String(segment.task_occurrence_id))
+      : null;
+    const eligible = Boolean(
+      occurrenceItem
+      && occurrenceItem.occurrence.execution_mode !== "time_window"
+      && entry.shift.source_type === "task"
+      && activeShiftSegments.length === 1
+      && segmentProjections.length === 1,
+    );
+    if (eligible) appendToMap(laneServicesByOccurrence, String(segment.task_occurrence_id), entry);
+  });
+  laneServicesByOccurrence.forEach(entries => entries.sort((left, right) => (
+    timeValue(left.projections[0]?.slice?.startTime || left.projections[0]?.segment?.start_time)
+      - timeValue(right.projections[0]?.slice?.startTime || right.projections[0]?.segment?.start_time)
+  )));
+  const laneOccurrenceIds = new Set([...laneServicesByOccurrence].flatMap(([occurrenceId, entries]) => {
+    const coveredOnDay = (coverageSegmentsByOccurrence.get(occurrenceId) || [])
+      .filter(segment => getTaskOccurrenceDayProjection({
+        service_date: segment.start_date,
+        end_date: segment.end_date,
+        window_start_time: segment.start_time,
+        window_end_time: segment.end_time,
+      }, dayKey))
+      .map(segment => String(segment.id));
+    const laneSegmentIds = new Set(entries.map(entry => String(entry.projections[0].segment.id)));
+    return coveredOnDay.every(id => laneSegmentIds.has(id)) ? [occurrenceId] : [];
+  }));
   const openTaskItems = cellOccurrences.flatMap(({ occurrence, planningState, projection }) => {
     const occurrenceId = String(occurrence.id);
+    if (laneOccurrenceIds.has(occurrenceId)) return [];
     const gaps = getTaskTimelineGaps({
       occurrence,
       serviceDate: dayKey,
@@ -882,8 +1390,25 @@ function ObjectDayCell({
     startMinute: timeValue(projections[0]?.slice?.startTime || projections[0]?.segment?.start_time || shift.start_time),
     shift,
     projections,
-  }));
-  const cellItems = [...openTaskItems, ...serviceItems].sort((left, right) => (
+  })).filter(item => {
+    const segment = item.projections.length === 1 ? item.projections[0]?.segment : null;
+    return !segment || !laneOccurrenceIds.has(String(segment.task_occurrence_id));
+  });
+  const laneItems = cellOccurrences.flatMap(({ occurrence, planningState, projection }) => {
+    const occurrenceId = String(occurrence.id);
+    if (!laneOccurrenceIds.has(occurrenceId)) return [];
+    const demand = getTaskTimelineDemand(occurrence, dayKey);
+    return [{
+      kind: "task-lane",
+      key: `lane:${occurrenceId}:${dayKey}`,
+      startMinute: demand?.startMinute ?? timeValue(projection?.startTime),
+      occurrence,
+      planningState,
+      projection,
+      serviceEntries: laneServicesByOccurrence.get(occurrenceId) || [],
+    }];
+  });
+  const cellItems = [...openTaskItems, ...serviceItems, ...laneItems].sort((left, right) => (
     left.startMinute - right.startMinute
     || (left.kind === right.kind ? 0 : left.kind === "service" ? -1 : 1)
     || left.key.localeCompare(right.key)
@@ -891,6 +1416,43 @@ function ObjectDayCell({
   return (
     <div className="min-h-[112px] space-y-1.5 p-2" data-matrix-cell={`${resource.key}:${dayKey}`}>
       {cellItems.map(item => {
+        if (item.kind === "task-lane") {
+          const occurrenceId = String(item.occurrence.id);
+          const laneShiftIds = item.serviceEntries.map(entry => `shift:${entry.shift.id}`);
+          const lanePending = isPlanningResourcePending(
+            pendingResourceKeys,
+            mutationPending,
+            `occurrence:${occurrenceId}`,
+            ...laneShiftIds,
+          );
+          return (
+            <TaskCoverageLane
+              key={item.key}
+              occurrence={item.occurrence}
+              planningState={item.planningState}
+              projection={item.projection}
+              serviceDate={dayKey}
+              serviceEntries={item.serviceEntries}
+              allOccurrenceSegments={coverageSegmentsByOccurrence.get(occurrenceId) || []}
+              coverageShifts={coverageShiftsByOccurrence.get(occurrenceId) || []}
+              assignmentsByShift={assignmentsByShift}
+              resourceKey={`${resource.key}:${dayKey}:occurrence:${occurrenceId}`}
+              selectedShiftId={selectedShiftId}
+              onSelectOccurrence={onSelectOccurrence}
+              onSelectShift={onSelectShift}
+              onUnassign={onUnassign}
+              onMove={onMove}
+              onCopy={onCopy}
+              onEditComposition={onEditComposition}
+              onCancelComposition={onCancelComposition}
+              onCreateOpenTaskSlice={onCreateOpenTaskSlice}
+              onResizeTaskSegment={onResizeTaskSegment}
+              onResizeTaskBoundary={onResizeTaskBoundary}
+              mutationPending={lanePending}
+              compact={compact}
+            />
+          );
+        }
         if (item.kind === "open-task") {
           return (
             <OpenTaskIntervalCard
@@ -901,7 +1463,11 @@ function ObjectDayCell({
               gap={item.gap}
               onSelectOccurrence={onSelectOccurrence}
               onCreateOpenTaskSlice={onCreateOpenTaskSlice}
-              mutationPending={mutationPending}
+              mutationPending={isPlanningResourcePending(
+                pendingResourceKeys,
+                mutationPending,
+                `occurrence:${item.occurrence.id}`,
+              )}
             />
           );
         }
@@ -932,7 +1498,12 @@ function ObjectDayCell({
             onEditComposition={onEditComposition}
             onCancelComposition={onCancelComposition}
             onResizeTaskSegment={onResizeTaskSegment}
-            mutationPending={mutationPending}
+            mutationPending={isPlanningResourcePending(
+              pendingResourceKeys,
+              mutationPending,
+              `shift:${shift.id}`,
+              occurrenceContext ? `occurrence:${occurrenceContext.id}` : null,
+            )}
           />
         );
       })}
@@ -941,32 +1512,49 @@ function ObjectDayCell({
   );
 }
 
-function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSelectShift, onUnassign }) {
+function EmployeeDayCell({ resource, dayKey, placements, segmentsByShift, onSelectShift, onUnassign, mutationPending, pendingResourceKeys }) {
   const droppableId = `employee-day:${resource.id}:${dayKey}`;
+  const cellPending = isPlanningResourcePending(
+    pendingResourceKeys,
+    mutationPending,
+    `personnel:${resource.id}`,
+  );
   return (
-    <Droppable droppableId={droppableId} type="TASK">
+    <Droppable droppableId={droppableId} type="TASK" isDropDisabled={cellPending}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
           {...provided.droppableProps}
           data-droppable-id={droppableId}
           data-matrix-cell={`${resource.key}:${dayKey}`}
+          aria-busy={cellPending ? "true" : "false"}
           className={cn(
             "min-h-[112px] space-y-1.5 p-2 transition-colors",
             snapshot.isDraggingOver && "bg-primary/[0.08] ring-2 ring-inset ring-primary/35",
           )}
         >
-          {sortByStart(placements, item => item.slice?.startTime || item.shift.start_time).map(({ shift, assignment, slice }) => (
-            <EmployeeAssignmentBlock
-              key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
-              shift={shift}
-              assignment={assignment}
-              segments={segmentsByShift.get(String(shift.id)) || []}
-              projectionSlice={slice}
-              onSelect={() => onSelectShift?.(shift)}
-              onUnassign={item => onUnassign?.(shift, item)}
-            />
-          ))}
+          {sortByStart(placements, item => item.slice?.startTime || item.shift.start_time).map(({ shift, assignment, slice }) => {
+            const shiftSegments = segmentsByShift.get(String(shift.id)) || [];
+            const placementPending = isPlanningResourcePending(
+              pendingResourceKeys,
+              mutationPending,
+              `personnel:${resource.id}`,
+              `shift:${shift.id}`,
+              ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
+            );
+            return (
+              <EmployeeAssignmentBlock
+                key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
+                shift={shift}
+                assignment={assignment}
+                segments={shiftSegments}
+                projectionSlice={slice}
+                onSelect={() => onSelectShift?.(shift)}
+                onUnassign={item => onUnassign?.(shift, item)}
+                disabled={placementPending}
+              />
+            );
+          })}
           {placements.length === 0 && (
             <p className={cn("flex min-h-12 items-center justify-center rounded border border-dashed border-transparent px-2 text-center text-[9px] text-muted-foreground/60", snapshot.isDraggingOver && "border-primary/40 text-primary")}>
               {snapshot.isDraggingOver ? "Loslaten om taak bij medewerker te plannen" : "Sleep hier een open taak"}
@@ -1011,7 +1599,9 @@ export default function PlanningMatrix({
   onCancelComposition,
   onCreateOpenTaskSlice,
   onResizeTaskSegment,
+  onResizeTaskBoundary,
   mutationPending = false,
+  pendingResourceKeys = null,
 }) {
   const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
   const shiftsById = useMemo(() => new Map(shifts.map(item => [String(item.id), item])), [shifts]);
@@ -1158,6 +1748,8 @@ export default function PlanningMatrix({
         segmentsByShift={segmentsByShift}
         onSelectShift={onSelectShift}
         onUnassign={onUnassign}
+        mutationPending={mutationPending}
+        pendingResourceKeys={pendingResourceKeys}
       />
     ) : (
       <ObjectDayCell
@@ -1179,7 +1771,10 @@ export default function PlanningMatrix({
         onCancelComposition={onCancelComposition}
         onCreateOpenTaskSlice={onCreateOpenTaskSlice}
         onResizeTaskSegment={onResizeTaskSegment}
+        onResizeTaskBoundary={onResizeTaskBoundary}
         mutationPending={mutationPending}
+        pendingResourceKeys={pendingResourceKeys}
+        compact={compact}
       />
     );
   };

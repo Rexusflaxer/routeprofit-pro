@@ -44,7 +44,9 @@ export default function PlanningBoard({
   onCancelComposition,
   onCreateOpenTaskSlice,
   onResizeTaskSegment,
+  onResizeTaskBoundary,
   mutationPending = false,
+  pendingResourceKeys = null,
   isLoading,
 }) {
   if (isLoading) {
@@ -82,7 +84,9 @@ export default function PlanningBoard({
       onCancelComposition={onCancelComposition}
       onCreateOpenTaskSlice={onCreateOpenTaskSlice}
       onResizeTaskSegment={onResizeTaskSegment}
+      onResizeTaskBoundary={onResizeTaskBoundary}
       mutationPending={mutationPending}
+      pendingResourceKeys={pendingResourceKeys}
     />
   );
 }

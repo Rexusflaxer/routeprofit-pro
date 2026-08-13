@@ -69,7 +69,7 @@ function selectedShiftTiming(shift) {
   };
 }
 
-const CandidateCard = React.memo(function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes }) {
+const CandidateCard = React.memo(function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes, disabled = false }) {
   const [expanded, setExpanded] = useState(false);
   const name = personnelName(candidate.personnel);
   const critical = Number(candidate.criticalCount || 0);
@@ -79,11 +79,12 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
   const contractHours = Number(candidate.contractMinutes || 0) / 60;
 
   return (
-    <Draggable draggableId={`personnel:${candidate.personnel.id}`} index={index}>
+    <Draggable draggableId={`personnel:${candidate.personnel.id}`} index={index} isDragDisabled={disabled}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
+          aria-busy={disabled ? "true" : "false"}
           className={cn(
             "group rounded-md border border-border bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-all",
             snapshot.isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/20",
@@ -92,9 +93,10 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
           <div className="flex items-start gap-2">
             <button
               type="button"
+              disabled={disabled}
               aria-label={`${name} slepen`}
               title="Sleep naar een dienst"
-              className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-40"
               {...provided.dragHandleProps}
             >
               <GripVertical className="h-4 w-4" />
@@ -162,6 +164,7 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
                 <Button
                   variant={shiftTiming.crossesCalendarDay ? "outline" : "ghost"}
                   size={shiftTiming.crossesCalendarDay ? "sm" : "icon"}
+                  disabled={disabled}
                   className={cn("h-7 text-primary", shiftTiming.crossesCalendarDay ? "gap-1 px-2 text-[9px]" : "w-7")}
                   onClick={() => onAssign(candidate)}
                   aria-label={`${name} ${shiftTiming.crossesCalendarDay ? "op de volledige dienst inplannen" : "inplannen"} op ${selectedShift.name}; ${shiftTiming.label}`}
@@ -207,9 +210,15 @@ export default function PlanningEmployeePanel({
   qualifications,
   securityPasses,
   embedded = false,
+  pendingResourceKeys = null,
 }) {
   const [search, setSearch] = useState("");
   const shiftTiming = useMemo(() => selectedShiftTiming(selectedShift), [selectedShift]);
+  const selectedShiftPending = Boolean(
+    selectedShift
+    && pendingResourceKeys instanceof Set
+    && pendingResourceKeys.has(`shift:${selectedShift.id}`),
+  );
   const qualificationsByPersonnel = useMemo(() => {
     const grouped = new Map();
     qualifications.forEach(item => {
@@ -321,6 +330,10 @@ export default function PlanningEmployeePanel({
                 onAssign={onAssign}
                 qualifications={qualificationsByPersonnel.get(String(candidate.personnel.id)) || []}
                 passes={passesByPersonnel.get(String(candidate.personnel.id)) || []}
+                disabled={selectedShiftPending || (
+                  pendingResourceKeys instanceof Set
+                  && pendingResourceKeys.has(`personnel:${candidate.personnel.id}`)
+                )}
               />
             )) : (
               <div className="m-2 rounded-md border border-dashed border-border bg-card p-4 text-center">

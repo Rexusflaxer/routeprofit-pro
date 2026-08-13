@@ -73,6 +73,44 @@ describe("Planning taakwerkvoorraad", () => {
     expect(onAddToShift).toHaveBeenCalledWith(occurrence);
   });
 
+  it("blokkeert toevoegen aan een geselecteerde dienst zolang die wordt hersteld", () => {
+    const onAddToShift = vi.fn();
+    const partial = {
+      id: "segment-first-half",
+      shift_id: "shift-other",
+      task_occurrence_id: occurrence.id,
+      start_date: "2026-08-17",
+      end_date: "2026-08-17",
+      start_time: "08:00",
+      end_time: "12:00",
+      status: "draft",
+    };
+    const selectedShift = {
+      id: "shift-selected",
+      source_type: "task",
+      service_date: "2026-08-17",
+      name: "Avonddienst",
+      start_time: "12:00",
+      end_time: "16:00",
+    };
+    render(
+      <PlanningTaskBacklog
+        occurrences={[occurrence]}
+        segments={[partial]}
+        selectedShift={selectedShift}
+        pendingResourceKeys={new Set([`shift:${selectedShift.id}`])}
+        onCreateShift={vi.fn()}
+        onAddToShift={onAddToShift}
+        onEditShift={vi.fn()}
+      />,
+    );
+
+    const addButton = screen.getByRole("button", { name: /aan deze dienst/i });
+    expect(addButton).toBeDisabled();
+    fireEvent.click(addButton);
+    expect(onAddToShift).not.toHaveBeenCalled();
+  });
+
   it("laat de planner een gekozen doeldienst expliciet wissen", () => {
     const onClearShift = vi.fn();
     render(
