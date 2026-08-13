@@ -29,6 +29,12 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             )}
             aria-label={name}
           >
+            {variant === "midnight" && (
+              <Avatar className="h-9 w-9 shrink-0 border border-white/15 bg-white/10">
+                <AvatarImage src={photoUrl || undefined} alt={`Profielfoto van ${name}`} className="object-cover object-top" />
+                <AvatarFallback className="bg-white/10 text-[10px] font-bold text-slate-100">{initials(name)}</AvatarFallback>
+              </Avatar>
+            )}
             <span className={cn(
               "min-w-0 truncate text-[24px] font-bold leading-none tracking-tight text-primary",
               variant === "midnight" && "pb-0.5 text-[22px] text-slate-50 drop-shadow-[0_2px_8px_rgba(0,0,0,0.4)]",
