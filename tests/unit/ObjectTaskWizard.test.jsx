@@ -53,7 +53,7 @@ describe("ObjectTaskWizard", () => {
     expect(await screen.findByText("Welk beveiligingsplan geldt?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Receptie werkdagen/i }));
 
-    expect(await screen.findByText("Teken de taak in het rooster")).toBeInTheDocument();
+    expect(await screen.findByText("Wanneer wordt deze taak uitgevoerd?")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Taakrooster per week" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Taak opslaan" })).toBeDisabled();
   });

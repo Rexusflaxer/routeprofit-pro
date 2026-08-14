@@ -2,7 +2,6 @@ import React from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, StepHeading } from "./ObjectWizardUi";
 import ObjectTaskSchedule from "./ObjectTaskSchedule";
-import { securityPlanTaskTypeLabel } from "./securityPlanConfig";
 
 export default function ObjectTaskTimingStep({
   form,
@@ -16,10 +15,10 @@ export default function ObjectTaskTimingStep({
   return (
     <>
       <StepHeading
-        title="Teken de taak in het rooster"
+        title="Wanneer wordt deze taak uitgevoerd?"
         description={continuous
-          ? "Je ziet de huidige kalenderweek. Teken alleen in de toekomst en stel herhaling daarna per taakmoment in."
-          : "Klik in de huidige of een volgende week. De duur komt uit het gekozen beveiligingsplan; herhaling stel je daarna per taakmoment in."}
+          ? "Teken de aaneengesloten bezetting per dag in de vertrouwde tijdlijn. Klik daarna op een taakblok voor de exacte tijd en herhaling."
+          : "Plaats de toegestane taakmomenten in de tijdlijn. De uitvoeringsduur komt uit het gekozen beveiligingsplan; exacte tijd en herhaling stel je per blok in."}
       />
       <ObjectTaskSchedule
         entries={form.schedule_entries}
@@ -27,7 +26,6 @@ export default function ObjectTaskTimingStep({
         onChange={value => onChange("schedule_entries", value)}
         executionMode={form.execution_mode}
         durationMinutes={Number(form.duration_minutes)}
-        taskLabel={form.custom_task_type || securityPlanTaskTypeLabel(form.task_type)}
         weekStart={weekStart}
         onWeekChange={onWeekChange}
         serverClock={serverClock}
