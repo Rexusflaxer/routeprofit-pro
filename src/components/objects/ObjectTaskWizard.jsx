@@ -17,6 +17,25 @@ const STEPS = [
   { key: "schedule", label: "Rooster" },
 ];
 
+function initialScheduleEntries(task) {
+  const source = Array.isArray(task?.schedule_entries)
+    ? task.schedule_entries
+    : Array.isArray(task?.schedule_blocks)
+      ? task.schedule_blocks
+      : [];
+  return source.map(entry => ({
+    ...entry,
+    client_id: entry.client_id || createClientId(),
+    occurrence_date: entry.occurrence_date || entry.service_date || "",
+    frequency: entry.frequency || (entry.repeat_weekly ? "weekly" : "once"),
+    repeat_until: entry.repeat_until || entry.recurrence_end_date || null,
+  }));
+}
+
+function createClientId() {
+  return `schedule:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+}
+
 function initialForm(task) {
   return {
     security_plan_id: task?.security_plan_id || "",
@@ -24,7 +43,7 @@ function initialForm(task) {
     custom_task_type: task?.custom_task_type || "",
     execution_mode: task?.execution_mode || "",
     duration_minutes: Number(task?.duration_minutes || 0),
-    schedule_entries: Array.isArray(task?.schedule_entries) ? task.schedule_entries : [],
+    schedule_entries: initialScheduleEntries(task),
     instructions: task?.instructions || "",
   };
 }

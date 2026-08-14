@@ -1,7 +1,7 @@
 # Objecttaken per kalenderweek - ontwerpbesluit
 
 Datum: 2026-08-14
-Status: gekozen en geimplementeerd interactie- en domeinmodel
+Status: gekozen en geimplementeerd domeinmodel; bediening gevalideerd met gebruiker
 
 ## Doel
 
@@ -26,13 +26,15 @@ De taakwizard heeft drie stappen:
 De losse stap **Herhaling** vervalt. Herhaling hoort bij een getekend tijdblok, omdat twee blokken van dezelfde taak verschillende patronen kunnen hebben.
 
 - De wizard opent op de huidige ISO-week in `Europe/Amsterdam`.
-- De weekkop toont ISO-weeknummer, weekjaar en het datumbereik.
-- De dagkop toont weekdag en datum; vandaag is apart gemarkeerd.
-- Een live tijdlijn toont de huidige tijd en beweegt door zolang het scherm openstaat.
+- Het vertrouwde compacte rooster blijft leidend: maandag tot en met zondag staan onder elkaar en de horizontale tijdlijn loopt van `00:00` tot `24:00` in blokken van dertig minuten.
+- De bestaande gereedschappen blijven behouden: slepen/schilderen voor aaneengesloten taken, een klik voor een taak met vaste planduur, wissen en de presets voor werkdagen en `24/7`.
+- Een compacte weekkop boven het bestaande rooster toont ISO-weeknummer, datumbereik en vorige/deze/volgende week. De daglabels tonen naast de weekdag de kalenderdatum.
+- Een live nu-indicatie wordt in dezelfde tijdlijn getekend en beweegt door zolang het scherm openstaat.
 - Voltooide dagen zijn vergrendeld. Op vandaag is alles voor de eerstvolgende geldige vijfminutengrens vergrendeld.
 - Toekomstige weken zijn rechtstreeks bereikbaar. De gebruiker kan niet naar een volledig verstreken week terug om nieuwe vraag te tekenen.
-- Tekenen, toetsenbordbediening en exacte tijdinvoer gebruiken dezelfde vijfminutensnap.
-- Een klik op een blok opent de reeksinstellingen: eenmalig of wekelijks, met optionele inclusieve einddatum.
+- De tijdlijn blijft op de bestaande dertigminutenblokken werken; via een klik op een getekend blok opent de kleine, aan het blok gekoppelde popup voor een exacte tijd.
+- Diezelfde popup bevat compact de keuze eenmalig of wekelijks, met een optionele inclusieve einddatum. Er komt geen afzonderlijke herhalingsstap of grote algemene reeksdialoog.
+- Andere objecttaken blijven gedempt in de achtergrond zichtbaar met de bestaande legenda.
 
 ## Reeks- en revisiemodel
 

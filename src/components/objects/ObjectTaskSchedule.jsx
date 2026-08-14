@@ -1,159 +1,540 @@
-import React, { useMemo, useState } from "react";
-import ObjectTaskSeriesDialog from "./ObjectTaskSeriesDialog";
-import ObjectTaskWeekSchedule from "./ObjectTaskWeekSchedule";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
+import ObjectTaskTimePopup from "./ObjectTaskTimePopup";
+import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
+import { periodsToSchedule } from "./warningAvailabilityScheduleModel";
 import {
+  OBJECT_TASK_DAY_KEYS,
   addObjectTaskDays,
+  addObjectTaskWeeks,
   createObjectTaskClientId,
+  formatObjectTaskCompactDate,
+  formatObjectTaskFullDate,
   getAmsterdamNow,
+  objectTaskClockToMinutes,
+  objectTaskEditableBoundary,
+  objectTaskWeek,
   objectTaskWeekStart,
+  objectTaskWeekday,
   projectObjectTaskDrafts,
   projectObjectTaskSchedules,
 } from "./objectTaskScheduleDomain";
 
-function withDraftLabel(entries, label) {
-  return entries.map(entry => ({ ...entry, label: label || "Nieuwe taak" }));
+const GRID_HEADER_HEIGHT = 36;
+const GRID_DAY_HEIGHT = 48;
+
+function liveAmsterdamClock(serverClock) {
+  const serverInstant = serverClock?.iso && Number.isFinite(Date.parse(serverClock.iso))
+    ? Date.parse(serverClock.iso)
+    : null;
+  const clientInstant = Date.now();
+  return () => getAmsterdamNow(new Date(
+    serverInstant == null ? Date.now() : serverInstant + (Date.now() - clientInstant),
+  ));
+}
+
+function useLiveAmsterdamNow(serverClock) {
+  const source = useRef(liveAmsterdamClock(serverClock));
+  const [now, setNow] = useState(() => source.current());
+  useEffect(() => {
+    source.current = liveAmsterdamClock(serverClock);
+    const update = () => setNow(source.current());
+    update();
+    let interval = null;
+    const align = globalThis.setTimeout(() => {
+      update();
+      interval = globalThis.setInterval(update, 60_000);
+    }, Math.max(250, 60_000 - (Date.now() % 60_000) + 25));
+    const onVisibility = () => document.visibilityState === "visible" && update();
+    globalThis.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      globalThis.clearTimeout(align);
+      if (interval) globalThis.clearInterval(interval);
+      globalThis.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [serverClock]);
+  return now;
+}
+
+function toMinutes(value) {
+  return objectTaskClockToMinutes(value) ?? 0;
+}
+
+function toTime(value) {
+  if (value === 1440) return "24:00";
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function entryPeriod(entry) {
+  const dayIndex = objectTaskWeekday(entry.occurrence_date) - 1;
+  if (dayIndex < 0) return null;
+  return {
+    days: [OBJECT_TASK_DAY_KEYS[dayIndex]],
+    start_time: entry.start_time,
+    end_time: entry.end_time,
+    kind: "available",
+    entry,
+  };
+}
+
+function occurrenceReplacement(source, occurrenceDate, values) {
+  const startsLater = source.frequency === "weekly" && occurrenceDate > source.occurrence_date;
+  const next = {
+    ...source,
+    ...values,
+    end_day_offset: 0,
+  };
+  if (!startsLater) return [next];
+  return [
+    { ...source, repeat_until: addObjectTaskDays(occurrenceDate, -1) },
+    {
+      ...next,
+      client_id: createObjectTaskClientId(),
+      occurrence_date: occurrenceDate,
+    },
+  ];
+}
+
+function occurrenceRemoval(source, occurrenceDate) {
+  if (source.frequency === "weekly" && occurrenceDate > source.occurrence_date) {
+    return [{ ...source, repeat_until: addObjectTaskDays(occurrenceDate, -1) }];
+  }
+  return [];
+}
+
+function replaceSource(entries, sourceId, replacement) {
+  return entries.flatMap(entry => entry.client_id === sourceId ? replacement : [entry]);
 }
 
 export default function ObjectTaskSchedule({
   entries = [],
   contextData = null,
+  taskDefinitionId = null,
   onChange,
   executionMode,
   durationMinutes,
-  taskLabel,
   weekStart,
   onWeekChange,
   serverClock = null,
+  pending = false,
+  error = null,
+  onPersistedCreate = null,
+  onPersistedChange = null,
+  onPersistedStop = null,
 }) {
-  const fallbackWeek = getAmsterdamNow(
-    serverClock?.iso && Number.isFinite(Date.parse(serverClock.iso))
-      ? new Date(serverClock.iso)
-      : new Date(),
-  ).weekStart;
-  const [localWeek, setLocalWeek] = useState(() => objectTaskWeekStart(weekStart) || fallbackWeek);
-  const selectedWeek = objectTaskWeekStart(weekStart) || localWeek;
+  const now = useLiveAmsterdamNow(serverClock);
+  const currentWeekStart = now.weekStart;
+  const [localWeek, setLocalWeek] = useState(() => objectTaskWeekStart(weekStart) || currentWeekStart);
+  const controlledWeek = objectTaskWeekStart(weekStart);
+  const selectedWeek = controlledWeek || localWeek;
+  const week = objectTaskWeek(selectedWeek);
+  const persistedMode = Boolean(taskDefinitionId);
+  const continuous = executionMode === "continuous";
+  const [tool, setTool] = useState("available");
+  const [painting, setPainting] = useState(false);
   const [editor, setEditor] = useState(null);
+  const [localError, setLocalError] = useState(null);
+  const [scratchEntries, setScratchEntries] = useState([]);
+  const entriesRef = useRef(entries);
+  const scratchRef = useRef(scratchEntries);
+  const paintingSourceRef = useRef(null);
 
-  const projectedEntries = useMemo(
-    () => withDraftLabel(projectObjectTaskDrafts(entries, selectedWeek), taskLabel),
-    [entries, selectedWeek, taskLabel],
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
+  useEffect(() => { scratchRef.current = scratchEntries; }, [scratchEntries]);
+  useEffect(() => {
+    const stop = () => {
+      setPainting(false);
+      paintingSourceRef.current = null;
+    };
+    window.addEventListener("pointerup", stop);
+    return () => window.removeEventListener("pointerup", stop);
+  }, []);
+  useEffect(() => {
+    if (selectedWeek < currentWeekStart) {
+      setLocalWeek(currentWeekStart);
+      onWeekChange?.(currentWeekStart);
+    }
+  }, [currentWeekStart, onWeekChange, selectedWeek]);
+
+  const projectedLocalEntries = useMemo(
+    () => projectObjectTaskDrafts(entries, selectedWeek),
+    [entries, selectedWeek],
   );
-  const contextEntries = useMemo(() => (
-    contextData
-      ? projectObjectTaskSchedules({
-        definitions: contextData.definitions,
-        series: contextData.series,
-        revisions: contextData.revisions,
-        sourceChanges: contextData.source_changes,
-        weekStart: selectedWeek,
-      })
-      : []
-  ), [contextData, selectedWeek]);
+  const projectedScratchEntries = useMemo(
+    () => projectObjectTaskDrafts(scratchEntries, selectedWeek),
+    [scratchEntries, selectedWeek],
+  );
+  const projectedContextEntries = useMemo(() => contextData ? projectObjectTaskSchedules({
+    definitions: contextData.definitions,
+    series: contextData.series,
+    revisions: contextData.revisions,
+    sourceChanges: contextData.source_changes,
+    weekStart: selectedWeek,
+  }) : [], [contextData, selectedWeek]);
+  const persistedOwnEntries = persistedMode
+    ? projectedContextEntries.filter(entry => String(entry.definition_id) === String(taskDefinitionId))
+    : [];
+  const ownEntries = persistedMode
+    ? [...persistedOwnEntries, ...projectedScratchEntries]
+    : projectedLocalEntries;
+  const contextEntries = persistedMode
+    ? projectedContextEntries.filter(entry => String(entry.definition_id) !== String(taskDefinitionId))
+    : projectedContextEntries;
+  const exactPeriods = ownEntries.map(entryPeriod).filter(Boolean);
+  const schedule = useMemo(() => periodsToSchedule(exactPeriods), [exactPeriods]);
+  const contextGroups = useMemo(() => {
+    const colors = new Map();
+    return contextEntries.map(entry => {
+      const label = entry.label || "Andere taak";
+      if (!colors.has(label)) colors.set(label, colors.size % 4);
+      return { entry, label, colorIndex: colors.get(label) };
+    });
+  }, [contextEntries]);
+  const backgroundPeriods = contextGroups.map(group => ({
+    ...entryPeriod(group.entry),
+    taskId: group.entry.id,
+    colorIndex: group.colorIndex,
+  }));
+  const contextLegend = [...new Map(contextGroups.map(group => [group.label, group])).values()];
+
+  const commitEntries = value => {
+    entriesRef.current = value;
+    onChange?.(value);
+  };
+  const commitScratch = value => {
+    scratchRef.current = value;
+    setScratchEntries(value);
+  };
+  const editableBoundary = dayIndex => objectTaskEditableBoundary(week.days[dayIndex], now);
+  const momentEditable = (dayIndex, minute) => minute >= editableBoundary(dayIndex);
+
+  const projectedEntryAt = (dayIndex, interval) => {
+    const occurrenceDate = week.days[dayIndex];
+    return ownEntries.find(entry => entry.occurrence_date === occurrenceDate
+      && toMinutes(entry.start_time) === interval.start
+      && toMinutes(entry.end_time) === interval.end) || null;
+  };
+
+  const removeEntry = entry => {
+    if (!entry) return;
+    setLocalError(null);
+    const sourceId = entry.draft_source_id || entry.client_id;
+    if (persistedMode && !entry.draft) {
+      // Bestaande reeksen worden uitsluitend via de bevestigde, awaited
+      // stopactie in de popup gewijzigd. De wis-tool is in deze modus verborgen.
+      return;
+    }
+    const collection = persistedMode ? scratchRef.current : entriesRef.current;
+    const source = collection.find(item => item.client_id === sourceId);
+    if (!source) return;
+    const next = replaceSource(collection, sourceId, occurrenceRemoval(source, entry.occurrence_date));
+    if (persistedMode) commitScratch(next);
+    else commitEntries(next);
+  };
+
+  const currentOwnEntries = () => persistedMode
+    ? [
+      ...persistedOwnEntries,
+      ...projectObjectTaskDrafts(scratchRef.current, selectedWeek),
+    ]
+    : projectObjectTaskDrafts(entriesRef.current, selectedWeek);
+
+  const createEntry = (occurrenceDate, startMinute, endMinute) => ({
+    client_id: createObjectTaskClientId(),
+    occurrence_date: occurrenceDate,
+    start_time: toTime(startMinute),
+    end_time: toTime(endMinute),
+    end_day_offset: 0,
+    frequency: "once",
+    repeat_until: null,
+  });
+
+  const paintContinuousSlot = (dayIndex, startMinute, start) => {
+    const occurrenceDate = week.days[dayIndex];
+    const endMinute = startMinute + 30;
+    if (start) {
+      setPainting(true);
+      paintingSourceRef.current = null;
+    }
+    const sourceId = paintingSourceRef.current;
+    const current = currentOwnEntries();
+    const blocked = current.some(entry => {
+      const entrySourceId = entry.draft_source_id || entry.client_id;
+      return entrySourceId !== sourceId
+        && entry.occurrence_date === occurrenceDate
+        && toMinutes(entry.start_time) < endMinute
+        && toMinutes(entry.end_time) > startMinute;
+    });
+    if (blocked) {
+      paintingSourceRef.current = null;
+      return;
+    }
+
+    const collection = persistedMode ? scratchRef.current : entriesRef.current;
+    const source = sourceId ? collection.find(entry => entry.client_id === sourceId) : null;
+    if (source && source.occurrence_date === occurrenceDate) {
+      const nextStart = Math.min(toMinutes(source.start_time), startMinute);
+      const nextEnd = Math.max(toMinutes(source.end_time), endMinute);
+      const next = collection.map(entry => entry.client_id === sourceId
+        ? { ...entry, start_time: toTime(nextStart), end_time: toTime(nextEnd) }
+        : entry);
+      if (persistedMode) commitScratch(next);
+      else commitEntries(next);
+      return;
+    }
+
+    const entry = createEntry(occurrenceDate, startMinute, endMinute);
+    paintingSourceRef.current = entry.client_id;
+    if (persistedMode) commitScratch([...collection, entry]);
+    else commitEntries([...collection, entry]);
+  };
+
+  const paint = (dayIndex, slot, start, active) => {
+    const startMinute = slot * 30;
+    if (!momentEditable(dayIndex, startMinute)) return;
+    if (!continuous) {
+      if (tool === null) {
+        if (active) removeEntry(projectedEntryAt(dayIndex, active.interval));
+        return;
+      }
+      const endMinute = startMinute + Number(durationMinutes || 0);
+      if (!durationMinutes || endMinute > 1440) return;
+      const overlaps = currentOwnEntries().some(entry => entry.occurrence_date === week.days[dayIndex]
+        && toMinutes(entry.start_time) < endMinute
+        && toMinutes(entry.end_time) > startMinute);
+      if (overlaps) return;
+      const nextEntry = createEntry(week.days[dayIndex], startMinute, endMinute);
+      if (persistedMode) commitScratch([...scratchRef.current, nextEntry]);
+      else commitEntries([...entriesRef.current, nextEntry]);
+      return;
+    }
+    if (tool === null && active) {
+      removeEntry(projectedEntryAt(dayIndex, active.interval));
+      return;
+    }
+    paintContinuousSlot(dayIndex, startMinute, start);
+  };
+
+  const preset = type => {
+    if (persistedMode) return;
+    if (type === "empty") {
+      let next = [...entriesRef.current];
+      const handled = new Set();
+      projectObjectTaskDrafts(entriesRef.current, selectedWeek).forEach(entry => {
+        const sourceId = entry.draft_source_id || entry.client_id;
+        if (handled.has(sourceId)) return;
+        handled.add(sourceId);
+        const source = next.find(item => item.client_id === sourceId);
+        if (source) next = replaceSource(next, sourceId, occurrenceRemoval(source, entry.occurrence_date));
+      });
+      commitEntries(next);
+      return;
+    }
+    const projected = projectObjectTaskDrafts(entriesRef.current, selectedWeek);
+    const additions = [];
+    week.days.forEach((occurrenceDate, dayIndex) => {
+      if (type === "business" && dayIndex >= 5) return;
+      let cursor = type === "business"
+        ? Math.max(8 * 60, Math.ceil(editableBoundary(dayIndex) / 30) * 30)
+        : Math.ceil(editableBoundary(dayIndex) / 30) * 30;
+      const limit = type === "business" ? 18 * 60 : 1440;
+      const occupied = projected
+        .filter(entry => entry.occurrence_date === occurrenceDate)
+        .map(entry => ({ start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) }))
+        .sort((left, right) => left.start - right.start);
+      occupied.forEach(interval => {
+        if (interval.end <= cursor || interval.start >= limit) return;
+        if (interval.start > cursor) additions.push(createEntry(occurrenceDate, cursor, Math.min(interval.start, limit)));
+        cursor = Math.max(cursor, interval.end);
+      });
+      if (cursor < limit) additions.push(createEntry(occurrenceDate, cursor, limit));
+    });
+    commitEntries([...entriesRef.current, ...additions]);
+  };
+
+  const openEditor = interval => {
+    const entry = projectedEntryAt(interval.dayIndex, interval);
+    if (!entry || !momentEditable(interval.dayIndex, interval.start)) return;
+    const occurrenceDate = week.days[interval.dayIndex];
+    setLocalError(null);
+    setEditor({
+      ...entry,
+      ...interval,
+      occurrence_date: occurrenceDate,
+      dayLabel: WEEKDAY_OPTIONS[interval.dayIndex].label,
+      dateLabel: formatObjectTaskFullDate(occurrenceDate),
+      start_time: entry.start_time || toTime(interval.start),
+      end_time: entry.end_time || toTime(interval.end),
+    });
+  };
+
+  const saveEditor = async values => {
+    if (!editor) return;
+    const startMinute = toMinutes(values.start_time);
+    if (!momentEditable(editor.dayIndex, startMinute)) {
+      setLocalError(new Error("Kies een starttijd die na het huidige tijdstip ligt."));
+      return;
+    }
+    const collision = ownEntries.some(entry => entry.id !== editor.id
+      && entry.occurrence_date === editor.occurrence_date
+      && toMinutes(entry.start_time) < toMinutes(values.end_time)
+      && toMinutes(entry.end_time) > startMinute);
+    if (collision) {
+      setLocalError(new Error("Dit tijdvak overlapt een ander moment van dezelfde taak."));
+      return;
+    }
+    setLocalError(null);
+    if (persistedMode && !editor.draft) {
+      try {
+        await onPersistedChange?.(editor, values);
+        setEditor(null);
+      } catch {
+        // De mutatiefout wordt via de callback/error-prop in de pop-up getoond.
+      }
+      return;
+    }
+    if (persistedMode) {
+      try {
+        await onPersistedCreate?.({ ...editor, ...values, end_day_offset: 0 });
+        commitScratch(scratchRef.current.filter(entry => entry.client_id !== (editor.draft_source_id || editor.client_id)));
+        setEditor(null);
+      } catch {
+        // De mutatiefout wordt via de callback/error-prop in de pop-up getoond.
+      }
+      return;
+    }
+    const sourceId = editor.draft_source_id || editor.client_id;
+    const source = entriesRef.current.find(entry => entry.client_id === sourceId);
+    if (!source) return;
+    commitEntries(replaceSource(
+      entriesRef.current,
+      sourceId,
+      occurrenceReplacement(source, editor.occurrence_date, values),
+    ));
+    setEditor(null);
+  };
+
+  const deleteEditor = async () => {
+    if (!editor) return;
+    if (persistedMode && !editor.draft) {
+      try {
+        await onPersistedStop?.(editor);
+        setEditor(null);
+      } catch {
+        // De mutatiefout wordt via de callback/error-prop in de pop-up getoond.
+      }
+      return;
+    }
+    removeEntry(editor);
+    setEditor(null);
+  };
 
   const changeWeek = value => {
-    const normalized = objectTaskWeekStart(value) || fallbackWeek;
+    const normalized = objectTaskWeekStart(value);
+    if (!normalized || normalized < currentWeekStart) return;
     setLocalWeek(normalized);
+    setEditor(null);
+    setLocalError(null);
+    if (persistedMode) commitScratch([]);
     onWeekChange?.(normalized);
   };
 
-  const addEntry = interval => {
-    const draft = {
-      client_id: createObjectTaskClientId(),
-      occurrence_date: interval.occurrence_date,
-      start_time: interval.start_time,
-      end_time: interval.end_time,
-      end_day_offset: Number(interval.end_day_offset || 0),
-      frequency: "once",
-      repeat_until: null,
-    };
-    onChange([...entries, draft]);
-    setEditor({
-      ...draft,
-      id: `${draft.client_id}:${draft.occurrence_date}`,
-      draft_source_id: draft.client_id,
-      draft: true,
-      label: taskLabel || "Nieuwe taak",
-    });
-  };
-
-  const openEntry = projected => {
-    const source = entries.find(entry => entry.client_id === projected.draft_source_id);
-    if (!source) return;
-    setEditor({
-      ...source,
-      occurrence_date: projected.occurrence_date,
-      id: projected.id,
-      draft_source_id: source.client_id,
-      draft: true,
-      label: taskLabel || "Nieuwe taak",
-    });
-  };
-
-  const saveEntry = next => {
-    const sourceIndex = entries.findIndex(entry => entry.client_id === editor?.draft_source_id);
-    if (sourceIndex < 0) return;
-    const source = entries[sourceIndex];
-    const appliesFromLaterOccurrence = source.frequency === "weekly"
-      && editor.occurrence_date > source.occurrence_date;
-    let nextEntries;
-    if (appliesFromLaterOccurrence) {
-      const previous = { ...source, repeat_until: addObjectTaskDays(editor.occurrence_date, -1) };
-      const replacement = {
-        ...source,
-        ...next,
-        client_id: createObjectTaskClientId(),
-        occurrence_date: editor.occurrence_date,
-      };
-      nextEntries = entries.flatMap((entry, index) => index === sourceIndex ? [previous, replacement] : [entry]);
-    } else {
-      nextEntries = entries.map((entry, index) => index === sourceIndex ? { ...entry, ...next } : entry);
-    }
-    onChange(nextEntries);
-    setEditor(null);
-  };
-
-  const deleteEntry = () => {
-    const sourceIndex = entries.findIndex(entry => entry.client_id === editor?.draft_source_id);
-    if (sourceIndex < 0) return;
-    const source = entries[sourceIndex];
-    const stopsLaterSeries = source.frequency === "weekly" && editor.occurrence_date > source.occurrence_date;
-    onChange(stopsLaterSeries
-      ? entries.map((entry, index) => index === sourceIndex
-        ? { ...entry, repeat_until: addObjectTaskDays(editor.occurrence_date, -1) }
-        : entry)
-      : entries.filter((_, index) => index !== sourceIndex));
-    setEditor(null);
-  };
+  const todayIndex = week.days.indexOf(now.dateKey);
+  const nowLeft = `calc(40px + (100% - 40px) * ${Math.min(1, now.minute / 1440)})`;
 
   return (
-    <fieldset className="space-y-3">
+    <fieldset role="region" className="space-y-3" aria-label="Taakrooster per week">
       <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taakrooster *</legend>
-      <ObjectTaskWeekSchedule
-        weekStart={selectedWeek}
-        onWeekChange={changeWeek}
-        entries={projectedEntries}
-        contextEntries={contextEntries}
-        editable
-        allowDrawing
-        allowEntryEditing
-        executionMode={executionMode}
-        durationMinutes={Number(durationMinutes || 0)}
-        serverClock={serverClock}
-        onDraw={addEntry}
-        onEntryClick={openEntry}
-      />
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        Momenten van andere taken zijn gedempt zichtbaar om overlap te herkennen. Herhaling stel je per getekend taakmoment in; eerdere weken veranderen nooit mee.
+
+      <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold">Week {week.week} · {week.year}</p>
+          <p className="text-[10px] text-muted-foreground">{week.rangeLabel}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button type="button" size="icon" variant="outline" className="h-7 w-7" disabled={selectedWeek <= currentWeekStart} onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, -1))} aria-label="Vorige week"><ChevronLeft className="h-3.5 w-3.5" /></Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={selectedWeek === currentWeekStart} onClick={() => changeWeek(currentWeekStart)}><RotateCcw className="h-3 w-3" /> Deze week</Button>
+          <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, 1))} aria-label="Volgende week"><ChevronRight className="h-3.5 w-3.5" /></Button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10px] text-muted-foreground" aria-label="Datums in deze week">
+        {week.days.map((dateKey, dayIndex) => (
+          <span key={dateKey} className={dateKey === now.dateKey ? "font-semibold text-primary" : dateKey < now.dateKey ? "opacity-55" : ""}>
+            {WEEKDAY_OPTIONS[dayIndex].label.slice(0, 2)} {formatObjectTaskCompactDate(dateKey)}{dateKey === now.dateKey ? ` · vandaag ${now.clock}` : ""}
+          </span>
+        ))}
+      </div>
+
+      {!persistedMode && (
+        <div className="flex flex-wrap gap-2">
+          {continuous && <button type="button" onClick={() => preset("business")} className="rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-xs font-medium hover:border-primary/40">Werkdagen 08:00–18:00</button>}
+          {continuous && <button type="button" onClick={() => preset("all")} className="rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-xs font-medium hover:border-primary/40">24/7 invullen</button>}
+          <button type="button" onClick={() => preset("empty")} className="rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-xs font-medium hover:border-primary/40">Rooster wissen</button>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setTool("available")} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === "available" ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" />{continuous ? "Taak uitvoeren" : `Taak plaatsen (${durationMinutes} min.)`}</button>
+        {!persistedMode && <button type="button" onClick={() => setTool(null)} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>}
+      </div>
+
+      <div className="overflow-auto">
+        <div className="relative min-w-[900px]">
+          <div className="[&>div]:overflow-visible [&>div>div]:min-w-0">
+            <WarningAvailabilityGrid
+              schedule={schedule}
+              exactPeriods={exactPeriods}
+              backgroundPeriods={backgroundPeriods}
+              previewDurationMinutes={continuous ? null : durationMinutes}
+              onPaint={paint}
+              onIntervalClick={openEditor}
+              painting={painting}
+              tool={tool}
+            />
+          </div>
+          {week.days.map((dateKey, dayIndex) => {
+            const past = dateKey < now.dateKey;
+            const today = dateKey === now.dateKey;
+            if (!past && !today) return null;
+            const width = past ? "calc(100% - 40px)" : `calc((100% - 40px) * ${Math.min(1, objectTaskEditableBoundary(dateKey, now) / 1440)})`;
+            return <span key={dateKey} className="pointer-events-auto absolute z-20 border-r border-border/50 bg-muted/35 [background-image:repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--border)/0.16)_5px,hsl(var(--border)/0.16)_6px)]" aria-hidden="true" style={{ left: 40, top: GRID_HEADER_HEIGHT + dayIndex * GRID_DAY_HEIGHT, width, height: GRID_DAY_HEIGHT }} />;
+          })}
+          {todayIndex >= 0 && (
+            <span className="pointer-events-none absolute z-30 w-px bg-destructive/80" style={{ left: nowLeft, top: GRID_HEADER_HEIGHT + todayIndex * GRID_DAY_HEIGHT + 2, height: GRID_DAY_HEIGHT - 4 }}>
+              <span className="absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-destructive" />
+              <span className="absolute left-1/2 top-1 -translate-x-1/2 rounded bg-destructive px-1 py-0.5 text-[8px] font-bold text-destructive-foreground shadow">{now.clock}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {contextLegend.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+          <span>Andere geplande taken:</span>
+          {contextLegend.map(group => <span key={group.label} className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-sm border ${["border-chart-2/40 bg-chart-2/20", "border-chart-4/40 bg-chart-4/20", "border-chart-5/40 bg-chart-5/20", "border-chart-3/40 bg-chart-3/20"][group.colorIndex % 4]}`} />{group.label}</span>)}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {continuous
+          ? "Sleep over blokken van 30 minuten. Klik op een ingetekende taak om exacte tijden en herhaling in te stellen."
+          : `Klik in het rooster om een losse taak van ${durationMinutes} minuten te plaatsen. Klik op de taak om de exacte starttijd en herhaling in te stellen.`}
       </p>
-      <ObjectTaskSeriesDialog
-        entry={editor}
-        open={Boolean(editor)}
-        fixedDuration={executionMode === "time_window" ? Number(durationMinutes || 0) : null}
-        serverClock={serverClock}
-        onOpenChange={open => !open && setEditor(null)}
-        onSave={saveEntry}
-        onDelete={deleteEntry}
-      />
+
+      {editor && (
+        <ObjectTaskTimePopup
+          editor={editor}
+          fixedDuration={continuous ? null : durationMinutes}
+          pending={pending}
+          error={localError || error}
+          onClose={() => !pending && setEditor(null)}
+          onSave={saveEditor}
+          onDelete={persistedMode ? deleteEditor : null}
+        />
+      )}
     </fieldset>
   );
 }

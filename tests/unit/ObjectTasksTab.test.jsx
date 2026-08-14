@@ -24,55 +24,75 @@ vi.mock("@/components/ui/use-toast", () => ({
 }));
 
 vi.mock("@/components/objects/ObjectTaskTable", () => ({
-  default: ({ rows, onAddSeries }) => (
+  default: ({ rows, onOpenSchedule }) => (
     <div>
       {rows.map(row => (
-        <button key={row.id} type="button" onClick={() => onAddSeries(row)}>
-          Rooster aanvullen voor {row.task_type_label}
+        <button key={row.id} type="button" onClick={() => onOpenSchedule(row)}>
+          Rooster wijzigen voor {row.task_type_label}
         </button>
       ))}
     </div>
   ),
 }));
 
-vi.mock("@/components/objects/ObjectTaskWeekSchedule", () => ({
-  default: ({ allowDrawing, onDraw }) => (
-    <section aria-label="Taakrooster testweergave">
-      <output aria-label="Tekenmodus">{allowDrawing ? "actief" : "inactief"}</output>
-      {allowDrawing && (
-        <button
-          type="button"
-          onClick={() => onDraw({
-            occurrence_date: "2026-08-21",
-            start_time: "10:00",
-            end_time: "18:00",
-            end_day_offset: 0,
-          })}
-        >
-          Teken tijdvak
-        </button>
-      )}
-    </section>
-  ),
-}));
+const persistedEntry = {
+  id: "series-reception:2026-08-17",
+  occurrence_date: "2026-08-17",
+  start_time: "06:30",
+  end_time: "18:00",
+  end_day_offset: 0,
+  frequency: "weekly",
+  repeat_until: null,
+  definition_id: "definition-reception",
+  definition: { id: "definition-reception", version: 3, execution_mode: "continuous" },
+  series_id: "series-reception",
+  series_version: 2,
+};
 
-vi.mock("@/components/objects/ObjectTaskSeriesDialog", () => ({
-  default: ({ entry, open, onSave }) => open ? (
-    <div role="dialog" aria-label="Roosterreeks instellen">
-      <output aria-label="Gekozen taakdefinitie">{entry.definition_id}</output>
-      <button
-        type="button"
-        onClick={() => onSave({
+vi.mock("@/components/objects/ObjectTaskSchedule", () => ({
+  default: ({ taskDefinitionId, onPersistedCreate, onPersistedChange, onPersistedStop }) => {
+    const [editorOpen, setEditorOpen] = React.useState(false);
+    const [editorError, setEditorError] = React.useState(null);
+    const applyChange = async () => {
+      setEditorError(null);
+      try {
+        await onPersistedChange(persistedEntry, {
           start_time: "10:00",
           end_time: "18:00",
           frequency: "weekly",
           repeat_until: "2026-09-04",
-        })}
-      >
-        Reeks opslaan
-      </button>
-    </div>
-  ) : null,
+        });
+        setEditorOpen(false);
+      } catch (error) {
+        setEditorError(error);
+      }
+    };
+    return (
+      <section aria-label="Oud taakrooster">
+        <output aria-label="Gekozen taakdefinitie">{taskDefinitionId}</output>
+        <button
+          type="button"
+          onClick={() => onPersistedCreate({
+            occurrence_date: "2026-08-18",
+            start_time: "08:00",
+            end_time: "16:00",
+            frequency: "once",
+            repeat_until: null,
+          })}
+        >
+          Nieuw taakmoment opslaan
+        </button>
+        <button type="button" onClick={() => setEditorOpen(true)}>Bestaand taakmoment openen</button>
+        {editorOpen && (
+          <div role="dialog" aria-label="Tijd en herhaling wijzigen">
+            {editorError && <p>{editorError.message}</p>}
+            <button type="button" onClick={applyChange}>Wijziging toepassen</button>
+          </div>
+        )}
+        <button type="button" onClick={() => onPersistedStop(persistedEntry)}>Taakmomenten stoppen</button>
+      </section>
+    );
+  },
 }));
 
 import ObjectTasksTab from "@/components/objects/ObjectTasksTab";
@@ -125,13 +145,28 @@ function renderTab() {
   );
 }
 
-describe("ObjectTasksTab tekenmodus", () => {
+describe("ObjectTasksTab compacte roosterbediening", () => {
   beforeEach(() => {
     Object.values(workflow).forEach(mock => mock.mockReset());
     workflow.createObjectTaskMutationKey.mockImplementation(action => `object-task:${action}:test-key`);
     workflow.listObjectTasks.mockResolvedValue({
       definitions: [definition],
-      series: [],
+      series: [{
+        id: "series-reception",
+        task_definition_id: definition.id,
+        status: "active",
+        version: 2,
+        current_revision: {
+          id: "revision-reception",
+          series_id: "series-reception",
+          revision_number: 1,
+          effective_from: "2026-08-17",
+          start_time: "06:30",
+          end_time: "18:00",
+          frequency: "weekly",
+          weekday: 1,
+        },
+      }],
       revisions: [],
       source_changes: [],
       server_clock: {
@@ -142,42 +177,83 @@ describe("ObjectTasksTab tekenmodus", () => {
       },
     });
     workflow.addObjectTaskSeries.mockResolvedValue({ ok: true, source_changes: [] });
+    workflow.changeObjectTaskSeries.mockResolvedValue({ ok: true, source_changes: [] });
+    workflow.stopObjectTaskSeries.mockResolvedValue({ ok: true, source_changes: [] });
   });
 
-  it("kiest een definitie via de URL, tekent een tijdvak en bewaart een nieuwe wekelijkse reeks", async () => {
+  it("toont standaard alleen de oude compacte tabel en opent het rooster pas via de taak", async () => {
     renderTab();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Rooster aanvullen voor Receptiedienst" }));
+    const openButton = await screen.findByRole("button", { name: "Rooster wijzigen voor Receptiedienst" });
+    expect(screen.queryByRole("region", { name: "Oud taakrooster" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Huidige URL")).not.toHaveTextContent("task_definition");
 
-    expect(await screen.findByRole("button", { name: "Tekenmodus sluiten" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Tekenmodus")).toHaveTextContent("actief");
-    expect(screen.getByLabelText("Huidige URL")).toHaveTextContent("task_definition=definition-reception");
+    fireEvent.click(openButton);
 
-    fireEvent.click(screen.getByRole("button", { name: "Teken tijdvak" }));
-    expect(await screen.findByRole("dialog", { name: "Roosterreeks instellen" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Oud taakrooster" })).toBeInTheDocument();
     expect(screen.getByLabelText("Gekozen taakdefinitie")).toHaveTextContent(definition.id);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Reeks opslaan" }));
+  it("wijzigt tijd en herhaling van een bestaand moment veilig vanaf die occurrence", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Rooster wijzigen voor Receptiedienst" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bestaand taakmoment openen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Wijziging toepassen" }));
 
-    await waitFor(() => expect(workflow.addObjectTaskSeries).toHaveBeenCalledTimes(1));
-    expect(workflow.addObjectTaskSeries).toHaveBeenCalledWith({
+    await waitFor(() => expect(workflow.changeObjectTaskSeries).toHaveBeenCalledTimes(1));
+    expect(workflow.changeObjectTaskSeries).toHaveBeenCalledWith({
       customerId: object.customer_id,
       objectId: object.id,
-      entry: expect.objectContaining({
-        definition_id: definition.id,
-        definition: expect.objectContaining({ id: definition.id, version: 3 }),
-        occurrence_date: "2026-08-21",
-        start_time: "10:00",
-        end_time: "18:00",
-        draft: true,
-      }),
+      entry: persistedEntry,
       data: {
         start_time: "10:00",
         end_time: "18:00",
         frequency: "weekly",
         repeat_until: "2026-09-04",
       },
+      idempotencyKey: "object-task:change-series:test-key",
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Tijd en herhaling wijzigen" })).not.toBeInTheDocument());
+  });
+
+  it.each([
+    [409, "De taakreeks is intussen gewijzigd"],
+    [503, "De planningsservice is tijdelijk niet beschikbaar"],
+  ])("houdt de tijd- en herhalingspopup open bij backendfout %s", async (status, message) => {
+    workflow.changeObjectTaskSeries.mockRejectedValueOnce(Object.assign(new Error(message), { status }));
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Rooster wijzigen voor Receptiedienst" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bestaand taakmoment openen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Wijziging toepassen" }));
+
+    expect(await screen.findByRole("dialog", { name: "Tijd en herhaling wijzigen" })).toBeInTheDocument();
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(workflow.changeObjectTaskSeries).toHaveBeenCalledTimes(1);
+  });
+
+  it("voegt nieuwe momenten toe en stopt reeksen via de veilige acties", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Rooster wijzigen voor Receptiedienst" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Nieuw taakmoment opslaan" }));
+    await waitFor(() => expect(workflow.addObjectTaskSeries).toHaveBeenCalledTimes(1));
+    expect(workflow.addObjectTaskSeries).toHaveBeenCalledWith(expect.objectContaining({
+      customerId: object.customer_id,
+      objectId: object.id,
+      entry: expect.objectContaining({
+        definition_id: definition.id,
+        occurrence_date: "2026-08-18",
+      }),
       idempotencyKey: "object-task:add-series:test-key",
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Taakmomenten stoppen" }));
+    await waitFor(() => expect(workflow.stopObjectTaskSeries).toHaveBeenCalledTimes(1));
+    expect(workflow.stopObjectTaskSeries).toHaveBeenCalledWith({
+      customerId: object.customer_id,
+      objectId: object.id,
+      entry: persistedEntry,
+      idempotencyKey: "object-task:stop-series:test-key",
     });
   });
 });
