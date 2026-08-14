@@ -122,6 +122,7 @@ describe("wekelijkse objecttaakreeks", () => {
   };
 
   it("neemt de wekelijkse einddatum inclusief mee en stopt in de week erna", () => {
+    expect(projectWeek("2026-08-10", [initialRevision])).toEqual([]);
     expect(projectWeek("2026-08-17", [initialRevision])).toEqual([
       expect.objectContaining({ occurrence_date: "2026-08-17", start_time: "06:30" }),
     ]);
@@ -289,5 +290,37 @@ describe("wekelijkse objecttaakreeks", () => {
         legacy: true,
       }),
     ]);
+  });
+
+  it("projecteert een wekelijkse legacytaak uitsluitend binnen valid_from en de inclusieve valid_until", () => {
+    const boundedLegacyDefinition = {
+      ...definition,
+      recurrence_type: "weekly",
+      valid_from: "2026-08-17",
+      valid_until: "2026-08-21",
+      schedule_periods: [{
+        period_key: "legacy-weekdays",
+        days: ["mon", "tue", "wed", "thu", "fri"],
+        start_time: "06:30",
+        end_time: "18:00",
+      }],
+    };
+    const projectLegacyWeek = weekStart => projectObjectTaskSchedules({
+      definitions: [boundedLegacyDefinition],
+      series: [],
+      revisions: [],
+      sourceChanges: [],
+      weekStart,
+    });
+
+    expect(projectLegacyWeek("2026-08-10")).toEqual([]);
+    expect(projectLegacyWeek("2026-08-17").map(item => item.occurrence_date)).toEqual([
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+      "2026-08-21",
+    ]);
+    expect(projectLegacyWeek("2026-08-24")).toEqual([]);
   });
 });

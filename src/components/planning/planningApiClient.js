@@ -54,7 +54,10 @@ async function invokePlanningApiWithClient(client, request) {
   return data;
 }
 
-export async function invokePlanningApi(payload, { ensureIdempotencyKey = true } = {}) {
+export async function invokePlanningApi(payload, {
+  ensureIdempotencyKey = true,
+  preferLatestFunctions = false,
+} = {}) {
   // Build this once so a retry against the latest function snapshot always
   // reuses the exact same idempotency key and payload.
   const request = ensureIdempotencyKey
@@ -63,6 +66,22 @@ export async function invokePlanningApi(payload, { ensureIdempotencyKey = true }
       idempotency_key: payload.idempotency_key || globalThis.crypto?.randomUUID?.() || `planning-${Date.now()}-${Math.random()}`,
     }
     : { ...payload };
+
+  // Object tasks can be created through the unpinned recovery client while a
+  // Base44 App Preview still points at an older function snapshot. Bootstrap
+  // must then use that same latest snapshot as well; an older bootstrap action
+  // may exist but not understand the effective-dated task-series records.
+  if (preferLatestFunctions && hasPinnedFunctionsVersion === true && base44LatestFunctions?.functions?.invoke) {
+    try {
+      return await invokePlanningApiWithClient(base44LatestFunctions, request);
+    } catch (error) {
+      const normalized = normalizePlanningError(error);
+      if (isUnknownPlanningAction(normalized)) {
+        throw outdatedPlanningBackendError(normalized, request.action);
+      }
+      throw normalized;
+    }
+  }
 
   try {
     return await invokePlanningApiWithClient(base44, request);

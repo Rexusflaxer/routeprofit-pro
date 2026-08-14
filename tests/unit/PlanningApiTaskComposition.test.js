@@ -184,6 +184,38 @@ async function createWeeklyObjectTask({
   }, context(`create-object-task-${key}`));
 }
 
+function weeklyReceptionDefinitionStartingAugust17() {
+  const weekdays = [
+    ["mon", 1],
+    ["tue", 2],
+    ["wed", 3],
+    ["thu", 4],
+    ["fri", 5],
+  ];
+  return {
+    id: "definition-reception-from-august-17",
+    customer_id: "customer-1",
+    object_id: "object-1",
+    task_type: "reception",
+    execution_mode: "continuous",
+    recurrence_type: "weekly",
+    schedule_periods: weekdays.map(([day], index) => ({
+      period_key: `series-${index + 1}`,
+      days: [day],
+      start_time: "06:30",
+      end_time: "18:00",
+    })),
+    weekdays: weekdays.map(([, weekday]) => weekday),
+    valid_from: "2026-08-17",
+    valid_until: null,
+    start_time: "06:30",
+    end_time: "18:00",
+    duration_minutes: 690,
+    status: "active",
+    version: 1,
+  };
+}
+
 async function createAdjacentAssignedTaskShifts({
   demand,
   base44,
@@ -2955,6 +2987,184 @@ describe("planningApi medewerker/dag-reserveringen", () => {
         "personnel-night:2026-08-19",
         "personnel-night:2026-08-20",
       ]);
+  });
+});
+
+describe("planningApi ingangsdatum van wekelijkse objecttaken", () => {
+  it("maakt voor een maandag-vrijdagtaak vanaf 17 augustus geen planningskaarten in de week ervoor", async () => {
+    const definition = weeklyReceptionDefinitionStartingAugust17();
+    const { base44, entities } = setup([]);
+    entities.ObjectTaskDefinition.records.push(structuredClone(definition));
+
+    const result = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-10",
+      period_end: "2026-08-21",
+    }, context("bootstrap-weekly-task-from-august-17"));
+
+    const activeOccurrences = entities.PlanningTaskOccurrence.records
+      .filter(item => (
+        item.object_task_definition_id === definition.id
+        && item.lifecycle_status === "active"
+      ))
+      .sort((left, right) => left.service_date.localeCompare(right.service_date));
+    expect(activeOccurrences.map(item => item.service_date)).toEqual([
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+      "2026-08-21",
+    ]);
+    expect(activeOccurrences.some(item => (
+      item.service_date >= "2026-08-10" && item.service_date <= "2026-08-14"
+    ))).toBe(false);
+    expect(result.created_task_occurrence_count).toBe(5);
+
+    const replay = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-10",
+      period_end: "2026-08-21",
+    }, context("bootstrap-weekly-task-from-august-17-again"));
+    expect(replay.created_task_occurrence_count).toBe(0);
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.object_task_definition_id === definition.id
+      && item.lifecycle_status === "active"
+    ))).toHaveLength(5);
+  });
+
+  it("supersedeert een eerder foutief gematerialiseerde occurrence van voor de ingangsdatum", async () => {
+    const definition = weeklyReceptionDefinitionStartingAugust17();
+    const tooEarlyOccurrence = {
+      ...occurrence("occurrence-too-early", "object-1", "06:30", "18:00", 690),
+      source_key: `object-task:${definition.id}:series-1:2026-08-10`,
+      object_task_definition_id: definition.id,
+      definition_version: definition.version,
+      schedule_period_key: "series-1",
+      service_date: "2026-08-10",
+      end_date: "2026-08-10",
+    };
+    const { base44, entities } = setup([tooEarlyOccurrence]);
+    entities.ObjectTaskDefinition.records.push(structuredClone(definition));
+
+    const result = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-10",
+      period_end: "2026-08-21",
+    }, context("reconcile-too-early-weekly-task-occurrence"));
+
+    expect(await entities.PlanningTaskOccurrence.get(tooEarlyOccurrence.id)).toMatchObject({
+      lifecycle_status: "superseded",
+    });
+    expect(result.superseded_task_occurrence_ids).toContain(tooEarlyOccurrence.id);
+    expect(entities.PlanningTaskOccurrence.records
+      .filter(item => (
+        item.object_task_definition_id === definition.id
+        && item.lifecycle_status === "active"
+      ))
+      .map(item => item.service_date)
+      .sort()).toEqual([
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+      "2026-08-21",
+    ]);
+  });
+
+  it("maakt voor een ingeplande legacy occurrence vóór valid_from een open bronwijziging met de moderne revisie", async () => {
+    const definition = weeklyReceptionDefinitionStartingAugust17();
+    const modernSeries = {
+      id: "series-reception-from-august-17",
+      series_key: "ots-reception-from-august-17",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      object_task_definition_id: definition.id,
+      current_revision_id: "revision-reception-from-august-17",
+      current_revision_number: 1,
+      status: "active",
+      timezone: "Europe/Amsterdam",
+      version: 1,
+    };
+    const modernRevision = {
+      id: modernSeries.current_revision_id,
+      series_id: modernSeries.id,
+      customer_id: "customer-1",
+      object_id: "object-1",
+      object_task_definition_id: definition.id,
+      revision_number: 1,
+      operation: "schedule",
+      effective_from: "2026-08-17",
+      recurrence_type: "weekly",
+      weekday: 1,
+      start_time: "06:30",
+      end_time: "18:00",
+      end_day_offset: 0,
+      recurrence_end_date: null,
+      required_minutes: 690,
+      task_snapshot: {
+        task_type: "reception",
+        execution_mode: "continuous",
+      },
+    };
+    const tooEarlyOccurrence = withPublishedSecurityPlan({
+      ...occurrence("occurrence-planned-too-early", "object-1", "06:30", "18:00", 690),
+      source_key: `object-task:${definition.id}:series-1:2026-08-10`,
+      object_task_definition_id: definition.id,
+      definition_version: definition.version,
+      schedule_period_key: "series-1",
+      service_date: "2026-08-10",
+      end_date: "2026-08-10",
+    });
+    const { base44, entities } = setup([tooEarlyOccurrence]);
+    entities.ObjectTaskDefinition.records.push(structuredClone(definition));
+    entities.ObjectTaskScheduleSeries.records.push(structuredClone(modernSeries));
+    entities.ObjectTaskScheduleRevision.records.push(structuredClone(modernRevision));
+    const composition = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: tooEarlyOccurrence.id,
+        start_time: "06:30",
+        end_time: "18:00",
+      }],
+      expected_occurrence_revisions: { [tooEarlyOccurrence.id]: tooEarlyOccurrence.revision },
+    }, context("compose-too-early-legacy-occurrence"));
+
+    const result = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-10",
+      period_end: "2026-08-17",
+    }, context("reconcile-planned-too-early-legacy-occurrence"));
+
+    expect(await entities.PlanningTaskOccurrence.get(tooEarlyOccurrence.id)).toMatchObject({
+      lifecycle_status: "active",
+    });
+    expect(result.superseded_task_occurrence_ids).not.toContain(tooEarlyOccurrence.id);
+    expect(result.task_source_change_ids).toHaveLength(1);
+    expect(entities.PlanningTaskSourceChange.records).toEqual([
+      expect.objectContaining({
+        id: result.task_source_change_ids[0],
+        status: "open",
+        change_type: "schedule_stopped",
+        schedule_series_id: modernSeries.id,
+        schedule_revision_id: modernRevision.id,
+        task_occurrence_id: tooEarlyOccurrence.id,
+        source_task_occurrence_id: tooEarlyOccurrence.id,
+        replacement_task_occurrence_id: null,
+        shift_id: composition.shift.id,
+        shift_ids: [composition.shift.id],
+        effective_from: modernRevision.effective_from,
+      }),
+    ]);
+
+    await expect(backend.publishPlanning(base44, user, {
+      scope_type: "selection",
+      shift_ids: [composition.shift.id],
+      expected_shift_revisions: { [composition.shift.id]: composition.shift.revision },
+      publication_reason: "Vroege legacytaak moet eerst worden herpland",
+    }, context("publish-with-too-early-legacy-occurrence"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_SOURCE_CHANGE_REQUIRES_REPLAN",
+        source_change_ids: result.task_source_change_ids,
+        shift_ids: [composition.shift.id],
+        task_occurrence_ids: [tooEarlyOccurrence.id],
+      },
+    });
   });
 });
 

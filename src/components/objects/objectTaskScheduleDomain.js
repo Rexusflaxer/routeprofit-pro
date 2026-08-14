@@ -288,12 +288,17 @@ function legacyEntries(definition, week) {
       period_key: `legacy:${day}:${definition.start_time}:${definition.end_time}`,
     }));
   return week.days.flatMap(dateKey => {
-  const dayKey = OBJECT_TASK_DAY_KEYS[objectTaskWeekday(dateKey) - 1];
+    const dayKey = OBJECT_TASK_DAY_KEYS[objectTaskWeekday(dateKey) - 1];
     const applies = definition.recurrence_type === "one_time"
       ? definition.specific_date === dateKey
       : definition.recurrence_type === "date_range"
-        ? definition.valid_from <= dateKey && dateKey <= definition.valid_until
-        : definition.recurrence_type === "weekly";
+        ? Boolean(definition.valid_from)
+          && Boolean(definition.valid_until)
+          && definition.valid_from <= dateKey
+          && dateKey <= definition.valid_until
+        : definition.recurrence_type === "weekly"
+          && (!definition.valid_from || definition.valid_from <= dateKey)
+          && (!definition.valid_until || dateKey <= definition.valid_until);
     if (!applies) return [];
     return periods.filter(period => period.days?.includes(dayKey)).map((period, index) => ({
       id: `${definition.id}:${period.period_key || index}:${dateKey}`,

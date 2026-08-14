@@ -50,6 +50,29 @@ describe("planningApiClient functieversieherstel", () => {
     });
   });
 
+  it("voert een versiegevoelige bootstrap in een vastgezette preview direct op de nieuwste functie uit", async () => {
+    const { invokePlanningApi, invoke, invokeLatest } = await loadPlanningClient({ pinned: true });
+    invokeLatest.mockResolvedValueOnce({ data: { ok: true, created_task_occurrence_count: 5 } });
+
+    await expect(invokePlanningApi({
+      action: "bootstrap_range",
+      period_start: "2026-08-10",
+      period_end: "2026-08-21",
+    }, { preferLatestFunctions: true })).resolves.toEqual({
+      ok: true,
+      created_task_occurrence_count: 5,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(invokeLatest).toHaveBeenCalledTimes(1);
+    expect(invokeLatest.mock.calls[0][1]).toMatchObject({
+      action: "bootstrap_range",
+      period_start: "2026-08-10",
+      period_end: "2026-08-21",
+      idempotency_key: expect.any(String),
+    });
+  });
+
   it("doet zonder vastgezette versie geen tweede call en geeft een duidelijke publicatiemelding", async () => {
     const { invokePlanningApi, invoke, invokeLatest } = await loadPlanningClient({ pinned: false });
     invoke.mockRejectedValueOnce(planningError(400, "Onbekende planningactie."));

@@ -585,7 +585,10 @@ export default function Planning() {
   };
 
   const bootstrapMutation = useMutation({
-    mutationFn: payload => invokePlanningApi({ action: "bootstrap_range", ...payload }),
+    mutationFn: payload => invokePlanningApi(
+      { action: "bootstrap_range", ...payload },
+      { preferLatestFunctions: true },
+    ),
     onSuccess: result => {
       refreshPlanningInBackground();
       if (
