@@ -252,6 +252,32 @@ function sourceChangeFor(sourceChanges, seriesId, dateKey) {
   )) || null;
 }
 
+const HIDDEN_DEFINITION_STATUSES = new Set(["archived", "deleted", "inactive"]);
+const HIDDEN_SERIES_STATUSES = new Set(["archived", "deleted", "inactive", "cancelled", "canceled"]);
+
+function normalizedStatus(value, fallback = "active") {
+  return String(value || fallback).trim().toLowerCase();
+}
+
+function definitionCanBeProjected(definition) {
+  return Boolean(definition) && !HIDDEN_DEFINITION_STATUSES.has(normalizedStatus(definition.status));
+}
+
+function seriesCanBeProjected(scheduleSeries, revisions) {
+  const status = normalizedStatus(scheduleSeries.status);
+  if (HIDDEN_SERIES_STATUSES.has(status)) return false;
+  if (status !== "stopped") return true;
+
+  // A stop is effective-dated. Keep the historical part of a valid stopped
+  // series projectable, but fail closed for malformed stopped records without
+  // an append-only stop revision.
+  return revisions.some(revision => (
+    String(revision.series_id) === String(scheduleSeries.id)
+    && revision.operation === "stop"
+    && Boolean(revision.effective_from)
+  ));
+}
+
 function legacyEntries(definition, week) {
   const periods = Array.isArray(definition.schedule_periods) && definition.schedule_periods.length
     ? definition.schedule_periods
@@ -295,9 +321,9 @@ export function projectObjectTaskSchedules({ definitions = [], series = [], revi
   const normalizedRevisions = revisions.map(normalizeObjectTaskRevision);
   const definitionById = new Map(definitions.map(definition => [String(definition.id), definition]));
   const entries = normalizedSeries.flatMap(scheduleSeries => {
-    if (scheduleSeries.status === "archived") return [];
+    if (!seriesCanBeProjected(scheduleSeries, normalizedRevisions)) return [];
     const definition = definitionById.get(String(scheduleSeries.task_definition_id));
-    if (!definition || definition.status === "archived") return [];
+    if (!definitionCanBeProjected(definition)) return [];
     return week.days.flatMap(dateKey => {
       const revision = activeRevisionForDate(scheduleSeries, normalizedRevisions, dateKey);
       if (!revisionOccursOnDate(revision, dateKey)) return [];
@@ -324,7 +350,10 @@ export function projectObjectTaskSchedules({ definitions = [], series = [], revi
   });
   const definitionsWithSeries = new Set(normalizedSeries.map(item => String(item.task_definition_id)));
   definitions.forEach(definition => {
-    if (!definitionsWithSeries.has(String(definition.id))) entries.push(...legacyEntries(definition, week));
+    if (
+      definitionCanBeProjected(definition)
+      && !definitionsWithSeries.has(String(definition.id))
+    ) entries.push(...legacyEntries(definition, week));
   });
   return entries.sort((left, right) => left.occurrence_date.localeCompare(right.occurrence_date)
     || Number(objectTaskClockToMinutes(left.start_time)) - Number(objectTaskClockToMinutes(right.start_time)));

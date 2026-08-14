@@ -110,6 +110,72 @@ function replaceSource(entries, sourceId, replacement) {
   return entries.flatMap(entry => entry.client_id === sourceId ? replacement : [entry]);
 }
 
+function recurrenceIdentity(entry) {
+  const frequency = ["weekly", "week"].includes(String(entry.frequency || entry.recurrence_type || "").toLowerCase())
+    ? "weekly"
+    : "once";
+  return {
+    occurrenceDate: entry.occurrence_date || entry.effective_from || "",
+    frequency,
+    repeatUntil: entry.repeat_until || entry.recurrence_end_date || entry.valid_until || "",
+    endDayOffset: Number(entry.end_day_offset || 0),
+    definitionId: String(entry.definition_id || entry.task_definition_id || entry.object_task_definition_id || ""),
+    seriesId: String(entry.series_id || entry.schedule_series_id || entry.object_task_schedule_series_id || ""),
+  };
+}
+
+function sameOptionalIdentity(left, right) {
+  return !left && !right || Boolean(left) && left === right;
+}
+
+function entriesCanJoin(left, right) {
+  const leftIdentity = recurrenceIdentity(left);
+  const rightIdentity = recurrenceIdentity(right);
+  return leftIdentity.occurrenceDate === rightIdentity.occurrenceDate
+    && leftIdentity.frequency === rightIdentity.frequency
+    && leftIdentity.repeatUntil === rightIdentity.repeatUntil
+    && leftIdentity.endDayOffset === rightIdentity.endDayOffset
+    && sameOptionalIdentity(leftIdentity.definitionId, rightIdentity.definitionId)
+    && sameOptionalIdentity(leftIdentity.seriesId, rightIdentity.seriesId);
+}
+
+function entriesTouchOrOverlap(left, right) {
+  return toMinutes(left.start_time) <= toMinutes(right.end_time)
+    && toMinutes(right.start_time) <= toMinutes(left.end_time);
+}
+
+function mergeConnectedDraftEntries(entries, preferredSourceId) {
+  const preferredIndex = entries.findIndex(entry => entry.client_id === preferredSourceId);
+  if (preferredIndex < 0) return entries;
+
+  let merged = { ...entries[preferredIndex] };
+  const consumed = new Set([preferredSourceId]);
+  let foundConnection = true;
+  while (foundConnection) {
+    foundConnection = false;
+    entries.forEach(entry => {
+      if (
+        consumed.has(entry.client_id)
+        || !entriesCanJoin(merged, entry)
+        || !entriesTouchOrOverlap(merged, entry)
+      ) return;
+      consumed.add(entry.client_id);
+      merged = {
+        ...merged,
+        start_time: toTime(Math.min(toMinutes(merged.start_time), toMinutes(entry.start_time))),
+        end_time: toTime(Math.max(toMinutes(merged.end_time), toMinutes(entry.end_time))),
+      };
+      foundConnection = true;
+    });
+  }
+
+  if (consumed.size === 1) return entries;
+  return entries.flatMap((entry, index) => {
+    if (index === preferredIndex) return [merged];
+    return consumed.has(entry.client_id) ? [] : [entry];
+  });
+}
+
 export default function ObjectTaskSchedule({
   entries = [],
   contextData = null,
@@ -279,18 +345,25 @@ export default function ObjectTaskSchedule({
     if (source && source.occurrence_date === occurrenceDate) {
       const nextStart = Math.min(toMinutes(source.start_time), startMinute);
       const nextEnd = Math.max(toMinutes(source.end_time), endMinute);
-      const next = collection.map(entry => entry.client_id === sourceId
+      const expanded = collection.map(entry => entry.client_id === sourceId
         ? { ...entry, start_time: toTime(nextStart), end_time: toTime(nextEnd) }
         : entry);
+      const next = mergeConnectedDraftEntries(expanded, sourceId);
       if (persistedMode) commitScratch(next);
       else commitEntries(next);
       return;
     }
 
     const entry = createEntry(occurrenceDate, startMinute, endMinute);
-    paintingSourceRef.current = entry.client_id;
-    if (persistedMode) commitScratch([...collection, entry]);
-    else commitEntries([...collection, entry]);
+    const adjacentSource = collection.find(candidate => (
+      entriesCanJoin(candidate, entry)
+      && entriesTouchOrOverlap(candidate, entry)
+    ));
+    const preferredSourceId = adjacentSource?.client_id || entry.client_id;
+    const next = mergeConnectedDraftEntries([...collection, entry], preferredSourceId);
+    paintingSourceRef.current = preferredSourceId;
+    if (persistedMode) commitScratch(next);
+    else commitEntries(next);
   };
 
   const paint = (dayIndex, slot, start, active) => {
