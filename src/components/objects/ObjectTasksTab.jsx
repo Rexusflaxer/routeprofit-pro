@@ -53,6 +53,11 @@ function sourceChangeCount(response) {
   return (response?.source_changes || []).filter(change => !["resolved", "closed"].includes(change.status)).length;
 }
 
+function retryTaskList(failureCount, error) {
+  const status = Number(error?.status || 0);
+  return failureCount < 1 && (!status || status >= 500);
+}
+
 export default function ObjectTasksTab({
   object,
   view,
@@ -76,7 +81,7 @@ export default function ObjectTasksTab({
   const query = useQuery({
     queryKey,
     queryFn: () => listObjectTasks({ customerId: object.customer_id, objectId: object.id }),
-    retry: 1,
+    retry: retryTaskList,
   });
   const data = useMemo(() => enrichedTaskData(query.data), [query.data]);
   const now = useMemo(() => getAmsterdamNow(
