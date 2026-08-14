@@ -1436,7 +1436,11 @@ function taskDefinitionAppliesOnDate(definition: LooseRecord, serviceDate: strin
       && definition.valid_from <= serviceDate
       && serviceDate <= definition.valid_until;
   }
-  return definition.recurrence_type === 'weekly';
+  if (definition.recurrence_type === 'weekly') {
+    return (!definition.valid_from || definition.valid_from <= serviceDate)
+      && (!definition.valid_until || serviceDate <= definition.valid_until);
+  }
+  return false;
 }
 
 function taskOccurrenceName(definition: LooseRecord) {
@@ -4375,12 +4379,39 @@ async function bootstrapRange(
     ) continue;
     if (occurrenceHasActiveSegment.has(String(occurrence.id))) {
       const seriesId = compact(occurrence.object_task_schedule_series_id);
-      const serviceRevision = seriesId
+      let serviceRevision = seriesId
         ? taskRevisionForDate(
             objectTaskScheduleRevisions.filter((item: LooseRecord) => String(item.series_id) === seriesId),
             occurrence.service_date,
           )
         : null;
+      if (!serviceRevision) {
+        // A pinned legacy bootstrap can create an occurrence without a
+        // schedule-series reference even though the newer task already has
+        // effective-dated series. If that occurrence was composed into a
+        // shift, keep it immutable but surface the removal as a mandatory
+        // planning source change instead of leaving stale work silently active.
+        const definitionSeriesIds = new Set(objectTaskScheduleSeries
+          .filter((item: LooseRecord) => (
+            String(item.object_task_definition_id) === String(occurrence.object_task_definition_id)
+            && item.status !== 'archived'
+          ))
+          .map((item: LooseRecord) => String(item.id)));
+        const occurrenceWeekday = isoWeekday(occurrence.service_date);
+        serviceRevision = objectTaskScheduleRevisions
+          .filter((item: LooseRecord) => (
+            definitionSeriesIds.has(String(item.series_id))
+            && item.operation === 'schedule'
+            && item.effective_from > occurrence.service_date
+          ))
+          .sort((left: LooseRecord, right: LooseRecord) => {
+            const leftWeekdayRank = Number(left.weekday) === occurrenceWeekday ? 0 : 1;
+            const rightWeekdayRank = Number(right.weekday) === occurrenceWeekday ? 0 : 1;
+            return leftWeekdayRank - rightWeekdayRank
+              || String(left.effective_from).localeCompare(String(right.effective_from))
+              || Number(left.revision_number || 0) - Number(right.revision_number || 0);
+          })[0] || null;
+      }
       if (serviceRevision) {
         const linkedSegments = activeSegmentsForOccurrence(
           String(occurrence.id),
