@@ -862,7 +862,7 @@ function MatrixShiftBlock({
         />
       )}
       <div className="flex items-start gap-1">
-        <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
+        <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait", embeddedInLane && "sr-only")}>
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             <span className={cn(
@@ -968,16 +968,6 @@ function MatrixShiftBlock({
             {shift.status === "published" ? "Gepubliceerd" : "Concept"}
           </span>
         </div>
-      )}
-      {embeddedInLane && segmentProjections.length === 1 && (
-        <button
-          type="button"
-          disabled={mutationPending || isPending}
-          onClick={onSelect}
-          className="order-5 -mx-3 mt-auto block border-t border-blue-300/20 px-3 py-1.5 text-left text-[9px] font-medium text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring dark:text-blue-100/90"
-        >
-          {projectionSegment.task_name_snapshot || projectionSegment.object_name_snapshot || "Taaksegment"}
-        </button>
       )}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesAfter && (
         <ServiceCardResizeHandle
