@@ -700,6 +700,9 @@ function MatrixShiftBlock({
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
   const assignmentsBySlot = mapAssignmentsToSlots(currentAssignments, requiredCount);
+  const timelinePhotoUrl = embeddedInLane && assignmentsBySlot.get(0)
+    ? assignmentIdentity(assignmentsBySlot.get(0), personnelById).photoUrl
+    : null;
   const activeSegments = segments.filter(item => item.status !== "removed");
   const linkedObjectCount = new Set([
     ...(shift.object_ids || []),
@@ -846,6 +849,20 @@ function MatrixShiftBlock({
       data-editable={editable ? "true" : "false"}
       style={style}
     >
+      {timelinePhotoUrl && (
+        <>
+          <img
+            src={timelinePhotoUrl}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-center opacity-55 grayscale contrast-75"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(145deg,hsl(var(--card)/0.90)_0%,hsl(var(--accent)/0.84)_100%)]"
+          />
+        </>
+      )}
       {embeddedInLane && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
