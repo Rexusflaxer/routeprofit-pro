@@ -832,7 +832,7 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
-      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-blue-400/35 !bg-[linear-gradient(105deg,rgba(37,99,235,0.34)_0%,rgba(59,130,246,0.18)_48%,rgba(37,99,235,0.04)_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100 dark:!bg-[linear-gradient(105deg,rgba(37,99,235,0.38)_0%,rgba(30,64,175,0.20)_48%,rgba(30,64,175,0.05)_100%)] [&>div]:relative [&>div]:z-10 [&>p]:relative [&>p]:z-10",
+      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-blue-400/35 !bg-[linear-gradient(105deg,rgba(37,99,235,0.34)_0%,rgba(59,130,246,0.18)_48%,rgba(37,99,235,0.04)_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100 dark:!bg-[linear-gradient(105deg,rgba(37,99,235,0.38)_0%,rgba(30,64,175,0.20)_48%,rgba(30,64,175,0.05)_100%)]",
       shift.status === "draft" && !embeddedInLane && "border-primary/60",
       currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
       isPending && "animate-pulse border-primary/70",
@@ -879,7 +879,7 @@ function MatrixShiftBlock({
           label={`Begintijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
-      <div className="flex items-start gap-1">
+      <div className="relative z-10 flex items-start gap-1">
         <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait", embeddedInLane && "sr-only")}>
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
@@ -950,13 +950,13 @@ function MatrixShiftBlock({
 
       {(requiredCount > 1 || embeddedInLane) && (
         <p className={cn(
-          "compact-hide mt-1.5 text-[9px] font-medium text-white/60",
-          embeddedInLane && "order-3 mt-1 text-[9px] text-slate-700 dark:text-white/75",
+          "compact-hide relative z-10 mt-1.5 text-[9px] font-medium text-white/60",
+          embeddedInLane && "order-3 mt-1 text-[9px] text-white/75",
         )} data-planning-dimensions="time-staffing">
           Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
         </p>
       )}
-      <div className={cn("mt-1.5 space-y-1", embeddedInLane && "order-2 mt-1 flex min-h-0 flex-1 flex-col justify-start overflow-hidden")}>
+      <div className={cn("relative z-10 mt-1.5 space-y-1", embeddedInLane && "order-2 mt-1 flex min-h-0 flex-1 flex-col justify-start overflow-hidden")}>
         {Array.from({ length: requiredCount }, (_, slotIndex) => (
           <ShiftSlot
             key={slotIndex}
@@ -976,7 +976,7 @@ function MatrixShiftBlock({
         ))}
       </div>
       {embeddedInLane && (
-        <div className="order-4 mt-1 flex items-center gap-1 pb-1">
+        <div className="relative z-10 order-4 mt-1 flex items-center gap-1 pb-1">
           <span className={cn(
             "rounded px-1.5 py-0.5 text-[8px] font-semibold",
             shift.status === "published"
