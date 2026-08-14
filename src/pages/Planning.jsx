@@ -1554,7 +1554,7 @@ export default function Planning() {
     setLiveMessage(`Bezetting geopend voor ${openShift.name || "de gekoppelde dienst"}.`);
   };
 
-  const handleDragEnd = result => {
+  const processPlanningDrop = result => {
     if (!editing) return;
     const drop = resolvePlanningDrop(result);
     if (!drop) return;
@@ -1607,6 +1607,12 @@ export default function Planning() {
       return;
     }
     composeAndAssignOccurrence(occurrence, personnelItem, dropServiceDate).catch(() => undefined);
+  };
+
+  const handleDragEnd = result => {
+    // Let the drag engine release its publisher and input lock before any
+    // planning mutation changes or unmounts draggable/droppable elements.
+    window.setTimeout(() => processPlanningDrop(result), 0);
   };
 
   const handleShiftActionConfirm = async payload => {
