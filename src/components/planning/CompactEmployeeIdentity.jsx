@@ -30,7 +30,7 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             )}
             aria-label={name}
           >
-            {(variant === "midnight" || variant === "timeline") && (
+            {variant === "midnight" && (
               <Avatar className={cn(
                 "shrink-0 rounded-md border border-white/15 bg-white/10",
                 variant === "timeline" ? "h-14 w-11" : "h-14 w-11",
