@@ -6,7 +6,7 @@ import {
   Search, Route, MapPin, CalendarCheck, CalendarRange,
   FileText, SlidersHorizontal,
   Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle,
-  ReceiptText
+  ReceiptText, Monitor, Sun, Moon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -100,6 +100,7 @@ function UserProfileFooter({ onNavigate, collapsed = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
 
   const { data: user } = useQuery({
     queryKey: ["current-user"],
@@ -148,6 +149,27 @@ function UserProfileFooter({ onNavigate, collapsed = false }) {
               <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
               Mijn bedrijven
             </button>
+            <div className="mx-2 my-1 rounded-md bg-muted/70 p-1">
+              <div className="grid grid-cols-3 gap-1" aria-label="Thema kiezen">
+                {[
+                  { value: "system", label: "Auto", icon: Monitor },
+                  { value: "light", label: "Licht", icon: Sun },
+                  { value: "dark", label: "Donker", icon: Moon },
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setTheme(option.value)}
+                    className={`flex items-center justify-center gap-1 rounded px-1.5 py-1.5 text-[10px] font-medium transition-colors ${theme === option.value ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                    aria-pressed={theme === option.value}
+                    title={option.label}
+                  >
+                    <option.icon className="h-3 w-3" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="my-1 border-t border-border" />
             <button
               onClick={() => { setOpen(false); base44.auth.logout(); }}
