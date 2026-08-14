@@ -16,7 +16,10 @@
         "personnel_day",
         "publication_scope",
         "shift_composition",
-        "task_occurrence"
+        "task_occurrence",
+        "object_task_definition",
+        "object_task_series",
+        "task_source_change"
       ]
     },
     "resource_id": {

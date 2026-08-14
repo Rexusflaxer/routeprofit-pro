@@ -7,6 +7,10 @@
       "type": "string",
       "enum": [
         "bootstrap_range",
+        "create_object_task",
+        "add_object_task_series",
+        "change_object_task_series",
+        "stop_object_task_series",
         "compose_shift",
         "compose_and_assign",
         "update_shift_composition",
@@ -33,6 +37,10 @@
         "PlanningRange",
         "PlanningTaskOccurrence",
         "PlanningShiftTaskSegment",
+        "ObjectTaskDefinition",
+        "ObjectTaskScheduleSeries",
+        "ObjectTaskScheduleRevision",
+        "PlanningTaskSourceChange",
         null
       ]
     },

@@ -1,0 +1,69 @@
+{
+  "name": "PlanningTaskSourceChange",
+  "type": "object",
+  "description": "Te verwerken impact van een gewijzigde objecttaakbron op een reeds ingeplande dienst.",
+  "properties": {
+    "change_key": { "type": "string", "minLength": 1, "maxLength": 220 },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "object_task_definition_id": { "type": "string" },
+    "schedule_series_id": { "type": "string" },
+    "schedule_revision_id": { "type": "string" },
+    "occurrence_id": { "type": "string" },
+    "task_occurrence_id": { "type": "string" },
+    "source_task_occurrence_id": { "type": "string" },
+    "replacement_task_occurrence_id": { "type": ["string", "null"] },
+    "shift_id": { "type": "string" },
+    "shift_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "minItems": 1 },
+    "segment_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "default": [] },
+    "service_date": { "type": "string", "format": "date" },
+    "effective_from": { "type": "string", "format": "date" },
+    "change_type": {
+      "type": "string",
+      "enum": ["schedule_changed", "schedule_stopped"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "resolved"],
+      "default": "open"
+    },
+    "previous_snapshot": { "type": ["object", "null"], "additionalProperties": true },
+    "desired_snapshot": { "type": ["object", "null"], "additionalProperties": true },
+    "detected_at": { "type": "string", "format": "date-time" },
+    "detected_by_user_id": { "type": ["string", "null"] },
+    "resolved_at": { "type": ["string", "null"], "format": "date-time" },
+    "resolved_by_user_id": { "type": ["string", "null"] },
+    "resolution_reason": { "type": ["string", "null"], "maxLength": 500 },
+    "creation_idempotency_key": { "type": "string", "maxLength": 180 },
+    "creation_request_fingerprint": { "type": "string" },
+    "version": { "type": "number", "minimum": 1, "default": 1 },
+    "metadata": { "type": ["object", "null"], "additionalProperties": true }
+  },
+  "required": [
+    "change_key",
+    "customer_id",
+    "object_id",
+    "object_task_definition_id",
+    "schedule_series_id",
+    "schedule_revision_id",
+    "occurrence_id",
+    "task_occurrence_id",
+    "source_task_occurrence_id",
+    "shift_id",
+    "shift_ids",
+    "service_date",
+    "effective_from",
+    "change_type",
+    "status",
+    "detected_at",
+    "creation_idempotency_key",
+    "creation_request_fingerprint",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}

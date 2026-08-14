@@ -131,6 +131,9 @@ function setup({ shifts = [], assignments = [], occurrences = [], segments = [] 
     Route: entity([], "route"),
     Task: entity([], "task"),
     ObjectTaskDefinition: entity([], "object-task-definition"),
+    ObjectTaskScheduleSeries: entity([], "object-task-schedule-series"),
+    ObjectTaskScheduleRevision: entity([], "object-task-schedule-revision"),
+    PlanningTaskSourceChange: entity([], "planning-task-source-change"),
     ObjectSecurityPlan: entity([], "object-security-plan"),
     ObjectSecurityPlanRevision: entity([], "object-security-plan-revision"),
     SurveillanceObject: entity([

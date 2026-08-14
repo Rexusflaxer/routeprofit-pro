@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Draggable, Droppable } from "@hello-pangea/dnd";
 import {
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -48,11 +49,20 @@ function statusClass(status, readiness) {
   return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300";
 }
 
-function OccurrenceCardContent({ occurrence, coverage, planningState, projection, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
+function sourceChangeTime(snapshot) {
+  if (!snapshot) return "verwijderd";
+  const start = snapshot.window_start_time || snapshot.start_time;
+  const end = snapshot.window_end_time || snapshot.end_time;
+  return start && end ? `${start}–${end}` : "gewijzigd";
+}
+
+function OccurrenceCardContent({ occurrence, coverage, planningState, projection, sourceChanges = [], impactedShift = null, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, onEditShift, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
   const percentage = coverage.requiredMinutes > 0
     ? Math.min(100, Math.round((coverage.allocatedMinutes / coverage.requiredMinutes) * 100))
     : 0;
-  const needsWork = planningState?.readiness !== "ready";
+  const sourceChange = sourceChanges[0] || null;
+  const hasSourceChange = Boolean(sourceChange);
+  const needsWork = hasSourceChange || planningState?.readiness !== "ready";
   return (
     <article
       ref={dragProvided?.innerRef}
@@ -62,14 +72,20 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
       aria-busy={disabled ? "true" : "false"}
       className={cn(
         "rounded-lg border-l-2 p-2.5 transition-colors",
-        needsWork
+        hasSourceChange
+          ? "border border-amber-300/35 border-l-amber-500 bg-amber-50/55 shadow-none backdrop-blur-xl hover:border-amber-400/60 dark:border-amber-800/40 dark:bg-amber-950/25"
+          : needsWork
           ? "border border-rose-300/20 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] shadow-none backdrop-blur-xl backdrop-saturate-150 hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]"
           : "border border-emerald-200/70 border-l-emerald-500 bg-card/70 shadow-none backdrop-blur-md dark:border-emerald-900/60",
         isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/25",
       )}
     >
       <div className="flex items-start gap-2">
-        {!needsWork ? (
+        {hasSourceChange ? (
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5" />
+          </span>
+        ) : !needsWork ? (
           <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
             <CheckCircle2 className="h-3.5 w-3.5" />
           </span>
@@ -96,8 +112,8 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
             {projection?.continuesBefore ? " · vervolg" : projection?.continuesAfter ? " · loopt door" : ""}
           </p>
         </div>
-        <Badge variant="outline" className={cn("h-5 shrink-0 rounded px-1.5 text-[9px]", statusClass(coverage.status, planningState?.readiness))}>
-          {coverageLabel(coverage, planningState)}
+        <Badge variant="outline" className={cn("h-5 shrink-0 rounded px-1.5 text-[9px]", hasSourceChange ? "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" : statusClass(coverage.status, planningState?.readiness))}>
+          {hasSourceChange ? "Bron gewijzigd" : coverageLabel(coverage, planningState)}
         </Badge>
       </div>
       <div className="mt-2">
@@ -107,7 +123,15 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
         </div>
         <Progress value={percentage} className="h-1.5" />
       </div>
-      {coverage.status !== "full" && (
+      {hasSourceChange && (
+        <div className="mt-2 rounded-md border border-amber-300/60 bg-amber-100/70 p-2 text-[10px] leading-relaxed text-amber-950 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100">
+          <p className="font-semibold">Objectrooster gewijzigd vanaf {sourceChange.effective_from || sourceChange.service_date}.</p>
+          <p className="mt-0.5">{sourceChangeTime(sourceChange.previous_snapshot)} → {sourceChangeTime(sourceChange.desired_snapshot)}. Eerdere weken blijven ongewijzigd.</p>
+          {sourceChanges.length > 1 && <p className="mt-0.5">Nog {sourceChanges.length - 1} gekoppelde wijziging{sourceChanges.length === 2 ? "" : "en"}.</p>}
+          {impactedShift && <div className="mt-2 flex justify-end"><Button type="button" size="sm" className="h-7 px-2 text-[10px]" disabled={disabled} onClick={() => onEditShift?.(impactedShift)}><Layers3 className="h-3 w-3" /> Dienst aanpassen</Button></div>}
+        </div>
+      )}
+      {!hasSourceChange && coverage.status !== "full" && (
         <div className="mt-2 flex flex-wrap justify-end gap-1.5">
           {selectedShift?.source_type === "task" && selectedShift.service_date === occurrence.service_date && (
             <Button disabled={disabled || selectedShiftPending} variant="outline" size="sm" className="h-7 px-2 text-[10px]" onClick={() => onAdd(occurrence)}>
@@ -119,7 +143,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
           </Button>
         </div>
       )}
-      {coverage.status === "full" && planningState?.readiness === "needs_staffing" && planningState.openSlots > 0 && (
+      {!hasSourceChange && coverage.status === "full" && planningState?.readiness === "needs_staffing" && planningState.openSlots > 0 && (
         <div className="mt-2 flex justify-end">
           <Button disabled={disabled} size="sm" className="h-7 px-2 text-[10px]" onClick={() => onFillStaffing?.(occurrence)}>
             <UserRoundPlus className="h-3 w-3" /> Bezetting invullen
@@ -133,7 +157,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
 function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   if (!enableTaskDrag) return <OccurrenceCardContent {...props} dragEnabled={false} />;
   return (
-    <Draggable draggableId={`task:${props.occurrence.id}`} index={index} isDragDisabled={props.planningState?.readiness === "ready" || props.disabled}>
+    <Draggable draggableId={`task:${props.occurrence.id}`} index={index} isDragDisabled={props.sourceChanges?.length > 0 || props.planningState?.readiness === "ready" || props.disabled}>
       {(provided, snapshot) => (
         <OccurrenceCardContent {...props} dragEnabled dragIndex={index} dragProvided={provided} isDragging={snapshot.isDragging} />
       )}
@@ -141,7 +165,7 @@ function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   );
 }
 
-function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing }) {
+function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing, onEditShift }) {
   if (groups.length === 0) {
     return (
       <div className="m-2 rounded-lg border border-dashed border-border bg-card p-5 text-center">
@@ -169,6 +193,7 @@ function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, s
             onCreate={onCreateShift}
             onAdd={onAddToShift}
             onFillStaffing={onFillStaffing}
+            onEditShift={onEditShift}
           />
         ))}
       </div>
@@ -187,12 +212,30 @@ export default function PlanningTaskBacklog({
   onFillStaffing,
   onEditShift,
   onClearShift,
+  sourceChanges = [],
   enableTaskDrag = false,
   periodStart = null,
   pendingResourceKeys = null,
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("work");
+  const openSourceChanges = useMemo(() => sourceChanges.filter(change => change.status === "open"), [sourceChanges]);
+  const sourceChangesByOccurrence = useMemo(() => {
+    const grouped = new Map();
+    openSourceChanges.forEach(change => {
+      const occurrenceIds = [...new Set([
+        change.source_task_occurrence_id,
+        change.task_occurrence_id,
+        change.occurrence_id,
+        change.replacement_task_occurrence_id,
+      ].filter(Boolean).map(String))];
+      occurrenceIds.forEach(occurrenceId => {
+        grouped.set(occurrenceId, [...(grouped.get(occurrenceId) || []), change]);
+      });
+    });
+    return grouped;
+  }, [openSourceChanges]);
+  const shiftsById = useMemo(() => new Map((shifts || []).map(shift => [String(shift.id), shift])), [shifts]);
   const items = useMemo(() => occurrences.map(occurrence => {
     const planningState = Array.isArray(shifts)
       ? getOccurrencePlanningState({ occurrence, segments, shifts, assignments })
@@ -211,16 +254,24 @@ export default function PlanningTaskBacklog({
     const projectionDate = periodStart && String(occurrence.service_date) < String(periodStart)
       ? periodStart
       : occurrence.service_date;
+    const occurrenceSourceChanges = sourceChangesByOccurrence.get(String(occurrence.id)) || [];
+    const impactedShiftId = occurrenceSourceChanges
+      .flatMap(change => [change.shift_id, ...(change.shift_ids || [])])
+      .filter(Boolean)
+      .map(String)
+      .find(shiftId => shiftsById.has(shiftId));
     return {
       occurrence,
       coverage: planningState.coverage,
       planningState,
       projection: getTaskOccurrenceDayProjection(occurrence, projectionDate),
+      sourceChanges: occurrenceSourceChanges,
+      impactedShift: impactedShiftId ? shiftsById.get(impactedShiftId) : null,
       disabled: pendingResourceKeys instanceof Set
         && pendingResourceKeys.has(`occurrence:${occurrence.id}`),
     };
   }).filter(item => {
-    if (status === "work" && item.planningState.readiness === "ready") return false;
+    if (status === "work" && item.planningState.readiness === "ready" && item.sourceChanges.length === 0) return false;
     if (status === "open" && item.planningState.readiness !== "unplanned") return false;
     if (status === "partial" && item.planningState.readiness !== "needs_staffing") return false;
     const query = search.trim().toLocaleLowerCase("nl-NL");
@@ -229,7 +280,7 @@ export default function PlanningTaskBacklog({
       item.occurrence.object_name_snapshot,
       item.occurrence.customer_name_snapshot,
     ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
-  }), [assignments, occurrences, pendingResourceKeys, periodStart, search, segments, shifts, status]);
+  }), [assignments, occurrences, pendingResourceKeys, periodStart, search, segments, shifts, shiftsById, sourceChangesByOccurrence, status]);
   const groups = useMemo(() => [...new Set(items.map(item => item.projection?.date || item.occurrence.service_date))]
     .sort()
     .map(date => ({ date, items: items.filter(item => (item.projection?.date || item.occurrence.service_date) === date) })), [items]);
@@ -304,6 +355,7 @@ export default function PlanningTaskBacklog({
                 onCreateShift={onCreateShift}
                 onAddToShift={onAddToShift}
                 onFillStaffing={onFillStaffing}
+                onEditShift={onEditShift}
               />
               {provided.placeholder}
             </div>
@@ -320,6 +372,7 @@ export default function PlanningTaskBacklog({
             onCreateShift={onCreateShift}
             onAddToShift={onAddToShift}
             onFillStaffing={onFillStaffing}
+            onEditShift={onEditShift}
           />
         </div>
       )}

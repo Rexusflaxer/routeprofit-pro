@@ -151,7 +151,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 116, "De verwachte 116 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 119, "De verwachte 119 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -172,11 +172,15 @@ const serviceOnlyObjectEntities = new Set([
   "ThirdPartyOrganization.jsonc",
 ]);
 const serviceWritePlanningEntities = new Set([
+  "ObjectTaskDefinition.jsonc",
+  "ObjectTaskScheduleRevision.jsonc",
+  "ObjectTaskScheduleSeries.jsonc",
   "PlanningAssignment.jsonc",
   "PlanningAuditEvent.jsonc",
   "PlanningMutationCoordinator.jsonc",
   "PlanningPublication.jsonc",
   "PlanningShift.jsonc",
+  "PlanningTaskSourceChange.jsonc",
   "PlanningTaskOccurrence.jsonc",
   "PlanningShiftTaskSegment.jsonc",
 ]);

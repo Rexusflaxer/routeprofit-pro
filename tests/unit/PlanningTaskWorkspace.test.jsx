@@ -128,6 +128,60 @@ describe("Planning taakwerkvoorraad", () => {
     fireEvent.click(screen.getByRole("button", { name: /doeldienst wissen/i }));
     expect(onClearShift).toHaveBeenCalledTimes(1);
   });
+
+  it("houdt een volledig ingeplande taak met gewijzigde bron zichtbaar en dwingt dienstbewerking af", () => {
+    const onEditShift = vi.fn();
+    const shift = {
+      id: "shift-reception",
+      source_type: "task",
+      service_date: occurrence.service_date,
+      name: "Receptiedienst",
+      start_time: "08:00",
+      end_time: "16:00",
+      required_count: 1,
+      status: "draft",
+    };
+    const segment = {
+      id: "segment-reception",
+      shift_id: shift.id,
+      task_occurrence_id: "occurrence-reception-old",
+      start_date: occurrence.service_date,
+      end_date: occurrence.service_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+    };
+    render(
+      <PlanningTaskBacklog
+        occurrences={[occurrence]}
+        segments={[segment]}
+        shifts={[shift]}
+        assignments={[{ id: "assignment-1", shift_id: shift.id, status: "draft" }]}
+        sourceChanges={[{
+          id: "source-change-1",
+          status: "open",
+          task_occurrence_id: "occurrence-reception-old",
+          source_task_occurrence_id: "occurrence-reception-old",
+          replacement_task_occurrence_id: occurrence.id,
+          shift_ids: [shift.id],
+          service_date: occurrence.service_date,
+          effective_from: occurrence.service_date,
+          previous_snapshot: { start_time: "08:00", end_time: "16:00" },
+          desired_snapshot: { start_time: "10:00", end_time: "18:00" },
+        }]}
+        selectedShift={null}
+        onCreateShift={vi.fn()}
+        onAddToShift={vi.fn()}
+        onEditShift={onEditShift}
+      />,
+    );
+
+    expect(screen.getByText("Bron gewijzigd")).toBeInTheDocument();
+    expect(screen.getByText(/08:00–16:00 → 10:00–18:00/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /nieuwe dienst/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /dienst aanpassen/i }));
+    expect(onEditShift).toHaveBeenCalledWith(shift);
+  });
 });
 
 describe("Planning dienstcomposer", () => {
@@ -196,6 +250,99 @@ describe("Planning dienstcomposer", () => {
     fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
     expect(onSave.mock.calls[1][0].idempotency_key).not.toBe(completedKey);
+  });
+
+  it("blokkeert een vervangen taaksegment totdat de planner het verwijdert en de actieve vervanger toevoegt", async () => {
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    const supersededOccurrence = {
+      ...occurrence,
+      id: "occurrence-reception-old",
+      revision: 2,
+      lifecycle_status: "superseded",
+      superseded_by_occurrence_id: "occurrence-reception-current",
+      window_start_time: "08:00",
+      window_end_time: "16:00",
+    };
+    const replacementOccurrence = {
+      ...occurrence,
+      id: "occurrence-reception-current",
+      revision: 1,
+      lifecycle_status: "active",
+      supersedes_task_occurrence_id: supersededOccurrence.id,
+      window_start_time: "10:00",
+      window_end_time: "18:00",
+    };
+    const existingShift = {
+      id: "shift-reception-source-change",
+      name: "Receptiedienst",
+      service_date: occurrence.service_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      required_count: 1,
+      revision: 4,
+      status: "draft",
+    };
+    const oldSegment = {
+      id: "segment-reception-old",
+      shift_id: existingShift.id,
+      task_occurrence_id: supersededOccurrence.id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.service_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+      task_name_snapshot: occurrence.task_name_snapshot,
+      object_name_snapshot: occurrence.object_name_snapshot,
+      execution_mode: "continuous",
+    };
+
+    render(
+      <PlanningShiftComposer
+        open
+        onOpenChange={vi.fn()}
+        shift={existingShift}
+        initialOccurrence={null}
+        occurrences={[supersededOccurrence, replacementOccurrence]}
+        segments={[oldSegment]}
+        shifts={[existingShift]}
+        onSave={onSave}
+        isPending={false}
+      />,
+    );
+
+    expect(screen.getByText(/de objecttaak is gewijzigd/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Begin")).toHaveValue("08:00");
+    expect(screen.getByLabelText("Begin")).toBeDisabled();
+    expect(screen.getByLabelText("Einde")).toBeDisabled();
+    expect(screen.getByText(/oude taakuitvoering is vervangen/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /conceptdienst opslaan/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Taaksegment verwijderen" }));
+    fireEvent.change(screen.getByLabelText(/taak toevoegen vanaf/i), {
+      target: { value: replacementOccurrence.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /toevoegen/i }));
+
+    expect(screen.getByLabelText("Begin")).toHaveValue("10:00");
+    expect(screen.getByLabelText("Einde")).toHaveValue("18:00");
+    expect(screen.getByLabelText("Begin")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /conceptdienst opslaan/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /conceptdienst opslaan/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      action: "update_shift_composition",
+      shift_id: existingShift.id,
+      expected_shift_revision: 4,
+      expected_occurrence_revisions: {
+        [supersededOccurrence.id]: 2,
+        [replacementOccurrence.id]: 1,
+      },
+      segments: [expect.objectContaining({
+        task_occurrence_id: replacementOccurrence.id,
+        start_time: "10:00",
+        end_time: "18:00",
+      })],
+    })));
   });
 
   it("toont exact welk taakdeel na een gesplitste dienst resteert", () => {
