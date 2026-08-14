@@ -5,9 +5,19 @@
   "properties": {
     "source_key": {
       "type": "string",
-      "description": "Logisch unieke sleutel object-task:<definition>:<period-key>:<datum>."
+      "description": "Fysiek unieke snapshotsleutel. Nieuwe weekreeksen gebruiken <logical_source_key>:r<revision>; legacyrecords behouden hun bestaande sleutel."
+    },
+    "logical_source_key": {
+      "type": ["string", "null"],
+      "description": "Stabiele sleutel per reeks en servicedatum: object-task-series:<series-key>:<datum>."
     },
     "object_task_definition_id": { "type": "string" },
+    "object_task_schedule_series_id": { "type": ["string", "null"] },
+    "object_task_schedule_revision_id": { "type": ["string", "null"] },
+    "schedule_series_key": { "type": ["string", "null"] },
+    "schedule_revision_number": { "type": ["number", "null"], "minimum": 1 },
+    "supersedes_task_occurrence_id": { "type": ["string", "null"] },
+    "superseded_by_task_occurrence_id": { "type": ["string", "null"] },
     "definition_version": { "type": "number", "minimum": 1 },
     "schedule_period_key": { "type": "string" },
     "company_id": { "type": ["string", "null"] },

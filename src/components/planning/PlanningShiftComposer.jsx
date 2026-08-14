@@ -101,6 +101,7 @@ function fromStoredSegment(segment) {
 
 function SegmentRow({ segment, index, occurrence, errors = [], onChange, onRemove }) {
   const coverage = occurrence ? getTaskOccurrenceCoverage(occurrence, [segment]) : null;
+  const sourceChanged = Boolean(occurrence && occurrence.lifecycle_status !== "active");
   const errorId = `segment-errors-${segment.local_id}`;
   return (
     <div className="rounded-lg border border-border bg-card p-3">
@@ -114,14 +115,19 @@ function SegmentRow({ segment, index, occurrence, errors = [], onChange, onRemov
           <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onRemove(index)} aria-label="Taaksegment verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
         </div>
       </div>
+      {sourceChanged && (
+        <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] font-medium text-amber-900 dark:text-amber-100">
+          <AlertTriangle className="mt-px h-3 w-3 shrink-0" /> De objecttaak is gewijzigd. Verwijder dit oude segment en voeg hieronder de actuele taakuitvoering toe.
+        </p>
+      )}
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="grid gap-1">
           <Label htmlFor={`segment-start-${segment.local_id}`} className="text-[10px]">Begin</Label>
-          <Input id={`segment-start-${segment.local_id}`} type="time" value={segment.start_time} onChange={event => onChange(index, "start_time", event.target.value)} aria-invalid={errors.length > 0} aria-describedby={errors.length ? errorId : undefined} className="h-8 text-[11px]" />
+          <Input id={`segment-start-${segment.local_id}`} type="time" value={segment.start_time} disabled={sourceChanged} onChange={event => onChange(index, "start_time", event.target.value)} aria-invalid={errors.length > 0} aria-describedby={errors.length ? errorId : undefined} className="h-8 text-[11px]" />
         </div>
         <div className="grid gap-1">
           <Label htmlFor={`segment-end-${segment.local_id}`} className="text-[10px]">Einde</Label>
-          <Input id={`segment-end-${segment.local_id}`} type="time" value={segment.end_time} onChange={event => onChange(index, "end_time", event.target.value)} aria-invalid={errors.length > 0} aria-describedby={errors.length ? errorId : undefined} className="h-8 text-[11px]" />
+          <Input id={`segment-end-${segment.local_id}`} type="time" value={segment.end_time} disabled={sourceChanged} onChange={event => onChange(index, "end_time", event.target.value)} aria-invalid={errors.length > 0} aria-describedby={errors.length ? errorId : undefined} className="h-8 text-[11px]" />
         </div>
       </div>
       <div className="mt-2 flex items-center justify-between text-[9px] text-muted-foreground">
@@ -219,10 +225,21 @@ export default function PlanningShiftComposer({
       ? [{ code: `overallocated_${id}`, message: `${occurrence.task_name_snapshot} krijgt meer tijd dan vereist.` }]
       : [];
   });
+  const inactiveOccurrenceErrors = draftSegments.flatMap(segment => {
+    const occurrence = occurrenceById.get(String(segment.task_occurrence_id));
+    return occurrence && occurrence.lifecycle_status !== "active"
+      ? [{
+        code: `inactive_occurrence_${segment.task_occurrence_id}`,
+        segmentId: segment.local_id,
+        message: "Deze oude taakuitvoering is vervangen. Verwijder het segment en voeg de actuele taak toe.",
+      }]
+      : [];
+  });
   const validationErrors = [
     ...composition.errors,
     ...allocationValidation.errors,
     ...coverageErrors,
+    ...inactiveOccurrenceErrors,
     ...missingAffectedOccurrenceIds.map(id => ({
       code: `missing_affected_occurrence_${id}`,
       message: "Een eerder gekoppelde klanttaak is niet geladen. Open de volledige taakperiode voordat u deze dienst wijzigt.",

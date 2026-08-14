@@ -1,0 +1,51 @@
+{
+  "name": "ObjectTaskScheduleSeries",
+  "type": "object",
+  "description": "Stabiele, versioneerbare weekreeks van een objecttaak. De reeks verwijst naar append-only revisies.",
+  "properties": {
+    "series_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "description": "Stabiele sleutel die samen met service_date de occurrence source_key vormt."
+    },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "object_task_definition_id": { "type": "string" },
+    "current_revision_id": { "type": ["string", "null"] },
+    "current_revision_number": { "type": "number", "minimum": 0, "default": 0 },
+    "status": {
+      "type": "string",
+      "enum": ["active", "stopped", "archived"],
+      "default": "active"
+    },
+    "timezone": {
+      "type": "string",
+      "enum": ["Europe/Amsterdam"],
+      "default": "Europe/Amsterdam"
+    },
+    "creation_idempotency_key": { "type": ["string", "null"], "maxLength": 180 },
+    "creation_request_fingerprint": { "type": ["string", "null"] },
+    "creation_actor_user_id": { "type": ["string", "null"] },
+    "version": { "type": "number", "minimum": 1, "default": 1 },
+    "last_modified_by_user_id": { "type": ["string", "null"] },
+    "last_modified_at": { "type": ["string", "null"], "format": "date-time" },
+    "metadata": { "type": ["object", "null"], "additionalProperties": true }
+  },
+  "required": [
+    "series_key",
+    "customer_id",
+    "object_id",
+    "object_task_definition_id",
+    "current_revision_number",
+    "status",
+    "timezone",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}

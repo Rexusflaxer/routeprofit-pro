@@ -128,6 +128,28 @@ function activeAssignments(assignments) {
   return assignments.filter(item => item.status !== "removed");
 }
 
+function annotateSourceChangedShifts(shifts, sourceChangesByShift) {
+  return shifts.map(shift => {
+    const changes = sourceChangesByShift.get(String(shift.id)) || [];
+    if (!changes.length) return shift;
+    const existingWarnings = Array.isArray(shift.service_context_snapshot?.composition_warnings)
+      ? shift.service_context_snapshot.composition_warnings.filter(warning => warning.code !== "task_source_changed")
+      : [];
+    return {
+      ...shift,
+      source_change_count: changes.length,
+      service_context_snapshot: {
+        ...(shift.service_context_snapshot || {}),
+        composition_warnings: [...existingWarnings, {
+          code: "task_source_changed",
+          severity: "critical",
+          message: `${changes.length} gekoppelde objecttaak${changes.length === 1 ? " is" : "taken zijn"} vanaf een latere week gewijzigd. Pas de dienstinhoud aan.`,
+        }],
+      },
+    };
+  });
+}
+
 function assignmentWarnings(assignment) {
   return Array.isArray(assignment?.warnings)
     ? assignment.warnings
@@ -450,6 +472,18 @@ export default function Planning() {
     ),
     staleTime: 10_000,
   });
+  const taskSourceChangesQuery = useQuery({
+    queryKey: ["planning-task-source-changes", periodStart, periodEnd],
+    queryFn: () => filterAllEntityRecords(
+      base44.entities.PlanningTaskSourceChange,
+      {
+        status: "open",
+        service_date: { $gte: periodStart, $lte: periodEnd },
+      },
+      "service_date",
+    ),
+    staleTime: 10_000,
+  });
   const taskSegmentsQuery = useQuery({
     queryKey: ["planning-task-segments", periodStart, periodEnd, planningContextShiftKey],
     queryFn: () => filterEntityRecordsForShiftIds(
@@ -513,6 +547,7 @@ export default function Planning() {
       queryClient.invalidateQueries({ queryKey: ["planning-shifts"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-assignments"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-task-occurrences"] }),
+      queryClient.invalidateQueries({ queryKey: ["planning-task-source-changes"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-task-segments"] }),
     ];
     if (includePublications) {
@@ -553,7 +588,10 @@ export default function Planning() {
     mutationFn: payload => invokePlanningApi({ action: "bootstrap_range", ...payload }),
     onSuccess: result => {
       refreshPlanningInBackground();
-      if (result?.repaired_shared_boundary_occurrence_ids?.length) {
+      if (
+        result?.repaired_shared_boundary_occurrence_ids?.length
+        || result?.resolved_task_source_change_ids?.length
+      ) {
         void refreshScheduler.current?.flush();
       }
     },
@@ -609,6 +647,34 @@ export default function Planning() {
   );
   const taskOccurrences = effectivePlanningRecords.occurrences;
   const taskSegments = effectivePlanningRecords.segments;
+  const openTaskSourceChanges = useMemo(() => (taskSourceChangesQuery.data || []).filter(change => (
+    change.status === "open"
+    && String(change.service_date || change.effective_from || "") >= periodStart
+    && String(change.service_date || change.effective_from || "") <= periodEnd
+  )), [periodEnd, periodStart, taskSourceChangesQuery.data]);
+  const sourceChangesByOccurrence = useMemo(() => {
+    const grouped = new Map();
+    openTaskSourceChanges.forEach(change => {
+      const occurrenceIds = [...new Set([
+        change.source_task_occurrence_id,
+        change.task_occurrence_id,
+        change.occurrence_id,
+        change.replacement_task_occurrence_id,
+      ].filter(Boolean).map(String))];
+      occurrenceIds.forEach(occurrenceId => {
+        grouped.set(occurrenceId, [...(grouped.get(occurrenceId) || []), change]);
+      });
+    });
+    return grouped;
+  }, [openTaskSourceChanges]);
+  const sourceChangesByShift = useMemo(() => {
+    const grouped = new Map();
+    openTaskSourceChanges.forEach(change => {
+      const shiftIds = [...new Set([change.shift_id, ...(change.shift_ids || [])].filter(Boolean).map(String))];
+      shiftIds.forEach(shiftId => grouped.set(shiftId, [...(grouped.get(shiftId) || []), change]));
+    });
+    return grouped;
+  }, [openTaskSourceChanges]);
   const matrixPendingResourceKeys = useMemo(() => new Set([
     ...pendingResourceKeys,
     ...effectivePlanningRecords.pendingResourceKeys,
@@ -709,6 +775,7 @@ export default function Planning() {
   const visibleTaskOccurrences = useMemo(() => taskOccurrencesInRange.filter(item => {
     if (customerFilter !== "all" && String(item.customer_id) !== String(customerFilter)) return false;
     const state = occurrencePlanningStates.get(String(item.id));
+    const hasSourceChange = (sourceChangesByOccurrence.get(String(item.id)) || []).length > 0;
     const query = search.trim().toLocaleLowerCase("nl-NL");
     if (query && ![
       item.task_name_snapshot,
@@ -724,23 +791,26 @@ export default function Planning() {
       return shift?.status === "draft" || (assignmentsInRangeByShift.get(String(shiftId)) || [])
         .some(assignment => assignment.status === "draft");
     });
-    if (statusFilter === "planned") return state?.readiness === "ready";
+    if (statusFilter === "planned") return state?.readiness === "ready" && !hasSourceChange;
     if (statusFilter === "published") return state?.readiness === "ready"
+      && !hasSourceChange
       && state.linkedShiftIds.length > 0
       && state.linkedShiftIds.every(shiftId => (
         shiftsInRangeById.get(String(shiftId))?.status === "published"
       ));
     if (statusFilter === "warnings") {
+      if (hasSourceChange) return true;
       if (!item.security_plan_revision_id || !item.security_plan_snapshot?.published_revision) return true;
       return state?.linkedShiftIds.some(shiftId => (
         assignmentsInRangeByShift.get(String(shiftId)) || []
       ).some(assignment => assignmentWarnings(assignment).length > 0));
     }
     return true;
-  }), [assignmentsInRangeByShift, customerFilter, occurrencePlanningStates, search, shiftsInRangeById, statusFilter, taskOccurrencesInRange]);
+  }), [assignmentsInRangeByShift, customerFilter, occurrencePlanningStates, search, shiftsInRangeById, sourceChangesByOccurrence, statusFilter, taskOccurrencesInRange]);
   const visibleWorkQueueCount = useMemo(() => visibleTaskOccurrences.filter(occurrence => (
     occurrencePlanningStates.get(String(occurrence.id))?.readiness !== "ready"
-  )).length, [occurrencePlanningStates, visibleTaskOccurrences]);
+    || (sourceChangesByOccurrence.get(String(occurrence.id)) || []).length > 0
+  )).length, [occurrencePlanningStates, sourceChangesByOccurrence, visibleTaskOccurrences]);
 
   const filteredShifts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
@@ -764,7 +834,7 @@ export default function Planning() {
         : [];
       if (statusFilter === "vacant" && shiftAssignments.length >= required) return false;
       if (statusFilter === "draft" && shift.status !== "draft" && !shiftAssignments.some(item => item.status === "draft")) return false;
-      if (statusFilter === "warnings" && warnings.length + compositionWarnings.length === 0) return false;
+      if (statusFilter === "warnings" && warnings.length + compositionWarnings.length === 0 && !(sourceChangesByShift.get(String(shift.id)) || []).length) return false;
       if (statusFilter === "published" && shift.status !== "published") return false;
       if (!query) return true;
       return [
@@ -785,6 +855,7 @@ export default function Planning() {
     objectsById,
     search,
     shiftsInRange,
+    sourceChangesByShift,
     statusFilter,
   ]);
   const pendingMatrixShifts = useMemo(
@@ -800,12 +871,12 @@ export default function Planning() {
     [pendingMatrixChanges],
   );
   const matrixShifts = useMemo(
-    () => overlayPlanningRecords(filteredShifts, pendingMatrixShifts),
-    [filteredShifts, pendingMatrixShifts],
+    () => annotateSourceChangedShifts(overlayPlanningRecords(filteredShifts, pendingMatrixShifts), sourceChangesByShift),
+    [filteredShifts, pendingMatrixShifts, sourceChangesByShift],
   );
   const matrixCoverageShifts = useMemo(
-    () => overlayPlanningRecords(shiftsInRange, pendingMatrixShifts),
-    [pendingMatrixShifts, shiftsInRange],
+    () => annotateSourceChangedShifts(overlayPlanningRecords(shiftsInRange, pendingMatrixShifts), sourceChangesByShift),
+    [pendingMatrixShifts, shiftsInRange, sourceChangesByShift],
   );
   const matrixAssignments = useMemo(
     () => overlayPlanningRecords(assignmentsInRange, pendingMatrixAssignments),
@@ -893,6 +964,17 @@ export default function Planning() {
 
   const runActionMutation = useMutation({
     mutationFn: payload => invokePlanningApi(payload),
+    onSuccess: (_result, variables) => {
+      if ([
+        "compose_shift",
+        "compose_and_assign",
+        "update_shift_composition",
+        "cancel_task_shift",
+        "resize_shared_task_boundary",
+      ].includes(variables?.action)) {
+        bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+      }
+    },
     onError: (error, variables) => {
       if (variables?.action === "resize_shared_task_boundary") {
         void refreshPlanning();
@@ -1615,22 +1697,29 @@ export default function Planning() {
     const securityPlanWarningCount = ownedTaskOccurrencesInRange.filter(occurrence => (
       !occurrence.security_plan_revision_id || !occurrence.security_plan_snapshot?.published_revision
     )).length;
+    const sourceChangeCount = openTaskSourceChanges.filter(change => (
+      ownedTaskOccurrencesInRange.some(occurrence => String(occurrence.id) === String(change.task_occurrence_id || change.occurrence_id))
+      || [...new Set([change.shift_id, ...(change.shift_ids || [])].filter(Boolean).map(String))]
+        .some(shiftId => ownedShiftIdsInRange.has(shiftId))
+    )).length;
     return {
       draftShiftCount: ownedShiftsInRange.filter(shift => shift.status === "draft" || Number(shift.revision || 0) > Number(shift.published_revision || 0)).length,
       draftAssignmentCount: active.filter(item => item.status === "draft" || Number(item.revision || 0) > Number(item.published_revision || 0)).length,
-      warningCount: warnings.length + compositionWarnings.length + coverage.open + coverage.partial + securityPlanWarningCount,
+      warningCount: warnings.length + compositionWarnings.length + coverage.open + coverage.partial + securityPlanWarningCount + sourceChangeCount,
       criticalCount: warnings.filter(warning => warning.severity === "critical").length
         + compositionWarnings.filter(warning => warning.severity === "critical").length
         + coverage.open
         + coverage.partial
-        + securityPlanWarningCount,
+        + securityPlanWarningCount
+        + sourceChangeCount,
       vacantCount,
       taskCoverage: coverage,
       workQueueCount,
       staffingOnlyCount,
       securityPlanWarningCount,
+      sourceChangeCount,
     };
-  }, [assignmentsInRangeByShift, occurrencePlanningStates, ownedAssignmentsInRange, ownedShiftsInRange, ownedTaskOccurrencesInRange, shiftsInRange, taskSegments]);
+  }, [assignmentsInRangeByShift, occurrencePlanningStates, openTaskSourceChanges, ownedAssignmentsInRange, ownedShiftIdsInRange, ownedShiftsInRange, ownedTaskOccurrencesInRange, shiftsInRange, taskSegments]);
   const publicationStats = useMemo(() => {
     const taskCoverage = taskCoverageSummary(ownedTaskOccurrencesInRange, taskSegments, shiftsInRange);
     const securityPlanWarningCount = ownedTaskOccurrencesInRange.filter(occurrence => (
@@ -1650,6 +1739,7 @@ export default function Planning() {
       securityPlanWarningCount,
       warningCount: nonTaskWarningCount + taskCoverage.open + taskCoverage.partial + securityPlanWarningCount,
       criticalCount: nonTaskCriticalCount + taskCoverage.open + taskCoverage.partial + securityPlanWarningCount,
+      sourceChangeCount: planningStats.sourceChangeCount,
     };
   }, [ownedTaskOccurrencesInRange, planningStats, shiftsInRange, taskSegments]);
 
@@ -1731,6 +1821,7 @@ export default function Planning() {
     shiftsQuery,
     assignmentsQuery,
     taskOccurrencesQuery,
+    taskSourceChangesQuery,
     taskSegmentsQuery,
     personnelQuery,
     objectsQuery,
@@ -1740,6 +1831,7 @@ export default function Planning() {
     shiftsQuery.error,
     assignmentsQuery.error,
     taskOccurrencesQuery.error,
+    taskSourceChangesQuery.error,
     taskSegmentsQuery.error,
     personnelQuery.error,
   ].find(Boolean);
@@ -1824,7 +1916,7 @@ export default function Planning() {
           mutationIntents.current.clear("publish");
           setPublishOpen(true);
         }}
-        publishDisabled={ownedShiftsInRange.length === 0 || publicationStats.draftShiftCount + publicationStats.draftAssignmentCount + publicationStats.taskCoverage.open + publicationStats.taskCoverage.partial === 0}
+        publishDisabled={planningStats.sourceChangeCount > 0 || ownedShiftsInRange.length === 0 || publicationStats.draftShiftCount + publicationStats.draftAssignmentCount + publicationStats.taskCoverage.open + publicationStats.taskCoverage.partial === 0}
         isPublishing={publishMutation.isPending}
       />
 
@@ -1832,6 +1924,13 @@ export default function Planning() {
         <div role="alert" className="flex shrink-0 items-center gap-2 border-b border-rose-300 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
           <AlertCircle className="h-3.5 w-3.5" />
           {mutationMessage(loadError)}
+        </div>
+      )}
+
+      {planningStats.sourceChangeCount > 0 && (
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-b border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span><strong>{planningStats.sourceChangeCount} {planningStats.sourceChangeCount === 1 ? "dienst vraagt" : "diensten vragen"} controle.</strong> Het objectrooster is gewijzigd; pas de gemarkeerde dienst aan voordat u opnieuw publiceert.</span>
         </div>
       )}
 
@@ -1891,6 +1990,7 @@ export default function Planning() {
                 periodStart,
                 selectedShift,
                 pendingResourceKeys: matrixPendingResourceKeys,
+                sourceChanges: openTaskSourceChanges,
                 onCreateShift: occurrence => openTaskComposer({ occurrence }),
                 onAddToShift: occurrence => openTaskComposer({ shift: selectedShift, occurrence }),
                 onFillStaffing: openOccurrenceStaffing,
@@ -1995,7 +2095,7 @@ export default function Planning() {
         onOpenChange={open => { if (!open) setComposer(null); }}
         shift={composer?.shift || null}
         initialOccurrence={composer?.occurrence || null}
-        occurrences={taskOccurrencesInRange}
+        occurrences={taskOccurrences.filter(item => planningTaskOccurrenceOverlapsRange(item, periodStart, periodEnd))}
         segments={taskSegments}
         shifts={shiftsInRange}
         onSave={handleCompositionSave}

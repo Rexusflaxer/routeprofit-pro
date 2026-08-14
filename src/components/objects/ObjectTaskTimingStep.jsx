@@ -2,8 +2,48 @@ import React from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, StepHeading } from "./ObjectWizardUi";
 import ObjectTaskSchedule from "./ObjectTaskSchedule";
+import { securityPlanTaskTypeLabel } from "./securityPlanConfig";
 
-export default function ObjectTaskTimingStep({ form, otherTasks = [], onChange }) {
+export default function ObjectTaskTimingStep({
+  form,
+  contextData,
+  weekStart,
+  onWeekChange,
+  serverClock,
+  onChange,
+}) {
   const continuous = form.execution_mode === "continuous";
-  return <><StepHeading title="Wanneer wordt deze taak uitgevoerd?" description={continuous ? "Teken de aaneengesloten bezetting per dag in het rooster." : "Teken de toegestane tijdvensters; de uitvoeringsduur komt uit het gekozen beveiligingsplan."} /><ObjectTaskSchedule periods={form.schedule_periods} otherTasks={otherTasks} recurrence={{ type: form.recurrence_type, specificDate: form.specific_date, validFrom: form.valid_from, validUntil: form.valid_until }} onChange={value => onChange("schedule_periods", value)} oneTimeDate={form.recurrence_type === "one_time" ? form.specific_date : null} executionMode={form.execution_mode} durationMinutes={Number(form.duration_minutes)} /><div className="max-w-2xl"><Field label="Taakinstructie" htmlFor="task-instructions"><Textarea id="task-instructions" rows={3} maxLength={2000} value={form.instructions} onChange={event => onChange("instructions", event.target.value)} placeholder="Optionele korte omschrijving van wat er moet gebeuren" /></Field></div></>;
+  return (
+    <>
+      <StepHeading
+        title="Teken de taak in het rooster"
+        description={continuous
+          ? "Je ziet de huidige kalenderweek. Teken alleen in de toekomst en stel herhaling daarna per taakmoment in."
+          : "Klik in de huidige of een volgende week. De duur komt uit het gekozen beveiligingsplan; herhaling stel je daarna per taakmoment in."}
+      />
+      <ObjectTaskSchedule
+        entries={form.schedule_entries}
+        contextData={contextData}
+        onChange={value => onChange("schedule_entries", value)}
+        executionMode={form.execution_mode}
+        durationMinutes={Number(form.duration_minutes)}
+        taskLabel={form.custom_task_type || securityPlanTaskTypeLabel(form.task_type)}
+        weekStart={weekStart}
+        onWeekChange={onWeekChange}
+        serverClock={serverClock}
+      />
+      <div className="max-w-2xl">
+        <Field label="Taakinstructie" htmlFor="task-instructions">
+          <Textarea
+            id="task-instructions"
+            rows={3}
+            maxLength={2000}
+            value={form.instructions}
+            onChange={event => onChange("instructions", event.target.value)}
+            placeholder="Optionele korte omschrijving van wat er moet gebeuren"
+          />
+        </Field>
+      </div>
+    </>
+  );
 }
