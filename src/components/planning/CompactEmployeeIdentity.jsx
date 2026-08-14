@@ -25,12 +25,12 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             onClick={onClick}
             className={cn(
               "flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait",
-              variant === "midnight" && "h-full items-end focus-visible:ring-white/70",
+              variant === "midnight" && "h-full flex-col items-start justify-end gap-2 focus-visible:ring-white/70",
             )}
             aria-label={name}
           >
             {variant === "midnight" && (
-              <Avatar className="h-9 w-9 shrink-0 border border-white/15 bg-white/10">
+              <Avatar className="h-14 w-11 shrink-0 rounded-md border border-white/15 bg-white/10">
                 <AvatarImage src={photoUrl || undefined} alt={`Profielfoto van ${name}`} className="object-cover object-top" />
                 <AvatarFallback className="bg-white/10 text-[10px] font-bold text-slate-100">{initials(name)}</AvatarFallback>
               </Avatar>
