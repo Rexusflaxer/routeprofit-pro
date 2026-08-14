@@ -951,7 +951,7 @@ function MatrixShiftBlock({
       {(requiredCount > 1 || embeddedInLane) && (
         <p className={cn(
           "compact-hide relative z-10 mt-1.5 text-[9px] font-medium text-white/60",
-          embeddedInLane && "order-3 mt-1 text-[9px] text-white/75",
+          embeddedInLane && "order-3 mt-1 text-[9px] text-slate-600 dark:text-white/75",
         )} data-planning-dimensions="time-staffing">
           Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
         </p>
@@ -980,8 +980,8 @@ function MatrixShiftBlock({
           <span className={cn(
             "rounded px-1.5 py-0.5 text-[8px] font-semibold",
             shift.status === "published"
-              ? "bg-blue-400/15 text-blue-100"
-              : "bg-amber-400/15 text-amber-200",
+              ? "bg-blue-100/80 text-blue-700 dark:bg-blue-400/15 dark:text-blue-100"
+              : "bg-amber-100/90 text-amber-800 dark:bg-amber-400/15 dark:text-amber-200",
           )}>
             {shift.status === "published" ? "Gepubliceerd" : "Concept"}
           </span>
