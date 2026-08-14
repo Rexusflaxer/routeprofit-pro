@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import PlanningClipboardContextMenu from "@/components/planning/PlanningClipboardContextMenu";
 import {
   formatMinutesAsHours,
   getOccurrencePlanningState,
@@ -56,7 +57,7 @@ function sourceChangeTime(snapshot) {
   return start && end ? `${start}–${end}` : "gewijzigd";
 }
 
-function OccurrenceCardContent({ occurrence, coverage, planningState, projection, sourceChanges = [], impactedShift = null, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, onEditShift, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
+function OccurrenceCardContent({ occurrence, coverage, planningState, projection, sourceChanges = [], impactedShift = null, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, onEditShift, onCopyTask, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
   const percentage = coverage.requiredMinutes > 0
     ? Math.min(100, Math.round((coverage.allocatedMinutes / coverage.requiredMinutes) * 100))
     : 0;
@@ -64,6 +65,14 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
   const hasSourceChange = Boolean(sourceChange);
   const needsWork = hasSourceChange || planningState?.readiness !== "ready";
   return (
+    <PlanningClipboardContextMenu
+      mode="copy"
+      label="Taak kopiëren"
+      available={Boolean(onCopyTask)}
+      disabled={disabled}
+      detail={`${occurrence.task_name_snapshot || "Taak"} · ${occurrence.window_start_time}–${occurrence.window_end_time}`}
+      onSelect={() => onCopyTask?.(occurrence)}
+    >
     <article
       ref={dragProvided?.innerRef}
       {...(dragProvided?.draggableProps || {})}
@@ -151,6 +160,7 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
         </div>
       )}
     </article>
+    </PlanningClipboardContextMenu>
   );
 }
 
@@ -165,7 +175,7 @@ function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   );
 }
 
-function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing, onEditShift }) {
+function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing, onEditShift, onCopyTask }) {
   if (groups.length === 0) {
     return (
       <div className="m-2 rounded-lg border border-dashed border-border bg-card p-5 text-center">
@@ -194,6 +204,7 @@ function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, s
             onAdd={onAddToShift}
             onFillStaffing={onFillStaffing}
             onEditShift={onEditShift}
+            onCopyTask={onCopyTask}
           />
         ))}
       </div>
@@ -212,6 +223,7 @@ export default function PlanningTaskBacklog({
   onFillStaffing,
   onEditShift,
   onClearShift,
+  onCopyTask,
   sourceChanges = [],
   enableTaskDrag = false,
   periodStart = null,
@@ -356,6 +368,7 @@ export default function PlanningTaskBacklog({
                 onAddToShift={onAddToShift}
                 onFillStaffing={onFillStaffing}
                 onEditShift={onEditShift}
+                onCopyTask={onCopyTask}
               />
               {provided.placeholder}
             </div>
@@ -373,6 +386,7 @@ export default function PlanningTaskBacklog({
             onAddToShift={onAddToShift}
             onFillStaffing={onFillStaffing}
             onEditShift={onEditShift}
+            onCopyTask={onCopyTask}
           />
         </div>
       )}

@@ -47,6 +47,9 @@ export default function PlanningBoard({
   onCopyService,
   onPasteService,
   serviceClipboard,
+  onCopyTask,
+  onPasteTask,
+  taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending = false,
@@ -91,6 +94,9 @@ export default function PlanningBoard({
       onCopyService={onCopyService}
       onPasteService={onPasteService}
       serviceClipboard={serviceClipboard}
+      onCopyTask={onCopyTask}
+      onPasteTask={onPasteTask}
+      taskClipboard={taskClipboard}
       onResizeTaskSegment={onResizeTaskSegment}
       onResizeTaskBoundary={onResizeTaskBoundary}
       mutationPending={mutationPending}

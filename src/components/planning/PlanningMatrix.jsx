@@ -191,6 +191,7 @@ function OpenTaskIntervalCard({
   onCreateOpenTaskSlice,
   onPasteService,
   serviceClipboard,
+  onCopyTask,
   mutationPending,
   embeddedInLane = false,
   style,
@@ -231,6 +232,9 @@ function OpenTaskIntervalCard({
         endTime: serviceClipboard.endTime,
         personnelId: serviceClipboard.personnelId,
       })}
+      secondaryLabel="Taak kopiëren"
+      secondaryDisabled={mutationPending}
+      onSecondarySelect={() => onCopyTask?.(occurrence)}
     >
     <article
       ref={provided?.innerRef}
@@ -1092,6 +1096,7 @@ function TaskCoverageLane({
   onCopyService,
   onPasteService,
   serviceClipboard,
+  onCopyTask,
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending,
@@ -1279,6 +1284,14 @@ function TaskCoverageLane({
       data-task-coverage-group={occurrence.id}
       aria-busy={isLaneBusy ? "true" : "false"}
     >
+      <PlanningClipboardContextMenu
+        mode="copy"
+        label="Taak kopiëren"
+        available={editable}
+        disabled={isLaneBusy}
+        detail={`${occurrence.task_name_snapshot || "Taak"} · ${demand.startTime}–${demand.endTime}`}
+        onSelect={() => onCopyTask?.(occurrence)}
+      >
       <button
         type="button"
         disabled={!editable}
@@ -1300,6 +1313,7 @@ function TaskCoverageLane({
           {openMinutes > 0 ? `${formatMinutesAsHours(openMinutes)} open` : "Ingepland"}
         </span>
       </button>
+      </PlanningClipboardContextMenu>
       <div
         ref={laneRef}
         className="relative isolate w-full overflow-hidden bg-primary/[0.025]"
@@ -1363,6 +1377,7 @@ function TaskCoverageLane({
             onCreateOpenTaskSlice={onCreateOpenTaskSlice}
             onPasteService={onPasteService}
             serviceClipboard={serviceClipboard}
+            onCopyTask={onCopyTask}
             mutationPending={isLaneBusy}
             editable={editable}
             embeddedInLane
@@ -1584,6 +1599,9 @@ function ObjectDayCell({
   onCopyService,
   onPasteService,
   serviceClipboard,
+  onCopyTask,
+  onPasteTask,
+  taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending,
@@ -1680,7 +1698,22 @@ function ObjectDayCell({
     || (left.kind === right.kind ? 0 : left.kind === "service" ? -1 : 1)
     || left.key.localeCompare(right.key)
   ));
+  const canPasteTask = Boolean(taskClipboard && String(taskClipboard.object_id) === String(resource.id));
+  const taskPastePending = pendingResourceKeys instanceof Set
+    && pendingResourceKeys.has(`task-date:${resource.id}:${dayKey}`);
   return (
+    <PlanningClipboardContextMenu
+      mode="paste"
+      label="Taak hier plakken"
+      available={editable && resource.kind === "object" && cellItems.length === 0}
+      disabled={mutationPending || taskPastePending || !canPasteTask}
+      detail={taskClipboard
+        ? canPasteTask
+          ? `${taskClipboard.task_name_snapshot || "Taak"} · ${taskClipboard.window_start_time}–${taskClipboard.window_end_time}`
+          : "Een taak kan alleen op hetzelfde object worden geplakt"
+        : "Kopieer eerst een taak"}
+      onSelect={() => onPasteTask?.({ task: taskClipboard, objectId: resource.id, serviceDate: dayKey })}
+    >
     <div className="min-h-[112px] space-y-1.5 p-2" data-matrix-cell={`${resource.key}:${dayKey}`}>
       {cellItems.map(item => {
         if (item.kind === "task-lane") {
@@ -1717,6 +1750,7 @@ function ObjectDayCell({
               onCopyService={onCopyService}
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
+              onCopyTask={onCopyTask}
               onResizeTaskSegment={onResizeTaskSegment}
               onResizeTaskBoundary={onResizeTaskBoundary}
               mutationPending={lanePending}
@@ -1737,6 +1771,7 @@ function ObjectDayCell({
               onCreateOpenTaskSlice={onCreateOpenTaskSlice}
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
+              onCopyTask={onCopyTask}
               editable={editable}
               mutationPending={isPlanningResourcePending(
                 pendingResourceKeys,
@@ -1787,6 +1822,7 @@ function ObjectDayCell({
       })}
       {cellItems.length === 0 && <span className="block px-1 py-2 text-[9px] text-muted-foreground/60">Geen planning</span>}
     </div>
+    </PlanningClipboardContextMenu>
   );
 }
 
@@ -1901,6 +1937,9 @@ export default function PlanningMatrix({
   onCopyService,
   onPasteService,
   serviceClipboard,
+  onCopyTask,
+  onPasteTask,
+  taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending = false,
@@ -2080,6 +2119,9 @@ export default function PlanningMatrix({
         onCopyService={onCopyService}
         onPasteService={onPasteService}
         serviceClipboard={serviceClipboard}
+        onCopyTask={onCopyTask}
+        onPasteTask={onPasteTask}
+        taskClipboard={taskClipboard}
         onResizeTaskSegment={onResizeTaskSegment}
         onResizeTaskBoundary={onResizeTaskBoundary}
         mutationPending={mutationPending}

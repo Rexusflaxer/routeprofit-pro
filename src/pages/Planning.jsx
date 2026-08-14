@@ -351,6 +351,7 @@ export default function Planning() {
   const [undoStack, setUndoStack] = useState([]);
   const [liveMessage, setLiveMessage] = useState("");
   const [serviceClipboard, setServiceClipboard] = useState(null);
+  const [taskClipboard, setTaskClipboard] = useState(null);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
   const lastBoundaryRecoveryKey = useRef("");
@@ -1295,6 +1296,41 @@ export default function Planning() {
     }
   };
 
+  const copyTaskToClipboard = task => {
+    setTaskClipboard(task);
+    const description = `${task.task_name_snapshot || "Taak"} is zonder diensten gekopieerd.`;
+    toast({ title: "Taak gekopieerd", description });
+    setLiveMessage(description);
+  };
+
+  const pasteTaskToDate = async ({ task, objectId, serviceDate }) => {
+    if (!task || String(task.object_id) !== String(objectId)) return;
+    const releasePendingResources = acquirePendingResources([`task-date:${objectId}:${serviceDate}`]);
+    if (!releasePendingResources) return;
+    try {
+      await runIntentMutation(`paste-task:${task.id}:${serviceDate}`, "planning-paste-task", {
+        action: "add_object_task_series",
+        object_id: task.object_id,
+        customer_id: task.customer_id,
+        task_definition_id: task.object_task_definition_id,
+        expected_version: Number(task.definition_version || 1),
+        schedule_block: {
+          service_date: serviceDate,
+          start_time: task.window_start_time,
+          end_time: task.window_end_time,
+          repeat_weekly: false,
+        },
+      });
+      await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
+      await refreshPlanning();
+      const description = `${task.task_name_snapshot || "Taak"} is op ${serviceDate} geplaatst zonder diensten of medewerkers.`;
+      toast({ title: "Taak geplakt", description });
+      setLiveMessage(description);
+    } finally {
+      releasePendingResources();
+    }
+  };
+
   const copyServiceToClipboard = clipboard => {
     setServiceClipboard(clipboard);
     const description = `${clipboard.personnelName} · ${clipboard.startTime}–${clipboard.endTime} is gekopieerd.`;
@@ -1996,6 +2032,9 @@ export default function Planning() {
               onCopyService={copyServiceToClipboard}
               onPasteService={payload => pasteServiceFromClipboard(payload).catch(() => undefined)}
               serviceClipboard={serviceClipboard}
+              onCopyTask={copyTaskToClipboard}
+              onPasteTask={payload => pasteTaskToDate(payload).catch(() => undefined)}
+              taskClipboard={taskClipboard}
               onResizeTaskSegment={resizeTimelineTaskSegment}
               onResizeTaskBoundary={resizeTimelineSharedBoundary}
               mutationPending={publishMutation.isPending}
@@ -2025,6 +2064,7 @@ export default function Planning() {
                 onFillStaffing: openOccurrenceStaffing,
                 onEditShift: shift => openTaskComposer({ shift }),
                 onClearShift: () => setSelectedShiftId(null),
+                onCopyTask: copyTaskToClipboard,
               }}
               employeeProps={{
                 selectedShift,
