@@ -850,12 +850,18 @@ function MatrixShiftBlock({
       style={style}
     >
       {timelinePhotoUrl && (
-        <img
-          src={timelinePhotoUrl}
-          alt=""
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-top opacity-35 grayscale [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_42%,black_100%)] [mask-image:linear-gradient(to_right,transparent_0%,black_42%,black_100%)]"
-        />
+        <>
+          <img
+            src={timelinePhotoUrl}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-[72%_32%] opacity-80"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 !z-[1] bg-[linear-gradient(90deg,rgba(8,42,116,0.97)_0%,rgba(10,43,105,0.78)_48%,rgba(9,24,62,0.24)_100%)]"
+          />
+        </>
       )}
       {embeddedInLane && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
