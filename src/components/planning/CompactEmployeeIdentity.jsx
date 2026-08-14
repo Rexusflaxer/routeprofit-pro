@@ -26,7 +26,7 @@ export default function CompactEmployeeIdentity({ name, photoUrl, disabled, onCl
             className={cn(
               "flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait",
               variant === "midnight" && "h-full flex-col items-start justify-end gap-2 focus-visible:ring-white/70",
-              variant === "timeline" && "h-auto flex-col items-start gap-0.5 focus-visible:ring-white/70",
+              variant === "timeline" && "h-auto flex-none flex-col items-start justify-start gap-0.5 focus-visible:ring-white/70",
             )}
             aria-label={name}
           >

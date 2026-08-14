@@ -322,7 +322,8 @@ function ShiftSlot({
       className={cn(
         "flex items-center",
         compact ? "min-h-8 gap-1.5 py-1" : "min-h-11 gap-2 py-1.5",
-        (visualVariant === "midnight" || visualVariant === "timeline") && "min-h-0 flex-1 py-0",
+        visualVariant === "midnight" && "min-h-0 flex-1 py-0",
+        visualVariant === "timeline" && "min-h-0 flex-none items-start py-0",
         assignment
           ? "bg-transparent"
           : (visualVariant === "midnight" || visualVariant === "timeline")
