@@ -186,6 +186,32 @@ describe("wekelijkse objecttaakreeks", () => {
     expect(projectWeek("2026-09-07", [initialRevision, stoppedFromWeek31])).toEqual([]);
   });
 
+  it("behoudt bij een gestopte reeks de occurrences van voor de toekomstige stopdatum", () => {
+    const stoppedSeries = { ...series, status: "stopped" };
+    const stoppedFromWeek31 = {
+      id: "revision-3",
+      series_id: series.id,
+      revision_number: 3,
+      operation: "stop",
+      effective_from: "2026-08-31",
+      recurrence_type: "weekly",
+      weekday: 1,
+    };
+    const projectStoppedWeek = weekStart => projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [stoppedSeries],
+      revisions: [initialRevision, stoppedFromWeek31],
+      sourceChanges: [],
+      weekStart,
+    });
+
+    expect(projectStoppedWeek("2026-08-24")).toEqual([
+      expect.objectContaining({ occurrence_date: "2026-08-24", start_time: "06:30" }),
+    ]);
+    expect(projectStoppedWeek("2026-08-31")).toEqual([]);
+    expect(projectStoppedWeek("2026-09-07")).toEqual([]);
+  });
+
   it("markeert een open planningimpact uitsluitend op de bijbehorende occurrence", () => {
     const openChange = {
       id: "source-change-1",
@@ -200,5 +226,68 @@ describe("wekelijkse objecttaakreeks", () => {
       id: "source-change-1",
       service_date: "2026-08-24",
     });
+  });
+
+  it.each(["archived", "stopped", "deleted"])(
+    "projecteert geen taakblokken voor een reeks met status %s",
+    status => {
+      const hiddenSeries = { ...series, status };
+      expect(projectObjectTaskSchedules({
+        definitions: [definition],
+        series: [hiddenSeries],
+        revisions: [initialRevision],
+        sourceChanges: [],
+        weekStart: "2026-08-17",
+      })).toEqual([]);
+    },
+  );
+
+  it.each(["archived", "deleted"])(
+    "projecteert geen legacytaak met definitiestatus %s",
+    status => {
+      expect(projectObjectTaskSchedules({
+        definitions: [{
+          ...definition,
+          status,
+          recurrence_type: "weekly",
+          schedule_periods: [{
+            period_key: "legacy-monday",
+            days: ["mon"],
+            start_time: "08:00",
+            end_time: "18:00",
+          }],
+        }],
+        series: [],
+        revisions: [],
+        sourceChanges: [],
+        weekStart: "2026-08-17",
+      })).toEqual([]);
+    },
+  );
+
+  it("blijft een actieve legacytaak zonder moderne reeks projecteren", () => {
+    expect(projectObjectTaskSchedules({
+      definitions: [{
+        ...definition,
+        recurrence_type: "weekly",
+        schedule_periods: [{
+          period_key: "legacy-monday",
+          days: ["mon"],
+          start_time: "08:00",
+          end_time: "18:00",
+        }],
+      }],
+      series: [],
+      revisions: [],
+      sourceChanges: [],
+      weekStart: "2026-08-17",
+    })).toEqual([
+      expect.objectContaining({
+        definition_id: definition.id,
+        occurrence_date: "2026-08-17",
+        start_time: "08:00",
+        legacy: true,
+      }),
+    ]);
   });
 });

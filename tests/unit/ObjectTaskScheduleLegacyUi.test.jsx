@@ -182,4 +182,198 @@ describe("ObjectTaskSchedule vertrouwde tijdlijn", () => {
       }),
     ]);
   });
+
+  it("voegt twee afzonderlijk getekende aangrenzende blokken samen tot een tijdvak", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_CLOCK.iso));
+    const onChange = vi.fn();
+
+    function ScheduleHarness() {
+      const [entries, setEntries] = React.useState([]);
+      return (
+        <ObjectTaskSchedule
+          entries={entries}
+          onChange={nextEntries => {
+            setEntries(nextEntries);
+            onChange(nextEntries);
+          }}
+          executionMode="continuous"
+          durationMinutes={0}
+          weekStart="2026-08-17"
+          serverClock={SERVER_CLOCK}
+        />
+      );
+    }
+
+    const { container } = render(<ScheduleHarness />);
+    const firstSlot = screen.getByRole("button", { name: "Maandag 08:00" });
+    fireEvent.pointerDown(firstSlot);
+    fireEvent.pointerUp(firstSlot);
+    fireEvent.pointerUp(window);
+
+    const adjacentSlot = screen.getByRole("button", { name: "Maandag 08:30" });
+    fireEvent.pointerDown(adjacentSlot);
+    fireEvent.pointerUp(adjacentSlot);
+    fireEvent.pointerUp(window);
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        occurrence_date: "2026-08-17",
+        start_time: "08:00",
+        end_time: "09:00",
+        frequency: "once",
+        repeat_until: null,
+      }),
+    ]);
+
+    const visibleTaskBlocks = Array.from(container.querySelectorAll("[style]")).filter(element => (
+      element.classList.contains("border-primary/40")
+      && element.classList.contains("bg-primary/25")
+    ));
+    expect(visibleTaskBlocks).toHaveLength(1);
+  });
+
+  it("voegt een aansluitend halfuur samen met een exact kwartierblok", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_CLOCK.iso));
+    const onChange = vi.fn();
+
+    function ExactQuarterHarness() {
+      const [entries, setEntries] = React.useState([{
+        client_id: "quarter-monday",
+        occurrence_date: "2026-08-17",
+        start_time: "08:15",
+        end_time: "08:30",
+        end_day_offset: 0,
+        frequency: "once",
+        repeat_until: null,
+      }]);
+      return (
+        <ObjectTaskSchedule
+          entries={entries}
+          onChange={nextEntries => {
+            setEntries(nextEntries);
+            onChange(nextEntries);
+          }}
+          executionMode="continuous"
+          durationMinutes={0}
+          weekStart="2026-08-17"
+          serverClock={SERVER_CLOCK}
+        />
+      );
+    }
+
+    const { container } = render(<ExactQuarterHarness />);
+    const adjacentSlot = screen.getByRole("button", { name: "Maandag 08:30" });
+    fireEvent.pointerDown(adjacentSlot);
+    fireEvent.pointerUp(adjacentSlot);
+    fireEvent.pointerUp(window);
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        client_id: "quarter-monday",
+        start_time: "08:15",
+        end_time: "09:00",
+        frequency: "once",
+        repeat_until: null,
+      }),
+    ]);
+    const visibleTaskBlocks = Array.from(container.querySelectorAll("[style]")).filter(element => (
+      element.classList.contains("border-primary/40")
+      && element.classList.contains("bg-primary/25")
+    ));
+    expect(visibleTaskBlocks).toHaveLength(1);
+  });
+
+  it("houdt aangrenzende tijdvakken met een andere herhaling of einddatum gescheiden", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_CLOCK.iso));
+    const entries = [{
+      client_id: "weekly-until-september",
+      occurrence_date: "2026-08-17",
+      start_time: "08:00",
+      end_time: "08:30",
+      end_day_offset: 0,
+      frequency: "weekly",
+      repeat_until: "2026-09-28",
+    }, {
+      client_id: "weekly-until-october",
+      occurrence_date: "2026-08-17",
+      start_time: "08:30",
+      end_time: "09:00",
+      end_day_offset: 0,
+      frequency: "weekly",
+      repeat_until: "2026-10-26",
+    }, {
+      client_id: "once-after-weekly",
+      occurrence_date: "2026-08-17",
+      start_time: "09:00",
+      end_time: "09:30",
+      end_day_offset: 0,
+      frequency: "once",
+      repeat_until: null,
+    }];
+
+    const { container } = render(
+      <ObjectTaskSchedule
+        entries={entries}
+        onChange={vi.fn()}
+        executionMode="continuous"
+        durationMinutes={0}
+        weekStart="2026-08-17"
+        serverClock={SERVER_CLOCK}
+      />,
+    );
+
+    const visibleTaskBlocks = Array.from(container.querySelectorAll("[style]")).filter(element => (
+      element.classList.contains("border-primary/40")
+      && element.classList.contains("bg-primary/25")
+    ));
+    expect(visibleTaskBlocks).toHaveLength(3);
+  });
+
+  it("toont geen overlay of legenda voor een gearchiveerde legacytaak", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_CLOCK.iso));
+    const contextData = {
+      definitions: [{
+        id: "archived-reception",
+        status: "archived",
+        task_type: "other",
+        custom_task_type: "Gearchiveerde receptietaak",
+        recurrence_type: "weekly",
+        schedule_periods: [{
+          period_key: "legacy-monday",
+          days: ["mon"],
+          start_time: "08:00",
+          end_time: "18:00",
+        }],
+      }],
+      series: [],
+      revisions: [],
+      source_changes: [],
+    };
+
+    const { container } = render(
+      <ObjectTaskSchedule
+        entries={[]}
+        contextData={contextData}
+        onChange={vi.fn()}
+        executionMode="continuous"
+        durationMinutes={0}
+        weekStart="2026-08-17"
+        serverClock={SERVER_CLOCK}
+      />,
+    );
+
+    expect(screen.queryByText("Andere geplande taken:")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gearchiveerde receptietaak")).not.toBeInTheDocument();
+    const backgroundTaskBlocks = Array.from(container.querySelectorAll("[style]")).filter(element => (
+      element.classList.contains("bg-chart-2/10")
+      || element.classList.contains("bg-chart-4/10")
+      || element.classList.contains("bg-chart-5/10")
+      || element.classList.contains("bg-chart-3/10")
+    ));
+    expect(backgroundTaskBlocks).toHaveLength(0);
+  });
 });
