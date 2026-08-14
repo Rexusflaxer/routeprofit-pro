@@ -855,11 +855,11 @@ function MatrixShiftBlock({
             src={timelinePhotoUrl}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-[72%_32%] opacity-80"
+            className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-right object-top opacity-90"
           />
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 !z-[1] bg-[linear-gradient(90deg,rgba(8,42,116,0.97)_0%,rgba(10,43,105,0.78)_48%,rgba(9,24,62,0.24)_100%)]"
+            className="pointer-events-none absolute inset-0 !z-[1] bg-[linear-gradient(90deg,rgba(2,8,20,0.99)_0%,rgba(3,14,39,0.96)_48%,rgba(6,18,46,0.72)_100%)]"
           />
         </>
       )}
