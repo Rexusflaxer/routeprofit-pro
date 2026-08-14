@@ -832,7 +832,7 @@ function MatrixShiftBlock({
   return (
     <article className={cn(
       "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
-      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-blue-400/35 !bg-[linear-gradient(145deg,rgba(59,130,246,0.16),rgba(37,99,235,0.07))] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100 dark:!bg-[linear-gradient(145deg,rgba(37,99,235,0.18),rgba(30,64,175,0.08))] [&>div]:relative [&>div]:z-10 [&>p]:relative [&>p]:z-10",
+      embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-blue-400/35 !bg-[linear-gradient(105deg,rgba(37,99,235,0.34)_0%,rgba(59,130,246,0.18)_48%,rgba(37,99,235,0.04)_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100 dark:!bg-[linear-gradient(105deg,rgba(37,99,235,0.38)_0%,rgba(30,64,175,0.20)_48%,rgba(30,64,175,0.05)_100%)] [&>div]:relative [&>div]:z-10 [&>p]:relative [&>p]:z-10",
       shift.status === "draft" && !embeddedInLane && "border-primary/60",
       currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
       isPending && "animate-pulse border-primary/70",
@@ -854,7 +854,7 @@ function MatrixShiftBlock({
           src={timelinePhotoUrl}
           alt=""
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-top opacity-[0.08] grayscale"
+          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover object-top opacity-35 grayscale [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_42%,black_100%)] [mask-image:linear-gradient(to_right,transparent_0%,black_42%,black_100%)]"
         />
       )}
       {embeddedInLane && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
