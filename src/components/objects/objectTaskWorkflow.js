@@ -1,4 +1,4 @@
-import { base44 } from "@/api/base44Client";
+import { invokePlanningApi } from "@/components/planning/planningApiClient";
 import {
   normalizeObjectTaskRevision,
   normalizeObjectTaskSeries,
@@ -22,23 +22,10 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function unwrap(response) {
-  let value = response?.data ?? response ?? {};
-  if (value?.data && Object.keys(value).length === 1) value = value.data;
-  if (value?.error) throw Object.assign(new Error(value.error), { status: value.status || 400, details: value.details || null });
-  return value || {};
-}
-
 async function invoke(payload) {
-  try {
-    return unwrap(await base44.functions.invoke("planningApi", payload));
-  } catch (error) {
-    const backend = error?.response?.data?.data || error?.response?.data || {};
-    throw Object.assign(new Error(backend.error || backend.message || error?.message || "Taakactie mislukt."), {
-      status: Number(error?.response?.status || backend.status || error?.status || 500),
-      details: backend.details || error?.details || null,
-    });
-  }
+  // Object-task mutations already carry their stable key. Reads intentionally
+  // remain keyless to preserve the existing planningApi contract.
+  return invokePlanningApi(payload, { ensureIdempotencyKey: false });
 }
 
 export function createObjectTaskMutationKey(action = "mutation") {

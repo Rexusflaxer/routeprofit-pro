@@ -256,4 +256,16 @@ describe("ObjectTasksTab compacte roosterbediening", () => {
       idempotencyKey: "object-task:stop-series:test-key",
     });
   });
+
+  it("herhaalt een mislukte takenlijst niet bij een backendfout 400", async () => {
+    workflow.listObjectTasks.mockRejectedValueOnce(Object.assign(new Error("De planningbackend is nog niet gepubliceerd."), {
+      status: 400,
+    }));
+
+    renderTab();
+
+    expect(await screen.findByText("De taken konden niet worden geladen.")).toBeInTheDocument();
+    expect(screen.getByText("De planningbackend is nog niet gepubliceerd.")).toBeInTheDocument();
+    expect(workflow.listObjectTasks).toHaveBeenCalledTimes(1);
+  });
 });
