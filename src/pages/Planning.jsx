@@ -350,6 +350,7 @@ export default function Planning() {
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [liveMessage, setLiveMessage] = useState("");
+  const [serviceClipboard, setServiceClipboard] = useState(null);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
   const lastBoundaryRecoveryKey = useRef("");
@@ -1294,6 +1295,22 @@ export default function Planning() {
     }
   };
 
+  const copyServiceToClipboard = clipboard => {
+    setServiceClipboard(clipboard);
+    const description = `${clipboard.personnelName} · ${clipboard.startTime}–${clipboard.endTime} is gekopieerd.`;
+    toast({ title: "Dienst gekopieerd", description });
+    setLiveMessage(description);
+  };
+
+  const pasteServiceFromClipboard = async ({ occurrence, serviceDate, startTime, endTime, personnelId }) => {
+    const personnelItem = activePersonnel.find(item => String(item.id) === String(personnelId));
+    if (!personnelItem) {
+      toast({ variant: "destructive", title: "Medewerker niet beschikbaar", description: "De medewerker van de gekopieerde dienst is niet meer actief." });
+      return;
+    }
+    return composeAndAssignOccurrenceSlice({ occurrence, personnelItem, serviceDate, startTime, endTime });
+  };
+
   const createOpenOccurrenceSlice = async ({ occurrence, serviceDate, startTime, endTime }) => {
     if (!occurrence) return;
     const segment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
@@ -1976,6 +1993,9 @@ export default function Planning() {
                 idempotencyKey: createPlanningMutationKey("cancel-task-shift"),
               })}
               onCreateOpenTaskSlice={payload => createOpenOccurrenceSlice(payload).catch(() => undefined)}
+              onCopyService={copyServiceToClipboard}
+              onPasteService={payload => pasteServiceFromClipboard(payload).catch(() => undefined)}
+              serviceClipboard={serviceClipboard}
               onResizeTaskSegment={resizeTimelineTaskSegment}
               onResizeTaskBoundary={resizeTimelineSharedBoundary}
               mutationPending={publishMutation.isPending}
