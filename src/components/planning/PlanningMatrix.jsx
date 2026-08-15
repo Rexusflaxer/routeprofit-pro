@@ -540,6 +540,8 @@ function TaskBoundaryHandle({
   onCommit,
   onCancel,
   disabled,
+  positionForMinute = null,
+  minuteForPosition = null,
 }) {
   const cleanupRef = useRef(null);
   const frameRef = useRef(null);
@@ -558,13 +560,20 @@ function TaskBoundaryHandle({
     const initialRect = laneRef.current?.getBoundingClientRect?.();
     const demandDuration = Math.max(1, demand.endMinute - demand.startMinute);
     const boundaryPixelY = initialRect
-      ? initialRect.top + ((value - demand.startMinute) / demandDuration) * initialRect.height
+      ? initialRect.top + (positionForMinute
+        ? positionForMinute(value) / 100
+        : (value - demand.startMinute) / demandDuration) * initialRect.height
       : lastClientY;
     const grabOffsetY = lastClientY - boundaryPixelY;
 
     const minuteForPointer = clientY => {
       const rect = laneRef.current?.getBoundingClientRect?.();
       if (!rect) return null;
+      if (minuteForPosition) {
+        const ratio = (clientY - grabOffsetY - rect.top) / Math.max(1, rect.height);
+        const minute = Math.round(minuteForPosition(ratio) / 5) * 5;
+        return Math.max(boundary.minMinute, Math.min(boundary.maxMinute, minute));
+      }
       return timelineMinuteFromLanePointer({
         clientY: clientY - grabOffsetY,
         laneTop: rect.top,
@@ -649,7 +658,9 @@ function TaskBoundaryHandle({
     if (next !== value) onPreview?.(next);
   };
 
-  const top = ((value - demand.startMinute) / Math.max(1, demand.endMinute - demand.startMinute)) * 100;
+  const top = positionForMinute
+    ? positionForMinute(value)
+    : ((value - demand.startMinute) / Math.max(1, demand.endMinute - demand.startMinute)) * 100;
   const leftLabel = boundary.left?.kind === "service"
     ? `${boundary.left.startTime}–${timelineMinutesToClock(value)}`
     : null;
@@ -1189,18 +1200,40 @@ function TaskCoverageLane({
     previewIntervalsBySegmentId: previewIntervals,
   });
   const duration = Math.max(1, demand.endMinute - demand.startMinute);
-  const pieceStyle = (startMinute, endMinute) => ({
-    top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
-    left: "44px",
-    width: "calc(100% - 44px)",
-    height: `${((endMinute - startMinute) / duration) * 100}%`,
-  });
-  const pieceCount = Math.max(1, baseServices.length + gaps.length);
-  const laneHeight = Math.max(
-    getTaskTimelineLaneHeight(duration, { compact }),
-    pieceCount * (compact ? 160 : 176),
-    compact ? 92 : 144,
-  );
+  const compactPieces = [
+    ...baseServices.map(service => ({ ...intervalFor(service), key: `service:${service.shift.id}` })),
+    ...gaps.map(gap => ({ startMinute: gap.startMinute, endMinute: gap.endMinute, key: `gap:${gap.startMinute}:${gap.endMinute}` })),
+  ].sort((left, right) => left.startMinute - right.startMinute || left.endMinute - right.endMinute);
+  const pieceCount = Math.max(1, compactPieces.length);
+  const compactPositionForMinute = minute => {
+    const index = compactPieces.findIndex(piece => minute >= piece.startMinute && minute <= piece.endMinute);
+    if (index < 0) return minute <= demand.startMinute ? 0 : 100;
+    const piece = compactPieces[index];
+    const progress = (minute - piece.startMinute) / Math.max(1, piece.endMinute - piece.startMinute);
+    return ((index + progress) / pieceCount) * 100;
+  };
+  const compactMinuteForPosition = ratio => {
+    const scaled = Math.max(0, Math.min(1, ratio)) * pieceCount;
+    const index = Math.min(pieceCount - 1, Math.floor(scaled));
+    const piece = compactPieces[index];
+    const progress = index === pieceCount - 1 && scaled === pieceCount ? 1 : scaled - index;
+    return piece.startMinute + progress * (piece.endMinute - piece.startMinute);
+  };
+  const pieceStyle = (startMinute, endMinute) => {
+    if (compact) {
+      const index = compactPieces.findIndex(piece => piece.startMinute === startMinute && piece.endMinute === endMinute);
+      return { top: `${Math.max(0, index) * 92}px`, left: "44px", width: "calc(100% - 44px)", height: "92px" };
+    }
+    return {
+      top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
+      left: "44px",
+      width: "calc(100% - 44px)",
+      height: `${((endMinute - startMinute) / duration) * 100}%`,
+    };
+  };
+  const laneHeight = compact
+    ? pieceCount * 92
+    : Math.max(getTaskTimelineLaneHeight(duration, { compact: false }), pieceCount * 176, 144);
   const isLaneBusy = mutationPending || resizeSaving;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
 
@@ -1315,6 +1348,7 @@ function TaskCoverageLane({
             shownPreview?.boundaryId === boundary.id ? shownPreview.minute : boundary.minute
           ))}
           openBoundaryMinutes={gaps.flatMap(gap => [gap.startMinute, gap.endMinute])}
+          positionForMinute={compact ? compactPositionForMinute : null}
         />
         {baseServices.map(service => {
           const interval = intervalFor(service);
@@ -1381,6 +1415,8 @@ function TaskCoverageLane({
             onCommit={minute => commitBoundary(boundary, minute)}
             onCancel={() => setActivePreview(null)}
             disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
+            positionForMinute={compact ? compactPositionForMinute : null}
+            minuteForPosition={compact ? compactMinuteForPosition : null}
           />
         ))}
       </div>
@@ -2140,7 +2176,7 @@ export default function PlanningMatrix({
         style={{ zoom }}
         className={cn(
           "min-w-max table-fixed border-separate border-spacing-0",
-          compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:p-1.5 [&_[data-inline-time-editor=true]]:p-2 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
+          compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:h-[92px] [&_article]:overflow-hidden [&_article]:p-1.5 [&_[data-inline-time-editor=true]]:p-2 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
         )}
         aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}
         data-planning-layout="cards"
