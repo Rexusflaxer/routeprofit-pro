@@ -242,7 +242,7 @@ function OpenTaskIntervalCard({
       aria-busy={mutationPending ? "true" : "false"}
       style={style}
       className={cn(
-        "group/open-task w-full rounded-lg border border-rose-300/20 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] px-2.5 py-2 text-left shadow-none backdrop-blur-xl backdrop-saturate-150 transition-colors hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]",
+        "group/open-task w-full rounded-lg border border-rose-300/20 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] px-2.5 py-2 text-left shadow-none backdrop-blur-xl backdrop-saturate-150 transition-[top,height,padding,border-color,background-color] duration-300 ease-out motion-reduce:transition-none hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]",
         embeddedInLane && "absolute z-20 flex min-h-0 items-center overflow-hidden rounded-none border-0 border-l-[3px] border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.09),transparent_48%),linear-gradient(145deg,rgba(255,255,255,0.16),rgba(255,228,230,0.08))] px-2 py-1.5 shadow-none backdrop-blur-xl dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.09),transparent_48%),linear-gradient(145deg,rgba(76,5,25,0.15),rgba(30,15,23,0.09))]",
         editable && !embeddedInLane && "border-dashed",
         isDraggingOver && "border-primary border-l-primary bg-primary/[0.12] ring-2 ring-inset ring-primary/25",
@@ -887,7 +887,7 @@ function MatrixShiftBlock({
       ]}
     >
     <article className={cn(
-      "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
+      "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[top,height,padding,filter,box-shadow,transform] duration-300 ease-out motion-reduce:transition-none hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
       embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-primary/35 !bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100",
       shift.status === "draft" && !embeddedInLane && "border-primary/60",
       currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
@@ -1333,7 +1333,7 @@ function TaskCoverageLane({
       </PlanningClipboardContextMenu>
       <div
         ref={laneRef}
-        className="relative isolate w-full overflow-hidden bg-primary/[0.025]"
+        className="relative isolate w-full overflow-hidden bg-primary/[0.025] transition-[height] duration-300 ease-out motion-reduce:transition-none"
         style={{ height: `${laneHeight}px` }}
         data-task-coverage-lane={occurrence.id}
         data-lane-start-minute={demand.startMinute}
@@ -1453,7 +1453,7 @@ function EmployeeAssignmentBlock({
         { label: "Medewerker uitplannen", disabled, onSelect: () => onUnassign?.(assignment), Icon: UserMinus },
       ]}
     >
-    <article aria-busy={disabled ? "true" : "false"} className="relative overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
+    <article aria-busy={disabled ? "true" : "false"} className="relative overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[top,height,padding,filter,box-shadow,transform] duration-300 ease-out motion-reduce:transition-none hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <PlanningEmployeePortraitOverlay photoUrl={identity.photoUrl} />
       <div className="relative z-10 flex items-start gap-2">
         <CompactEmployeeIdentity
@@ -2175,7 +2175,7 @@ export default function PlanningMatrix({
       <table
         style={{ zoom }}
         className={cn(
-          "min-w-max table-fixed border-separate border-spacing-0",
+          "min-w-max table-fixed border-separate border-spacing-0 [interpolate-size:allow-keywords]",
           compact && "[&_[data-matrix-cell]]:min-h-[72px] [&_[data-matrix-cell]]:p-1 [&_article]:h-[92px] [&_article]:overflow-hidden [&_article]:p-1.5 [&_[data-inline-time-editor=true]]:p-2 [&_[data-planning-dimensions]]:hidden [&_.compact-hide]:hidden",
         )}
         aria-label={perspective === "employee" ? "Planning per medewerker" : "Planning per object"}
