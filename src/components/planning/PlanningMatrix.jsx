@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
+import FadedEmployeePortrait from "@/components/planning/FadedEmployeePortrait";
 import PlanningClipboardContextMenu from "@/components/planning/PlanningClipboardContextMenu";
 import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
 
@@ -727,9 +728,11 @@ function MatrixShiftBlock({
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
   const assignmentsBySlot = mapAssignmentsToSlots(currentAssignments, requiredCount);
-  const timelinePhotoUrl = embeddedInLane && assignmentsBySlot.get(0)
-    ? assignmentIdentity(assignmentsBySlot.get(0), personnelById).photoUrl
+  const primaryAssignmentIdentity = assignmentsBySlot.get(0)
+    ? assignmentIdentity(assignmentsBySlot.get(0), personnelById)
     : null;
+  const timelinePhotoUrl = embeddedInLane ? primaryAssignmentIdentity?.photoUrl : null;
+  const cardPhotoUrl = !embeddedInLane ? primaryAssignmentIdentity?.photoUrl : null;
   const activeSegments = segments.filter(item => item.status !== "removed");
   const linkedObjectCount = new Set([
     ...(shift.object_ids || []),
@@ -893,6 +896,7 @@ function MatrixShiftBlock({
       data-editable={editable ? "true" : "false"}
       style={style}
     >
+      {cardPhotoUrl && <FadedEmployeePortrait photoUrl={cardPhotoUrl} name={primaryAssignmentIdentity?.name} />}
       {timelinePhotoUrl && (
         <>
           <img
@@ -1015,7 +1019,7 @@ function MatrixShiftBlock({
             disabled={mutationPending || isPending}
             editable={editable}
             compact={embeddedInLane}
-            visualVariant={embeddedInLane ? "timeline" : "midnight"}
+            visualVariant={embeddedInLane ? "timeline" : "portrait"}
           />
         ))}
       </div>
@@ -1429,15 +1433,16 @@ function EmployeeAssignmentBlock({
         { label: "Medewerker uitplannen", disabled, onSelect: () => onUnassign?.(assignment), Icon: UserMinus },
       ]}
     >
-    <article aria-busy={disabled ? "true" : "false"} className="rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
-      <div className="flex items-start gap-2">
+    <article aria-busy={disabled ? "true" : "false"} className="relative overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
+      <FadedEmployeePortrait photoUrl={identity.photoUrl} name={identity.name} />
+      <div className="relative z-10 flex items-start gap-2">
         <CompactEmployeeIdentity
           name={identity.name}
           photoUrl={identity.photoUrl}
           disabled={disabled}
           onClick={onSelect}
           warningCount={warnings}
-          variant="midnight"
+          variant="portrait"
         />
         {editable && (
           <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>
@@ -1445,7 +1450,7 @@ function EmployeeAssignmentBlock({
           </button>
         )}
       </div>
-      <button type="button" disabled={disabled} onClick={onSelect} className="mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
+      <button type="button" disabled={disabled} onClick={onSelect} className="relative z-10 mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
         <span className="block text-[10px] font-semibold tabular-nums text-white">
           {projectionSlice?.startTime || shift.start_time || "--:--"}–{projectionSlice?.endTime || shift.end_time || "--:--"}
           {projectionSlice?.continuesBefore ? " · vervolg" : projectionSlice?.continuesAfter ? " · loopt door" : ""}
