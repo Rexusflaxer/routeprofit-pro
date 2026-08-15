@@ -1,33 +1,13 @@
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React from "react";
 import { cn } from "@/lib/utils";
 
-const PORTRAIT_HEIGHT = 240;
-
 export default function PlanningEmployeePortraitOverlay({ photoUrl, embedded = false }) {
-  const portraitRef = useRef(null);
-  const [fits, setFits] = useState(false);
-
-  useLayoutEffect(() => {
-    const card = portraitRef.current?.parentElement;
-    if (!card) return undefined;
-
-    const updateVisibility = () => setFits(card.clientHeight >= PORTRAIT_HEIGHT);
-    updateVisibility();
-    const observer = new ResizeObserver(updateVisibility);
-    observer.observe(card);
-    return () => observer.disconnect();
-  }, [photoUrl]);
-
   if (!photoUrl) return null;
 
   return (
     <div
-      ref={portraitRef}
       aria-hidden="true"
-      className={cn(
-        "pointer-events-none absolute right-0 top-0 z-0 h-[240px] w-[142px] overflow-hidden [mask-image:linear-gradient(to_right,transparent_0%,black_35%)] [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_35%)]",
-        !fits && "hidden",
-      )}
+      className="pointer-events-none absolute right-0 top-0 z-0 h-[40%] w-[37%] overflow-hidden [mask-image:linear-gradient(to_right,transparent_0%,black_35%)] [-webkit-mask-image:linear-gradient(to_right,transparent_0%,black_35%)]"
     >
       <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_0%,black_55%,transparent_100%)] [-webkit-mask-image:linear-gradient(to_bottom,black_0%,black_55%,transparent_100%)]">
         <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
