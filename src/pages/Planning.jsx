@@ -26,6 +26,7 @@ import PlanningToolbar from "@/components/planning/PlanningToolbar";
 import PlanningBoard from "@/components/planning/PlanningBoard";
 import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
 import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
+import PlanningTaskDeleteDialog from "@/components/planning/PlanningDeleteDialogs";
 import {
   CancelTaskShiftDialog,
   PublishPlanningDialog,
@@ -348,6 +349,7 @@ export default function Planning() {
   const [pendingResourceKeys, setPendingResourceKeys] = useState(() => new Set());
   const [composer, setComposer] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
+  const [taskDeleteRequest, setTaskDeleteRequest] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [liveMessage, setLiveMessage] = useState("");
   const [serviceClipboard, setServiceClipboard] = useState(null);
@@ -1303,6 +1305,98 @@ export default function Planning() {
     setLiveMessage(description);
   };
 
+  const deleteTaskOccurrence = async request => {
+    const occurrence = request?.occurrence;
+    if (!occurrence) return;
+    const linkedShifts = request.linkedShifts || [];
+    const releasePendingResources = acquirePendingResources([
+      `occurrence:${occurrence.id}`,
+      ...linkedShifts.map(shift => `shift:${shift.id}`),
+    ]);
+    if (!releasePendingResources) return;
+    try {
+      const catalog = await invokePlanningApi({
+        action: "list_object_tasks",
+        object_id: occurrence.object_id,
+        customer_id: occurrence.customer_id,
+      });
+      const taskRow = (catalog.tasks || []).find(item => String(item.definition?.id) === String(occurrence.object_task_definition_id));
+      const seriesEntry = occurrence.object_task_schedule_series_id
+        ? taskRow?.series?.find(item => String(item.series?.id) === String(occurrence.object_task_schedule_series_id))
+        : taskRow?.series?.find(item => item.current_revision?.start_time === occurrence.window_start_time && item.current_revision?.end_time === occurrence.window_end_time);
+      if (!taskRow || !seriesEntry?.series || !seriesEntry.current_revision) {
+        toast({ variant: "destructive", title: "Taak kan niet worden verwijderd", description: "De bijbehorende taakreeks kon niet veilig worden vastgesteld." });
+        return;
+      }
+
+      let currentOccurrence = occurrence;
+      for (const shift of linkedShifts) {
+        const result = await runIntentMutation(`delete-task-shift:${occurrence.id}:${shift.id}`, "planning-delete-task-shift", {
+          action: "cancel_task_shift",
+          shift_id: shift.id,
+          expected_shift_revision: Number(shift.revision || 1),
+          expected_occurrence_revisions: { [occurrence.id]: Number(currentOccurrence.revision || 1) },
+        });
+        currentOccurrence = result.task_occurrences?.find(item => String(item.id) === String(occurrence.id)) || currentOccurrence;
+        reconcilePlanningResult(result);
+      }
+
+      const revision = seriesEntry.current_revision;
+      const stopped = await runIntentMutation(`delete-task:${occurrence.id}`, "planning-delete-task", {
+        action: "stop_object_task_series",
+        object_id: occurrence.object_id,
+        customer_id: occurrence.customer_id,
+        task_definition_id: occurrence.object_task_definition_id,
+        series_id: seriesEntry.series.id,
+        expected_version: Number(seriesEntry.series.version || 1),
+        effective_from: occurrence.service_date,
+      });
+      const resumeDate = toDateKey(addDays(occurrence.service_date, 7));
+      const shouldResume = revision.recurrence_type === "weekly"
+        && (!revision.recurrence_end_date || resumeDate <= revision.recurrence_end_date);
+      if (shouldResume) {
+        await runIntentMutation(`resume-task:${occurrence.id}`, "planning-resume-task", {
+          action: "add_object_task_series",
+          object_id: occurrence.object_id,
+          customer_id: occurrence.customer_id,
+          task_definition_id: occurrence.object_task_definition_id,
+          expected_version: Number(stopped.definition?.version || 1),
+          schedule_block: {
+            service_date: resumeDate,
+            start_time: revision.start_time,
+            end_time: revision.end_time,
+            repeat_weekly: true,
+            recurrence_end_date: revision.recurrence_end_date || null,
+          },
+        });
+      }
+      await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
+      await refreshPlanning();
+      if (String(taskClipboard?.id) === String(occurrence.id)) setTaskClipboard(null);
+      const description = `${occurrence.task_name_snapshot || "Taak"} is verwijderd${linkedShifts.length ? `, inclusief ${linkedShifts.length} ${linkedShifts.length === 1 ? "dienst" : "diensten"}` : ""}.`;
+      toast({ title: "Taak verwijderd", description });
+      setLiveMessage(description);
+      setTaskDeleteRequest(null);
+    } finally {
+      releasePendingResources();
+    }
+  };
+
+  const requestTaskDeletion = occurrence => {
+    const state = occurrencePlanningStates.get(String(occurrence.id));
+    const linkedShifts = (state?.linkedShiftIds || []).map(id => shiftsInRangeById.get(String(id))).filter(Boolean);
+    if (linkedShifts.some(shift => shift.status === "published" || Number(shift.published_revision || 0) > 0)) {
+      toast({ variant: "destructive", title: "Taak kan niet rechtstreeks worden verwijderd", description: "Minimaal één gekoppelde dienst is al gepubliceerd en moet via een formele annulering worden afgehandeld." });
+      return;
+    }
+    const employeeCount = new Set(linkedShifts.flatMap(shift => (
+      assignmentsInRangeByShift.get(String(shift.id)) || []
+    )).map(assignment => String(assignment.personnel_id))).size;
+    const request = { occurrence, linkedShifts, employeeCount };
+    if (linkedShifts.length) setTaskDeleteRequest(request);
+    else deleteTaskOccurrence(request).catch(() => undefined);
+  };
+
   const pasteTaskToDate = async ({ task, objectId, serviceDate }) => {
     if (!task || String(task.object_id) !== String(objectId)) return;
     const releasePendingResources = acquirePendingResources([`task-date:${objectId}:${serviceDate}`]);
@@ -1728,8 +1822,8 @@ export default function Planning() {
     });
     reconcilePlanningResult(result);
     refreshPlanningInBackground();
-    const description = `${shift.name || "Conceptdienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
-    toast({ title: "Conceptdienst verwijderd", description });
+    const description = `${shift.name || "Dienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
+    toast({ title: "Dienst verwijderd", description });
     setSelectedShiftId(null);
     setCancelTaskShift(null);
     setSidePanelMode("tasks");
@@ -2034,6 +2128,8 @@ export default function Planning() {
               serviceClipboard={serviceClipboard}
               onCopyTask={copyTaskToClipboard}
               onPasteTask={payload => pasteTaskToDate(payload).catch(() => undefined)}
+              onDeleteTask={requestTaskDeletion}
+              onDeleteService={shift => setCancelTaskShift({ shift, idempotencyKey: createPlanningMutationKey("cancel-task-shift") })}
               taskClipboard={taskClipboard}
               onResizeTaskSegment={resizeTimelineTaskSegment}
               onResizeTaskBoundary={resizeTimelineSharedBoundary}
@@ -2065,7 +2161,8 @@ export default function Planning() {
                 onEditShift: shift => openTaskComposer({ shift }),
                 onClearShift: () => setSelectedShiftId(null),
                 onCopyTask: copyTaskToClipboard,
-              }}
+                onDeleteTask: requestTaskDeletion,
+                }}
               employeeProps={{
                 selectedShift,
                 candidates,
@@ -2151,6 +2248,13 @@ export default function Planning() {
         }}
         onConfirm={payload => handleShiftActionConfirm(payload).catch(() => undefined)}
         isPending={runActionMutation.isPending}
+      />
+      <PlanningTaskDeleteDialog
+        request={taskDeleteRequest}
+        open={Boolean(taskDeleteRequest)}
+        onOpenChange={open => { if (!open && !runActionMutation.isPending) setTaskDeleteRequest(null); }}
+        onConfirm={request => deleteTaskOccurrence(request).catch(() => undefined)}
+        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
       />
       <CancelTaskShiftDialog
         shift={cancelTaskShift?.shift || null}

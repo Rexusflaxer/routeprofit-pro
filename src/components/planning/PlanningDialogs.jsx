@@ -250,20 +250,20 @@ export function CancelTaskShiftDialog({ shift, open, onOpenChange, onConfirm, is
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[16px]">
             <Trash2 className="h-4 w-4 text-destructive" />
-            Conceptdienst verwijderen
+            Dienst verwijderen
           </DialogTitle>
           <DialogDescription className="text-[12px]">
             De dienst en eventuele conceptbezetting verdwijnen uit het rooster. De taaksegmenten keren direct terug naar de werkvoorraad; de auditgeschiedenis blijft bewaard.
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-border bg-muted/35 p-3">
-          <p className="text-[12px] font-semibold">{shift?.name || "Conceptdienst"}</p>
+          <p className="text-[12px] font-semibold">{shift?.name || "Dienst"}</p>
           <p className="mt-0.5 text-[10px] text-muted-foreground">{shift?.service_date} · {shift?.start_time}–{shift?.end_time}</p>
         </div>
         <DialogFooter>
           <Button variant="outline" disabled={isPending} onClick={() => onOpenChange(false)}>Behouden</Button>
           <Button variant="destructive" disabled={isPending} onClick={() => onConfirm(shift)}>
-            {isPending ? "Verwijderen…" : "Verwijderen en taken vrijgeven"}
+            {isPending ? "Verwijderen…" : "Dienst verwijderen"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   Clock3,
+  ClipboardPaste,
   Copy,
   GripHorizontal,
   Layers3,
@@ -192,6 +193,7 @@ function OpenTaskIntervalCard({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onDeleteTask,
   mutationPending,
   embeddedInLane = false,
   style,
@@ -219,22 +221,12 @@ function OpenTaskIntervalCard({
     <PlanningClipboardContextMenu
       mode="paste"
       available={editable}
-      disabled={mutationPending || !canPaste}
-      detail={serviceClipboard
-        ? canPaste
-          ? `${serviceClipboard.personnelName} · ${serviceClipboard.startTime}–${serviceClipboard.endTime}`
-          : `${serviceClipboard.startTime}–${serviceClipboard.endTime} valt buiten dit open taakdeel`
-        : "Kopieer eerst een bemande dienst"}
-      onSelect={() => onPasteService?.({
-        occurrence,
-        serviceDate: dropServiceDate,
-        startTime: serviceClipboard.startTime,
-        endTime: serviceClipboard.endTime,
-        personnelId: serviceClipboard.personnelId,
-      })}
-      secondaryLabel="Taak kopiëren"
-      secondaryDisabled={mutationPending}
-      onSecondarySelect={() => onCopyTask?.(occurrence)}
+      detail={`${occurrence.task_name_snapshot || "Taak"} · ${gap.startTime}–${gap.endTime}`}
+      items={[
+        { label: "Dienst hier plakken", disabled: mutationPending || !canPaste, onSelect: () => onPasteService?.({ occurrence, serviceDate: dropServiceDate, startTime: serviceClipboard.startTime, endTime: serviceClipboard.endTime, personnelId: serviceClipboard.personnelId }), Icon: ClipboardPaste },
+        { label: "Taak kopiëren", disabled: mutationPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
+        { label: "Taak verwijderen", disabled: mutationPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+      ]}
     >
     <article
       ref={provided?.innerRef}
@@ -720,6 +712,7 @@ function MatrixShiftBlock({
   onEditComposition,
   onCancelComposition,
   onCopyService,
+  onDeleteService,
   onResizeTaskSegment,
   mutationPending,
   personnelById,
@@ -869,17 +862,17 @@ function MatrixShiftBlock({
     <PlanningClipboardContextMenu
       mode="copy"
       available={editable}
-      disabled={!copiedAssignment || mutationPending || isPending || isResizeSaving}
-      detail={copiedAssignment
-        ? `${copiedIdentity.name} · ${displayedStartTime}–${displayedEndTime}`
-        : "Alleen een dienst met één medewerker kan worden gekopieerd"}
-      onSelect={() => onCopyService?.({
-        shift,
-        personnelId: copiedAssignment.personnel_id,
-        personnelName: copiedIdentity.name,
-        startTime: displayedStartTime,
-        endTime: displayedEndTime,
-      })}
+      detail={`${shift.name || shift.service_name_snapshot || "Dienst"} · ${displayedStartTime}–${displayedEndTime}`}
+      items={[
+        { label: "Dienst kopiëren", disabled: !copiedAssignment || mutationPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
+        { label: "Dienst verwijderen", disabled: mutationPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
+        ...currentAssignments.map(assignment => ({
+          label: currentAssignments.length === 1 ? "Medewerker uitplannen" : `${assignmentIdentity(assignment, personnelById).name} uitplannen`,
+          disabled: mutationPending || isPending,
+          onSelect: () => onUnassign?.(assignment),
+          Icon: UserMinus,
+        })),
+      ]}
     >
     <article className={cn(
       "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
@@ -1097,6 +1090,8 @@ function TaskCoverageLane({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onDeleteTask,
+  onDeleteService,
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending,
@@ -1286,11 +1281,12 @@ function TaskCoverageLane({
     >
       <PlanningClipboardContextMenu
         mode="copy"
-        label="Taak kopiëren"
         available={editable}
-        disabled={isLaneBusy}
         detail={`${occurrence.task_name_snapshot || "Taak"} · ${demand.startTime}–${demand.endTime}`}
-        onSelect={() => onCopyTask?.(occurrence)}
+        items={[
+          { label: "Taak kopiëren", disabled: isLaneBusy, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
+          { label: "Taak verwijderen", disabled: isLaneBusy, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+        ]}
       >
       <button
         type="button"
@@ -1354,6 +1350,7 @@ function TaskCoverageLane({
               onEditComposition={onEditComposition}
               onCancelComposition={onCancelComposition}
               onCopyService={onCopyService}
+              onDeleteService={onDeleteService}
               onResizeTaskSegment={onResizeTaskSegment}
               mutationPending={isLaneBusy}
               editable={editable}
@@ -1378,6 +1375,7 @@ function TaskCoverageLane({
             onPasteService={onPasteService}
             serviceClipboard={serviceClipboard}
             onCopyTask={onCopyTask}
+            onDeleteTask={onDeleteTask}
             mutationPending={isLaneBusy}
             editable={editable}
             embeddedInLane
@@ -1411,6 +1409,7 @@ function EmployeeAssignmentBlock({
   onSelect,
   onUnassign,
   onCopyService,
+  onDeleteService,
   disabled = false,
   editable = false,
 }) {
@@ -1423,15 +1422,12 @@ function EmployeeAssignmentBlock({
     <PlanningClipboardContextMenu
       mode="copy"
       available={editable}
-      disabled={disabled}
       detail={`${identity.name} · ${startTime}–${endTime}`}
-      onSelect={() => onCopyService?.({
-        shift,
-        personnelId: assignment.personnel_id,
-        personnelName: identity.name,
-        startTime,
-        endTime,
-      })}
+      items={[
+        { label: "Dienst kopiëren", disabled, onSelect: () => onCopyService?.({ shift, personnelId: assignment.personnel_id, personnelName: identity.name, startTime, endTime }), Icon: Copy },
+        { label: "Dienst verwijderen", disabled: disabled || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
+        { label: "Medewerker uitplannen", disabled, onSelect: () => onUnassign?.(assignment), Icon: UserMinus },
+      ]}
     >
     <article aria-busy={disabled ? "true" : "false"} className="rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[filter,box-shadow,transform] hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <div className="flex items-start gap-2">
@@ -1601,6 +1597,8 @@ function ObjectDayCell({
   serviceClipboard,
   onCopyTask,
   onPasteTask,
+  onDeleteTask,
+  onDeleteService,
   taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
@@ -1751,6 +1749,8 @@ function ObjectDayCell({
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
               onCopyTask={onCopyTask}
+              onDeleteTask={onDeleteTask}
+              onDeleteService={onDeleteService}
               onResizeTaskSegment={onResizeTaskSegment}
               onResizeTaskBoundary={onResizeTaskBoundary}
               mutationPending={lanePending}
@@ -1772,6 +1772,7 @@ function ObjectDayCell({
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
               onCopyTask={onCopyTask}
+              onDeleteTask={onDeleteTask}
               editable={editable}
               mutationPending={isPlanningResourcePending(
                 pendingResourceKeys,
@@ -1809,6 +1810,7 @@ function ObjectDayCell({
             onEditComposition={onEditComposition}
             onCancelComposition={onCancelComposition}
             onCopyService={onCopyService}
+            onDeleteService={onDeleteService}
             onResizeTaskSegment={onResizeTaskSegment}
             editable={editable}
             mutationPending={isPlanningResourcePending(
@@ -1834,6 +1836,7 @@ function EmployeeDayCell({
   onSelectShift,
   onUnassign,
   onCopyService,
+  onDeleteService,
   mutationPending,
   pendingResourceKeys,
   editable,
@@ -1876,6 +1879,7 @@ function EmployeeDayCell({
             onSelect={() => onSelectShift?.(shift)}
             onUnassign={item => onUnassign?.(shift, item)}
             onCopyService={onCopyService}
+            onDeleteService={onDeleteService}
             disabled={placementPending}
             editable={editable}
           />
@@ -1939,6 +1943,8 @@ export default function PlanningMatrix({
   serviceClipboard,
   onCopyTask,
   onPasteTask,
+  onDeleteTask,
+  onDeleteService,
   taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
@@ -2092,6 +2098,7 @@ export default function PlanningMatrix({
         onSelectShift={onSelectShift}
         onUnassign={onUnassign}
         onCopyService={onCopyService}
+        onDeleteService={onDeleteService}
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
         editable={editable}
@@ -2121,6 +2128,8 @@ export default function PlanningMatrix({
         serviceClipboard={serviceClipboard}
         onCopyTask={onCopyTask}
         onPasteTask={onPasteTask}
+        onDeleteTask={onDeleteTask}
+        onDeleteService={onDeleteService}
         taskClipboard={taskClipboard}
         onResizeTaskSegment={onResizeTaskSegment}
         onResizeTaskBoundary={onResizeTaskBoundary}

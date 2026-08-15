@@ -5,12 +5,14 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  Copy,
   GripVertical,
   Layers3,
   ListTodo,
   Plus,
   Search,
   UserRoundPlus,
+  Trash2,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +59,7 @@ function sourceChangeTime(snapshot) {
   return start && end ? `${start}–${end}` : "gewijzigd";
 }
 
-function OccurrenceCardContent({ occurrence, coverage, planningState, projection, sourceChanges = [], impactedShift = null, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, onEditShift, onCopyTask, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
+function OccurrenceCardContent({ occurrence, coverage, planningState, projection, sourceChanges = [], impactedShift = null, selectedShift, selectedShiftPending = false, onCreate, onAdd, onFillStaffing, onEditShift, onCopyTask, onDeleteTask, dragEnabled, dragIndex, dragProvided, isDragging, disabled = false }) {
   const percentage = coverage.requiredMinutes > 0
     ? Math.min(100, Math.round((coverage.allocatedMinutes / coverage.requiredMinutes) * 100))
     : 0;
@@ -67,11 +69,12 @@ function OccurrenceCardContent({ occurrence, coverage, planningState, projection
   return (
     <PlanningClipboardContextMenu
       mode="copy"
-      label="Taak kopiëren"
-      available={Boolean(onCopyTask)}
-      disabled={disabled}
+      available={Boolean(onCopyTask || onDeleteTask)}
       detail={`${occurrence.task_name_snapshot || "Taak"} · ${occurrence.window_start_time}–${occurrence.window_end_time}`}
-      onSelect={() => onCopyTask?.(occurrence)}
+      items={[
+        { label: "Taak kopiëren", disabled, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
+        { label: "Taak verwijderen", disabled, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+      ]}
     >
     <article
       ref={dragProvided?.innerRef}
@@ -175,7 +178,7 @@ function OccurrenceCard({ enableTaskDrag, index, ...props }) {
   );
 }
 
-function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing, onEditShift, onCopyTask }) {
+function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, selectedShiftPending, onCreateShift, onAddToShift, onFillStaffing, onEditShift, onCopyTask, onDeleteTask }) {
   if (groups.length === 0) {
     return (
       <div className="m-2 rounded-lg border border-dashed border-border bg-card p-5 text-center">
@@ -205,6 +208,7 @@ function BacklogGroups({ groups, itemIndexById, enableTaskDrag, selectedShift, s
             onFillStaffing={onFillStaffing}
             onEditShift={onEditShift}
             onCopyTask={onCopyTask}
+            onDeleteTask={onDeleteTask}
           />
         ))}
       </div>
@@ -224,6 +228,7 @@ export default function PlanningTaskBacklog({
   onEditShift,
   onClearShift,
   onCopyTask,
+  onDeleteTask,
   sourceChanges = [],
   enableTaskDrag = false,
   periodStart = null,
@@ -369,6 +374,7 @@ export default function PlanningTaskBacklog({
                 onFillStaffing={onFillStaffing}
                 onEditShift={onEditShift}
                 onCopyTask={onCopyTask}
+                onDeleteTask={onDeleteTask}
               />
               {provided.placeholder}
             </div>
@@ -387,6 +393,7 @@ export default function PlanningTaskBacklog({
             onFillStaffing={onFillStaffing}
             onEditShift={onEditShift}
             onCopyTask={onCopyTask}
+            onDeleteTask={onDeleteTask}
           />
         </div>
       )}

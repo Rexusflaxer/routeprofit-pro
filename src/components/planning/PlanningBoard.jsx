@@ -49,6 +49,8 @@ export default function PlanningBoard({
   serviceClipboard,
   onCopyTask,
   onPasteTask,
+  onDeleteTask,
+  onDeleteService,
   taskClipboard,
   onResizeTaskSegment,
   onResizeTaskBoundary,
@@ -96,6 +98,8 @@ export default function PlanningBoard({
       serviceClipboard={serviceClipboard}
       onCopyTask={onCopyTask}
       onPasteTask={onPasteTask}
+      onDeleteTask={onDeleteTask}
+      onDeleteService={onDeleteService}
       taskClipboard={taskClipboard}
       onResizeTaskSegment={onResizeTaskSegment}
       onResizeTaskBoundary={onResizeTaskBoundary}
