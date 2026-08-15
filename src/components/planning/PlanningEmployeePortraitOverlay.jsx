@@ -7,7 +7,7 @@ export default function PlanningEmployeePortraitOverlay({ photoUrl, embedded = f
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute right-0 top-[10%] z-0 h-[46%] w-[40%] overflow-hidden [mask-image:radial-gradient(ellipse_at_100%_0%,black_0%,black_48%,transparent_84%)] [-webkit-mask-image:radial-gradient(ellipse_at_100%_0%,black_0%,black_48%,transparent_84%)]"
+      className="pointer-events-none absolute right-0 top-0 z-0 h-[40%] w-[37%] overflow-hidden [mask-image:radial-gradient(ellipse_at_100%_0%,black_0%,black_48%,transparent_84%)] [-webkit-mask-image:radial-gradient(ellipse_at_100%_0%,black_0%,black_48%,transparent_84%)]"
     >
       <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
       <span className={cn(
