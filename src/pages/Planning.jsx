@@ -877,12 +877,27 @@ export default function Planning() {
     () => pendingMatrixChanges.flatMap(item => item.segments || []),
     [pendingMatrixChanges],
   );
+  const pendingMatrixOccurrences = useMemo(
+    () => pendingMatrixChanges.flatMap(item => item.occurrences || []),
+    [pendingMatrixChanges],
+  );
+  const matrixOccurrences = useMemo(
+    () => overlayPlanningRecords(visibleTaskOccurrences, pendingMatrixOccurrences)
+      .filter(occurrence => occurrence.lifecycle_status !== "cancelled"),
+    [pendingMatrixOccurrences, visibleTaskOccurrences],
+  );
   const matrixShifts = useMemo(
-    () => annotateSourceChangedShifts(overlayPlanningRecords(filteredShifts, pendingMatrixShifts), sourceChangesByShift),
+    () => annotateSourceChangedShifts(
+      overlayPlanningRecords(filteredShifts, pendingMatrixShifts).filter(shift => shift.status !== "cancelled"),
+      sourceChangesByShift,
+    ),
     [filteredShifts, pendingMatrixShifts, sourceChangesByShift],
   );
   const matrixCoverageShifts = useMemo(
-    () => annotateSourceChangedShifts(overlayPlanningRecords(shiftsInRange, pendingMatrixShifts), sourceChangesByShift),
+    () => annotateSourceChangedShifts(
+      overlayPlanningRecords(shiftsInRange, pendingMatrixShifts).filter(shift => shift.status !== "cancelled"),
+      sourceChangesByShift,
+    ),
     [pendingMatrixShifts, shiftsInRange, sourceChangesByShift],
   );
   const matrixAssignments = useMemo(
@@ -1135,6 +1150,13 @@ export default function Planning() {
       `personnel:${assignment.personnel_id}`,
     ]);
     if (!releasePendingResources) return;
+    const pendingKey = createPlanningMutationKey("pending-unassign");
+    addPendingMatrixChange({
+      key: pendingKey,
+      shifts: [],
+      segments: [],
+      assignments: [{ ...assignment, status: "removed" }],
+    });
     try {
       const result = await runIntentMutation("unassign", "planning-unassign", {
         action: "unassign",
@@ -1149,6 +1171,7 @@ export default function Planning() {
       rememberUndo(result, description);
       setLiveMessage(description);
     } finally {
+      removePendingMatrixChange(pendingKey);
       releasePendingResources();
     }
   };
@@ -1314,6 +1337,18 @@ export default function Planning() {
       ...linkedShifts.map(shift => `shift:${shift.id}`),
     ]);
     if (!releasePendingResources) return;
+    const linkedShiftIds = new Set(linkedShifts.map(shift => String(shift.id)));
+    const linkedSegments = taskSegments.filter(segment => linkedShiftIds.has(String(segment.shift_id)));
+    const linkedAssignments = assignments.filter(assignment => linkedShiftIds.has(String(assignment.planning_shift_id || assignment.shift_id)));
+    const pendingKey = createPlanningMutationKey("pending-delete-task");
+    addPendingMatrixChange({
+      key: pendingKey,
+      occurrences: [{ ...occurrence, lifecycle_status: "cancelled" }],
+      shifts: linkedShifts.map(shift => ({ ...shift, status: "cancelled" })),
+      segments: linkedSegments.map(segment => ({ ...segment, status: "removed" })),
+      assignments: linkedAssignments.map(assignment => ({ ...assignment, status: "removed" })),
+    });
+    setTaskDeleteRequest(null);
     try {
       const catalog = await invokePlanningApi({
         action: "list_object_tasks",
@@ -1376,8 +1411,8 @@ export default function Planning() {
       const description = `${occurrence.task_name_snapshot || "Taak"} is verwijderd${linkedShifts.length ? `, inclusief ${linkedShifts.length} ${linkedShifts.length === 1 ? "dienst" : "diensten"}` : ""}.`;
       toast({ title: "Taak verwijderd", description });
       setLiveMessage(description);
-      setTaskDeleteRequest(null);
     } finally {
+      removePendingMatrixChange(pendingKey);
       releasePendingResources();
     }
   };
@@ -1401,6 +1436,21 @@ export default function Planning() {
     if (!task || String(task.object_id) !== String(objectId)) return;
     const releasePendingResources = acquirePendingResources([`task-date:${objectId}:${serviceDate}`]);
     if (!releasePendingResources) return;
+    const pendingKey = createPlanningMutationKey("pending-paste-task");
+    addPendingMatrixChange({
+      key: pendingKey,
+      shifts: [],
+      segments: [],
+      assignments: [],
+      occurrences: [{
+        ...task,
+        id: `pending-occurrence-${pendingKey}`,
+        service_date: serviceDate,
+        end_date: task.window_end_time <= task.window_start_time ? toDateKey(addDays(serviceDate, 1)) : serviceDate,
+        lifecycle_status: "active",
+        _optimistic_pending: true,
+      }],
+    });
     try {
       await runIntentMutation(`paste-task:${task.id}:${serviceDate}`, "planning-paste-task", {
         action: "add_object_task_series",
@@ -1421,6 +1471,7 @@ export default function Planning() {
       toast({ title: "Taak geplakt", description });
       setLiveMessage(description);
     } finally {
+      removePendingMatrixChange(pendingKey);
       releasePendingResources();
     }
   };
@@ -1765,25 +1816,47 @@ export default function Planning() {
   const handleShiftActionConfirm = async payload => {
     const action = shiftAction?.action;
     if (!action) return;
-    const result = await runIntentMutation("shift-action", `planning-${action}`, {
-      action,
-      shift_id: payload.shift.id,
+    const releasePendingResources = acquirePendingResources([`shift:${payload.shift.id}`]);
+    if (!releasePendingResources) return;
+    const pendingKey = createPlanningMutationKey(`pending-${action}`);
+    const optimisticShift = {
+      ...payload.shift,
+      id: action === "copy" ? `pending-shift-${pendingKey}` : payload.shift.id,
+      source_type: action === "copy" ? "copy" : payload.shift.source_type,
+      source_shift_id: action === "copy" ? payload.shift.id : payload.shift.source_shift_id,
       service_date: payload.service_date,
+      end_date: payload.end_time <= payload.start_time ? toDateKey(addDays(payload.service_date, 1)) : null,
       start_time: payload.start_time,
       end_time: payload.end_time,
-      expected_shift_revision: Number(payload.shift.revision || 1),
-    });
-    reconcilePlanningResult(result);
-    refreshPlanningInBackground();
-    const description = action === "copy"
-      ? `${payload.shift.name} is zonder medewerkers gekopieerd naar ${payload.service_date}.`
-      : `${payload.shift.name} is verplaatst naar ${payload.service_date}.`;
-    rememberUndo(result, description);
-    if (result?.undoable !== true) {
-      toast({ title: "Conceptplanning bijgewerkt", description });
-    }
-    setLiveMessage(description);
+      status: "draft",
+      _optimistic_pending: action === "copy",
+    };
+    addPendingMatrixChange({ key: pendingKey, shifts: [optimisticShift], segments: [], assignments: [] });
     setShiftAction(null);
+    try {
+      const result = await runIntentMutation("shift-action", `planning-${action}`, {
+        action,
+        shift_id: payload.shift.id,
+        service_date: payload.service_date,
+        start_time: payload.start_time,
+        end_time: payload.end_time,
+        expected_shift_revision: Number(payload.shift.revision || 1),
+      });
+      reconcilePlanningResult(result);
+      refreshPlanningInBackground();
+      const description = action === "copy"
+        ? `${payload.shift.name} is zonder medewerkers gekopieerd naar ${payload.service_date}.`
+        : `${payload.shift.name} is verplaatst naar ${payload.service_date}.`;
+      rememberUndo(result, description);
+      if (result?.undoable !== true) toast({ title: "Conceptplanning bijgewerkt", description });
+      setLiveMessage(description);
+    } catch (error) {
+      mutationIntents.current.clear("shift-action");
+      throw error;
+    } finally {
+      removePendingMatrixChange(pendingKey);
+      releasePendingResources();
+    }
   };
 
   const openTaskComposer = ({ shift = null, occurrence = null } = {}) => {
@@ -1808,26 +1881,45 @@ export default function Planning() {
   };
 
   const handleCancelTaskShift = async shift => {
-    const occurrenceIds = [...new Set((activeTaskSegmentsByShift.get(String(shift.id)) || [])
-      .map(segment => String(segment.task_occurrence_id)))];
-    const result = await runActionMutation.mutateAsync({
-      action: "cancel_task_shift",
-      idempotency_key: cancelTaskShift?.idempotencyKey,
-      shift_id: shift.id,
-      expected_shift_revision: Number(shift.revision || 1),
-      expected_occurrence_revisions: Object.fromEntries(occurrenceIds.map(id => [
-        id,
-        Number(taskOccurrences.find(occurrence => String(occurrence.id) === id)?.revision || 1),
-      ])),
+    const shiftSegments = activeTaskSegmentsByShift.get(String(shift.id)) || [];
+    const occurrenceIds = [...new Set(shiftSegments.map(segment => String(segment.task_occurrence_id)))];
+    const releasePendingResources = acquirePendingResources([
+      `shift:${shift.id}`,
+      ...occurrenceIds.map(id => `occurrence:${id}`),
+    ]);
+    if (!releasePendingResources) return;
+    const pendingKey = createPlanningMutationKey("pending-cancel-shift");
+    const shiftAssignments = assignments.filter(item => String(item.planning_shift_id || item.shift_id) === String(shift.id));
+    addPendingMatrixChange({
+      key: pendingKey,
+      shifts: [{ ...shift, status: "cancelled" }],
+      segments: shiftSegments.map(segment => ({ ...segment, status: "removed" })),
+      assignments: shiftAssignments.map(assignment => ({ ...assignment, status: "removed" })),
     });
-    reconcilePlanningResult(result);
-    refreshPlanningInBackground();
-    const description = `${shift.name || "Dienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
-    toast({ title: "Dienst verwijderd", description });
+    const idempotencyKey = cancelTaskShift?.idempotencyKey;
     setSelectedShiftId(null);
     setCancelTaskShift(null);
     setSidePanelMode("tasks");
-    setLiveMessage(description);
+    try {
+      const result = await runActionMutation.mutateAsync({
+        action: "cancel_task_shift",
+        idempotency_key: idempotencyKey,
+        shift_id: shift.id,
+        expected_shift_revision: Number(shift.revision || 1),
+        expected_occurrence_revisions: Object.fromEntries(occurrenceIds.map(id => [
+          id,
+          Number(taskOccurrences.find(occurrence => String(occurrence.id) === id)?.revision || 1),
+        ])),
+      });
+      reconcilePlanningResult(result);
+      refreshPlanningInBackground();
+      const description = `${shift.name || "Dienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
+      toast({ title: "Dienst verwijderd", description });
+      setLiveMessage(description);
+    } finally {
+      removePendingMatrixChange(pendingKey);
+      releasePendingResources();
+    }
   };
 
   const planningStats = useMemo(() => {
@@ -2103,7 +2195,7 @@ export default function Planning() {
               coverageShifts={matrixCoverageShifts}
               assignments={matrixAssignments}
               segments={matrixSegments}
-              occurrences={visibleTaskOccurrences}
+              occurrences={matrixOccurrences}
               personnel={matrixPersonnel}
               objects={matrixObjects}
               routes={routes}
@@ -2254,7 +2346,7 @@ export default function Planning() {
         open={Boolean(taskDeleteRequest)}
         onOpenChange={open => { if (!open && !runActionMutation.isPending) setTaskDeleteRequest(null); }}
         onConfirm={request => deleteTaskOccurrence(request).catch(() => undefined)}
-        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
+        isPending={runActionMutation.isPending}
       />
       <CancelTaskShiftDialog
         shift={cancelTaskShift?.shift || null}
