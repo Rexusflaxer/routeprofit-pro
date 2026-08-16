@@ -7,11 +7,13 @@ import {
   ContextMenuLabel,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import useTouchContextMenu from "@/components/planning/useTouchContextMenu";
 
 export default function PlanningClipboardContextMenu({
   children, mode, available, disabled, detail, label, onSelect,
   secondaryLabel, secondaryDisabled, onSecondarySelect, items,
 }) {
+  const touchTriggerProps = useTouchContextMenu();
   if (!available) return children;
   const isCopy = mode === "copy";
   const actions = items || [
@@ -20,7 +22,7 @@ export default function PlanningClipboardContextMenu({
   ];
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild {...touchTriggerProps}>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-60">
         {detail && <ContextMenuLabel className="truncate text-[11px] font-medium text-muted-foreground">{detail}</ContextMenuLabel>}
         {actions.map((action, index) => (
