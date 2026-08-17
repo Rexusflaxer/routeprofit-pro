@@ -11,8 +11,6 @@ import {
   Layers3,
   Loader2,
   Building2,
-  MoreHorizontal,
-  MoveRight,
   Pencil,
   Route,
   Scissors,
@@ -21,20 +19,12 @@ import {
   UserRound,
   UserRoundPlus,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
 import PlanningEmployeePortraitOverlay from "@/components/planning/PlanningEmployeePortraitOverlay";
 import PlanningObjectInfoDialog from "@/components/planning/PlanningObjectInfoDialog";
 import PlanningClipboardContextMenu from "@/components/planning/PlanningClipboardContextMenu";
 import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   formatMinutesAsHours,
   getOccurrencePlanningState,
@@ -371,17 +361,7 @@ function ShiftSlot({
             warningCount={assignmentWarningCount(assignment)}
             variant={visualVariant}
             />
-          {editable && (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onUnassign?.(assignment)}
-              className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-50"
-              aria-label={`${identity.name} vrijmaken`}
-            >
-              <UserMinus className="h-3 w-3" />
-            </button>
-          )}
+
         </>
       ) : (
         <button
@@ -881,13 +861,13 @@ function MatrixShiftBlock({
       items={[
         { label: "Dienst bewerken", disabled: mutationPending || isPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
         { label: "Dienst kopiëren", disabled: !copiedAssignment || mutationPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
-        { label: "Dienst verwijderen", disabled: mutationPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
         ...currentAssignments.map(assignment => ({
           label: currentAssignments.length === 1 ? "Medewerker uitplannen" : `${assignmentIdentity(assignment, personnelById).name} uitplannen`,
           disabled: mutationPending || isPending,
           onSelect: () => onUnassign?.(assignment),
           Icon: UserMinus,
         })),
+        { label: "Dienst verwijderen", disabled: mutationPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
       ]}
     >
     <article className={cn(
@@ -969,30 +949,7 @@ function MatrixShiftBlock({
             </span>
           )}
         </button>
-        {editable && !isPending && <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button disabled={mutationPending} variant="ghost" size="icon" className={cn("h-6 w-6 shrink-0 text-white/70 hover:bg-white/10 hover:text-white", embeddedInLane && "opacity-0 transition-opacity group-hover/service:opacity-100 focus-visible:opacity-100")} aria-label={`Acties voor ${shift.name || "dienst"}`}>
-              <MoreHorizontal className="h-3 w-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            {activeSegments.length > 0 ? (
-              <>
-                <DropdownMenuItem onSelect={() => onEditComposition?.(shift)}><Layers3 className="h-3.5 w-3.5" /> Dienstinhoud bewerken</DropdownMenuItem>
-                {shift.status === "draft" && Number(shift.published_revision || 0) === 0 && (
-                  <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => onCancelComposition?.(shift)}><Trash2 className="h-3.5 w-3.5" /> Conceptdienst verwijderen</DropdownMenuItem>
-                )}
-              </>
-            ) : (
-              <>
-                <DropdownMenuItem onSelect={() => onMove?.(shift)}><MoveRight className="h-3.5 w-3.5" /> Verplaatsen</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onCopy?.(shift)}><Copy className="h-3.5 w-3.5" /> Kopiëren</DropdownMenuItem>
-              </>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onSelect}><UserRoundPlus className="h-3.5 w-3.5" /> Bezetting bekijken</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>}
+
       </div>
 
       {(requiredCount > 1 || embeddedInLane) && (
@@ -1430,8 +1387,8 @@ function EmployeeAssignmentBlock({
       items={[
         { label: "Dienst bewerken", disabled, onSelect: () => onEditService?.({ shift, assignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
         { label: "Dienst kopiëren", disabled, onSelect: () => onCopyService?.({ shift, personnelId: assignment.personnel_id, personnelName: identity.name, startTime, endTime }), Icon: Copy },
-        { label: "Dienst verwijderen", disabled: disabled || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
         { label: "Medewerker uitplannen", disabled, onSelect: () => onUnassign?.(assignment), Icon: UserMinus },
+        { label: "Dienst verwijderen", disabled: disabled || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
       ]}
     >
     <article aria-busy={disabled ? "true" : "false"} className="relative overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[top,height,padding,filter,box-shadow,transform] duration-300 ease-out motion-reduce:transition-none hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
@@ -1445,11 +1402,7 @@ function EmployeeAssignmentBlock({
           warningCount={warnings}
           variant="portrait"
         />
-        {editable && (
-          <button type="button" disabled={disabled} onClick={() => onUnassign?.(assignment)} className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-wait disabled:opacity-40" aria-label={`${identity.name} vrijmaken`}>
-            <UserMinus className="h-3 w-3" />
-          </button>
-        )}
+
       </div>
       <button type="button" disabled={disabled} onClick={onSelect} className="relative z-10 mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
         <span className="block text-[10px] font-semibold tabular-nums text-white">
