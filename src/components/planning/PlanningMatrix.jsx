@@ -42,6 +42,7 @@ import {
   isPlanningObjectActive,
   isPlanningPersonnelActive,
   parseDateKey,
+  taskCoverageSummary,
   toDateKey,
 } from "@/components/planning/planningDomain";
 import {
@@ -1480,6 +1481,8 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
   const Icon = perspective === "employee" ? UserRound : resource.kind === "route" ? Route : Building2;
   const isObject = resource.kind === "object";
   const showObjectLogo = isObject && resource.logoUrl;
+  const summary = resource.planningSummary;
+  const hasOpenWork = Boolean(summary?.remainingMinutes > 0 || summary?.hasOpenStaffing);
   return (
     <button
       type="button"
@@ -1497,15 +1500,24 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
           ? <img src={resource.logoUrl} alt="" className="h-full w-full object-contain p-1" />
           : <Icon className="h-3.5 w-3.5" />}
       </span>
-      <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold" title={resource.label}>{resource.label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="block min-w-0 flex-1 truncate text-[11px] font-semibold" title={resource.label}>{resource.label}</span>
+          {hasOpenWork && <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Nog in te plannen werk" aria-label="Nog in te plannen werk" />}
+        </span>
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
+        {summary?.requiredMinutes > 0 && (
+          <span className="mt-1 block text-[9px] font-semibold tabular-nums text-foreground">
+            {formatMinutesAsHours(summary.allocatedMinutes)} / {formatMinutesAsHours(summary.requiredMinutes)} ingepland
+            {summary.remainingMinutes > 0 && <span className="ml-1 font-normal text-rose-600 dark:text-rose-300">· {formatMinutesAsHours(summary.remainingMinutes)} open</span>}
+          </span>
+        )}
       </span>
     </button>
   );
 }
 
-function buildObjectResources({ objects, routes, shifts, occurrences, segmentsByShift }) {
+function buildObjectResources({ objects, routes, shifts, occurrences, segmentsByShift, objectPlanningSummaries }) {
   const objectsById = new Map(objects.map(item => [String(item.id), item]));
   const routesById = new Map(routes.map(item => [String(item.id), item]));
   const currentOccurrences = occurrences.filter(item => item.lifecycle_status !== "cancelled");
@@ -1559,6 +1571,7 @@ function buildObjectResources({ objects, routes, shifts, occurrences, segmentsBy
         : object?.address || occurrence?.customer_name_snapshot || segment?.customer_name_snapshot || "Object",
       logoUrl: object?.logo_file_url || null,
       object: object || null,
+      planningSummary: objectPlanningSummaries?.get(id) || null,
     };
   }).filter(Boolean);
 
@@ -2036,10 +2049,30 @@ export default function PlanningMatrix({
         .flatMap(shift => assignmentsByShift.get(String(shift.id)) || []),
     }),
   ])), [assignmentsByShift, coverageSegmentsByOccurrence, coverageShiftsByOccurrence, occurrences]);
+  const objectPlanningSummaries = useMemo(() => {
+    const objectIds = new Set([
+      ...objects.map(item => item.id),
+      ...occurrences.map(item => item.object_id),
+      ...coverageSegments.map(item => item.object_id),
+    ].filter(Boolean).map(String));
+    return new Map([...objectIds].map(objectId => {
+      const objectOccurrences = occurrences.filter(item => String(item.object_id) === objectId);
+      const summary = taskCoverageSummary(objectOccurrences, coverageSegments, coverageShifts);
+      const objectShiftIds = new Set(coverageSegments.filter(segment => String(segment.object_id) === objectId).map(segment => String(segment.shift_id)));
+      coverageShifts.forEach(shift => {
+        if (String(shift.object_id || "") === objectId || (shift.object_ids || []).some(id => String(id) === objectId)) objectShiftIds.add(String(shift.id));
+      });
+      const hasOpenStaffing = [...objectShiftIds].some(shiftId => {
+        const shift = coverageShifts.find(item => String(item.id) === shiftId);
+        return shift && (assignmentsByShift.get(shiftId) || []).length < Math.max(1, Number(shift.required_count || 1));
+      });
+      return [objectId, { ...summary, hasOpenStaffing }];
+    }));
+  }, [assignmentsByShift, coverageSegments, coverageShifts, objects, occurrences]);
   const resources = useMemo(() => perspective === "employee"
     ? buildEmployeeResources(personnel)
-    : buildObjectResources({ objects, routes, shifts, occurrences, segmentsByShift }),
-  [objects, occurrences, personnel, perspective, routes, segmentsByShift, shifts]);
+    : buildObjectResources({ objects, routes, shifts, occurrences, segmentsByShift, objectPlanningSummaries }),
+  [objectPlanningSummaries, objects, occurrences, personnel, perspective, routes, segmentsByShift, shifts]);
 
   const occurrencesByCell = useMemo(() => {
     const map = new Map();
