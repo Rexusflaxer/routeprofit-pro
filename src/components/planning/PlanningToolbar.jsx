@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Filter,
   Loader2,
-  Minimize2,
   Pencil,
   Rows3,
   Save,
@@ -141,15 +140,13 @@ export default function PlanningToolbar({
         />
 
         <Button
-          variant={compactMode ? "secondary" : "outline"}
-          size="icon"
-          className="h-8 w-8 shrink-0"
+          variant={compactMode ? "default" : "outline"}
+          className="h-8 shrink-0 px-3 text-[12px]"
           onClick={() => onCompactModeChange(!compactMode)}
           aria-label="Compacte modus aan- of uitzetten"
           aria-pressed={compactMode}
-          title="Compacte modus"
         >
-          <Minimize2 className="h-3.5 w-3.5" />
+          Compacte modus
         </Button>
         <PlanningZoomControls
           value={zoomValue}
