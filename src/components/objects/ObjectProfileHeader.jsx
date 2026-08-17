@@ -1,6 +1,7 @@
 import React from "react";
 import { Check, Edit, Loader2, Upload, X } from "lucide-react";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import ObjectHeaderMap from "@/components/objects/ObjectHeaderMap";
 import { OBJECT_TYPE_OPTIONS, objectTypeLabel } from "@/components/customers/customerObjectConfig";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -38,8 +39,8 @@ export default function ObjectProfileHeader({
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="flex flex-col gap-5 border-b border-border bg-muted/40 px-5 py-5 sm:px-6 lg:flex-row lg:items-start">
-        <div className="flex min-w-0 flex-1 items-start gap-5">
+      <div className={`relative flex flex-col gap-5 border-b border-border bg-muted/40 px-5 py-5 sm:px-6 lg:flex-row lg:items-start ${editing ? "" : "lg:pr-[38%]"}`}>
+        <div className="relative z-10 flex min-w-0 flex-1 items-start gap-5">
           <div className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
             {data?.logo_file_url ? (
               <img src={data.logo_file_url} alt={`Logo van ${data.name || "object"}`} className="h-full w-full object-contain p-1" />
@@ -127,7 +128,7 @@ export default function ObjectProfileHeader({
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        <div className="relative z-10 flex shrink-0 flex-wrap justify-end gap-2">
           {editing ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={disabled}><X className="h-4 w-4" /> Annuleren</Button>
@@ -140,6 +141,7 @@ export default function ObjectProfileHeader({
             <Button type="button" variant="outline" onClick={onStartEdit} disabled={object.status === "archived"}><Edit className="h-4 w-4" /> Wijzigen</Button>
           )}
         </div>
+        {!editing && <ObjectHeaderMap object={object} />}
       </div>
       {editing && error && (
         <div className="border-t border-border px-5 py-3 sm:px-6">
