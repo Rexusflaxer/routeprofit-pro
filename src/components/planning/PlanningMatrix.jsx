@@ -1477,6 +1477,11 @@ function DayHeader({ day, hasOpenWork = false }) {
   );
 }
 
+function formatObjectPlanningTime(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 function ResourceHeader({ resource, perspective, onObjectClick }) {
   const Icon = perspective === "employee" ? UserRound : resource.kind === "route" ? Route : Building2;
   const isObject = resource.kind === "object";
@@ -1508,8 +1513,7 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
         {summary?.requiredMinutes > 0 && (
           <span className="mt-1 block text-[9px] font-semibold tabular-nums text-foreground">
-            {formatMinutesAsHours(summary.allocatedMinutes)} / {formatMinutesAsHours(summary.requiredMinutes)} ingepland
-            {summary.remainingMinutes > 0 && <span className="ml-1 font-normal text-rose-600 dark:text-rose-300">· {formatMinutesAsHours(summary.remainingMinutes)} open</span>}
+            {formatObjectPlanningTime(summary.allocatedMinutes)} / {formatObjectPlanningTime(summary.requiredMinutes)} ingepland
           </span>
         )}
       </span>
