@@ -1843,156 +1843,105 @@ async function objectTaskOccurrenceContext(
   };
 }
 
-function activeSegmentsForOccurrence(
-  occurrenceId: string,
-  segments: LooseRecord[],
-  shiftById: Map<string, LooseRecord>,
-) {
-  return segments.filter(segment => (
-    String(segment.task_occurrence_id) === occurrenceId
-    && segment.status !== 'removed'
-    && shiftById.get(String(segment.shift_id))?.status !== 'cancelled'
-  ));
+function activeSegmentsForOccurrence(occurrenceId: string, segments: LooseRecord[], shiftById: Map<string, LooseRecord>) {
+  return segments.filter(segment => String(segment.task_occurrence_id) === occurrenceId
+    && segment.status !== 'removed' && shiftById.get(String(segment.shift_id))?.status !== 'cancelled');
 }
 
 async function ensureTaskSourceChange(
-  base44: LooseRecord,
-  user: LooseRecord,
-  context: ReturnType<typeof mutationContext>,
-  revision: LooseRecord,
-  sourceOccurrence: LooseRecord,
-  replacementOccurrence: LooseRecord | null,
-  shift: LooseRecord,
-  segments: LooseRecord[],
-  previousSnapshot: LooseRecord | null,
-  desiredSnapshot: LooseRecord | null,
+  base44: LooseRecord, user: LooseRecord, context: ReturnType<typeof mutationContext>, revision: LooseRecord,
+  sourceOccurrence: LooseRecord, replacementOccurrence: LooseRecord | null, shift: LooseRecord,
+  segments: LooseRecord[], previousSnapshot: LooseRecord | null, desiredSnapshot: LooseRecord | null,
   changeType: 'schedule_changed' | 'schedule_stopped',
 ) {
   const changeKey = `${revision.id}:${sourceOccurrence.id}:${shift.id}`;
-  const fingerprint = await sha256(stableStringify({
-    change_key: changeKey,
-    previous_snapshot: previousSnapshot,
-    desired_snapshot: desiredSnapshot,
-  }));
-  const existing = (await filterAllRecords(
-    base44.asServiceRole.entities.PlanningTaskSourceChange,
-    { change_key: changeKey },
-    'created_date',
-  )).sort(coordinatorOrder)[0] || null;
+  const fingerprint = await sha256(stableStringify({ change_key: changeKey, previous_snapshot: previousSnapshot, desired_snapshot: desiredSnapshot }));
+  const existing = (await filterAllRecords(base44.asServiceRole.entities.PlanningTaskSourceChange, { change_key: changeKey }, 'created_date')).sort(coordinatorOrder)[0] || null;
   if (existing) {
-    if (existing.creation_request_fingerprint !== fingerprint) {
-      throw new ApiError(409, 'Bronwijzigingssleutel hoort bij een andere taakimpact', {
-        source_change_id: existing.id,
-      });
-    }
+    if (existing.creation_request_fingerprint !== fingerprint) throw new ApiError(409, 'Bronwijzigingssleutel hoort bij een andere taakimpact', { source_change_id: existing.id });
     return existing;
   }
-  const earlierOpen = (await filterAllRecords(
-    base44.asServiceRole.entities.PlanningTaskSourceChange,
-    { task_occurrence_id: sourceOccurrence.id, shift_id: shift.id, status: 'open' },
-    '-detected_at',
-  ));
-  for (const item of earlierOpen) {
-    await casVersionUpdate(base44, 'PlanningTaskSourceChange', item, versionOf(item), {
-      status: 'resolved',
-      resolved_at: nowIso(),
-      resolved_by_user_id: user.id || null,
-      resolution_reason: 'Vervangen door een nieuwere wijziging van dezelfde taakreeks',
-      metadata: { ...(item.metadata || {}), superseded_by_change_key: changeKey },
-    });
-  }
+  const earlierOpen = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskSourceChange, { task_occurrence_id: sourceOccurrence.id, shift_id: shift.id, status: 'open' }, '-detected_at');
+  for (const item of earlierOpen) await casVersionUpdate(base44, 'PlanningTaskSourceChange', item, versionOf(item), {
+    status: 'resolved', resolved_at: nowIso(), resolved_by_user_id: user.id || null,
+    resolution_reason: 'Vervangen door een nieuwere wijziging van dezelfde taakreeks', metadata: { ...(item.metadata || {}), superseded_by_change_key: changeKey },
+  });
   return base44.asServiceRole.entities.PlanningTaskSourceChange.create({
-    change_key: changeKey,
-    customer_id: sourceOccurrence.customer_id,
-    object_id: sourceOccurrence.object_id,
-    object_task_definition_id: sourceOccurrence.object_task_definition_id,
-    schedule_series_id: revision.series_id,
-    schedule_revision_id: revision.id,
-    occurrence_id: sourceOccurrence.id,
-    task_occurrence_id: sourceOccurrence.id,
-    source_task_occurrence_id: sourceOccurrence.id,
-    replacement_task_occurrence_id: replacementOccurrence?.id || null,
-    shift_id: shift.id,
-    shift_ids: [shift.id],
-    segment_ids: uniqueStrings(segments.map(item => item.id)),
-    service_date: sourceOccurrence.service_date,
-    effective_from: revision.effective_from,
-    change_type: changeType,
-    status: 'open',
-    previous_snapshot: previousSnapshot,
-    desired_snapshot: desiredSnapshot,
-    detected_at: nowIso(),
-    detected_by_user_id: user.id || null,
-    resolved_at: null,
-    resolved_by_user_id: null,
-    resolution_reason: null,
-    creation_idempotency_key: await taskMutationStorageKey(
-      context,
-      `source-change:${sourceOccurrence.id}:${shift.id}:${revision.id}`,
-    ),
-    creation_request_fingerprint: fingerprint,
-    version: 1,
-    metadata: { correlation_id: context.correlationId },
+    change_key: changeKey, customer_id: sourceOccurrence.customer_id, object_id: sourceOccurrence.object_id,
+    object_task_definition_id: sourceOccurrence.object_task_definition_id, schedule_series_id: revision.series_id,
+    schedule_revision_id: revision.id, occurrence_id: sourceOccurrence.id, task_occurrence_id: sourceOccurrence.id,
+    source_task_occurrence_id: sourceOccurrence.id, replacement_task_occurrence_id: replacementOccurrence?.id || null,
+    shift_id: shift.id, shift_ids: [shift.id], segment_ids: uniqueStrings(segments.map(item => item.id)),
+    service_date: sourceOccurrence.service_date, effective_from: revision.effective_from, change_type: changeType, status: 'open',
+    previous_snapshot: previousSnapshot, desired_snapshot: desiredSnapshot, detected_at: nowIso(), detected_by_user_id: user.id || null,
+    resolved_at: null, resolved_by_user_id: null, resolution_reason: null,
+    creation_idempotency_key: await taskMutationStorageKey(context, `source-change:${sourceOccurrence.id}:${shift.id}:${revision.id}`),
+    creation_request_fingerprint: fingerprint, version: 1, metadata: { correlation_id: context.correlationId },
+  });
+}
+
+function minuteParts(value: number) {
+  const minute = ((value % 1440) + 1440) % 1440;
+  return { date: dateFromOrdinal(Math.floor(value / 1440)), time: `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}` };
+}
+
+async function migrateTaskBoundaryImpact(base44: LooseRecord, user: LooseRecord, source: LooseRecord, replacement: LooseRecord, shift: LooseRecord, linked: LooseRecord[], allSegments: LooseRecord[]) {
+  const desired = intervalFromParts(replacement.service_date, replacement.window_start_time, replacement.end_date, replacement.window_end_time);
+  if (!desired) throw new ApiError(409, 'Het nieuwe taakvenster is ongeldig');
+  const projected = new Map(allSegments.filter(item => String(item.shift_id) === String(shift.id) && item.status !== 'removed').map(item => [String(item.id), item]));
+  for (const segment of linked) {
+    const current = segmentInterval(segment);
+    if (!current) continue;
+    const start = Math.max(current.start, desired.start), end = Math.min(current.end, desired.end);
+    if (end <= start) {
+      await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), { status: 'removed', last_modified_by_user_id: user.id || null, last_modified_at: nowIso(), metadata: { ...(segment.metadata || {}), removed_by_task_boundary_change: true } });
+      projected.delete(String(segment.id));
+      continue;
+    }
+    const startPart = minuteParts(start), endPart = minuteParts(end);
+    const updated = await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
+      task_occurrence_id: replacement.id, object_task_definition_id: replacement.object_task_definition_id,
+      start_date: startPart.date, end_date: endPart.date, start_time: startPart.time, end_time: endPart.time, duration_minutes: end - start,
+      task_type: replacement.task_type, task_name_snapshot: replacement.task_name_snapshot,
+      customer_name_snapshot: replacement.customer_name_snapshot || null, object_name_snapshot: replacement.object_name_snapshot || null,
+      instructions_snapshot: replacement.instructions_snapshot || null, status: 'draft', last_modified_by_user_id: user.id || null, last_modified_at: nowIso(),
+      metadata: { ...(segment.metadata || {}), source_task_occurrence_id: source.id, migrated_by_task_boundary_change: true },
+    });
+    projected.set(String(segment.id), updated);
+  }
+  const pendingChanges = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskSourceChange, { source_task_occurrence_id: source.id, shift_id: shift.id, status: 'open' }); for (const change of pendingChanges) await casVersionUpdate(base44, 'PlanningTaskSourceChange', change, versionOf(change), { status: 'resolved', resolved_at: nowIso(), resolved_by_user_id: user.id || null, resolution_reason: 'Dienstgrenzen automatisch aangepast aan de gewijzigde taaktijd' }); const remaining = [...projected.values()], intervals = remaining.map(segmentInterval).filter(Boolean) as { start: number; end: number }[];
+  if (!remaining.length) {
+    const cancelled = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), { status: 'cancelled', task_occurrence_ids: [], task_segment_count: 0, last_modified_by_user_id: user.id || null, last_modified_at: nowIso(), metadata: { ...(shift.metadata || {}), cancelled_by_task_boundary_change: true } });
+    const assignments = await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: shift.id });
+    for (const assignment of assignments.filter(item => item.status !== 'removed')) await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), { status: 'removed', removed_by_user_id: user.id || null, removed_at: nowIso(), metadata: { ...(assignment.metadata || {}), removed_by_task_boundary_change: true } });
+    return cancelled;
+  }
+  const start = Math.min(...intervals.map(item => item.start)), end = Math.max(...intervals.map(item => item.end));
+  const startPart = minuteParts(start), endPart = minuteParts(end);
+  return casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+    service_date: startPart.date, end_date: endPart.date === startPart.date ? null : endPart.date,
+    start_time: startPart.time, end_time: endPart.time, duration_minutes: end - start,
+    task_occurrence_ids: uniqueStrings(remaining.map(item => item.task_occurrence_id)), task_segment_count: remaining.length, status: 'draft',
+    last_modified_by_user_id: user.id || null, last_modified_at: nowIso(),
+    metadata: { ...(shift.metadata || {}), task_boundary_migrated_at: nowIso(), source_task_occurrence_id: source.id, replacement_task_occurrence_id: replacement.id },
   });
 }
 
 async function replaceTaskOccurrenceSnapshot(
-  base44: LooseRecord,
-  user: LooseRecord,
-  sourceOccurrence: LooseRecord,
-  desiredPayload: LooseRecord,
+  base44: LooseRecord, user: LooseRecord, sourceOccurrence: LooseRecord, desiredPayload: LooseRecord,
 ) {
-  const candidates = await filterAllRecords(
-    base44.asServiceRole.entities.PlanningTaskOccurrence,
-    { source_key: desiredPayload.source_key },
-    'created_date',
-  );
-  let replacement = candidates
-    .filter(item => item.lifecycle_status === 'active')
-    .sort(coordinatorOrder)[0] || null;
+  const candidates = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, { source_key: desiredPayload.source_key }, 'created_date');
+  let replacement = candidates.filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null;
   if (replacement) {
-    if (
-      stableStringify(taskOccurrenceSourceSnapshot(replacement))
-      !== stableStringify(taskOccurrenceSourceSnapshot({
-        ...desiredPayload,
-        supersedes_task_occurrence_id: sourceOccurrence.id,
-        superseded_by_task_occurrence_id: null,
-      }))
-    ) {
-      throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', {
-        source_key: desiredPayload.source_key,
-        task_occurrence_id: replacement.id,
-      });
+    if (stableStringify(taskOccurrenceSourceSnapshot(replacement)) !== stableStringify(taskOccurrenceSourceSnapshot({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null }))) {
+      throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', { source_key: desiredPayload.source_key, task_occurrence_id: replacement.id });
     }
-  } else {
-    replacement = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({
-      ...desiredPayload,
-      supersedes_task_occurrence_id: sourceOccurrence.id,
-      superseded_by_task_occurrence_id: null,
-      revision: 1,
-      published_revision: 0,
-      last_published_correlation_id: null,
-    });
-  }
-  const currentSource = await requireRecord(
-    base44,
-    'PlanningTaskOccurrence',
-    sourceOccurrence.id,
-    'Taakuitvoering',
-  );
-  if (
-    currentSource.lifecycle_status !== 'superseded'
-    || String(currentSource.superseded_by_task_occurrence_id || '') !== String(replacement.id)
-  ) {
+  } else replacement = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null, revision: 1, published_revision: 0, last_published_correlation_id: null });
+  const currentSource = await requireRecord(base44, 'PlanningTaskOccurrence', sourceOccurrence.id, 'Taakuitvoering');
+  if (currentSource.lifecycle_status !== 'superseded' || String(currentSource.superseded_by_task_occurrence_id || '') !== String(replacement.id)) {
     await casUpdate(base44, 'PlanningTaskOccurrence', currentSource, revisionOf(currentSource), {
-      lifecycle_status: 'superseded',
-      superseded_by_task_occurrence_id: replacement.id,
-      last_modified_by_user_id: user.id || null,
-      last_modified_at: nowIso(),
-      metadata: {
-        ...(currentSource.metadata || {}),
-        superseded_by_schedule_revision_id: desiredPayload.object_task_schedule_revision_id || null,
-      },
+      lifecycle_status: 'superseded', superseded_by_task_occurrence_id: replacement.id, last_modified_by_user_id: user.id || null, last_modified_at: nowIso(),
+      metadata: { ...(currentSource.metadata || {}), superseded_by_schedule_revision_id: desiredPayload.object_task_schedule_revision_id || null },
     });
   }
   return replacement;
@@ -2215,20 +2164,11 @@ async function reconcileSeriesMaterializedOccurrences(
       });
     }
     for (const impact of impacts) {
-      const change = await ensureTaskSourceChange(
-        base44,
-        user,
-        context,
-        triggeringRevision,
-        impact.source_occurrence,
-        replacement,
-        impact.shift,
-        impact.segments,
-        impact.previous_snapshot,
-        desiredImpact,
-        'schedule_changed',
+      await migrateTaskBoundaryImpact(
+        base44, user, impact.source_occurrence, replacement,
+        impact.shift, impact.segments, segments,
       );
-      result.source_change_ids.push(change.id);
+      result.refreshed_occurrence_ids.push(replacement.id);
     }
   }
   return result;
@@ -3577,18 +3517,17 @@ async function mutateObjectTaskSeries(
       current_version: versionOf(series),
     });
   }
-  const affectedOccurrences = await filterAllRecords(
-    base44.asServiceRole.entities.PlanningTaskOccurrence,
-    { object_task_schedule_series_id: series.id },
-    '-service_date',
-  );
-  const descriptors = [
-    await resourceCoordinatorDescriptor('object_task_definition', definition.id),
-    await resourceCoordinatorDescriptor('object_task_series', series.id),
-    ...await Promise.all(affectedOccurrences.filter(item => item.service_date >= effectiveFrom).map(item => (
-      resourceCoordinatorDescriptor('task_occurrence', item.id)
-    ))),
-  ];
+  const affectedOccurrences = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, { object_task_schedule_series_id: series.id }, '-service_date');
+  const [affectedSegments, affectedShifts] = await Promise.all([listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'), listAllRecords(base44.asServiceRole.entities.PlanningShift)]);
+  const affectedIds = new Set(affectedOccurrences.filter(item => item.service_date >= effectiveFrom).map(item => String(item.id)));
+  const linkedSegments = affectedSegments.filter(item => item.status !== 'removed' && affectedIds.has(String(item.task_occurrence_id)));
+  const linkedShiftIds = uniqueStrings(linkedSegments.map(item => item.shift_id));
+  if (operation === 'schedule') {
+    const shiftById = new Map(affectedShifts.map(item => [String(item.id), item]));
+    const outside = uniqueRecords(linkedSegments.filter(segment => { const occurrence = affectedOccurrences.find(item => String(item.id) === String(segment.task_occurrence_id)); const desired = occurrence && normalizedPeriodInterval(occurrence.service_date, block.start_time, block.end_time)?.interval; const current = segmentInterval(segment); return !!desired && !!current && (current.end <= desired.start || current.start >= desired.end); }).map(segment => shiftById.get(String(segment.shift_id))).filter(Boolean), item => String(item.id));
+    if (outside.length && body.confirm_remove_outside_shifts !== true) throw new ApiError(409, 'Bevestig dat volledig buitenvallende diensten mogen worden verwijderd', { code: 'TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED', shifts: outside.map(item => ({ id: item.id, name: item.service_name_snapshot || 'Dienst', service_date: item.service_date, start_time: item.start_time, end_time: item.end_time })) });
+  }
+  const descriptors = [await resourceCoordinatorDescriptor('object_task_definition', definition.id), await resourceCoordinatorDescriptor('object_task_series', series.id), ...await Promise.all(affectedOccurrences.filter(item => item.service_date >= effectiveFrom).map(item => resourceCoordinatorDescriptor('task_occurrence', item.id))), ...await Promise.all(linkedShiftIds.map(id => resourceCoordinatorDescriptor('shift_composition', id)))];
   return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
     series = await requireRecord(base44, 'ObjectTaskScheduleSeries', series.id, 'Taakreeks');
     const revisionNumber = Number(series.current_revision_number || currentRevision.revision_number || 0) + 1;

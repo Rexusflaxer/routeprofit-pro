@@ -28,6 +28,7 @@ import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
 import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
 import PlanningServiceEditDialog from "@/components/planning/PlanningServiceEditDialog";
 import PlanningTaskEditDialog from "@/components/planning/PlanningTaskEditDialog";
+import PlanningTaskShiftRemovalDialog from "@/components/planning/PlanningTaskShiftRemovalDialog";
 import PlanningTaskDeleteDialog from "@/components/planning/PlanningDeleteDialogs";
 import {
   CancelTaskShiftDialog,
@@ -376,6 +377,7 @@ export default function Planning() {
   const [composer, setComposer] = useState(null);
   const [serviceEditor, setServiceEditor] = useState(null);
   const [taskEditor, setTaskEditor] = useState(null);
+  const [taskShiftRemovalRequest, setTaskShiftRemovalRequest] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [taskDeleteRequest, setTaskDeleteRequest] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -1052,6 +1054,7 @@ export default function Planning() {
       }
     },
     onError: (error, variables) => {
+      if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") return;
       if (variables?.action === "resize_shared_task_boundary") {
         void refreshPlanning();
         bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
@@ -1368,7 +1371,7 @@ export default function Planning() {
     }
   };
 
-  const saveTaskEdit = async ({ occurrence, startTime, endTime }) => {
+  const saveTaskEdit = async ({ occurrence, startTime, endTime, confirmRemoval = false }) => {
     const catalog = await invokePlanningApi({
       action: "list_object_tasks",
       object_id: occurrence.object_id,
@@ -1383,19 +1386,29 @@ export default function Planning() {
       return;
     }
     const revision = seriesEntry.current_revision;
-    await runIntentMutation(`edit-task:${occurrence.id}`, "planning-edit-task", {
-      action: "change_object_task_series",
-      customer_id: occurrence.customer_id,
-      object_id: occurrence.object_id,
-      task_definition_id: occurrence.object_task_definition_id,
-      series_id: seriesEntry.series.id,
-      expected_version: Number(seriesEntry.series.version || 1),
-      effective_from: occurrence.service_date,
-      start_time: startTime,
-      end_time: endTime,
-      repeat_weekly: revision.recurrence_type === "weekly",
-      recurrence_end_date: revision.recurrence_end_date || null,
-    });
+    try {
+      await runIntentMutation(`edit-task:${occurrence.id}`, "planning-edit-task", {
+        action: "change_object_task_series",
+        customer_id: occurrence.customer_id,
+        object_id: occurrence.object_id,
+        task_definition_id: occurrence.object_task_definition_id,
+        series_id: seriesEntry.series.id,
+        expected_version: Number(seriesEntry.series.version || 1),
+        effective_from: occurrence.service_date,
+        start_time: startTime,
+        end_time: endTime,
+        repeat_weekly: revision.recurrence_type === "weekly",
+        recurrence_end_date: revision.recurrence_end_date || null,
+        confirm_remove_outside_shifts: confirmRemoval,
+      });
+    } catch (error) {
+      if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") {
+        setTaskShiftRemovalRequest({ occurrence, startTime, endTime, shifts: error.details.shifts || [] });
+        return;
+      }
+      throw error;
+    }
+    setTaskShiftRemovalRequest(null);
     await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
     await refreshPlanning();
     setTaskEditor(null);
@@ -2425,6 +2438,12 @@ export default function Planning() {
         open={Boolean(taskEditor)}
         onOpenChange={open => { if (!open && !runActionMutation.isPending) setTaskEditor(null); }}
         onSave={payload => saveTaskEdit(payload).catch(() => undefined)}
+        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
+      />
+      <PlanningTaskShiftRemovalDialog
+        request={taskShiftRemovalRequest}
+        onCancel={() => setTaskShiftRemovalRequest(null)}
+        onConfirm={() => saveTaskEdit({ ...taskShiftRemovalRequest, confirmRemoval: true }).catch(() => undefined)}
         isPending={runActionMutation.isPending || bootstrapMutation.isPending}
       />
       <PlanningServiceEditDialog
