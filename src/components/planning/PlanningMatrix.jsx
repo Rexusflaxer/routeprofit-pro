@@ -87,7 +87,7 @@ function assignmentIdentity(assignment, personnelById, fallbackPersonnel = null)
     || assignment?.personnel_photo_url
     || assignment?.photo_file_url
     || null;
-  return { name, photoUrl };
+  return { name, photoUrl, personnel };
 }
 
 function activeAssignments(assignments) {
@@ -367,6 +367,7 @@ function ShiftSlot({
           <CompactEmployeeIdentity
             name={identity.name}
             photoUrl={identity.photoUrl}
+            employee={identity.personnel}
             disabled={disabled}
             onClick={onSelect}
             warningCount={assignmentWarningCount(assignment)}

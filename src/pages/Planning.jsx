@@ -53,6 +53,7 @@ import {
   getSafeOccurrenceDropServiceDate,
   getOccurrenceStaffingTarget,
   getPlanningRange,
+  getShiftInterval,
   getPlanningShiftRangeQuery,
   getPlanningTaskOccurrenceBootstrapStart,
   getPlanningTaskOccurrenceRangeQuery,
@@ -940,23 +941,47 @@ export default function Planning() {
       return directMatch || workObjectIds.has(String(object.id));
     });
   }, [activeTaskSegmentsByShift, customerFilter, filteredShifts, objectFilter, objects, search, visibleTaskOccurrences]);
+  const personnelPlanningSummaries = useMemo(() => {
+    const scheduledMinutes = new Map();
+    activeAssignmentsInRange.forEach(assignment => {
+      const shift = shiftsInRangeById.get(String(assignment.planning_shift_id || assignment.shift_id));
+      if (!shift) return;
+      const interval = getShiftInterval(shift);
+      const minutes = interval.valid
+        ? Math.max(0, (interval.end.getTime() - interval.start.getTime()) / 60000)
+        : Math.max(0, Number(shift.duration_minutes || 0));
+      const key = String(assignment.personnel_id);
+      scheduledMinutes.set(key, (scheduledMinutes.get(key) || 0) + minutes);
+    });
+    return new Map(activePersonnel.map(item => {
+      const employeeContracts = contracts.filter(contract => String(contract.personnel_id) === String(item.id));
+      const contract = employeeContracts.find(entry => entry.is_current !== false && !["archived", "expired"].includes(entry.document_status))
+        || employeeContracts[0]
+        || null;
+      return [String(item.id), {
+        scheduledHours: (scheduledMinutes.get(String(item.id)) || 0) / 60,
+        contractHoursPerWeek: contract?.contract_hours_per_week,
+        contractHoursPerPayPeriod: contract?.contract_hours_per_pay_period || contract?.fixed_hours_per_pay_period,
+        contractForm: contract?.contract_form,
+        functionLabel: contract?.cao_function_group || contract?.function_type,
+      }];
+    }));
+  }, [activeAssignmentsInRange, activePersonnel, contracts, shiftsInRangeById]);
   const matrixPersonnel = useMemo(() => {
+    const enrichedPersonnel = activePersonnel.map(item => ({ ...item, _planning_summary: personnelPlanningSummaries.get(String(item.id)) }));
     const query = search.trim().toLocaleLowerCase("nl-NL");
-    if (!query) return activePersonnel;
-    if (visibleTaskOccurrences.length > 0) return activePersonnel;
+    if (!query || visibleTaskOccurrences.length > 0) return enrichedPersonnel;
     const visibleShiftIds = new Set(filteredShifts.map(shift => String(shift.id)));
     const matchedPersonnelIds = new Set(assignmentsInRange
       .filter(assignment => visibleShiftIds.has(String(assignment.planning_shift_id)))
       .map(assignment => String(assignment.personnel_id)));
-    activePersonnel.forEach(item => {
+    enrichedPersonnel.forEach(item => {
       if ([personnelName(item), item.cao_function_group, item.function_type, item.employee_type]
         .filter(Boolean)
-        .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query))) {
-        matchedPersonnelIds.add(String(item.id));
-      }
+        .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query))) matchedPersonnelIds.add(String(item.id));
     });
-    return activePersonnel.filter(item => matchedPersonnelIds.has(String(item.id)));
-  }, [activePersonnel, assignmentsInRange, filteredShifts, search, visibleTaskOccurrences.length]);
+    return enrichedPersonnel.filter(item => matchedPersonnelIds.has(String(item.id)));
+  }, [activePersonnel, assignmentsInRange, filteredShifts, personnelPlanningSummaries, search, visibleTaskOccurrences.length]);
 
   const warningContext = useMemo(() => ({
     assignments,
