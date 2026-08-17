@@ -128,16 +128,6 @@ export default function PlanningToolbar({
   return (
     <header className="shrink-0 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-        <div className="mr-1 flex min-w-[150px] items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <CalendarRange className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-[15px] font-semibold leading-tight">Planning</h1>
-            <p className="truncate text-[11px] leading-tight text-muted-foreground">Week- en periodeplanning</p>
-          </div>
-        </div>
-
         <Segment
           options={PERSPECTIVES}
           value={perspective}
