@@ -5,7 +5,6 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
-  Eye,
   Filter,
   Loader2,
   Minimize2,
@@ -194,15 +193,12 @@ export default function PlanningToolbar({
         )}
 
         <div className={cn("flex shrink-0 items-center gap-1.5", warningCount === 0 && "ml-auto")}>
-          <span className={cn(
-            "hidden h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold xl:inline-flex",
-            editing
-              ? "border-amber-300/70 bg-amber-50 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200"
-              : "border-border bg-card text-muted-foreground",
-          )}>
-            {editing ? <Pencil className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-            {editing ? `Concept${draftChangeCount > 0 ? ` · ${draftChangeCount}` : ""}` : "Roosterweergave"}
-          </span>
+          {editing && (
+            <span className="hidden h-8 items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50 px-2 text-[11px] font-semibold text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-200 xl:inline-flex">
+              <Pencil className="h-3 w-3" />
+              {`Concept${draftChangeCount > 0 ? ` · ${draftChangeCount}` : ""}`}
+            </span>
+          )}
           {editing ? (
             <>
               <Button
