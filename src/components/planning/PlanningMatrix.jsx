@@ -210,8 +210,6 @@ function OpenTaskIntervalCard({
   );
   const proposedEndTime = timelineMinutesToClock(proposedEnd);
   const droppableId = `occurrence-gap:${encodeURIComponent(String(occurrence.id))}:${dropServiceDate}:${String(gap.startMinute).padStart(4, "0")}:${String(proposedEnd).padStart(4, "0")}`;
-  const flexible = occurrence.execution_mode === "time_window";
-  const coverage = planningState?.coverage;
   const clipboardStartMinute = clockToTimelineMinutes(serviceClipboard?.startTime);
   const clipboardEndMinute = clockToTimelineMinutes(serviceClipboard?.endTime);
   const canPaste = Boolean(
@@ -265,7 +263,7 @@ function OpenTaskIntervalCard({
                 !embeddedInLane && "break-words",
                 embeddedInLane && "text-rose-700 dark:text-rose-300",
               )}>
-                {embeddedInLane ? "Nog in te plannen" : occurrence.task_name_snapshot || "Open taak"}
+                {embeddedInLane ? "Open dienst" : occurrence.task_name_snapshot || "Open taak"}
               </span>
               <span className={cn("mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground", embeddedInLane && "sr-only")}>
                 <Clock3 className="h-3 w-3 shrink-0" />
@@ -279,11 +277,7 @@ function OpenTaskIntervalCard({
               </span>
             )}
           </span>
-          <span className="compact-hide mt-1.5 block text-[9px] font-medium text-muted-foreground" data-planning-dimensions="open-time">
-            {flexible
-              ? `${formatMinutesAsHours(gap.allocatableMinutes)} te plannen binnen dit venster`
-              : `${formatMinutesAsHours(gap.durationMinutes)} nog niet ingepland`}
-          </span>
+
         </button>
         {editable && (
           <button
@@ -1467,7 +1461,7 @@ function DayHeader({ day, hasOpenWork = false }) {
         <span className={cn("text-[14px] font-semibold capitalize", today && "text-primary")}>{dayFormatter.format(day)}</span>
         <span className="flex items-center gap-2">
           {hasOpenWork && (
-            <span className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Nog in te plannen werk" aria-label="Nog in te plannen werk" />
+            <span className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Open dienst werk" aria-label="Open dienst werk" />
           )}
           <span className="text-[18px] font-bold leading-none text-muted-foreground/30">{getISOWeek(day)}</span>
         </span>
@@ -1508,7 +1502,7 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="block min-w-0 flex-1 truncate text-[11px] font-semibold" title={resource.label}>{resource.label}</span>
-          {hasOpenWork && <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Nog in te plannen werk" aria-label="Nog in te plannen werk" />}
+          {hasOpenWork && <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Open dienst werk" aria-label="Open dienst werk" />}
         </span>
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
         {summary?.requiredMinutes > 0 && (
