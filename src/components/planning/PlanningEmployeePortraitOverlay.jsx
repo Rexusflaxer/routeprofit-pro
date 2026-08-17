@@ -29,7 +29,7 @@ export default function PlanningEmployeePortraitOverlay({ photoUrl, embedded = f
       <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_0%,black_55%,transparent_100%)] [-webkit-mask-image:linear-gradient(to_bottom,black_0%,black_55%,transparent_100%)]">
         <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
         <span className={cn(
-          "absolute inset-0 bg-[linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] opacity-80",
+          "absolute inset-0 bg-[linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] opacity-65",
           embedded && "bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)]",
         )} />
       </div>
