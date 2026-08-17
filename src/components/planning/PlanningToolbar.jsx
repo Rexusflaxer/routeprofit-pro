@@ -98,6 +98,12 @@ export default function PlanningToolbar({
   customerFilter,
   onCustomerFilterChange,
   customers,
+  objectFilter,
+  onObjectFilterChange,
+  objects,
+  taskTypeFilter,
+  onTaskTypeFilterChange,
+  taskTypes,
   warningCount,
   editing = false,
   draftChangeCount = 0,
@@ -163,22 +169,31 @@ export default function PlanningToolbar({
           canZoomOut={canZoomOut}
         />
 
-        <div className="inline-flex h-8 items-center rounded-md border border-border bg-card">
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded" onClick={onPrevious} aria-label="Vorige periode">
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </Button>
-          <button
-            type="button"
-            onClick={onToday}
-            className="min-w-[132px] px-2 text-center text-[12px] font-semibold capitalize text-foreground hover:text-primary"
-            title="Ga naar vandaag"
-          >
-            {rangeLabel}
-          </button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded" onClick={onNext} aria-label="Volgende periode">
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        {normalizedView === "period" && periodOptions.length > 0 ? (
+          <Select value={selectedPeriodId} onValueChange={onPeriodChange}>
+            <SelectTrigger className="h-8 w-[180px] shrink-0 bg-card text-[12px]" aria-label="Beveiligingsperiode">
+              <CalendarRange className="mr-1.5 h-3.5 w-3.5 text-primary" />
+              <SelectValue placeholder="Kies een periode" />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {periodOptions.map(period => (
+                <SelectItem key={period.id} value={period.id}>{period.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="inline-flex h-8 items-center rounded-md border border-border bg-card">
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded" onClick={onPrevious} aria-label="Vorige week">
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <button type="button" onClick={onToday} className="min-w-[132px] px-2 text-center text-[12px] font-semibold capitalize text-foreground hover:text-primary" title="Ga naar vandaag">
+              {rangeLabel}
+            </button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded" onClick={onNext} aria-label="Volgende week">
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
 
         {warningCount > 0 && (
           <div className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50 px-2 text-[11px] font-semibold text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/35 dark:text-amber-300">
@@ -231,23 +246,6 @@ export default function PlanningToolbar({
       </div>
 
       <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-        {normalizedView === "period" && periodOptions.length > 0 && (
-          <Select value={selectedPeriodId} onValueChange={onPeriodChange}>
-            <SelectTrigger className="h-8 w-[245px] shrink-0 bg-card text-[12px]" aria-label="Beveiligingsperiode">
-              <CalendarRange className="mr-1.5 h-3.5 w-3.5 text-primary" />
-              <SelectValue placeholder="Kies een beveiligingsperiode" />
-            </SelectTrigger>
-            <SelectContent>
-              {periodOptions.map(period => (
-                <SelectItem key={period.id} value={period.id}>
-                  <span className="font-medium">{period.label}</span>
-                  {period.dateLabel ? <span className="ml-1.5 text-muted-foreground">· {period.dateLabel}</span> : null}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
         {normalizedView === "period" && periodOptions.length === 0 && (
           <div className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-card p-1" aria-label="Aangepaste periode">
             <label className="flex items-center gap-1">
@@ -297,6 +295,30 @@ export default function PlanningToolbar({
               <SelectItem key={customer.id} value={String(customer.id)}>
                 {customer.trade_name || customer.name || customer.legal_name || "Naamloze klant"}
               </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={objectFilter} onValueChange={onObjectFilterChange}>
+          <SelectTrigger className="h-8 w-[145px] bg-card text-[12px]" aria-label="Filter op object">
+            <SelectValue placeholder="Alle objecten" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Alle objecten</SelectItem>
+            {objects.map(object => (
+              <SelectItem key={object.id} value={String(object.id)}>{object.name || "Naamloos object"}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={taskTypeFilter} onValueChange={onTaskTypeFilterChange}>
+          <SelectTrigger className="h-8 w-[155px] bg-card text-[12px]" aria-label="Filter op taaktype">
+            <SelectValue placeholder="Alle taaktypes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Alle taaktypes</SelectItem>
+            {taskTypes.map(taskType => (
+              <SelectItem key={taskType.value} value={taskType.value}>{taskType.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>

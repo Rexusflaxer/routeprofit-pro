@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getISOWeek } from "date-fns";
 import { Droppable } from "@hello-pangea/dnd";
 import {
   AlertTriangle,
@@ -1489,7 +1490,10 @@ function DayHeader({ day }) {
   const today = key === dateKey(new Date());
   return (
     <div className={cn("px-3 py-2.5", today && "bg-primary/[0.06]")}>
-      <span className={cn("block text-[11px] font-semibold capitalize", today && "text-primary")}>{dayFormatter.format(day)}</span>
+      <span className="flex items-center justify-between gap-2">
+        <span className={cn("text-[11px] font-semibold capitalize", today && "text-primary")}>{dayFormatter.format(day)}</span>
+        <span className="text-[8px] font-medium text-muted-foreground/70">Week {getISOWeek(day)}</span>
+      </span>
       {today && <span className="mt-0.5 block text-[9px] font-medium text-primary">Vandaag</span>}
     </div>
   );

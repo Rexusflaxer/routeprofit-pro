@@ -79,6 +79,7 @@ import {
   resolveCaoPbPlanningPeriod,
 } from "@/components/planning/planningCaoPeriodDomain";
 import { findSamePersonnelAdjacentShiftMerge } from "@/components/planning/planningAdjacentShiftMerge";
+import { OBJECT_TASK_TYPES } from "@/components/objects/objectTaskConfig";
 
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
@@ -314,7 +315,7 @@ export default function Planning() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialDate = parseDateKey(searchParams.get("date")) || new Date();
   const requestedView = searchParams.get("view") === "four_weeks" ? "period" : searchParams.get("view");
-  const initialView = VALID_VIEWS.has(requestedView) ? requestedView : "week";
+  const initialView = VALID_VIEWS.has(requestedView) ? requestedView : "period";
   const initialPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
     ? searchParams.get("perspective")
     : "object";
@@ -341,6 +342,8 @@ export default function Planning() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [customerFilter, setCustomerFilter] = useState("all");
+  const [objectFilter, setObjectFilter] = useState("all");
+  const [taskTypeFilter, setTaskTypeFilter] = useState("all");
   const [selectedShiftId, setSelectedShiftId] = useState(null);
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -392,7 +395,7 @@ export default function Planning() {
     }
     const nextDate = parseDateKey(searchParams.get("date")) || new Date();
     const requestedNextView = searchParams.get("view") === "four_weeks" ? "period" : searchParams.get("view");
-    const nextView = VALID_VIEWS.has(requestedNextView) ? requestedNextView : "week";
+    const nextView = VALID_VIEWS.has(requestedNextView) ? requestedNextView : "period";
     const nextPerspective = VALID_PERSPECTIVES.has(searchParams.get("perspective"))
       ? searchParams.get("perspective")
       : "object";
@@ -781,6 +784,8 @@ export default function Planning() {
   ])), [activeTaskSegmentsByOccurrence, assignmentsInRangeByShift, shiftsInRangeById, taskOccurrencesInRange]);
   const visibleTaskOccurrences = useMemo(() => taskOccurrencesInRange.filter(item => {
     if (customerFilter !== "all" && String(item.customer_id) !== String(customerFilter)) return false;
+    if (objectFilter !== "all" && String(item.object_id) !== String(objectFilter)) return false;
+    if (taskTypeFilter !== "all" && String(item.task_type) !== String(taskTypeFilter)) return false;
     const state = occurrencePlanningStates.get(String(item.id));
     const hasSourceChange = (sourceChangesByOccurrence.get(String(item.id)) || []).length > 0;
     const query = search.trim().toLocaleLowerCase("nl-NL");
@@ -813,7 +818,7 @@ export default function Planning() {
       ).some(assignment => assignmentWarnings(assignment).length > 0));
     }
     return true;
-  }), [assignmentsInRangeByShift, customerFilter, occurrencePlanningStates, search, shiftsInRangeById, sourceChangesByOccurrence, statusFilter, taskOccurrencesInRange]);
+  }), [assignmentsInRangeByShift, customerFilter, objectFilter, occurrencePlanningStates, search, shiftsInRangeById, sourceChangesByOccurrence, statusFilter, taskOccurrencesInRange, taskTypeFilter]);
   const visibleWorkQueueCount = useMemo(() => visibleTaskOccurrences.filter(occurrence => (
     occurrencePlanningStates.get(String(occurrence.id))?.readiness !== "ready"
     || (sourceChangesByOccurrence.get(String(occurrence.id)) || []).length > 0
@@ -833,6 +838,15 @@ export default function Planning() {
         ].filter(Boolean).map(String));
         if (!shiftCustomerIds.has(String(customerFilter))) return false;
       }
+      if (objectFilter !== "all") {
+        const shiftObjectIds = new Set([
+          shift.object_id,
+          ...(shift.object_ids || []),
+          ...shiftSegments.map(item => item.object_id),
+        ].filter(Boolean).map(String));
+        if (!shiftObjectIds.has(String(objectFilter))) return false;
+      }
+      if (taskTypeFilter !== "all" && !shiftSegments.some(item => String(item.task_type) === String(taskTypeFilter))) return false;
       const shiftAssignments = assignmentsInRangeByShift.get(String(shift.id)) || [];
       const required = Math.max(1, Number(shift.required_count || 1));
       const warnings = shiftAssignments.flatMap(assignmentWarnings);
@@ -859,8 +873,10 @@ export default function Planning() {
     activeTaskSegmentsByShift,
     assignmentsInRangeByShift,
     customerFilter,
+    objectFilter,
     objectsById,
     search,
+    taskTypeFilter,
     shiftsInRange,
     sourceChangesByShift,
     statusFilter,
@@ -916,13 +932,14 @@ export default function Planning() {
     ].filter(Boolean).map(String));
     return objects.filter(object => {
       if (customerFilter !== "all" && String(object.customer_id) !== String(customerFilter)) return false;
+      if (objectFilter !== "all" && String(object.id) !== String(objectFilter)) return false;
       if (!query) return true;
       const directMatch = [object.name, object.address, object.code]
         .filter(Boolean)
         .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
       return directMatch || workObjectIds.has(String(object.id));
     });
-  }, [activeTaskSegmentsByShift, customerFilter, filteredShifts, objects, search, visibleTaskOccurrences]);
+  }, [activeTaskSegmentsByShift, customerFilter, filteredShifts, objectFilter, objects, search, visibleTaskOccurrences]);
   const matrixPersonnel = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("nl-NL");
     if (!query) return activePersonnel;
@@ -2028,7 +2045,6 @@ export default function Planning() {
         periodOptions={CAO_PB_PLANNING_PERIODS_2026.map(period => ({
           id: period.key,
           label: period.label,
-          dateLabel: `${compactDateLabel.format(parseDateKey(period.start_date))} – ${compactDateLabel.format(parseDateKey(period.end_date))}`,
         }))}
         selectedPeriodId={selectedCaoPeriod?.key || ""}
         onPeriodChange={periodId => {
@@ -2046,8 +2062,19 @@ export default function Planning() {
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         customerFilter={customerFilter}
-        onCustomerFilterChange={setCustomerFilter}
+        onCustomerFilterChange={value => {
+          setCustomerFilter(value);
+          if (value !== "all" && !objects.some(object => String(object.id) === String(objectFilter) && String(object.customer_id) === String(value))) setObjectFilter("all");
+        }}
         customers={customers}
+        objectFilter={objectFilter}
+        onObjectFilterChange={setObjectFilter}
+        objects={objects
+          .filter(object => customerFilter === "all" || String(object.customer_id) === String(customerFilter))
+          .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "nl"))}
+        taskTypeFilter={taskTypeFilter}
+        onTaskTypeFilterChange={setTaskTypeFilter}
+        taskTypes={OBJECT_TASK_TYPES.filter(option => taskOccurrencesInRange.some(item => item.task_type === option.value))}
         warningCount={planningStats.warningCount}
         editing={editing}
         draftChangeCount={planningStats.draftShiftCount + planningStats.draftAssignmentCount}
