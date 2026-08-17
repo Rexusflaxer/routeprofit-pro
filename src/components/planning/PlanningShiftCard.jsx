@@ -4,22 +4,9 @@ import {
   AlertTriangle,
   Check,
   Clock3,
-  Copy,
   Layers3,
-  MoreHorizontal,
-  MoveRight,
-  Trash2,
-  UserMinus,
   UserRoundPlus,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 function initials(name) {
@@ -50,7 +37,6 @@ function Slot({
   slotIndex,
   assignment,
   onSelect,
-  onUnassign,
   compact,
 }) {
   const droppableId = `slot:${shift.id}:${slotIndex}`;
@@ -92,17 +78,6 @@ function Slot({
                   {warnings}
                 </span>
               )}
-              <button
-                type="button"
-                aria-label={`${assignment.personnel_name || "Medewerker"} vrijmaken`}
-                className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={event => {
-                  event.stopPropagation();
-                  onUnassign(assignment);
-                }}
-              >
-                <UserMinus className="h-3 w-3" />
-              </button>
             </>
           ) : (
             <button
@@ -132,11 +107,6 @@ export default function PlanningShiftCard({
   segments = [],
   selected,
   onSelect,
-  onUnassign,
-  onMove,
-  onCopy,
-  onEditComposition,
-  onCancelComposition,
   compact = false,
   className,
   style,
@@ -190,51 +160,7 @@ export default function PlanningShiftCard({
           </p>
         </button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Acties voor ${shift.name || "dienst"}`}
-              className="h-6 w-6 shrink-0 opacity-60 hover:opacity-100"
-              onClick={event => event.stopPropagation()}
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            {activeSegments.length > 0 ? (
-              <>
-                <DropdownMenuItem onSelect={() => onEditComposition(shift)}>
-                  <Layers3 className="h-3.5 w-3.5" />
-                  Dienstinhoud bewerken
-                </DropdownMenuItem>
-                {shift.status === "draft" && Number(shift.published_revision || 0) === 0 && (
-                  <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => onCancelComposition(shift)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Conceptdienst verwijderen
-                  </DropdownMenuItem>
-                )}
-              </>
-            ) : (
-              <>
-                <DropdownMenuItem onSelect={() => onMove(shift)}>
-                  <MoveRight className="h-3.5 w-3.5" />
-                  Verplaatsen
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onCopy(shift)}>
-                  <Copy className="h-3.5 w-3.5" />
-                  Kopiëren
-                </DropdownMenuItem>
-              </>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onSelect}>
-              <UserRoundPlus className="h-3.5 w-3.5" />
-              Bezetting bekijken
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+
       </div>
 
       {activeSegments.length > 0 && (
@@ -260,7 +186,6 @@ export default function PlanningShiftCard({
             slotIndex={slot.slotIndex}
             assignment={slot.assignment}
             onSelect={onSelect}
-            onUnassign={onUnassign}
             compact={compact}
           />
         ))}
