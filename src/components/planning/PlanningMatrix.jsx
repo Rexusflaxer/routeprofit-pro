@@ -1202,40 +1202,13 @@ function TaskCoverageLane({
     previewIntervalsBySegmentId: previewIntervals,
   });
   const duration = Math.max(1, demand.endMinute - demand.startMinute);
-  const compactPieces = [
-    ...baseServices.map(service => ({ ...intervalFor(service), key: `service:${service.shift.id}` })),
-    ...gaps.map(gap => ({ startMinute: gap.startMinute, endMinute: gap.endMinute, key: `gap:${gap.startMinute}:${gap.endMinute}` })),
-  ].sort((left, right) => left.startMinute - right.startMinute || left.endMinute - right.endMinute);
-  const pieceCount = Math.max(1, compactPieces.length);
-  const compactPositionForMinute = minute => {
-    const index = compactPieces.findIndex(piece => minute >= piece.startMinute && minute <= piece.endMinute);
-    if (index < 0) return minute <= demand.startMinute ? 0 : 100;
-    const piece = compactPieces[index];
-    const progress = (minute - piece.startMinute) / Math.max(1, piece.endMinute - piece.startMinute);
-    return ((index + progress) / pieceCount) * 100;
-  };
-  const compactMinuteForPosition = ratio => {
-    const scaled = Math.max(0, Math.min(1, ratio)) * pieceCount;
-    const index = Math.min(pieceCount - 1, Math.floor(scaled));
-    const piece = compactPieces[index];
-    const progress = index === pieceCount - 1 && scaled === pieceCount ? 1 : scaled - index;
-    return piece.startMinute + progress * (piece.endMinute - piece.startMinute);
-  };
-  const pieceStyle = (startMinute, endMinute) => {
-    if (compact) {
-      const index = compactPieces.findIndex(piece => piece.startMinute === startMinute && piece.endMinute === endMinute);
-      return { top: `${Math.max(0, index) * 92}px`, left: "44px", width: "calc(100% - 44px)", height: "92px" };
-    }
-    return {
-      top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
-      left: "44px",
-      width: "calc(100% - 44px)",
-      height: `${((endMinute - startMinute) / duration) * 100}%`,
-    };
-  };
-  const laneHeight = compact
-    ? pieceCount * 92
-    : Math.max(getTaskTimelineLaneHeight(duration, { compact: false }), pieceCount * 176, 144);
+  const pieceStyle = (startMinute, endMinute) => ({
+    top: `${((startMinute - demand.startMinute) / duration) * 100}%`,
+    left: "44px",
+    width: "calc(100% - 44px)",
+    height: `${((endMinute - startMinute) / duration) * 100}%`,
+  });
+  const laneHeight = getTaskTimelineLaneHeight(duration, { compact });
   const isLaneBusy = mutationPending || resizeSaving;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
 
@@ -1350,7 +1323,6 @@ function TaskCoverageLane({
             shownPreview?.boundaryId === boundary.id ? shownPreview.minute : boundary.minute
           ))}
           openBoundaryMinutes={gaps.flatMap(gap => [gap.startMinute, gap.endMinute])}
-          positionForMinute={compact ? compactPositionForMinute : null}
         />
         {baseServices.map(service => {
           const interval = intervalFor(service);
@@ -1417,8 +1389,6 @@ function TaskCoverageLane({
             onCommit={minute => commitBoundary(boundary, minute)}
             onCancel={() => setActivePreview(null)}
             disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
-            positionForMinute={compact ? compactPositionForMinute : null}
-            minuteForPosition={compact ? compactMinuteForPosition : null}
           />
         ))}
       </div>
