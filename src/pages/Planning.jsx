@@ -155,6 +155,26 @@ function annotateSourceChangedShifts(shifts, sourceChangesByShift) {
   });
 }
 
+function projectSegmentsToCurrentTaskOccurrences(segments, occurrences) {
+  const occurrenceById = new Map(occurrences.map(item => [String(item.id), item]));
+  const currentByLogicalKey = new Map();
+  occurrences
+    .filter(item => item.lifecycle_status === "active" && item.logical_source_key)
+    .forEach(item => currentByLogicalKey.set(String(item.logical_source_key), item));
+
+  return segments.map(segment => {
+    const linked = occurrenceById.get(String(segment.task_occurrence_id));
+    if (linked?.lifecycle_status !== "superseded" || !linked.logical_source_key) return segment;
+    const current = currentByLogicalKey.get(String(linked.logical_source_key));
+    if (!current) return segment;
+    return {
+      ...segment,
+      task_occurrence_id: current.id,
+      source_task_occurrence_id: segment.task_occurrence_id,
+    };
+  });
+}
+
 function assignmentWarnings(assignment) {
   return Array.isArray(assignment?.warnings)
     ? assignment.warnings
@@ -911,8 +931,11 @@ export default function Planning() {
     [assignmentsInRange, pendingMatrixAssignments],
   );
   const matrixSegments = useMemo(
-    () => overlayPlanningRecords(taskSegments, pendingMatrixSegments),
-    [pendingMatrixSegments, taskSegments],
+    () => projectSegmentsToCurrentTaskOccurrences(
+      overlayPlanningRecords(taskSegments, pendingMatrixSegments),
+      taskOccurrences,
+    ),
+    [pendingMatrixSegments, taskOccurrences, taskSegments],
   );
 
   const selectedShift = useMemo(
