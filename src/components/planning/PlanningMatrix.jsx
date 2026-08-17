@@ -10,7 +10,7 @@ import {
   GripHorizontal,
   Layers3,
   Loader2,
-  MapPin,
+  Building2,
   MoreHorizontal,
   MoveRight,
   Route,
@@ -1506,10 +1506,15 @@ function DayHeader({ day, hasOpenWork = false }) {
 }
 
 function ResourceHeader({ resource, perspective }) {
-  const Icon = perspective === "employee" ? UserRound : resource.kind === "route" ? Route : MapPin;
+  const Icon = perspective === "employee" ? UserRound : resource.kind === "route" ? Route : Building2;
+  const showObjectLogo = resource.kind === "object" && resource.logoUrl;
   return (
     <div className="flex h-full min-h-14 items-start gap-2 px-3 py-2.5 text-left">
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Icon className="h-3.5 w-3.5" /></span>
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-primary/10 text-primary">
+        {showObjectLogo
+          ? <img src={resource.logoUrl} alt="" className="h-full w-full object-contain" />
+          : <Icon className="h-3.5 w-3.5" />}
+      </span>
       <span className="min-w-0">
         <span className="block truncate text-[11px] font-semibold" title={resource.label}>{resource.label}</span>
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
@@ -1570,6 +1575,7 @@ function buildObjectResources({ objects, routes, shifts, occurrences, segmentsBy
       subtitle: preferSnapshot
         ? occurrence?.customer_name_snapshot || segment?.customer_name_snapshot || object.address || "Historische objectkoppeling"
         : object?.address || occurrence?.customer_name_snapshot || segment?.customer_name_snapshot || "Object",
+      logoUrl: object?.logo_file_url || null,
     };
   }).filter(Boolean);
 
