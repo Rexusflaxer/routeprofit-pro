@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import A4PdfPreview from "@/components/files/A4PdfPreview";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +44,8 @@ export default function ManagedFilePreviewDialog({
   title = "Document bekijken",
   description = null,
   renderPdfAsA4 = false,
+  onPrevious = null,
+  onNext = null,
 }) {
   const descriptionId = React.useId();
   const [preview, setPreview] = useState(null);
@@ -125,17 +127,28 @@ export default function ManagedFilePreviewDialog({
                 <DialogDescription id={descriptionId} className="truncate">{description}</DialogDescription>
               )}
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleDownload}
-              disabled={loading || (!preview && !fileUrl)}
-              className="shrink-0"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Downloaden
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {onPrevious && (
+                <Button type="button" variant="outline" size="sm" onClick={onPrevious} disabled={loading}>
+                  <ChevronLeft className="h-3.5 w-3.5" /> Vorige
+                </Button>
+              )}
+              {onNext && (
+                <Button type="button" size="sm" onClick={onNext} disabled={loading}>
+                  Volgende <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDownload}
+                disabled={loading || (!preview && !fileUrl)}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Downloaden
+              </Button>
+            </div>
           </div>
         </DialogHeader>
 

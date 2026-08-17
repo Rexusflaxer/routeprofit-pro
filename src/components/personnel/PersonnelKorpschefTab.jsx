@@ -1,12 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   Archive,
   ArrowLeft,
-  Eye,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Trash2,
@@ -187,38 +185,13 @@ function KorpschefRow({
   onRestore,
   onDelete,
 }) {
-  const [menu, setMenu] = useState(null);
-  const rowRef = useRef(null);
-  const menuRef = useRef(null);
   const files = documentFiles(document);
   const isLegacy = document.metadata?.legacy_read_only === true;
 
-  useEffect(() => {
-    if (!menu) return undefined;
-    const close = event => {
-      if (!menuRef.current?.contains(event.target)) setMenu(null);
-    };
-    window.document.addEventListener("mousedown", close);
-    return () => window.document.removeEventListener("mousedown", close);
-  }, [menu]);
-
-  const openRow = event => {
-    if (files.length === 1 && !archived) {
-      onPreview(document, files[0]);
-      return;
-    }
-    const rowRect = rowRef.current?.getBoundingClientRect();
-    setMenu({
-      left: Math.min(event.clientX - (rowRect?.left || 0), Math.max((rowRect?.width || 240) - 230, 8)),
-      top: event.clientY - (rowRect?.top || 0),
-    });
-  };
-
   return (
     <div
-      ref={rowRef}
-      className={`${TABLE_GRID} group relative items-center px-5 py-2.5 transition-colors hover:bg-accent/35 ${files.length || archived ? "cursor-pointer" : ""}`}
-      onClick={openRow}
+      className={`${TABLE_GRID} group items-center px-5 py-2.5 transition-colors hover:bg-accent/35 ${files.length ? "cursor-pointer" : ""}`}
+      onClick={() => files.length && onPreview(document)}
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-foreground">
@@ -236,95 +209,23 @@ function KorpschefRow({
       <span className="min-w-0 truncate text-sm text-muted-foreground">
         {isLegacy ? "Oude registratie" : getAuditActorLabel(document, auditActors)}
       </span>
-      <div className="flex justify-end" onClick={event => event.stopPropagation()}>
-        {!isLegacy && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={event => {
-              const rowRect = rowRef.current?.getBoundingClientRect();
-              setMenu({
-                left: Math.max((rowRect?.width || 240) - 230, 8),
-                top: event.currentTarget.offsetTop + event.currentTarget.offsetHeight,
-              });
-            }}
-            title="Acties"
-          >
-            <MoreHorizontal className="h-4 w-4" />
+      <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
+        {!isLegacy && !archived && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => onArchive(document)} title="Naar archief">
+            <Archive className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {!isLegacy && archived && korpschefRecordStatus(document) !== "expired" && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => onRestore(document)} title="Terugzetten naar actief">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {!isLegacy && archived && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => onDelete(document)} title="Definitief verwijderen">
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
-
-      <AnimatePresence>
-        {menu && (
-          <motion.div
-            ref={menuRef}
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.1 }}
-            style={{ left: menu.left, top: menu.top }}
-            className="absolute z-50 min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
-            onClick={event => event.stopPropagation()}
-          >
-            {files.map(file => (
-              <button
-                key={file.side}
-                type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                onClick={() => {
-                  setMenu(null);
-                  onPreview(document, file);
-                }}
-              >
-                <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-                {file.label}
-              </button>
-            ))}
-            {!isLegacy && !archived && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                onClick={() => {
-                  setMenu(null);
-                  onArchive(document);
-                }}
-              >
-                <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-                Archiveren
-              </button>
-            )}
-            {!isLegacy && archived && korpschefRecordStatus(document) !== "expired" && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                onClick={() => {
-                  setMenu(null);
-                  onRestore(document);
-                }}
-              >
-                <RefreshCw className="h-3.5 w-3.5 text-emerald-500" />
-                Terugzetten
-              </button>
-            )}
-            {!isLegacy && archived && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-destructive transition-colors hover:bg-destructive/10"
-                onClick={() => {
-                  setMenu(null);
-                  onDelete(document);
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Definitief verwijderen
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -578,7 +479,7 @@ export default function PersonnelKorpschefTab({
               archived={showArchive}
               companyMap={companyMap}
               auditActors={auditActors}
-              onPreview={(record, file) => setPreview({ document: record, file })}
+              onPreview={record => setPreview({ document: record, files: documentFiles(record), index: 0 })}
               onArchive={record => archiveMutation.mutate({ document: record })}
               onRestore={record => restoreMutation.mutate(record)}
               onDelete={setDeleteDocument}
@@ -592,11 +493,13 @@ export default function PersonnelKorpschefTab({
         onOpenChange={open => {
           if (!open) setPreview(null);
         }}
-        managedFileId={preview?.file?.managedFileId}
-        fileUrl={preview?.file?.fileUrl}
-        filename={preview?.file?.filename}
-        title={preview ? `${korpschefDocumentLabel(preview.document)} - ${preview.file.label.replace(" openen", "")}` : "Document bekijken"}
+        managedFileId={preview?.files?.[preview.index]?.managedFileId}
+        fileUrl={preview?.files?.[preview.index]?.fileUrl}
+        filename={preview?.files?.[preview.index]?.filename}
+        title={preview ? `${korpschefDocumentLabel(preview.document)} - ${preview.files[preview.index].label.replace(" openen", "")}` : "Document bekijken"}
         renderPdfAsA4={preview?.document?.category === "wpbr_permission"}
+        onPrevious={preview?.index > 0 ? () => setPreview(current => ({ ...current, index: current.index - 1 })) : null}
+        onNext={preview?.index < (preview?.files?.length || 0) - 1 ? () => setPreview(current => ({ ...current, index: current.index + 1 })) : null}
       />
 
       <DeleteDialog
