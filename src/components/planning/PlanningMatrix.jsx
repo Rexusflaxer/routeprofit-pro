@@ -13,6 +13,7 @@ import {
   Building2,
   MoreHorizontal,
   MoveRight,
+  Pencil,
   Route,
   Scissors,
   Trash2,
@@ -719,6 +720,7 @@ function MatrixShiftBlock({
   onUnassign,
   onMove,
   onCopy,
+  onEditService,
   onEditComposition,
   onCancelComposition,
   onCopyService,
@@ -813,6 +815,7 @@ function MatrixShiftBlock({
     : baseEndTime;
   const isPending = shift._optimistic_pending === true;
   const isResizeSaving = resizeSaving || externalResizeSaving;
+  const editAssignment = assignmentsBySlot.get(0) || null;
   const copiedAssignment = currentAssignments.length === 1 ? currentAssignments[0] : null;
   const copiedIdentity = copiedAssignment ? assignmentIdentity(copiedAssignment, personnelById) : null;
 
@@ -874,6 +877,7 @@ function MatrixShiftBlock({
       available={editable}
       detail={`${shift.name || shift.service_name_snapshot || "Dienst"} · ${displayedStartTime}–${displayedEndTime}`}
       items={[
+        { label: "Dienst bewerken", disabled: mutationPending || isPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
         { label: "Dienst kopiëren", disabled: !copiedAssignment || mutationPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
         { label: "Dienst verwijderen", disabled: mutationPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
         ...currentAssignments.map(assignment => ({
@@ -1080,6 +1084,7 @@ function TaskCoverageLane({
   onUnassign,
   onMove,
   onCopy,
+  onEditService,
   onEditComposition,
   onCancelComposition,
   onCreateOpenTaskSlice,
@@ -1337,6 +1342,7 @@ function TaskCoverageLane({
               selected={String(selectedShiftId || "") === String(service.shift.id)}
               onSelect={() => onSelectShift?.(service.shift)}
               onUnassign={assignment => onUnassign?.(service.shift, assignment)}
+              onEditService={onEditService}
               onMove={onMove}
               onCopy={onCopy}
               onEditComposition={onEditComposition}
@@ -1400,6 +1406,7 @@ function EmployeeAssignmentBlock({
   projectionSlice,
   onSelect,
   onUnassign,
+  onEditService,
   onCopyService,
   onDeleteService,
   disabled = false,
@@ -1416,6 +1423,7 @@ function EmployeeAssignmentBlock({
       available={editable}
       detail={`${identity.name} · ${startTime}–${endTime}`}
       items={[
+        { label: "Dienst bewerken", disabled, onSelect: () => onEditService?.({ shift, assignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
         { label: "Dienst kopiëren", disabled, onSelect: () => onCopyService?.({ shift, personnelId: assignment.personnel_id, personnelName: identity.name, startTime, endTime }), Icon: Copy },
         { label: "Dienst verwijderen", disabled: disabled || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
         { label: "Medewerker uitplannen", disabled, onSelect: () => onUnassign?.(assignment), Icon: UserMinus },
@@ -1624,6 +1632,7 @@ function ObjectDayCell({
   onUnassign,
   onMove,
   onCopy,
+  onEditService,
   onEditComposition,
   onCancelComposition,
   onCreateOpenTaskSlice,
@@ -1775,6 +1784,7 @@ function ObjectDayCell({
               onSelectOccurrence={onSelectOccurrence}
               onSelectShift={onSelectShift}
               onUnassign={onUnassign}
+              onEditService={onEditService}
               onMove={onMove}
               onCopy={onCopy}
               onEditComposition={onEditComposition}
@@ -1840,6 +1850,7 @@ function ObjectDayCell({
             selected={String(selectedShiftId || "") === String(shift.id)}
             onSelect={() => onSelectShift?.(shift)}
             onUnassign={assignment => onUnassign?.(shift, assignment)}
+            onEditService={onEditService}
             onMove={onMove}
             onCopy={onCopy}
             onEditComposition={onEditComposition}
@@ -1870,6 +1881,7 @@ function EmployeeDayCell({
   segmentsByShift,
   onSelectShift,
   onUnassign,
+  onEditService,
   onCopyService,
   onDeleteService,
   mutationPending,
@@ -1913,6 +1925,7 @@ function EmployeeDayCell({
             projectionSlice={slice}
             onSelect={() => onSelectShift?.(shift)}
             onUnassign={item => onUnassign?.(shift, item)}
+            onEditService={onEditService}
             onCopyService={onCopyService}
             onDeleteService={onDeleteService}
             disabled={placementPending}
@@ -1970,6 +1983,7 @@ export default function PlanningMatrix({
   onUnassign,
   onMove,
   onCopy,
+  onEditService,
   onEditComposition,
   onCancelComposition,
   onCreateOpenTaskSlice,
@@ -2179,6 +2193,7 @@ export default function PlanningMatrix({
         segmentsByShift={segmentsByShift}
         onSelectShift={onSelectShift}
         onUnassign={onUnassign}
+        onEditService={onEditService}
         onCopyService={onCopyService}
         onDeleteService={onDeleteService}
         mutationPending={mutationPending}
@@ -2200,6 +2215,7 @@ export default function PlanningMatrix({
         onSelectOccurrence={onSelectOccurrence}
         onSelectShift={onSelectShift}
         onUnassign={onUnassign}
+        onEditService={onEditService}
         onMove={onMove}
         onCopy={onCopy}
         onEditComposition={onEditComposition}

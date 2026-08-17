@@ -26,6 +26,7 @@ import PlanningToolbar from "@/components/planning/PlanningToolbar";
 import PlanningBoard from "@/components/planning/PlanningBoard";
 import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
 import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
+import PlanningServiceEditDialog from "@/components/planning/PlanningServiceEditDialog";
 import PlanningTaskDeleteDialog from "@/components/planning/PlanningDeleteDialogs";
 import {
   CancelTaskShiftDialog,
@@ -352,6 +353,7 @@ export default function Planning() {
   const [pendingMatrixChanges, setPendingMatrixChanges] = useState([]);
   const [pendingResourceKeys, setPendingResourceKeys] = useState(() => new Set());
   const [composer, setComposer] = useState(null);
+  const [serviceEditor, setServiceEditor] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [taskDeleteRequest, setTaskDeleteRequest] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -1190,6 +1192,7 @@ export default function Planning() {
       const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name}.`;
       rememberUndo(result, description);
       setLiveMessage(description);
+      return result;
     } finally {
       releasePendingResources();
     }
@@ -1828,6 +1831,59 @@ export default function Planning() {
     setShiftAction(null);
   };
 
+  const saveServiceEdit = async ({ shift, assignment, segments: requestSegments = [], startTime, endTime, personnelId }) => {
+    let currentShift = shift;
+    const timesChanged = startTime !== shift.start_time || endTime !== shift.end_time;
+    if (timesChanged && requestSegments.length) {
+      const ordered = [...requestSegments].sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
+      const affectedIds = [...new Set(ordered.map(item => String(item.task_occurrence_id)))];
+      const result = await runIntentMutation(`service-edit-time:${shift.id}`, "planning-service-edit-time", {
+        action: "update_shift_composition",
+        shift_id: shift.id,
+        expected_shift_revision: Number(shift.revision || 1),
+        service_name: shift.name || shift.service_name_snapshot,
+        required_count: Number(shift.required_count || 1),
+        expected_occurrence_revisions: Object.fromEntries(affectedIds.map(id => [id, Number(taskOccurrences.find(item => String(item.id) === id)?.revision || 1)])),
+        segments: ordered.map((segment, index) => ({
+          task_occurrence_id: segment.task_occurrence_id,
+          start_date: segment.start_date,
+          end_date: index === ordered.length - 1
+            ? toDateKey(addDays(segment.start_date, endTime <= (index === 0 ? startTime : segment.start_time) ? 1 : 0))
+            : segment.end_date,
+          start_time: index === 0 ? startTime : segment.start_time,
+          end_time: index === ordered.length - 1 ? endTime : segment.end_time,
+        })),
+      });
+      reconcilePlanningResult(result, { replaceShiftSegments: true });
+      currentShift = result.shift || currentShift;
+    } else if (timesChanged) {
+      const result = await runIntentMutation(`service-edit-time:${shift.id}`, "planning-service-edit-time", {
+        action: "move",
+        shift_id: shift.id,
+        service_date: shift.service_date,
+        start_time: startTime,
+        end_time: endTime,
+        expected_shift_revision: Number(shift.revision || 1),
+      });
+      reconcilePlanningResult(result);
+      currentShift = result.shift || currentShift;
+    }
+    const currentPersonnelId = assignment?.personnel_id ? String(assignment.personnel_id) : null;
+    if (currentPersonnelId !== personnelId) {
+      if (assignment) {
+        const unassigned = await handleUnassign(currentShift, assignment);
+        currentShift = unassigned?.shift || currentShift;
+      }
+      if (personnelId) {
+        const person = activePersonnel.find(item => String(item.id) === String(personnelId));
+        if (person) await executeAssignment(currentShift, person, Number(assignment?.slot_index || 0));
+      }
+    }
+    refreshPlanningInBackground();
+    setServiceEditor(null);
+    setLiveMessage(`${shift.name || "Dienst"} is bijgewerkt.`);
+  };
+
   const openTaskComposer = ({ shift = null, occurrence = null } = {}) => {
     if (!editing) return;
     setComposer({ shift, occurrence });
@@ -2169,6 +2225,7 @@ export default function Planning() {
               onUnassign={(shift, assignment) => handleUnassign(shift, assignment).catch(() => undefined)}
               onMove={shift => setShiftAction({ action: "move", shift })}
               onCopy={shift => setShiftAction({ action: "copy", shift })}
+              onEditService={setServiceEditor}
               onEditComposition={shift => openTaskComposer({ shift })}
               onCancelComposition={shift => setCancelTaskShift({
                 shift,
@@ -2300,6 +2357,14 @@ export default function Planning() {
         }}
         onConfirm={payload => handleShiftActionConfirm(payload).catch(() => undefined)}
         isPending={runActionMutation.isPending}
+      />
+      <PlanningServiceEditDialog
+        request={serviceEditor}
+        personnel={activePersonnel}
+        open={Boolean(serviceEditor)}
+        onOpenChange={open => { if (!open && !runActionMutation.isPending) setServiceEditor(null); }}
+        onSave={payload => saveServiceEdit(payload).catch(() => undefined)}
+        isPending={runActionMutation.isPending || pendingResourceKeys.size > 0}
       />
       <PlanningTaskDeleteDialog
         request={taskDeleteRequest}

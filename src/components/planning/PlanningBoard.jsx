@@ -41,6 +41,7 @@ export default function PlanningBoard({
   onUnassign,
   onMove,
   onCopy,
+  onEditService,
   onEditComposition,
   onCancelComposition,
   onCreateOpenTaskSlice,
@@ -90,6 +91,7 @@ export default function PlanningBoard({
       onUnassign={onUnassign}
       onMove={onMove}
       onCopy={onCopy}
+      onEditService={onEditService}
       onEditComposition={onEditComposition}
       onCancelComposition={onCancelComposition}
       onCreateOpenTaskSlice={onCreateOpenTaskSlice}
