@@ -1512,11 +1512,11 @@ function ResourceHeader({ resource, perspective }) {
       <span className={cn(
         "mt-0.5 flex shrink-0 items-center justify-center overflow-hidden rounded-md text-primary",
         showObjectLogo
-          ? "h-9 w-9 border border-border bg-card"
+          ? "h-9 w-9 border border-border bg-white"
           : "h-6 w-6 bg-primary/10",
       )}>
         {showObjectLogo
-          ? <img src={resource.logoUrl} alt="" className="aspect-square h-full w-full object-cover" />
+          ? <img src={resource.logoUrl} alt="" className="h-full w-full object-contain p-1" />
           : <Icon className="h-3.5 w-3.5" />}
       </span>
       <span className="min-w-0">
