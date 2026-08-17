@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import PlanningZoomControls from "@/components/planning/PlanningZoomControls";
+import PlanningMultiSelect from "@/components/planning/PlanningMultiSelect";
 import {
   Select,
   SelectContent,
@@ -285,43 +286,33 @@ export default function PlanningToolbar({
           />
         </div>
 
-        <Select value={customerFilter} onValueChange={onCustomerFilterChange}>
-          <SelectTrigger className="h-8 w-[145px] bg-card text-[12px]" aria-label="Filter op klant">
-            <SelectValue placeholder="Alle klanten" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle klanten</SelectItem>
-            {customers.map(customer => (
-              <SelectItem key={customer.id} value={String(customer.id)}>
-                {customer.trade_name || customer.name || customer.legal_name || "Naamloze klant"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={objectFilter} onValueChange={onObjectFilterChange}>
-          <SelectTrigger className="h-8 w-[145px] bg-card text-[12px]" aria-label="Filter op object">
-            <SelectValue placeholder="Alle objecten" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle objecten</SelectItem>
-            {objects.map(object => (
-              <SelectItem key={object.id} value={String(object.id)}>{object.name || "Naamloos object"}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={taskTypeFilter} onValueChange={onTaskTypeFilterChange}>
-          <SelectTrigger className="h-8 w-[155px] bg-card text-[12px]" aria-label="Filter op taaktype">
-            <SelectValue placeholder="Alle taaktypes" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle taaktypes</SelectItem>
-            {taskTypes.map(taskType => (
-              <SelectItem key={taskType.value} value={taskType.value}>{taskType.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PlanningMultiSelect
+          values={customerFilter}
+          onChange={onCustomerFilterChange}
+          options={customers.map(customer => ({ value: String(customer.id), label: customer.trade_name || customer.name || customer.legal_name || "Naamloze klant" }))}
+          allLabel="Alle klanten"
+          singularLabel="klanten"
+          ariaLabel="Filter op klanten"
+          className="w-[145px]"
+        />
+        <PlanningMultiSelect
+          values={objectFilter}
+          onChange={onObjectFilterChange}
+          options={objects.map(object => ({ value: String(object.id), label: object.name || "Naamloos object" }))}
+          allLabel="Alle objecten"
+          singularLabel="objecten"
+          ariaLabel="Filter op objecten"
+          className="w-[145px]"
+        />
+        <PlanningMultiSelect
+          values={taskTypeFilter}
+          onChange={onTaskTypeFilterChange}
+          options={taskTypes}
+          allLabel="Alle taaktypes"
+          singularLabel="taaktypes"
+          ariaLabel="Filter op taaktypes"
+          className="w-[155px]"
+        />
 
         <Select value={statusFilter} onValueChange={onStatusFilterChange}>
           <SelectTrigger className="h-8 w-[132px] bg-card text-[12px]" aria-label="Filter op planningsstatus">

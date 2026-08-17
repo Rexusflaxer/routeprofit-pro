@@ -341,9 +341,9 @@ export default function Planning() {
   const planningZoom = PLANNING_ZOOM_LEVELS[zoomIndex];
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [customerFilter, setCustomerFilter] = useState("all");
-  const [objectFilter, setObjectFilter] = useState("all");
-  const [taskTypeFilter, setTaskTypeFilter] = useState("all");
+  const [customerFilter, setCustomerFilter] = useState([]);
+  const [objectFilter, setObjectFilter] = useState([]);
+  const [taskTypeFilter, setTaskTypeFilter] = useState([]);
   const [selectedShiftId, setSelectedShiftId] = useState(null);
   const [shiftAction, setShiftAction] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -783,9 +783,9 @@ export default function Planning() {
     })(),
   ])), [activeTaskSegmentsByOccurrence, assignmentsInRangeByShift, shiftsInRangeById, taskOccurrencesInRange]);
   const visibleTaskOccurrences = useMemo(() => taskOccurrencesInRange.filter(item => {
-    if (customerFilter !== "all" && String(item.customer_id) !== String(customerFilter)) return false;
-    if (objectFilter !== "all" && String(item.object_id) !== String(objectFilter)) return false;
-    if (taskTypeFilter !== "all" && String(item.task_type) !== String(taskTypeFilter)) return false;
+    if (customerFilter.length > 0 && !customerFilter.includes(String(item.customer_id))) return false;
+    if (objectFilter.length > 0 && !objectFilter.includes(String(item.object_id))) return false;
+    if (taskTypeFilter.length > 0 && !taskTypeFilter.includes(String(item.task_type))) return false;
     const state = occurrencePlanningStates.get(String(item.id));
     const hasSourceChange = (sourceChangesByOccurrence.get(String(item.id)) || []).length > 0;
     const query = search.trim().toLocaleLowerCase("nl-NL");
@@ -829,24 +829,24 @@ export default function Planning() {
     return shiftsInRange.filter(shift => {
       const object = objectsById.get(String(shift.object_id || ""));
       const shiftSegments = activeTaskSegmentsByShift.get(String(shift.id)) || [];
-      if (customerFilter !== "all") {
+      if (customerFilter.length > 0) {
         const shiftCustomerIds = new Set([
           shift.customer_id,
           object?.customer_id,
           ...(shift.customer_ids || []),
           ...shiftSegments.map(item => item.customer_id),
         ].filter(Boolean).map(String));
-        if (!shiftCustomerIds.has(String(customerFilter))) return false;
+        if (!customerFilter.some(id => shiftCustomerIds.has(id))) return false;
       }
-      if (objectFilter !== "all") {
+      if (objectFilter.length > 0) {
         const shiftObjectIds = new Set([
           shift.object_id,
           ...(shift.object_ids || []),
           ...shiftSegments.map(item => item.object_id),
         ].filter(Boolean).map(String));
-        if (!shiftObjectIds.has(String(objectFilter))) return false;
+        if (!objectFilter.some(id => shiftObjectIds.has(id))) return false;
       }
-      if (taskTypeFilter !== "all" && !shiftSegments.some(item => String(item.task_type) === String(taskTypeFilter))) return false;
+      if (taskTypeFilter.length > 0 && !shiftSegments.some(item => taskTypeFilter.includes(String(item.task_type)))) return false;
       const shiftAssignments = assignmentsInRangeByShift.get(String(shift.id)) || [];
       const required = Math.max(1, Number(shift.required_count || 1));
       const warnings = shiftAssignments.flatMap(assignmentWarnings);
@@ -931,8 +931,8 @@ export default function Planning() {
       ).map(segment => segment.object_id)),
     ].filter(Boolean).map(String));
     return objects.filter(object => {
-      if (customerFilter !== "all" && String(object.customer_id) !== String(customerFilter)) return false;
-      if (objectFilter !== "all" && String(object.id) !== String(objectFilter)) return false;
+      if (customerFilter.length > 0 && !customerFilter.includes(String(object.customer_id))) return false;
+      if (objectFilter.length > 0 && !objectFilter.includes(String(object.id))) return false;
       if (!query) return true;
       const directMatch = [object.name, object.address, object.code]
         .filter(Boolean)
@@ -2062,15 +2062,15 @@ export default function Planning() {
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         customerFilter={customerFilter}
-        onCustomerFilterChange={value => {
-          setCustomerFilter(value);
-          if (value !== "all" && !objects.some(object => String(object.id) === String(objectFilter) && String(object.customer_id) === String(value))) setObjectFilter("all");
+        onCustomerFilterChange={values => {
+          setCustomerFilter(values);
+          if (values.length > 0) setObjectFilter(current => current.filter(id => objects.some(object => String(object.id) === String(id) && values.includes(String(object.customer_id)))));
         }}
         customers={customers}
         objectFilter={objectFilter}
         onObjectFilterChange={setObjectFilter}
         objects={objects
-          .filter(object => customerFilter === "all" || String(object.customer_id) === String(customerFilter))
+          .filter(object => customerFilter.length === 0 || customerFilter.includes(String(object.customer_id)))
           .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "nl"))}
         taskTypeFilter={taskTypeFilter}
         onTaskTypeFilterChange={setTaskTypeFilter}
