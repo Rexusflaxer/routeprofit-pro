@@ -1507,7 +1507,7 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
         {summary?.requiredMinutes > 0 && (
           <span className="mt-1 block text-[9px] font-semibold tabular-nums text-foreground">
-            {formatObjectPlanningTime(summary.allocatedMinutes)} / {formatObjectPlanningTime(summary.requiredMinutes)} ingepland
+            {formatObjectPlanningTime(summary.allocatedMinutes)} / {formatObjectPlanningTime(summary.requiredMinutes)}
           </span>
         )}
       </span>
