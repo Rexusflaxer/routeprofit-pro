@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
@@ -46,6 +47,8 @@ export default function ManagedFilePreviewDialog({
   renderPdfAsA4 = false,
   onPrevious = null,
   onNext = null,
+  previousDisabled = false,
+  nextDisabled = false,
 }) {
   const descriptionId = React.useId();
   const [preview, setPreview] = useState(null);
@@ -114,7 +117,7 @@ export default function ManagedFilePreviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         aria-describedby={description ? descriptionId : undefined}
-        className={`h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6 ${renderPdfAsA4 ? "max-w-6xl" : "max-w-2xl"}`}
+        className={`h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] ${onPrevious || onNext ? "grid-rows-[auto,1fr,auto]" : "grid-rows-[auto,1fr]"} overflow-hidden p-4 sm:p-6 ${renderPdfAsA4 ? "max-w-6xl" : "max-w-2xl"}`}
       >
         <DialogHeader className="min-w-0 pr-12">
           <div className="flex min-w-0 items-start justify-between gap-4">
@@ -127,28 +130,17 @@ export default function ManagedFilePreviewDialog({
                 <DialogDescription id={descriptionId} className="truncate">{description}</DialogDescription>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {onPrevious && (
-                <Button type="button" variant="outline" size="sm" onClick={onPrevious} disabled={loading}>
-                  <ChevronLeft className="h-3.5 w-3.5" /> Vorige
-                </Button>
-              )}
-              {onNext && (
-                <Button type="button" size="sm" onClick={onNext} disabled={loading}>
-                  Volgende <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleDownload}
-                disabled={loading || (!preview && !fileUrl)}
-              >
-                <Download className="h-3.5 w-3.5" />
-                Downloaden
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownload}
+              disabled={loading || (!preview && !fileUrl)}
+              className="shrink-0"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Downloaden
+            </Button>
           </div>
         </DialogHeader>
 
@@ -208,6 +200,16 @@ export default function ManagedFilePreviewDialog({
             </div>
           )}
         </div>
+        {(onPrevious || onNext) && (
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button type="button" variant="outline" onClick={onPrevious} disabled={loading || previousDisabled}>
+              <ChevronLeft className="mr-1 h-4 w-4" /> Vorige
+            </Button>
+            <Button type="button" onClick={onNext} disabled={loading || nextDisabled}>
+              Volgende <ChevronRight className="ml-1 h-4 w-4" />
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

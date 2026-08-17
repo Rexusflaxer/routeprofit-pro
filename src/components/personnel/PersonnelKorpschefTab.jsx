@@ -498,8 +498,10 @@ export default function PersonnelKorpschefTab({
         filename={preview?.files?.[preview.index]?.filename}
         title={preview ? `${korpschefDocumentLabel(preview.document)} - ${preview.files[preview.index].label.replace(" openen", "")}` : "Document bekijken"}
         renderPdfAsA4={preview?.document?.category === "wpbr_permission"}
-        onPrevious={preview?.index > 0 ? () => setPreview(current => ({ ...current, index: current.index - 1 })) : null}
-        onNext={preview?.index < (preview?.files?.length || 0) - 1 ? () => setPreview(current => ({ ...current, index: current.index + 1 })) : null}
+        onPrevious={preview?.files?.length > 1 ? () => setPreview(current => ({ ...current, index: Math.max(current.index - 1, 0) })) : null}
+        onNext={preview?.files?.length > 1 ? () => setPreview(current => ({ ...current, index: Math.min(current.index + 1, current.files.length - 1) })) : null}
+        previousDisabled={preview?.index === 0}
+        nextDisabled={preview?.index === (preview?.files?.length || 1) - 1}
       />
 
       <DeleteDialog
