@@ -1486,14 +1486,19 @@ function EmployeeAssignmentBlock({
   );
 }
 
-function DayHeader({ day }) {
+function DayHeader({ day, hasOpenWork = false }) {
   const key = dateKey(day);
   const today = key === dateKey(new Date());
   return (
     <div className={cn("px-3 py-2.5", today && "bg-primary/[0.06]")}>
       <span className="flex items-center justify-between gap-2">
         <span className={cn("text-[14px] font-semibold capitalize", today && "text-primary")}>{dayFormatter.format(day)}</span>
-        <span className="text-[18px] font-bold leading-none text-muted-foreground/30">{getISOWeek(day)}</span>
+        <span className="flex items-center gap-2">
+          {hasOpenWork && (
+            <span className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_0_3px_hsl(var(--destructive)/0.10)]" title="Nog in te plannen werk" aria-label="Nog in te plannen werk" />
+          )}
+          <span className="text-[18px] font-bold leading-none text-muted-foreground/30">{getISOWeek(day)}</span>
+        </span>
       </span>
       {today && <span className="mt-0.5 block text-[9px] font-medium text-primary">Vandaag</span>}
     </div>
@@ -2102,6 +2107,32 @@ export default function PlanningMatrix({
     });
     return map;
   }, [segmentsByShift, shifts]);
+  const openWorkDays = useMemo(() => {
+    const visibleDays = new Set(days.map(dateKey));
+    const openDays = new Set();
+
+    occurrences.filter(item => item.lifecycle_status !== "cancelled").forEach(occurrence => {
+      visibleDays.forEach(day => {
+        if (!getTaskOccurrenceDayProjection(occurrence, day)) return;
+        const gaps = getTaskTimelineGaps({
+          occurrence,
+          serviceDate: day,
+          segments: coverageSegmentsByOccurrence.get(String(occurrence.id)) || [],
+          shifts: coverageShiftsByOccurrence.get(String(occurrence.id)) || [],
+        });
+        if (gaps.length > 0) openDays.add(day);
+      });
+    });
+
+    shifts.filter(shift => shift.status !== "cancelled").forEach(shift => {
+      const assigned = (assignmentsByShift.get(String(shift.id)) || []).length;
+      if (assigned >= Math.max(1, Number(shift.required_count || 1))) return;
+      intervalDaySlices(shift).forEach(slice => {
+        if (visibleDays.has(slice.date)) openDays.add(slice.date);
+      });
+    });
+    return openDays;
+  }, [assignmentsByShift, coverageSegmentsByOccurrence, coverageShiftsByOccurrence, days, occurrences, shifts]);
   const placementsByEmployeeCell = useMemo(() => {
     const map = new Map();
     const visibleDays = new Set(days.map(dateKey));
@@ -2209,7 +2240,7 @@ export default function PlanningMatrix({
                 return (
                   <tr key={key}>
                     <th scope="row" className="sticky left-0 z-30 w-[138px] min-w-[138px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
-                      <DayHeader day={day} />
+                      <DayHeader day={day} hasOpenWork={openWorkDays.has(key)} />
                     </th>
                     {resources.map(resource => (
                       <td key={`${resource.key}:${key}`} className="w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border/80 align-top last:border-r-0">
@@ -2234,7 +2265,7 @@ export default function PlanningMatrix({
                   const key = dateKey(day);
                   return (
                     <th key={key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top text-left backdrop-blur last:border-r-0">
-                      <DayHeader day={day} />
+                      <DayHeader day={day} hasOpenWork={openWorkDays.has(key)} />
                     </th>
                   );
                 })}
