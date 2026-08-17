@@ -25,7 +25,6 @@ import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdenti
 import PlanningEmployeePortraitOverlay from "@/components/planning/PlanningEmployeePortraitOverlay";
 import PlanningClipboardContextMenu from "@/components/planning/PlanningClipboardContextMenu";
 import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
-import PlanningHorizontalScrollbar from "@/components/planning/PlanningHorizontalScrollbar";
 
 import {
   DropdownMenu,
@@ -1992,7 +1991,6 @@ export default function PlanningMatrix({
   mutationPending = false,
   pendingResourceKeys = null,
 }) {
-  const matrixScrollRef = useRef(null);
   const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
   const shiftsById = useMemo(() => new Map(shifts.map(item => [String(item.id), item])), [shifts]);
   const personnelById = useMemo(() => new Map(personnel.map(item => [String(item.id), item])), [personnel]);
@@ -2210,10 +2208,9 @@ export default function PlanningMatrix({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="h-full min-h-0">
       <div
-        ref={matrixScrollRef}
-        className="min-h-0 flex-1 overflow-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
+        className="planning-persistent-scrollbar h-full min-h-0 overflow-x-scroll overflow-y-auto overscroll-contain bg-background [scrollbar-gutter:stable]"
         data-testid="planning-matrix-scroll"
       >
       <table
@@ -2306,7 +2303,6 @@ export default function PlanningMatrix({
         </div>
       )}
       </div>
-      <PlanningHorizontalScrollbar targetRef={matrixScrollRef} />
     </div>
   );
 }
