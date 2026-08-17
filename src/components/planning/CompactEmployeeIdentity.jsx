@@ -17,7 +17,7 @@ function compactName(name) {
 
 export default function CompactEmployeeIdentity({ name, photoUrl, employee, disabled, onClick, warningCount = 0, variant = "default" }) {
   return (
-    <TooltipProvider delayDuration={250}>
+    <TooltipProvider delayDuration={250} disableHoverableContent>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
