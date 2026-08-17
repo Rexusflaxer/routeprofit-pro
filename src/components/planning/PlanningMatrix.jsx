@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import CompactEmployeeIdentity from "@/components/planning/CompactEmployeeIdentity";
 import PlanningEmployeePortraitOverlay from "@/components/planning/PlanningEmployeePortraitOverlay";
+import PlanningObjectInfoDialog from "@/components/planning/PlanningObjectInfoDialog";
 import PlanningClipboardContextMenu from "@/components/planning/PlanningClipboardContextMenu";
 import TimelineTimeScale from "@/components/planning/TimelineTimeScale";
 
@@ -1504,11 +1505,17 @@ function DayHeader({ day, hasOpenWork = false }) {
   );
 }
 
-function ResourceHeader({ resource, perspective }) {
+function ResourceHeader({ resource, perspective, onObjectClick }) {
   const Icon = perspective === "employee" ? UserRound : resource.kind === "route" ? Route : Building2;
-  const showObjectLogo = resource.kind === "object" && resource.logoUrl;
+  const isObject = resource.kind === "object";
+  const showObjectLogo = isObject && resource.logoUrl;
   return (
-    <div className="flex h-full min-h-14 items-start gap-2 px-3 py-2.5 text-left">
+    <button
+      type="button"
+      disabled={!isObject}
+      onClick={() => onObjectClick?.(resource)}
+      className="flex h-full min-h-14 w-full items-start gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent/60 disabled:cursor-default disabled:hover:bg-transparent"
+    >
       <span className={cn(
         "mt-0.5 flex shrink-0 items-center justify-center overflow-hidden rounded-md text-primary",
         showObjectLogo
@@ -1523,7 +1530,7 @@ function ResourceHeader({ resource, perspective }) {
         <span className="block truncate text-[11px] font-semibold" title={resource.label}>{resource.label}</span>
         <span className="mt-0.5 block truncate text-[9px] font-normal text-muted-foreground" title={resource.subtitle}>{resource.subtitle}</span>
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -1580,6 +1587,7 @@ function buildObjectResources({ objects, routes, shifts, occurrences, segmentsBy
         ? occurrence?.customer_name_snapshot || segment?.customer_name_snapshot || object.address || "Historische objectkoppeling"
         : object?.address || occurrence?.customer_name_snapshot || segment?.customer_name_snapshot || "Object",
       logoUrl: object?.logo_file_url || null,
+      object: object || null,
     };
   }).filter(Boolean);
 
@@ -1996,6 +2004,7 @@ export default function PlanningMatrix({
   mutationPending = false,
   pendingResourceKeys = null,
 }) {
+  const [selectedObjectResource, setSelectedObjectResource] = useState(null);
   const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
   const shiftsById = useMemo(() => new Map(shifts.map(item => [String(item.id), item])), [shifts]);
   const personnelById = useMemo(() => new Map(personnel.map(item => [String(item.id), item])), [personnel]);
@@ -2237,7 +2246,7 @@ export default function PlanningMatrix({
                 </th>
                 {resources.map(resource => (
                   <th key={resource.key} scope="col" className="sticky top-0 z-40 w-[238px] min-w-[238px] max-w-[238px] border-b border-r border-border bg-card/95 align-top backdrop-blur last:border-r-0">
-                    <ResourceHeader resource={resource} perspective={perspective} />
+                    <ResourceHeader resource={resource} perspective={perspective} onObjectClick={setSelectedObjectResource} />
                   </th>
                 ))}
               </tr>
@@ -2283,7 +2292,7 @@ export default function PlanningMatrix({
               {resources.map(resource => (
                 <tr key={resource.key}>
                   <th scope="row" className="sticky left-0 z-30 w-[220px] min-w-[220px] max-w-[220px] border-b border-r border-border bg-card align-top text-left shadow-[4px_0_10px_rgba(15,23,42,0.025)]">
-                    <ResourceHeader resource={resource} perspective={perspective} />
+                    <ResourceHeader resource={resource} perspective={perspective} onObjectClick={setSelectedObjectResource} />
                   </th>
                   {days.map(day => {
                     const key = dateKey(day);
@@ -2308,6 +2317,7 @@ export default function PlanningMatrix({
         </div>
       )}
       </div>
+      <PlanningObjectInfoDialog resource={selectedObjectResource} onClose={() => setSelectedObjectResource(null)} />
     </div>
   );
 }
