@@ -49,6 +49,7 @@ export default function PlanningBoard({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onEditTask,
   onPasteTask,
   onDeleteTask,
   onDeleteService,
@@ -99,6 +100,7 @@ export default function PlanningBoard({
       onPasteService={onPasteService}
       serviceClipboard={serviceClipboard}
       onCopyTask={onCopyTask}
+      onEditTask={onEditTask}
       onPasteTask={onPasteTask}
       onDeleteTask={onDeleteTask}
       onDeleteService={onDeleteService}

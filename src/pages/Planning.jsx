@@ -27,6 +27,7 @@ import PlanningBoard from "@/components/planning/PlanningBoard";
 import PlanningSidePanel from "@/components/planning/PlanningSidePanel";
 import PlanningShiftComposer from "@/components/planning/PlanningShiftComposer";
 import PlanningServiceEditDialog from "@/components/planning/PlanningServiceEditDialog";
+import PlanningTaskEditDialog from "@/components/planning/PlanningTaskEditDialog";
 import PlanningTaskDeleteDialog from "@/components/planning/PlanningDeleteDialogs";
 import {
   CancelTaskShiftDialog,
@@ -354,6 +355,7 @@ export default function Planning() {
   const [pendingResourceKeys, setPendingResourceKeys] = useState(() => new Set());
   const [composer, setComposer] = useState(null);
   const [serviceEditor, setServiceEditor] = useState(null);
+  const [taskEditor, setTaskEditor] = useState(null);
   const [cancelTaskShift, setCancelTaskShift] = useState(null);
   const [taskDeleteRequest, setTaskDeleteRequest] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -1343,6 +1345,42 @@ export default function Planning() {
     }
   };
 
+  const saveTaskEdit = async ({ occurrence, startTime, endTime }) => {
+    const catalog = await invokePlanningApi({
+      action: "list_object_tasks",
+      object_id: occurrence.object_id,
+      customer_id: occurrence.customer_id,
+    });
+    const taskRow = (catalog.tasks || []).find(item => String(item.definition?.id) === String(occurrence.object_task_definition_id));
+    const seriesEntry = occurrence.object_task_schedule_series_id
+      ? taskRow?.series?.find(item => String(item.series?.id) === String(occurrence.object_task_schedule_series_id))
+      : taskRow?.series?.find(item => item.current_revision?.start_time === occurrence.window_start_time && item.current_revision?.end_time === occurrence.window_end_time);
+    if (!taskRow || !seriesEntry?.series || !seriesEntry.current_revision) {
+      toast({ variant: "destructive", title: "Taak kan niet worden bewerkt", description: "De bijbehorende taakreeks kon niet veilig worden vastgesteld." });
+      return;
+    }
+    const revision = seriesEntry.current_revision;
+    await runIntentMutation(`edit-task:${occurrence.id}`, "planning-edit-task", {
+      action: "change_object_task_series",
+      customer_id: occurrence.customer_id,
+      object_id: occurrence.object_id,
+      task_definition_id: occurrence.object_task_definition_id,
+      series_id: seriesEntry.series.id,
+      expected_version: Number(seriesEntry.series.version || 1),
+      effective_from: occurrence.service_date,
+      start_time: startTime,
+      end_time: endTime,
+      repeat_weekly: revision.recurrence_type === "weekly",
+      recurrence_end_date: revision.recurrence_end_date || null,
+    });
+    await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
+    await refreshPlanning();
+    setTaskEditor(null);
+    const description = `${occurrence.task_name_snapshot || "Taak"} loopt nu van ${startTime} tot ${endTime}.`;
+    toast({ title: "Taaktijden aangepast", description });
+    setLiveMessage(description);
+  };
+
   const copyTaskToClipboard = task => {
     setTaskClipboard(task);
     const description = `${task.task_name_snapshot || "Taak"} is zonder diensten gekopieerd.`;
@@ -2236,6 +2274,7 @@ export default function Planning() {
               onPasteService={payload => pasteServiceFromClipboard(payload).catch(() => undefined)}
               serviceClipboard={serviceClipboard}
               onCopyTask={copyTaskToClipboard}
+              onEditTask={setTaskEditor}
               onPasteTask={payload => pasteTaskToDate(payload).catch(() => undefined)}
               onDeleteTask={requestTaskDeletion}
               onDeleteService={shift => setCancelTaskShift({ shift, idempotencyKey: createPlanningMutationKey("cancel-task-shift") })}
@@ -2357,6 +2396,13 @@ export default function Planning() {
         }}
         onConfirm={payload => handleShiftActionConfirm(payload).catch(() => undefined)}
         isPending={runActionMutation.isPending}
+      />
+      <PlanningTaskEditDialog
+        occurrence={taskEditor}
+        open={Boolean(taskEditor)}
+        onOpenChange={open => { if (!open && !runActionMutation.isPending) setTaskEditor(null); }}
+        onSave={payload => saveTaskEdit(payload).catch(() => undefined)}
+        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
       />
       <PlanningServiceEditDialog
         request={serviceEditor}

@@ -198,6 +198,7 @@ function OpenTaskIntervalCard({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onEditTask,
   onDeleteTask,
   mutationPending,
   embeddedInLane = false,
@@ -227,6 +228,7 @@ function OpenTaskIntervalCard({
       detail={`${occurrence.task_name_snapshot || "Taak"} · ${gap.startTime}–${gap.endTime}`}
       items={[
         { label: "Dienst hier plakken", disabled: mutationPending || !canPaste, onSelect: () => onPasteService?.({ occurrence, serviceDate: dropServiceDate, startTime: serviceClipboard.startTime, endTime: serviceClipboard.endTime, personnelId: serviceClipboard.personnelId }), Icon: ClipboardPaste },
+        { label: "Taak bewerken", disabled: mutationPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
         { label: "Taak kopiëren", disabled: mutationPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
         { label: "Taak verwijderen", disabled: mutationPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
       ]}
@@ -1092,6 +1094,7 @@ function TaskCoverageLane({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onEditTask,
   onDeleteTask,
   onDeleteService,
   onResizeTaskSegment,
@@ -1281,6 +1284,7 @@ function TaskCoverageLane({
         available={editable}
         detail={`${occurrence.task_name_snapshot || "Taak"} · ${demand.startTime}–${demand.endTime}`}
         items={[
+          { label: "Taak bewerken", disabled: isLaneBusy, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
           { label: "Taak kopiëren", disabled: isLaneBusy, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
           { label: "Taak verwijderen", disabled: isLaneBusy, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
         ]}
@@ -1373,6 +1377,7 @@ function TaskCoverageLane({
             onPasteService={onPasteService}
             serviceClipboard={serviceClipboard}
             onCopyTask={onCopyTask}
+            onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             mutationPending={isLaneBusy}
             editable={editable}
@@ -1640,6 +1645,7 @@ function ObjectDayCell({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onEditTask,
   onPasteTask,
   onDeleteTask,
   onDeleteService,
@@ -1794,6 +1800,7 @@ function ObjectDayCell({
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
               onCopyTask={onCopyTask}
+              onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               onDeleteService={onDeleteService}
               onResizeTaskSegment={onResizeTaskSegment}
@@ -1817,6 +1824,7 @@ function ObjectDayCell({
               onPasteService={onPasteService}
               serviceClipboard={serviceClipboard}
               onCopyTask={onCopyTask}
+              onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               editable={editable}
               mutationPending={isPlanningResourcePending(
@@ -1991,6 +1999,7 @@ export default function PlanningMatrix({
   onPasteService,
   serviceClipboard,
   onCopyTask,
+  onEditTask,
   onPasteTask,
   onDeleteTask,
   onDeleteService,
@@ -2225,6 +2234,7 @@ export default function PlanningMatrix({
         onPasteService={onPasteService}
         serviceClipboard={serviceClipboard}
         onCopyTask={onCopyTask}
+        onEditTask={onEditTask}
         onPasteTask={onPasteTask}
         onDeleteTask={onDeleteTask}
         onDeleteService={onDeleteService}
