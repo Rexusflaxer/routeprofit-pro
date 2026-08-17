@@ -2165,7 +2165,10 @@ export default function Planning() {
   ].find(Boolean);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
+      onContextMenu={event => event.preventDefault()}
+    >
       <PlanningToolbar
         perspective={perspective}
         onPerspectiveChange={nextPerspective => {
