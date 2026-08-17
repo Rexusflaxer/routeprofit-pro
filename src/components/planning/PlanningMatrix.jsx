@@ -1509,9 +1509,14 @@ function ResourceHeader({ resource, perspective }) {
   const showObjectLogo = resource.kind === "object" && resource.logoUrl;
   return (
     <div className="flex h-full min-h-14 items-start gap-2 px-3 py-2.5 text-left">
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-primary/10 text-primary">
+      <span className={cn(
+        "mt-0.5 flex shrink-0 items-center justify-center overflow-hidden rounded-md text-primary",
+        showObjectLogo
+          ? "h-9 w-9 border border-border bg-card p-1"
+          : "h-6 w-6 bg-primary/10",
+      )}>
         {showObjectLogo
-          ? <img src={resource.logoUrl} alt="" className="h-full w-full object-contain" />
+          ? <img src={resource.logoUrl} alt="" className="aspect-square h-full w-full object-contain" />
           : <Icon className="h-3.5 w-3.5" />}
       </span>
       <span className="min-w-0">
