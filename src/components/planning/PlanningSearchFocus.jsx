@@ -22,6 +22,7 @@ export default function PlanningSearchFocus({ query, shifts, assignments, segmen
     const directOccurrenceIds = new Set(occurrences.filter(item => text([item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot, item.task_type]).includes(normalized)).map(item => String(item.id)));
     const selector = "[data-shift-id], [data-task-occurrence-id], [data-task-coverage-group]";
     const cards = [...root.querySelectorAll(selector)];
+    let scrollFrame = null;
     cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
     if (normalized) {
       const lanes = [...root.querySelectorAll("[data-task-coverage-group]")];
@@ -42,8 +43,27 @@ export default function PlanningSearchFocus({ query, shifts, assignments, segmen
           || (card.dataset.taskOccurrenceId && directOccurrenceIds.has(card.dataset.taskOccurrenceId));
         card.classList.add(matches ? "planning-search-match" : "planning-search-dim");
       });
+
+      const viewport = root.querySelector("[data-testid='planning-matrix-scroll']");
+      const matches = [...root.querySelectorAll(".planning-search-match")];
+      const viewportRect = viewport?.getBoundingClientRect();
+      const hasVisibleMatch = viewportRect && matches.some(card => {
+        const rect = card.getBoundingClientRect();
+        return rect.right > viewportRect.left && rect.left < viewportRect.right
+          && rect.bottom > viewportRect.top && rect.top < viewportRect.bottom;
+      });
+      if (matches.length > 0 && !hasVisibleMatch) {
+        scrollFrame = window.requestAnimationFrame(() => matches[0].scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "center",
+        }));
+      }
     }
-    return () => cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
+    return () => {
+      if (scrollFrame != null) window.cancelAnimationFrame(scrollFrame);
+      cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
+    };
   }, [assignments, occurrences, personnel, query, segments, shifts]);
 
   return <div ref={ref} className="h-full min-h-0">{children}</div>;
