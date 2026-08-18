@@ -12,7 +12,7 @@ const previewStyle = tool => tool === "available"
   ? "border-primary/70 bg-primary/40"
   : tool === "emergency_only"
     ? "border-chart-4/80 bg-chart-4/60"
-    : "border-foreground/50 bg-background/80";
+    : "border-destructive/70 bg-destructive/25";
 const BACKGROUND_STYLES = [
   "border-chart-2/25 bg-chart-2/10",
   "border-chart-4/25 bg-chart-4/10",
@@ -47,6 +47,18 @@ const intervalDetails = period => ({
 });
 const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(intervalDetails);
 const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: intervalDetails(period) } : null; };
+const hoverPreviewFor = ({ hover, dayIndex, tool, scheduleValue, previewDurationMinutes }) => {
+  if (hover?.dayIndex !== dayIndex) return null;
+  if (tool === null) {
+    if (!hover.interval) return null;
+    return previewDurationMinutes
+      ? { start: hover.interval.start, duration: hover.interval.end - hover.interval.start }
+      : { start: hover.slot * SLOT_MINUTES, duration: SLOT_MINUTES };
+  }
+  const duration = previewDurationMinutes || SLOT_MINUTES;
+  if (scheduleValue === tool || hover.slot * SLOT_MINUTES + duration > 1440) return null;
+  return { start: hover.slot * SLOT_MINUTES, duration };
+};
 
 export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true, hoverOnlyActive = false }) {
   const [hover, setHover] = useState(null);
@@ -74,7 +86,7 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
           <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
         </div>
       )}
-      {rows.map((row, dayIndex) => { const day = weekdayAt(dayIndex); return <div key={row} className={`flex ${dayDisabled(dayIndex) ? "opacity-30" : ""}`}>
+      {rows.map((row, dayIndex) => { const day = weekdayAt(dayIndex); const preview = hoverPreviewFor({ hover, dayIndex, tool, scheduleValue: schedule[dayIndex][hover?.slot], previewDurationMinutes }); return <div key={row} className={`flex ${dayDisabled(dayIndex) ? "opacity-30" : ""}`}>
         <span className={`${dayLabels ? `sticky left-0 z-20 w-20 flex-col justify-center bg-transparent leading-tight ${rowActive?.[dayIndex] ? "text-primary" : "text-foreground"}` : "w-10 items-center"} flex h-12 shrink-0 pr-2 text-xs font-semibold`}>
           <span>{day.label.slice(0, 2)}</span>
           {dayLabels?.[dayIndex] && <span className="text-[10px] font-normal text-muted-foreground">{dayLabels[dayIndex]}</span>}
@@ -85,7 +97,7 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
           {backgroundPeriods.filter(period => matchesRow(period, day.key, rowDates?.[dayIndex])).map((period, index) => { const start = toMinutes(period.start_time), end = toMinutes(period.end_time); return <div key={`${period.taskId}-${day.key}-${index}`} className={`pointer-events-none absolute inset-y-2 rounded-sm border ${BACKGROUND_STYLES[period.colorIndex % BACKGROUND_STYLES.length]}`} style={{ left: `${(start / 1440) * 100}%`, width: `${((end - start) / 1440) * 100}%` }} />; })}
           {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "available", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "available")).map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 flex items-center justify-center overflow-hidden rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }}>{interval.alternative ? <Shuffle className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Aangepast alternatief taakmoment" /> : interval.repeating && <Repeat2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Herhalende taak" />}</div>) }
           {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "emergency_only", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "emergency_only")).map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
-          {hover?.dayIndex === dayIndex && schedule[dayIndex][hover.slot] !== tool && (!previewDurationMinutes || hover.slot * SLOT_MINUTES + previewDurationMinutes <= 1440) && <div className={`pointer-events-none absolute inset-y-1 z-[5] rounded-sm border ${previewStyle(tool)}`} style={{ left: `${(hover.slot * SLOT_MINUTES / 1440) * 100}%`, width: `${((previewDurationMinutes || SLOT_MINUTES) / 1440) * 100}%` }} />}
+          {preview && <div className={`pointer-events-none absolute inset-y-1 z-[5] rounded-sm border ${previewStyle(tool)}`} style={{ left: `${(preview.start / 1440) * 100}%`, width: `${(preview.duration / 1440) * 100}%` }} />}
           <div className="absolute inset-0 z-10 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: SLOT_COUNT }, (_, slot) => <button key={slot} type="button" disabled={dayDisabled(dayIndex)} aria-label={`${day.label} ${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`} className="h-full touch-none bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed" onPointerDown={event => { event.preventDefault(); if (!dayDisabled(dayIndex)) startPointer(event, dayIndex, slot); }} onPointerUp={finishPointer} onPointerEnter={event => { if (!dayDisabled(dayIndex)) enterPointer(event, dayIndex, slot); }} onPointerMove={event => !dayDisabled(dayIndex) && showHover(event, dayIndex, slot)} />)}</div>
         </div>
       </div>})}
