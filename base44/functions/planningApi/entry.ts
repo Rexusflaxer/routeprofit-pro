@@ -1701,16 +1701,12 @@ const TASK_OCCURRENCE_COMPARABLE_FIELDS = [
   'object_task_schedule_revision_id',
   'schedule_series_key',
   'schedule_revision_number',
-  'supersedes_task_occurrence_id',
-  'superseded_by_task_occurrence_id',
-  'definition_version',
   'schedule_period_key',
   'company_id',
   'customer_id',
   'object_id',
   'security_plan_id',
   'security_plan_revision_id',
-  'security_plan_checksum',
   'task_type',
   'custom_task_type',
   'execution_mode',
@@ -1915,9 +1911,9 @@ async function replaceTaskOccurrenceSnapshot(
   const candidates = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, { source_key: desiredPayload.source_key }, 'created_date');
   let replacement = candidates.filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null;
   if (replacement) {
-    if (stableStringify(taskOccurrenceSourceSnapshot(replacement)) !== stableStringify(taskOccurrenceSourceSnapshot({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null }))) {
-      throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', { source_key: desiredPayload.source_key, task_occurrence_id: replacement.id });
-    }
+    const expectedReplacement = { ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null };
+    const mismatchedFields = TASK_OCCURRENCE_COMPARABLE_FIELDS.filter(field => stableStringify(replacement[field] ?? null) !== stableStringify(expectedReplacement[field] ?? null));
+    if (mismatchedFields.length) throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', { source_key: desiredPayload.source_key, task_occurrence_id: replacement.id, mismatched_fields: mismatchedFields });
   } else replacement = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null, revision: 1, published_revision: 0, last_published_correlation_id: null });
   const currentSource = await requireRecord(base44, 'PlanningTaskOccurrence', sourceOccurrence.id, 'Taakuitvoering');
   if (currentSource.lifecycle_status !== 'superseded' || String(currentSource.superseded_by_task_occurrence_id || '') !== String(replacement.id)) {
