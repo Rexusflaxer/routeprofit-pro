@@ -25,6 +25,7 @@ import { eraseTaskOccurrence, remainingTaskIntervals } from "./objectTaskSchedul
 
 const GRID_HEADER_HEIGHT = 36;
 const GRID_DAY_HEIGHT = 48;
+const GRID_LABEL_WIDTH = 56;
 
 function liveAmsterdamClock(serverClock) {
   const serverInstant = serverClock?.iso && Number.isFinite(Date.parse(serverClock.iso))
@@ -623,7 +624,7 @@ export default function ObjectTaskSchedule({
   };
 
   const todayIndex = week.days.indexOf(now.dateKey);
-  const nowLeft = `calc(40px + (100% - 40px) * ${Math.min(1, now.minute / 1440)})`;
+  const nowLeft = `calc(${GRID_LABEL_WIDTH}px + (100% - ${GRID_LABEL_WIDTH}px) * ${Math.min(1, now.minute / 1440)})`;
 
   return (
     <fieldset role="region" className="space-y-3" aria-label="Taakrooster per week">
@@ -641,14 +642,6 @@ export default function ObjectTaskSchedule({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10px] text-muted-foreground" aria-label="Datums in deze week">
-        {week.days.map((dateKey, dayIndex) => (
-          <span key={dateKey} className={dateKey === now.dateKey ? "font-semibold text-primary" : dateKey < now.dateKey ? "opacity-55" : ""}>
-            {WEEKDAY_OPTIONS[dayIndex].label.slice(0, 2)} {formatObjectTaskCompactDate(dateKey)}{dateKey === now.dateKey ? ` · vandaag ${now.clock}` : ""}
-          </span>
-        ))}
-      </div>
-
       {!persistedMode && (
         <div className="flex flex-wrap gap-2">
           {continuous && <button type="button" onClick={() => preset("business")} className="rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-xs font-medium hover:border-primary/40">Werkdagen 08:00–18:00</button>}
@@ -661,7 +654,7 @@ export default function ObjectTaskSchedule({
         <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
       </div>
 
-      <div className="overflow-auto">
+      <div className="max-h-[288px] touch-pan-y overflow-auto overscroll-contain rounded-md border border-border/50">
         <div className="relative min-w-[900px]">
           <div className="[&>div]:overflow-visible [&>div>div]:min-w-0">
             <WarningAvailabilityGrid
@@ -673,14 +666,15 @@ export default function ObjectTaskSchedule({
               onIntervalClick={openEditor}
               painting={painting}
               tool={tool}
+              dayLabels={week.days.map(formatObjectTaskCompactDate)}
             />
           </div>
           {week.days.map((dateKey, dayIndex) => {
             const past = dateKey < now.dateKey;
             const today = dateKey === now.dateKey;
             if (!past && !today) return null;
-            const width = past ? "calc(100% - 40px)" : `calc((100% - 40px) * ${Math.min(1, objectTaskEditableBoundary(dateKey, now) / 1440)})`;
-            return <span key={dateKey} className="pointer-events-auto absolute z-20 border-r border-border/50 bg-muted/35 [background-image:repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--border)/0.16)_5px,hsl(var(--border)/0.16)_6px)]" aria-hidden="true" style={{ left: 40, top: GRID_HEADER_HEIGHT + dayIndex * GRID_DAY_HEIGHT, width, height: GRID_DAY_HEIGHT }} />;
+            const width = past ? `calc(100% - ${GRID_LABEL_WIDTH}px)` : `calc((100% - ${GRID_LABEL_WIDTH}px) * ${Math.min(1, objectTaskEditableBoundary(dateKey, now) / 1440)})`;
+            return <span key={dateKey} className="pointer-events-auto absolute z-20 border-r border-border/50 bg-muted/35 [background-image:repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--border)/0.16)_5px,hsl(var(--border)/0.16)_6px)]" aria-hidden="true" style={{ left: GRID_LABEL_WIDTH, top: GRID_HEADER_HEIGHT + dayIndex * GRID_DAY_HEIGHT, width, height: GRID_DAY_HEIGHT }} />;
           })}
           {todayIndex >= 0 && (
             <span className="pointer-events-none absolute z-30 w-px bg-destructive/80" style={{ left: nowLeft, top: GRID_HEADER_HEIGHT + todayIndex * GRID_DAY_HEIGHT + 2, height: GRID_DAY_HEIGHT - 4 }}>
