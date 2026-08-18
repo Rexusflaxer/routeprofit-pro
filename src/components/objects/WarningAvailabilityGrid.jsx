@@ -39,7 +39,7 @@ const matchesRow = (period, dayKey, dateKey) => dateKey ? period.date === dateKe
 const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(period => ({ start: toMinutes(period.start_time), end: toMinutes(period.end_time) }));
 const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: { start: toMinutes(period.start_time), end: toMinutes(period.end_time) } } : null; };
 
-export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, transparentHeader = false }) {
+export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true }) {
   const [hover, setHover] = useState(null);
   const pointerStart = useRef(null);
   const rows = rowDates || WEEKDAY_OPTIONS.map(day => day.key);
@@ -55,16 +55,19 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
   const finishPointer = event => { const start = pointerStart.current; pointerStart.current = null; if (!start?.moved && start.active && tool === start.active.kind && onIntervalClick) { setHover(null); onIntervalClick({ dayIndex: start.dayIndex, ...start.active.interval, x: Math.min(event.clientX + 12, window.innerWidth - 272), y: Math.min(event.clientY + 12, window.innerHeight - 210) }); } };
   return <div className="overflow-auto">
     <div className="min-w-[900px] select-none">
-      <div className={`sticky top-0 z-30 flex h-9 ${transparentHeader ? "bg-transparent" : "bg-card"}`}>
-        <span className={`${dayLabels ? `sticky left-0 z-30 w-20 ${transparentHeader ? "bg-transparent" : "bg-card"}` : "w-10"} shrink-0`} />
-        <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
-      </div>
+      {showHeader && (
+        <div className="sticky top-0 z-30 flex h-9 bg-card">
+          <span className={`${dayLabels ? "sticky left-0 z-30 w-20 bg-card" : "w-10"} shrink-0`} />
+          <div className="relative flex-1">{TIME_LABELS.map((hour, index) => <span key={hour} className={`absolute bottom-2 text-[10px] text-muted-foreground ${labelPosition(index)}`} style={{ left: `${(index / 12) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
+        </div>
+      )}
       {rows.map((row, dayIndex) => { const day = weekdayAt(dayIndex); return <div key={row} className={`flex ${dayDisabled(dayIndex) ? "opacity-30" : ""}`}>
-        <span className={`${dayLabels ? `sticky left-0 z-20 w-20 flex-col justify-center leading-tight ${rowActive?.[dayIndex] ? "bg-primary/10 text-primary" : "bg-card"}` : "w-10 items-center"} flex h-12 shrink-0 pr-2 text-xs font-semibold`}>
-          <span>{weekNumbers?.[dayIndex] ? `W${weekNumbers[dayIndex]} · ` : ""}{day.label.slice(0, 2)}</span>
+        <span className={`${dayLabels ? `sticky left-0 z-20 w-20 flex-col justify-center bg-background leading-tight ${rowActive?.[dayIndex] ? "text-primary" : "text-foreground"}` : "w-10 items-center"} flex h-12 shrink-0 pr-2 text-xs font-semibold`}>
+          <span>{day.label.slice(0, 2)}</span>
           {dayLabels?.[dayIndex] && <span className="text-[10px] font-normal text-muted-foreground">{dayLabels[dayIndex]}</span>}
         </span>
         <div className={`relative h-12 flex-1 border-b border-r border-border ${dayIndex === 0 ? "border-t" : ""}`} onPointerLeave={() => setHover(null)}>
+          {weekNumbers?.[dayIndex] && <span className="pointer-events-none absolute left-1.5 top-1 z-[6] text-[9px] font-medium text-muted-foreground/55">week {weekNumbers[dayIndex]}</span>}
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {backgroundPeriods.filter(period => matchesRow(period, day.key, rowDates?.[dayIndex])).map((period, index) => { const start = toMinutes(period.start_time), end = toMinutes(period.end_time); return <div key={`${period.taskId}-${day.key}-${index}`} className={`pointer-events-none absolute inset-y-2 rounded-sm border ${BACKGROUND_STYLES[period.colorIndex % BACKGROUND_STYLES.length]}`} style={{ left: `${(start / 1440) * 100}%`, width: `${((end - start) / 1440) * 100}%` }} />; })}
           {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "available", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "available")).map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}

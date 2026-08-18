@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
 import ObjectTaskScheduleNavigator from "./ObjectTaskScheduleNavigator";
+import ObjectTaskTimeScale from "./ObjectTaskTimeScale";
 import ObjectTaskTimePopup from "./ObjectTaskTimePopup";
 import { getCaoPbPlanningPeriodByKey, listCaoPbPlanningPeriods, resolveCaoPbPlanningPeriod } from "@/components/planning/planningCaoPeriodDomain";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
@@ -25,7 +26,7 @@ import {
 } from "./objectTaskScheduleDomain";
 import { eraseTaskOccurrence, remainingTaskIntervals } from "./objectTaskScheduleEditing";
 
-const GRID_HEADER_HEIGHT = 36;
+const GRID_HEADER_HEIGHT = 0;
 const GRID_DAY_HEIGHT = 48;
 const GRID_LABEL_WIDTH = 80;
 
@@ -727,38 +728,47 @@ export default function ObjectTaskSchedule({
         <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
       </div>
 
-      <div ref={scheduleScrollRef} className="planning-persistent-scrollbar h-[288px] touch-pan-y overflow-auto overscroll-contain bg-transparent" onScroll={handleScheduleScroll}>
-        <div className="relative min-w-[900px]">
-          <div className="[&>div]:overflow-visible [&>div>div]:min-w-0">
-            <WarningAvailabilityGrid
-              schedule={schedule}
-              exactPeriods={exactPeriods}
-              backgroundPeriods={backgroundPeriods}
-              previewDurationMinutes={continuous ? null : durationMinutes}
-              onPaint={paint}
-              onIntervalClick={openEditor}
-              painting={painting}
-              tool={tool}
-              dayLabels={visibleDates.map(formatObjectTaskCompactDate)}
-              rowDates={visibleDates}
-              weekNumbers={weekNumbers}
-              rowActive={rowActive}
-              transparentHeader
-            />
-          </div>
-          {visibleDates.map((dateKey, dayIndex) => {
+      <div className="planning-persistent-scrollbar overflow-x-auto">
+        <div className="min-w-[900px]">
+          <ObjectTaskTimeScale />
+          <div className="relative">
+            <div ref={scheduleScrollRef} className="h-[288px] touch-pan-y overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent" onScroll={handleScheduleScroll}>
+              <div className="relative">
+                <div className="[&>div]:overflow-visible [&>div>div]:min-w-0">
+                  <WarningAvailabilityGrid
+                    schedule={schedule}
+                    exactPeriods={exactPeriods}
+                    backgroundPeriods={backgroundPeriods}
+                    previewDurationMinutes={continuous ? null : durationMinutes}
+                    onPaint={paint}
+                    onIntervalClick={openEditor}
+                    painting={painting}
+                    tool={tool}
+                    dayLabels={visibleDates.map(formatObjectTaskCompactDate)}
+                    rowDates={visibleDates}
+                    weekNumbers={weekNumbers}
+                    rowActive={rowActive}
+                    showHeader={false}
+                  />
+                </div>
+                {visibleDates.map((dateKey, dayIndex) => {
             const past = dateKey < now.dateKey;
             const today = dateKey === now.dateKey;
             if (!past && !today) return null;
             const width = past ? `calc(100% - ${GRID_LABEL_WIDTH}px)` : `calc((100% - ${GRID_LABEL_WIDTH}px) * ${Math.min(1, objectTaskEditableBoundary(dateKey, now) / 1440)})`;
             return <span key={dateKey} className="pointer-events-auto absolute z-20 border-r border-border/50 bg-muted/35 [background-image:repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--border)/0.16)_5px,hsl(var(--border)/0.16)_6px)]" aria-hidden="true" style={{ left: GRID_LABEL_WIDTH, top: GRID_HEADER_HEIGHT + dayIndex * GRID_DAY_HEIGHT, width, height: GRID_DAY_HEIGHT }} />;
           })}
-          {todayIndex >= 0 && (
-            <span className="pointer-events-none absolute z-30 w-px bg-destructive/80" style={{ left: nowLeft, top: GRID_HEADER_HEIGHT + todayIndex * GRID_DAY_HEIGHT + 2, height: GRID_DAY_HEIGHT - 4 }}>
-              <span className="absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-destructive" />
-              <span className="absolute left-1/2 top-1 -translate-x-1/2 rounded bg-destructive px-1 py-0.5 text-[8px] font-bold text-destructive-foreground shadow">{now.clock}</span>
-            </span>
-          )}
+                {todayIndex >= 0 && (
+                  <span className="pointer-events-none absolute z-30 w-px bg-destructive/80" style={{ left: nowLeft, top: todayIndex * GRID_DAY_HEIGHT + 2, height: GRID_DAY_HEIGHT - 4 }}>
+                    <span className="absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-destructive" />
+                    <span className="absolute left-1/2 top-1 -translate-x-1/2 rounded bg-destructive px-1 py-0.5 text-[8px] font-bold text-destructive-foreground shadow">{now.clock}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <span className="pointer-events-none absolute left-0 top-0 z-40 h-8 w-20 bg-gradient-to-b from-background via-background/70 to-transparent" />
+            <span className="pointer-events-none absolute bottom-0 left-0 z-40 h-8 w-20 bg-gradient-to-t from-background via-background/70 to-transparent" />
+          </div>
         </div>
       </div>
 
