@@ -815,13 +815,6 @@ export default function Planning() {
     if (taskTypeFilter.length > 0 && !taskTypeFilter.includes(String(item.task_type))) return false;
     const state = occurrencePlanningStates.get(String(item.id));
     const hasSourceChange = (sourceChangesByOccurrence.get(String(item.id)) || []).length > 0;
-    const query = search.trim().toLocaleLowerCase("nl-NL");
-    if (query && ![
-      item.task_name_snapshot,
-      item.object_name_snapshot,
-      item.customer_name_snapshot,
-      item.task_type,
-    ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query))) return false;
     if (statusFilter === "open") return state?.readiness === "unplanned";
     if (statusFilter === "partial") return state?.readiness === "needs_staffing";
     if (statusFilter === "vacant") return state?.readiness !== "ready";
@@ -845,15 +838,13 @@ export default function Planning() {
       ).some(assignment => assignmentWarnings(assignment).length > 0));
     }
     return true;
-  }), [assignmentsInRangeByShift, customerFilter, objectFilter, occurrencePlanningStates, search, shiftsInRangeById, sourceChangesByOccurrence, statusFilter, taskOccurrencesInRange, taskTypeFilter]);
+  }), [assignmentsInRangeByShift, customerFilter, objectFilter, occurrencePlanningStates, shiftsInRangeById, sourceChangesByOccurrence, statusFilter, taskOccurrencesInRange, taskTypeFilter]);
   const visibleWorkQueueCount = useMemo(() => visibleTaskOccurrences.filter(occurrence => (
     occurrencePlanningStates.get(String(occurrence.id))?.readiness !== "ready"
     || (sourceChangesByOccurrence.get(String(occurrence.id)) || []).length > 0
   )).length, [occurrencePlanningStates, sourceChangesByOccurrence, visibleTaskOccurrences]);
 
-  const filteredShifts = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase("nl-NL");
-    return shiftsInRange.filter(shift => {
+  const filteredShifts = useMemo(() => shiftsInRange.filter(shift => {
       const object = objectsById.get(String(shift.object_id || ""));
       const shiftSegments = activeTaskSegmentsByShift.get(String(shift.id)) || [];
       if (customerFilter.length > 0) {
@@ -884,25 +875,13 @@ export default function Planning() {
       if (statusFilter === "draft" && shift.status !== "draft" && !shiftAssignments.some(item => item.status === "draft")) return false;
       if (statusFilter === "warnings" && warnings.length + compositionWarnings.length === 0 && !(sourceChangesByShift.get(String(shift.id)) || []).length) return false;
       if (statusFilter === "published" && shift.status !== "published") return false;
-      if (!query) return true;
-      return [
-        shift.name,
-        shift.route_name,
-        shift.object_name,
-        shift.group_label,
-        object?.name,
-        object?.address,
-        ...shiftSegments.flatMap(item => [item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot]),
-        ...shiftAssignments.map(item => item.personnel_name),
-      ].filter(Boolean).some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
-    });
-  }, [
+      return true;
+    }), [
     activeTaskSegmentsByShift,
     assignmentsInRangeByShift,
     customerFilter,
     objectFilter,
     objectsById,
-    search,
     taskTypeFilter,
     shiftsInRange,
     sourceChangesByShift,
@@ -950,26 +929,11 @@ export default function Planning() {
     if (!remainsVisible) setSelectedShiftId(null);
   }, [filteredShifts, selectedShiftId]);
   const activePersonnel = useMemo(() => personnel.filter(isPlanningPersonnelActive), [personnel]);
-  const matrixObjects = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase("nl-NL");
-    const visibleShiftIds = new Set(filteredShifts.map(shift => String(shift.id)));
-    const workObjectIds = new Set([
-      ...visibleTaskOccurrences.map(item => item.object_id),
-      ...filteredShifts.flatMap(shift => [shift.object_id, ...(shift.object_ids || [])]),
-      ...[...visibleShiftIds].flatMap(shiftId => (
-        activeTaskSegmentsByShift.get(shiftId) || []
-      ).map(segment => segment.object_id)),
-    ].filter(Boolean).map(String));
-    return objects.filter(object => {
-      if (customerFilter.length > 0 && !customerFilter.includes(String(object.customer_id))) return false;
-      if (objectFilter.length > 0 && !objectFilter.includes(String(object.id))) return false;
-      if (!query) return true;
-      const directMatch = [object.name, object.address, object.code]
-        .filter(Boolean)
-        .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query));
-      return directMatch || workObjectIds.has(String(object.id));
-    });
-  }, [activeTaskSegmentsByShift, customerFilter, filteredShifts, objectFilter, objects, search, visibleTaskOccurrences]);
+  const matrixObjects = useMemo(() => objects.filter(object => {
+    if (customerFilter.length > 0 && !customerFilter.includes(String(object.customer_id))) return false;
+    if (objectFilter.length > 0 && !objectFilter.includes(String(object.id))) return false;
+    return true;
+  }), [customerFilter, objectFilter, objects]);
   const personnelPlanningSummaries = useMemo(() => {
     const scheduledMinutes = new Map();
     activeAssignmentsInRange.forEach(assignment => {
@@ -996,21 +960,10 @@ export default function Planning() {
       }];
     }));
   }, [activeAssignmentsInRange, activePersonnel, contracts, shiftsInRangeById]);
-  const matrixPersonnel = useMemo(() => {
-    const enrichedPersonnel = activePersonnel.map(item => ({ ...item, _planning_summary: personnelPlanningSummaries.get(String(item.id)) }));
-    const query = search.trim().toLocaleLowerCase("nl-NL");
-    if (!query || visibleTaskOccurrences.length > 0) return enrichedPersonnel;
-    const visibleShiftIds = new Set(filteredShifts.map(shift => String(shift.id)));
-    const matchedPersonnelIds = new Set(assignmentsInRange
-      .filter(assignment => visibleShiftIds.has(String(assignment.planning_shift_id)))
-      .map(assignment => String(assignment.personnel_id)));
-    enrichedPersonnel.forEach(item => {
-      if ([personnelName(item), item.cao_function_group, item.function_type, item.employee_type]
-        .filter(Boolean)
-        .some(value => String(value).toLocaleLowerCase("nl-NL").includes(query))) matchedPersonnelIds.add(String(item.id));
-    });
-    return enrichedPersonnel.filter(item => matchedPersonnelIds.has(String(item.id)));
-  }, [activePersonnel, assignmentsInRange, filteredShifts, personnelPlanningSummaries, search, visibleTaskOccurrences.length]);
+  const matrixPersonnel = useMemo(() => activePersonnel.map(item => ({
+    ...item,
+    _planning_summary: personnelPlanningSummaries.get(String(item.id)),
+  })), [activePersonnel, personnelPlanningSummaries]);
 
   const warningContext = useMemo(() => ({
     assignments,
@@ -2324,6 +2277,7 @@ export default function Planning() {
               mutationPending={publishMutation.isPending}
               pendingResourceKeys={matrixPendingResourceKeys}
               taskOccurrenceCount={visibleTaskOccurrences.length}
+              searchQuery={search}
               isLoading={isLoading}
             />
           </ResizablePanel>

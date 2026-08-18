@@ -1,5 +1,6 @@
 import React from "react";
 import PlanningMatrix from "@/components/planning/PlanningMatrix";
+import PlanningSearchFocus from "@/components/planning/PlanningSearchFocus";
 
 /**
  * Full-screen planning projection.
@@ -58,6 +59,7 @@ export default function PlanningBoard({
   onResizeTaskBoundary,
   mutationPending = false,
   pendingResourceKeys = null,
+  searchQuery = "",
   isLoading,
 }) {
   if (isLoading) {
@@ -72,6 +74,14 @@ export default function PlanningBoard({
   }
 
   return (
+    <PlanningSearchFocus
+      query={searchQuery}
+      shifts={shifts}
+      assignments={assignments}
+      segments={segments}
+      occurrences={occurrences}
+      personnel={personnel}
+    >
     <PlanningMatrix
       perspective={perspective}
       editable={editable}
@@ -109,6 +119,8 @@ export default function PlanningBoard({
       onResizeTaskBoundary={onResizeTaskBoundary}
       mutationPending={mutationPending}
       pendingResourceKeys={pendingResourceKeys}
+      searchQuery={searchQuery}
     />
+    </PlanningSearchFocus>
   );
 }

@@ -116,6 +116,30 @@
     background: hsl(var(--foreground) / 0.62);
   }
 
+  .planning-search-dim {
+    opacity: 0.2;
+    filter: brightness(0.42) saturate(0.35);
+    transform: scale(0.985);
+    transition: opacity 220ms ease, filter 220ms ease, transform 220ms ease;
+  }
+
+  .planning-search-match {
+    position: relative;
+    z-index: 45;
+    animation: planning-search-highlight 1.15s ease-out;
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.72), 0 0 24px hsl(var(--primary) / 0.42) !important;
+  }
+
+  @keyframes planning-search-highlight {
+    0% { filter: brightness(0.88); transform: scale(0.985); }
+    45% { filter: brightness(1.24); transform: scale(1.018); }
+    100% { filter: brightness(1); transform: scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .planning-search-match { animation: none; }
+  }
+
   #template-block-toolbar button,
   #template-block-toolbar .ql-picker,
   #template-block-toolbar .ql-picker-label {
