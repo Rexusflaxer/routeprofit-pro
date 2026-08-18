@@ -1,11 +1,12 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 function objectCoordinates(object) {
-  const lat = Number(object?.latitude);
-  const lng = Number(object?.longitude);
+  if (object?.latitude == null || object?.longitude == null || object.latitude === "" || object.longitude === "") return null;
+  const lat = Number(object.latitude);
+  const lng = Number(object.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return { lat, lng };
 }
@@ -13,7 +14,33 @@ function objectCoordinates(object) {
 export default function ObjectHeaderMap({ object }) {
   const containerRef = useRef(null);
   const { resolvedTheme } = useTheme();
-  const coords = objectCoordinates(object);
+  const storedCoords = objectCoordinates(object);
+  const [coords, setCoords] = useState(storedCoords);
+
+  useEffect(() => {
+    if (storedCoords) {
+      setCoords(storedCoords);
+      return undefined;
+    }
+    const address = String(object?.address || "").trim();
+    if (!address || !MAPBOX_PUBLIC_TOKEN) {
+      setCoords(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setCoords(null);
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${encodeURIComponent(MAPBOX_PUBLIC_TOKEN)}&country=nl&limit=1`;
+    fetch(url)
+      .then(response => response.ok ? response.json() : null)
+      .then(result => {
+        if (cancelled) return;
+        const center = result?.features?.[0]?.center;
+        if (Array.isArray(center) && Number.isFinite(center[0]) && Number.isFinite(center[1])) {
+          setCoords({ lng: center[0], lat: center[1] });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [object?.address, object?.id, storedCoords?.lat, storedCoords?.lng]);
 
   useEffect(() => {
     if (!coords || !containerRef.current) return undefined;
