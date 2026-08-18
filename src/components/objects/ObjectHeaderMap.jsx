@@ -93,7 +93,7 @@ export default function ObjectHeaderMap({ object }) {
   if (!coords) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[38%] overflow-hidden lg:block" aria-label={`Kaartlocatie van ${object?.name || "object"}`}>
+    <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[44%] overflow-hidden lg:block" aria-label={`Kaartlocatie van ${object?.name || "object"}`}>
       <div ref={containerRef} className="absolute inset-0" />
       <div className="absolute inset-y-0 -left-px w-72 bg-gradient-to-r from-card via-card/95 to-transparent" />
       <div className="absolute inset-y-0 -left-px w-72 bg-gradient-to-r from-muted/40 via-muted/30 to-transparent" />
