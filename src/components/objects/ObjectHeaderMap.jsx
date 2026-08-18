@@ -59,6 +59,7 @@ export default function ObjectHeaderMap({ object }) {
         zoom: 14.5,
         interactive: false,
         attributionControl: false,
+        logoPosition: "bottom-right",
       });
       map.on("load", () => {
         if (!map.getLayer("object-header-buildings")) {
