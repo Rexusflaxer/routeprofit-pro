@@ -339,7 +339,10 @@ export default function ObjectTaskSchedule({
   const displayedPersistedEntries = useMemo(() => persistedOwnEntries.flatMap(entry => {
     const staged = stagedChangeForEntry(stagedErases, entry);
     if (!staged) return [entry];
-    return remainingAfterRanges(entry, staged.ranges).map((interval, index) => ({
+    return mergeTaskIntervals([
+      ...remainingAfterRanges(entry, staged.ranges),
+      ...(staged.additions || []),
+    ]).map((interval, index) => ({
       ...entry,
       id: `staged:${entry.id}:${index}:${interval.start}`,
       start_time: toTime(interval.start),
@@ -386,6 +389,23 @@ export default function ObjectTaskSchedule({
     return ownEntries.find(entry => entry.occurrence_date === occurrenceDate
       && toMinutes(entry.start_time) === interval.start
       && toMinutes(entry.end_time) === interval.end) || null;
+  };
+
+  const stagePersistedAddition = (entry, range) => {
+    const original = entry._staged_original || entry;
+    const key = persistedEntryKey(original);
+    setStagedErases(current => {
+      const existing = current.find(item => item.key === key);
+      const next = existing
+        ? current.map(item => item.key === key ? {
+          ...item,
+          additions: mergeTaskIntervals([...(item.additions || []), range]),
+        } : item)
+        : [...current, { key, original, ranges: [], additions: [range] }];
+      stagedErasesRef.current = next;
+      return next;
+    });
+    return key;
   };
 
   const removeEntry = (entry, eraseStart = null, eraseEnd = null) => {
@@ -454,6 +474,23 @@ export default function ObjectTaskSchedule({
     });
     if (blocked) {
       paintingSourceRef.current = null;
+      return;
+    }
+
+    if (persistedMode && String(sourceId || "").startsWith("persisted:")) {
+      const staged = stagedErasesRef.current.find(item => item.key === String(sourceId).slice(10));
+      if (staged) stagePersistedAddition(staged.original, { start: startMinute, end: endMinute });
+      return;
+    }
+
+    const adjacentPersisted = persistedMode ? current.find(entry => (
+      !entry.draft
+      && entry.occurrence_date === occurrenceDate
+      && (toMinutes(entry.end_time) === startMinute || toMinutes(entry.start_time) === endMinute)
+    )) : null;
+    if (adjacentPersisted) {
+      const key = stagePersistedAddition(adjacentPersisted, { start: startMinute, end: endMinute });
+      paintingSourceRef.current = `persisted:${key}`;
       return;
     }
 
@@ -638,7 +675,10 @@ export default function ObjectTaskSchedule({
       for (const staged of [...stagedErasesRef.current]) {
         const candidates = scratchRef.current.filter(entry => entry.occurrence_date === staged.original.occurrence_date);
         const { intervals: remaining, connected: adjoiningDrafts } = connectedDraftIntervals(
-          remainingAfterRanges(staged.original, staged.ranges),
+          mergeTaskIntervals([
+            ...remainingAfterRanges(staged.original, staged.ranges),
+            ...(staged.additions || []),
+          ]),
           candidates,
         );
         if (adjoiningDrafts.length) commitScratch(scratchRef.current.filter(entry => !adjoiningDrafts.includes(entry)));
