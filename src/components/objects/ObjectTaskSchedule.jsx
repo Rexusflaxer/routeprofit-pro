@@ -702,6 +702,8 @@ export default function ObjectTaskSchedule({
           periods={planningPeriods}
           periodKey={selectedPeriod?.key || periodKey}
           weekNumber={selectedWeekNumber}
+          currentPeriodKey={resolveCaoPbPlanningPeriod(now.dateKey)?.key || ""}
+          currentWeekNumber={objectTaskIsoWeek(now.dateKey).week}
           onPeriodChange={selectPeriod}
           onWeekChange={selectWeekNumber}
         />
