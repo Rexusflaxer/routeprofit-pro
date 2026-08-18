@@ -96,6 +96,7 @@ export default function ObjectHeaderMap({ object }) {
     <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[44%] overflow-hidden lg:block" aria-label={`Kaartlocatie van ${object?.name || "object"}`}>
       <div ref={containerRef} className="absolute inset-0" />
       <div className="absolute inset-y-0 -left-px w-72 bg-gradient-to-r from-card via-card to-transparent" />
+      <div className="absolute inset-y-0 -left-px w-72 bg-gradient-to-r from-muted/60 via-muted/45 to-transparent" />
     </div>
   );
 }
