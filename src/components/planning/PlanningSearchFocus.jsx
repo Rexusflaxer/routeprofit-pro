@@ -22,15 +22,28 @@ export default function PlanningSearchFocus({ query, shifts, assignments, segmen
     const matchedOccurrenceIds = new Set(occurrences.filter(item => text([item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot, item.task_type]).includes(normalized)).map(item => String(item.id)));
     segments.filter(item => matchedShiftIds.has(String(item.shift_id))).forEach(item => matchedOccurrenceIds.add(String(item.task_occurrence_id)));
     const selector = "[data-shift-id], [data-task-occurrence-id], [data-task-coverage-group]";
-    const cards = [...root.querySelectorAll(selector)].filter(card => !card.parentElement?.closest(selector));
-    cards.forEach(card => {
-      card.classList.remove("planning-search-match", "planning-search-dim");
-      if (!normalized) return;
-      const matches = (card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId))
-        || (card.dataset.taskOccurrenceId && matchedOccurrenceIds.has(card.dataset.taskOccurrenceId))
-        || (card.dataset.taskCoverageGroup && matchedOccurrenceIds.has(card.dataset.taskCoverageGroup));
-      card.classList.add(matches ? "planning-search-match" : "planning-search-dim");
-    });
+    const cards = [...root.querySelectorAll(selector)];
+    cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
+    if (normalized) {
+      const lanes = [...root.querySelectorAll("[data-task-coverage-group]")];
+      lanes.forEach(lane => {
+        const occurrenceMatch = matchedOccurrenceIds.has(lane.dataset.taskCoverageGroup);
+        const childCards = [...lane.querySelectorAll("[data-shift-id], [data-task-occurrence-id]")];
+        const hasMatchingService = childCards.some(card => card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId));
+        if (occurrenceMatch && !hasMatchingService) lane.classList.add("planning-search-match");
+        else if (!hasMatchingService) lane.classList.add("planning-search-dim");
+        else childCards.forEach(card => card.classList.add(
+          card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId)
+            ? "planning-search-match"
+            : "planning-search-dim",
+        ));
+      });
+      cards.filter(card => !card.closest("[data-task-coverage-group]")).forEach(card => {
+        const matches = (card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId))
+          || (card.dataset.taskOccurrenceId && matchedOccurrenceIds.has(card.dataset.taskOccurrenceId));
+        card.classList.add(matches ? "planning-search-match" : "planning-search-dim");
+      });
+    }
     return () => cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
   }, [assignments, occurrences, personnel, query, segments, shifts]);
 
