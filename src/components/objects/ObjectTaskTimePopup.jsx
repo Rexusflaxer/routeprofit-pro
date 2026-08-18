@@ -6,6 +6,7 @@ import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence } from "./objectTa
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import ObjectTaskRecurrenceEndChoice from "./ObjectTaskRecurrenceEndChoice";
 
 const minutes = value => value === "24:00" ? 1440 : /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3)) : NaN;
 
@@ -25,6 +26,7 @@ export default function ObjectTaskTimePopup({
   const [end, setEnd] = useState(editor.end_time);
   const [recurrenceKey, setRecurrenceKey] = useState(() => objectTaskRecurrence(editor).key);
   const [repeatUntil, setRepeatUntil] = useState(editor.repeat_until || "");
+  const [hasEndDate, setHasEndDate] = useState(Boolean(editor.repeat_until));
   const recurrence = OBJECT_TASK_RECURRENCE_OPTIONS.find(option => option.key === recurrenceKey) || OBJECT_TASK_RECURRENCE_OPTIONS[0];
 
   useEffect(() => {
@@ -41,8 +43,8 @@ export default function ObjectTaskTimePopup({
     && Number.isFinite(minutes(resolvedEnd))
     && minutes(start) < minutes(resolvedEnd);
   const validRepeatUntil = recurrence.type === "one_time"
-    || !repeatUntil
-    || repeatUntil >= editor.occurrence_date;
+    || !hasEndDate
+    || Boolean(repeatUntil && repeatUntil >= editor.occurrence_date);
   const valid = validTime && validRepeatUntil;
   const viewportWidth = Number(globalThis.innerWidth) || 10_000;
   const viewportHeight = Number(globalThis.innerHeight) || 10_000;
@@ -76,7 +78,7 @@ export default function ObjectTaskTimePopup({
 
       <div className="mt-3 border-t border-border/70 pt-3">
         <Label htmlFor="exact-task-recurrence" className="text-[11px]">Herhaling</Label>
-        <Select value={recurrenceKey} disabled={pending} onValueChange={value => { setRecurrenceKey(value); if (value === "once") setRepeatUntil(""); }}>
+        <Select value={recurrenceKey} disabled={pending} onValueChange={value => { setRecurrenceKey(value); if (value === "once") { setRepeatUntil(""); setHasEndDate(false); } }}>
           <SelectTrigger id="exact-task-recurrence" className="mt-1.5 h-8 rounded-lg border-border/70 bg-card/55 px-2.5 text-xs shadow-sm backdrop-blur-xl">
             <SelectValue />
           </SelectTrigger>
@@ -85,10 +87,8 @@ export default function ObjectTaskTimePopup({
           </SelectContent>
         </Select>
         {recurrence.type !== "one_time" && (
-          <div className="mt-2 space-y-1">
-            <Label htmlFor="exact-task-repeat-until" className="text-[11px]">Einddatum <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
-            <Input id="exact-task-repeat-until" type="date" min={editor.occurrence_date} value={repeatUntil} disabled={pending} onChange={event => setRepeatUntil(event.target.value)} />
-            <p className="text-[10px] text-muted-foreground">Zonder einddatum loopt dit herhalingspatroon door.</p>
+          <div className="mt-3">
+            <ObjectTaskRecurrenceEndChoice hasEndDate={hasEndDate} date={repeatUntil} minDate={editor.occurrence_date} disabled={pending} onModeChange={value => { setHasEndDate(value); if (!value) setRepeatUntil(""); }} onDateChange={setRepeatUntil} />
           </div>
         )}
       </div>
@@ -112,7 +112,7 @@ export default function ObjectTaskTimePopup({
             frequency: recurrence.type === "one_time" ? "once" : recurrence.type,
             recurrence_type: recurrence.type,
             recurrence_interval: recurrence.interval,
-            repeat_until: recurrence.type !== "one_time" ? repeatUntil || null : null,
+            repeat_until: recurrence.type !== "one_time" && hasEndDate ? repeatUntil : null,
           })}
         >
           {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

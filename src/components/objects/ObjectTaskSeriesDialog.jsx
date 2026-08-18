@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Infinity, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence } from "./objectTaskRecurrence";
+import ObjectTaskRecurrenceEndChoice from "./ObjectTaskRecurrenceEndChoice";
 import {
   formatObjectTaskCompactDate,
   formatObjectTaskFullDate,
@@ -166,11 +167,7 @@ export default function ObjectTaskSeriesDialog({
 
             {recurrence.type !== "one_time" && (
               <div className="rounded-xl border border-border/70 bg-card/35 p-4">
-                <label className="flex items-center justify-between gap-3">
-                  <span><span className="flex items-center gap-1.5 text-sm font-semibold"><Infinity className="h-4 w-4 text-primary" /> Zonder einddatum</span><span className="mt-0.5 block text-xs text-muted-foreground">Zet uit om een laatste uitvoeringsdatum te kiezen.</span></span>
-                  <Switch checked={!form.has_end_date} onCheckedChange={checked => set("has_end_date", !checked)} />
-                </label>
-                {form.has_end_date && <div className="mt-4 max-w-xs space-y-1.5"><Label htmlFor="object-task-series-until">Herhalen tot en met</Label><Input id="object-task-series-until" type="date" min={entry?.occurrence_date} value={form.repeat_until} onChange={event => set("repeat_until", event.target.value)} /></div>}
+                <ObjectTaskRecurrenceEndChoice hasEndDate={form.has_end_date} date={form.repeat_until} minDate={entry?.occurrence_date} disabled={pending} onModeChange={value => setForm(current => ({ ...current, has_end_date: value, repeat_until: value ? current.repeat_until : "" }))} onDateChange={value => set("repeat_until", value)} />
               </div>
             )}
 
