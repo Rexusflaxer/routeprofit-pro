@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import ObjectTaskSchedule from "./ObjectTaskSchedule";
+import ObjectTaskSchedulePreviewDialog from "./ObjectTaskSchedulePreviewDialog";
 import ObjectTaskTable from "./ObjectTaskTable";
 import ObjectTaskWizard from "./ObjectTaskWizard";
 import { getAmsterdamNow, objectTaskWeekStart } from "./objectTaskScheduleDomain";
@@ -71,6 +72,7 @@ export default function ObjectTasksTab({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [scheduleDefinitionId, setScheduleDefinitionId] = useState(null);
+  const [previewDefinitionId, setPreviewDefinitionId] = useState(null);
   const createKeyRef = useRef(null);
   const addKeyRef = useRef(null);
   const changeKeyRef = useRef(null);
@@ -233,6 +235,7 @@ export default function ObjectTasksTab({
     ].some(value => String(value || "").toLowerCase().includes(term)));
   }, [activeDefinitions, searchTerm]);
   const scheduleDefinition = activeDefinitions.find(definition => String(definition.id) === String(scheduleDefinitionId)) || null;
+  const previewDefinition = activeDefinitions.find(definition => String(definition.id) === String(previewDefinitionId)) || null;
   const openSourceChanges = data.source_changes.filter(change => !["resolved", "closed"].includes(change.status));
   const archived = object.status === "archived";
   const wizardOpen = !archived && view === "new";
@@ -241,6 +244,7 @@ export default function ObjectTasksTab({
 
   const openSchedule = definition => {
     if (archived) return;
+    setPreviewDefinitionId(null);
     addMutation.reset();
     changeMutation.reset();
     stopMutation.reset();
@@ -267,6 +271,15 @@ export default function ObjectTasksTab({
 
   return (
     <div className="flex min-h-[620px] flex-col bg-card/35 backdrop-blur-xl">
+      <ObjectTaskSchedulePreviewDialog
+        definition={previewDefinition}
+        contextData={data}
+        weekStart={selectedWeek}
+        onWeekChange={setWeek}
+        open={Boolean(previewDefinition)}
+        onOpenChange={open => !open && setPreviewDefinitionId(null)}
+      />
+
       {wizardOpen && (
         <ObjectTaskWizard
           key="new-task"
@@ -360,6 +373,7 @@ export default function ObjectTasksTab({
                 sourceChanges={data.source_changes}
                 selectedDefinitionId={scheduleDefinition?.id || null}
                 disabled={archived || wizardOpen || schedulePending}
+                onViewSchedule={definition => setPreviewDefinitionId(definition.id)}
                 onOpenSchedule={openSchedule}
               />
             ) : (

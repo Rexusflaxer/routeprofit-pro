@@ -113,6 +113,7 @@ export default function ObjectTaskTable({
   sourceChanges = [],
   selectedDefinitionId = null,
   disabled = false,
+  onViewSchedule,
   onOpenSchedule,
 }) {
   const seriesMap = useMemo(() => byDefinition(series), [series]);
@@ -146,7 +147,7 @@ export default function ObjectTaskTable({
               <TableRow
                 key={task.id}
                 className="group cursor-pointer hover:bg-muted/20"
-                onClick={() => !disabled && onOpenSchedule?.(task)}
+                onClick={() => !disabled && onViewSchedule?.(task)}
               >
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -193,11 +194,11 @@ export default function ObjectTaskTable({
             role="button"
             tabIndex={disabled ? -1 : 0}
             className="space-y-2 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            onClick={() => !disabled && onOpenSchedule?.(task)}
+            onClick={() => !disabled && onViewSchedule?.(task)}
             onKeyDown={event => {
               if (!disabled && ["Enter", " "].includes(event.key)) {
                 event.preventDefault();
-                onOpenSchedule?.(task);
+                onViewSchedule?.(task);
               }
             }}
           >

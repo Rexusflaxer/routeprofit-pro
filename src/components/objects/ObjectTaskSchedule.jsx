@@ -221,6 +221,7 @@ export default function ObjectTaskSchedule({
   onPersistedStop = null,
   onCancel = null,
   onSaved = null,
+  readOnly = false,
 }) {
   const now = useLiveAmsterdamNow(serverClock);
   const currentWeekStart = now.weekStart;
@@ -442,6 +443,7 @@ export default function ObjectTaskSchedule({
   };
 
   const paint = (dayIndex, slot, start, active) => {
+    if (readOnly) return;
     const startMinute = slot * 30;
     if (!momentEditable(dayIndex, startMinute)) return;
     if (!continuous) {
@@ -510,6 +512,7 @@ export default function ObjectTaskSchedule({
   };
 
   const openEditor = interval => {
+    if (readOnly) return;
     const entry = projectedEntryAt(interval.dayIndex, interval);
     if (!entry || !momentEditable(interval.dayIndex, interval.start)) return;
     const occurrenceDate = visibleDates[interval.dayIndex];
@@ -695,7 +698,7 @@ export default function ObjectTaskSchedule({
 
   return (
     <fieldset role="region" className="space-y-3" aria-label="Taakrooster per week">
-      <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taakrooster *</legend>
+      <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taakrooster{readOnly ? "" : " *"}</legend>
 
       {persistedMode ? (
         <ObjectTaskScheduleNavigator
@@ -725,10 +728,12 @@ export default function ObjectTaskSchedule({
           <button type="button" onClick={() => preset("empty")} className="rounded-xl border border-border/70 bg-card/45 px-3 py-2 text-xs font-medium hover:border-primary/40">Rooster wissen</button>
         </div>
       )}
-      <div className="flex gap-2">
-        <button type="button" onClick={() => setTool("available")} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === "available" ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" />{continuous ? "Taak uitvoeren" : `Taak plaatsen (${durationMinutes} min.)`}</button>
-        <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setTool("available")} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === "available" ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" />{continuous ? "Taak uitvoeren" : `Taak plaatsen (${durationMinutes} min.)`}</button>
+          <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
+        </div>
+      )}
 
       <div className="planning-persistent-scrollbar overflow-x-auto">
         <div className="min-w-[900px]">
@@ -780,13 +785,15 @@ export default function ObjectTaskSchedule({
           {contextLegend.map(group => <span key={group.label} className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-sm border ${["border-chart-2/40 bg-chart-2/20", "border-chart-4/40 bg-chart-4/20", "border-chart-5/40 bg-chart-5/20", "border-chart-3/40 bg-chart-3/20"][group.colorIndex % 4]}`} />{group.label}</span>)}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        {continuous
-          ? "Sleep over blokken van 30 minuten. Met Wissen verwijder je alleen de gekozen tijdblokken; klik op een taak voor exacte tijden en herhaling."
-          : `Klik in het rooster om een losse taak van ${durationMinutes} minuten te plaatsen. Klik op de taak om de exacte starttijd en herhaling in te stellen.`}
-      </p>
+      {!readOnly && (
+        <p className="text-xs text-muted-foreground">
+          {continuous
+            ? "Sleep over blokken van 30 minuten. Met Wissen verwijder je alleen de gekozen tijdblokken; klik op een taak voor exacte tijden en herhaling."
+            : `Klik in het rooster om een losse taak van ${durationMinutes} minuten te plaatsen. Klik op de taak om de exacte starttijd en herhaling in te stellen.`}
+        </p>
+      )}
 
-      {persistedMode && (
+      {persistedMode && !readOnly && (
         <div className="flex items-center justify-end gap-2 border-t border-border/70 pt-3">
           <Button type="button" size="sm" variant="ghost" disabled={savingDrafts || pending} onClick={cancelDrafts}>Annuleren</Button>
           <Button type="button" size="sm" disabled={(scratchEntries.length === 0 && stagedErases.length === 0) || savingDrafts || pending} onClick={saveDrafts}>
@@ -795,7 +802,7 @@ export default function ObjectTaskSchedule({
         </div>
       )}
 
-      {editor && (
+      {!readOnly && editor && (
         <ObjectTaskTimePopup
           editor={editor}
           fixedDuration={continuous ? null : durationMinutes}
