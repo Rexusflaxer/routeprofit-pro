@@ -232,10 +232,9 @@ export function normalizeObjectTaskSeries(series = {}) {
 }
 
 function activeRevisionForDate(series, revisions, dateKey) {
-  const applicable = revisions
+  return revisions
     .filter(revision => String(revision.series_id) === String(series.id) && revision.effective_from && revision.effective_from <= dateKey)
-    .sort((left, right) => left.effective_from.localeCompare(right.effective_from) || left.revision_number - right.revision_number);
-  return applicable.at(-1) || null;
+    .sort((left, right) => right.revision_number - left.revision_number)[0] || null;
 }
 
 function revisionOccursOnDate(revision, dateKey) {

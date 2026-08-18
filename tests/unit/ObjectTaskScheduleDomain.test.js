@@ -169,6 +169,44 @@ describe("wekelijkse objecttaakreeks", () => {
     ]);
   });
 
+  it("laat een latere objectkaartwijziging een planningalternatief en hervatting vanaf dezelfde reeks overschrijven", () => {
+    const planningAlternative = {
+      ...initialRevision,
+      id: "revision-2-alternative",
+      revision_number: 2,
+      effective_from: "2026-08-17",
+      recurrence_type: "one_time",
+      recurrence_end_date: "2026-08-17",
+      end_time: "12:00",
+      metadata: { planning_only_single_occurrence: true },
+    };
+    const planningResume = {
+      ...initialRevision,
+      id: "revision-3-resume",
+      revision_number: 3,
+      effective_from: "2026-08-24",
+      recurrence_end_date: null,
+    };
+    const objectCardChange = {
+      ...initialRevision,
+      id: "revision-4-object-card",
+      revision_number: 4,
+      effective_from: "2026-08-17",
+      recurrence_end_date: null,
+      end_time: "12:00",
+    };
+
+    expect(projectWeek("2026-08-17", [initialRevision, planningAlternative, planningResume])).toEqual([
+      expect.objectContaining({ revision_id: "revision-2-alternative", frequency: "once", end_time: "12:00" }),
+    ]);
+    expect(projectWeek("2026-08-24", [initialRevision, planningAlternative, planningResume])).toEqual([
+      expect.objectContaining({ revision_id: "revision-3-resume", frequency: "weekly", end_time: "18:00" }),
+    ]);
+    expect(projectWeek("2026-08-24", [initialRevision, planningAlternative, planningResume, objectCardChange])).toEqual([
+      expect.objectContaining({ revision_id: "revision-4-object-card", frequency: "weekly", end_time: "12:00" }),
+    ]);
+  });
+
   it("stopt de reeks vanaf de gekozen occurrence zonder eerdere weken te verwijderen", () => {
     const stoppedFromWeek31 = {
       id: "revision-3",
