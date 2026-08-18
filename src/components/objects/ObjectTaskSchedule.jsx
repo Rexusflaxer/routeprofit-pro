@@ -21,6 +21,7 @@ import {
   projectObjectTaskDrafts,
   projectObjectTaskSchedules,
 } from "./objectTaskScheduleDomain";
+import { eraseTaskOccurrence, remainingTaskIntervals } from "./objectTaskScheduleEditing";
 
 const GRID_HEADER_HEIGHT = 36;
 const GRID_DAY_HEIGHT = 48;
@@ -286,15 +287,28 @@ export default function ObjectTaskSchedule({
       && toMinutes(entry.end_time) === interval.end) || null;
   };
 
-  const removeEntry = entry => {
+  const removeEntry = (entry, eraseStart = null, eraseEnd = null) => {
     if (!entry) return;
     setLocalError(null);
     const sourceId = entry.draft_source_id || entry.client_id;
     if (persistedMode && !entry.draft) {
-      const stopKey = `${entry.series_id || entry.id}:${entry.occurrence_date}`;
-      if (pending || stoppingEntryRef.current === stopKey) return;
+      const stopKey = `${entry.series_id || entry.id}:${entry.occurrence_date}:${eraseStart ?? "all"}`;
+      if (pending || stoppingEntryRef.current) return;
       stoppingEntryRef.current = stopKey;
-      Promise.resolve(onPersistedStop?.(entry))
+      const remaining = eraseStart == null ? [] : remainingTaskIntervals(entry, eraseStart, eraseEnd);
+      const mutation = remaining.length === 0
+        ? onPersistedStop?.(entry)
+        : onPersistedChange?.(entry, {
+          start_time: toTime(remaining[0].start),
+          end_time: toTime(remaining[0].end),
+          frequency: entry.frequency,
+          repeat_until: entry.repeat_until || null,
+        }).then(() => remaining[1] && onPersistedCreate?.({
+          ...entry,
+          start_time: toTime(remaining[1].start),
+          end_time: toTime(remaining[1].end),
+        }));
+      Promise.resolve(mutation)
         .catch(() => {})
         .finally(() => {
           if (stoppingEntryRef.current === stopKey) stoppingEntryRef.current = null;
@@ -304,7 +318,10 @@ export default function ObjectTaskSchedule({
     const collection = persistedMode ? scratchRef.current : entriesRef.current;
     const source = collection.find(item => item.client_id === sourceId);
     if (!source) return;
-    const next = replaceSource(collection, sourceId, occurrenceRemoval(source, entry.occurrence_date));
+    const replacement = eraseStart == null
+      ? occurrenceRemoval(source, entry.occurrence_date)
+      : eraseTaskOccurrence(source, entry.occurrence_date, eraseStart, eraseEnd);
+    const next = replaceSource(collection, sourceId, replacement);
     if (persistedMode) commitScratch(next);
     else commitEntries(next);
   };
@@ -393,7 +410,12 @@ export default function ObjectTaskSchedule({
       return;
     }
     if (tool === null) {
-      if (active) removeEntry(projectedEntryAt(dayIndex, active.interval));
+      if (start) setPainting(true);
+      if (active) removeEntry(
+        projectedEntryAt(dayIndex, active.interval),
+        continuous ? startMinute : null,
+        continuous ? startMinute + 30 : null,
+      );
       return;
     }
     paintContinuousSlot(dayIndex, startMinute, start);
@@ -600,7 +622,7 @@ export default function ObjectTaskSchedule({
       )}
       <p className="text-xs text-muted-foreground">
         {continuous
-          ? "Sleep over blokken van 30 minuten. Klik op een ingetekende taak om exacte tijden en herhaling in te stellen."
+          ? "Sleep over blokken van 30 minuten. Met Wissen verwijder je alleen de gekozen tijdblokken; klik op een taak voor exacte tijden en herhaling."
           : `Klik in het rooster om een losse taak van ${durationMinutes} minuten te plaatsen. Klik op de taak om de exacte starttijd en herhaling in te stellen.`}
       </p>
 
