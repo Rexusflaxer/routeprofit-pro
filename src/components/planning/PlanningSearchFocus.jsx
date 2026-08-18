@@ -15,34 +15,49 @@ export default function PlanningSearchFocus({ query, shifts, assignments, segmen
     const assignmentsByShift = new Map();
     assignments.filter(item => item.status !== "removed").forEach(item => assignmentsByShift.set(String(item.shift_id || item.planning_shift_id), [...(assignmentsByShift.get(String(item.shift_id || item.planning_shift_id)) || []), item]));
     const matchedShiftIds = new Set(shifts.filter(shift => text([
-      shift.name, shift.service_name_snapshot, shift.route_name, shift.object_name, shift.object_name_snapshot,
-      shift.customer_name_snapshot, (segmentsByShift.get(String(shift.id)) || []).flatMap(item => [item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot, item.task_type]),
+      shift.name, shift.service_name_snapshot, shift.route_name,
+      (segmentsByShift.get(String(shift.id)) || []).flatMap(item => [item.task_name_snapshot, item.task_type]),
       (assignmentsByShift.get(String(shift.id)) || []).flatMap(item => [item.personnel_name, item.personnel_name_snapshot, personnelById.get(String(item.personnel_id))?.name, personnelById.get(String(item.personnel_id))?.display_name]),
     ]).includes(normalized)).map(item => String(item.id)));
-    const directOccurrenceIds = new Set(occurrences.filter(item => text([item.task_name_snapshot, item.object_name_snapshot, item.customer_name_snapshot, item.task_type]).includes(normalized)).map(item => String(item.id)));
-    const selector = "[data-shift-id], [data-task-occurrence-id], [data-task-coverage-group]";
-    const cards = [...root.querySelectorAll(selector)];
+    const directOccurrenceIds = new Set(occurrences.filter(item => text([item.task_name_snapshot, item.task_type]).includes(normalized)).map(item => String(item.id)));
+    const planningCards = [...root.querySelectorAll("[data-shift-id], [data-task-occurrence-id], [data-task-coverage-group]")];
+    const resourceCards = [...root.querySelectorAll("[data-planning-resource-card]")];
+    const cards = [...planningCards, ...resourceCards];
     let scrollFrame = null;
     cards.forEach(card => card.classList.remove("planning-search-match", "planning-search-dim"));
     if (normalized) {
-      const lanes = [...root.querySelectorAll("[data-task-coverage-group]")];
-      lanes.forEach(lane => {
-        const occurrenceMatch = directOccurrenceIds.has(lane.dataset.taskCoverageGroup);
-        const childCards = [...lane.querySelectorAll("[data-shift-id], [data-task-occurrence-id]")];
-        const hasMatchingService = childCards.some(card => card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId));
-        if (occurrenceMatch) lane.classList.add("planning-search-match");
-        else if (!hasMatchingService) lane.classList.add("planning-search-dim");
-        else childCards.forEach(card => card.classList.add(
-          card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId)
-            ? "planning-search-match"
-            : "planning-search-dim",
-        ));
-      });
-      cards.filter(card => !card.closest("[data-task-coverage-group]")).forEach(card => {
-        const matches = (card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId))
-          || (card.dataset.taskOccurrenceId && directOccurrenceIds.has(card.dataset.taskOccurrenceId));
-        card.classList.add(matches ? "planning-search-match" : "planning-search-dim");
-      });
+      const matchedObjectCards = resourceCards.filter(card => (
+        card.dataset.resourceKind === "object"
+        && String(card.dataset.resourceSearchText || "").toLocaleLowerCase("nl-NL").includes(normalized)
+      ));
+      const objectOnlyMatch = matchedObjectCards.length > 0
+        && matchedShiftIds.size === 0
+        && directOccurrenceIds.size === 0;
+
+      if (objectOnlyMatch) {
+        const matchedObjects = new Set(matchedObjectCards);
+        resourceCards.forEach(card => card.classList.add(matchedObjects.has(card) ? "planning-search-match" : "planning-search-dim"));
+        planningCards.forEach(card => card.classList.add("planning-search-dim"));
+      } else {
+        const lanes = [...root.querySelectorAll("[data-task-coverage-group]")];
+        lanes.forEach(lane => {
+          const occurrenceMatch = directOccurrenceIds.has(lane.dataset.taskCoverageGroup);
+          const childCards = [...lane.querySelectorAll("[data-shift-id], [data-task-occurrence-id]")];
+          const hasMatchingService = childCards.some(card => card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId));
+          if (occurrenceMatch) lane.classList.add("planning-search-match");
+          else if (!hasMatchingService) lane.classList.add("planning-search-dim");
+          else childCards.forEach(card => card.classList.add(
+            card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId)
+              ? "planning-search-match"
+              : "planning-search-dim",
+          ));
+        });
+        planningCards.filter(card => !card.closest("[data-task-coverage-group]")).forEach(card => {
+          const matches = (card.dataset.shiftId && matchedShiftIds.has(card.dataset.shiftId))
+            || (card.dataset.taskOccurrenceId && directOccurrenceIds.has(card.dataset.taskOccurrenceId));
+          card.classList.add(matches ? "planning-search-match" : "planning-search-dim");
+        });
+      }
 
       const viewport = root.querySelector("[data-testid='planning-matrix-scroll']");
       const matches = [...root.querySelectorAll(".planning-search-match")];
@@ -53,10 +68,11 @@ export default function PlanningSearchFocus({ query, shifts, assignments, segmen
           && rect.bottom > viewportRect.top && rect.top < viewportRect.bottom;
       });
       if (matches.length > 0 && !hasVisibleMatch) {
+        const objectMatch = matches[0].hasAttribute("data-planning-resource-card");
         scrollFrame = window.requestAnimationFrame(() => matches[0].scrollIntoView({
           behavior: "smooth",
           block: "center",
-          inline: "center",
+          inline: objectMatch ? "nearest" : "center",
         }));
       }
     }

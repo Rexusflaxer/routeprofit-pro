@@ -1454,6 +1454,9 @@ function ResourceHeader({ resource, perspective, onObjectClick }) {
       disabled={!isObject}
       onClick={() => onObjectClick?.(resource)}
       className="flex h-full min-h-14 w-full items-start gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent/60 disabled:cursor-default disabled:hover:bg-transparent"
+      data-planning-resource-card
+      data-resource-kind={resource.kind}
+      data-resource-search-text={`${resource.label || ""} ${resource.subtitle || ""}`}
     >
       <span className={cn(
         "mt-0.5 flex shrink-0 items-center justify-center overflow-hidden rounded-md text-primary",
