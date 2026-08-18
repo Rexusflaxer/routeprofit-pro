@@ -111,6 +111,21 @@ function replaceSource(entries, sourceId, replacement) {
   return entries.flatMap(entry => entry.client_id === sourceId ? replacement : [entry]);
 }
 
+function persistedEntryKey(entry) {
+  return `${entry.series_id || entry.id}:${entry.occurrence_date}`;
+}
+
+function remainingAfterRanges(entry, ranges) {
+  return ranges.reduce(
+    (segments, range) => segments.flatMap(segment => remainingTaskIntervals(
+      { start_time: toTime(segment.start), end_time: toTime(segment.end) },
+      range.start,
+      range.end,
+    )),
+    [{ start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) }],
+  );
+}
+
 function recurrenceIdentity(entry) {
   const frequency = ["weekly", "week"].includes(String(entry.frequency || entry.recurrence_type || "").toLowerCase())
     ? "weekly"
@@ -192,6 +207,8 @@ export default function ObjectTaskSchedule({
   onPersistedCreate = null,
   onPersistedChange = null,
   onPersistedStop = null,
+  onCancel = null,
+  onSaved = null,
 }) {
   const now = useLiveAmsterdamNow(serverClock);
   const currentWeekStart = now.weekStart;
@@ -206,13 +223,16 @@ export default function ObjectTaskSchedule({
   const [editor, setEditor] = useState(null);
   const [localError, setLocalError] = useState(null);
   const [scratchEntries, setScratchEntries] = useState([]);
+  const [stagedErases, setStagedErases] = useState([]);
+  const [savingDrafts, setSavingDrafts] = useState(false);
   const entriesRef = useRef(entries);
   const scratchRef = useRef(scratchEntries);
+  const stagedErasesRef = useRef(stagedErases);
   const paintingSourceRef = useRef(null);
-  const stoppingEntryRef = useRef(null);
 
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   useEffect(() => { scratchRef.current = scratchEntries; }, [scratchEntries]);
+  useEffect(() => { stagedErasesRef.current = stagedErases; }, [stagedErases]);
   useEffect(() => {
     const stop = () => {
       setPainting(false);
@@ -246,8 +266,19 @@ export default function ObjectTaskSchedule({
   const persistedOwnEntries = persistedMode
     ? projectedContextEntries.filter(entry => String(entry.definition_id) === String(taskDefinitionId))
     : [];
+  const displayedPersistedEntries = useMemo(() => persistedOwnEntries.flatMap(entry => {
+    const staged = stagedErases.find(item => item.key === persistedEntryKey(entry));
+    if (!staged) return [entry];
+    return remainingAfterRanges(entry, staged.ranges).map((interval, index) => ({
+      ...entry,
+      id: `staged:${entry.id}:${index}:${interval.start}`,
+      start_time: toTime(interval.start),
+      end_time: toTime(interval.end),
+      _staged_original: entry,
+    }));
+  }), [persistedOwnEntries, stagedErases]);
   const ownEntries = persistedMode
-    ? [...persistedOwnEntries, ...projectedScratchEntries]
+    ? [...displayedPersistedEntries, ...projectedScratchEntries]
     : projectedLocalEntries;
   const contextEntries = persistedMode
     ? projectedContextEntries.filter(entry => String(entry.definition_id) !== String(taskDefinitionId))
@@ -292,27 +323,19 @@ export default function ObjectTaskSchedule({
     setLocalError(null);
     const sourceId = entry.draft_source_id || entry.client_id;
     if (persistedMode && !entry.draft) {
-      const stopKey = `${entry.series_id || entry.id}:${entry.occurrence_date}:${eraseStart ?? "all"}`;
-      if (pending || stoppingEntryRef.current) return;
-      stoppingEntryRef.current = stopKey;
-      const remaining = eraseStart == null ? [] : remainingTaskIntervals(entry, eraseStart, eraseEnd);
-      const mutation = remaining.length === 0
-        ? onPersistedStop?.(entry)
-        : onPersistedChange?.(entry, {
-          start_time: toTime(remaining[0].start),
-          end_time: toTime(remaining[0].end),
-          frequency: entry.frequency,
-          repeat_until: entry.repeat_until || null,
-        }).then(() => remaining[1] && onPersistedCreate?.({
-          ...entry,
-          start_time: toTime(remaining[1].start),
-          end_time: toTime(remaining[1].end),
-        }));
-      Promise.resolve(mutation)
-        .catch(() => {})
-        .finally(() => {
-          if (stoppingEntryRef.current === stopKey) stoppingEntryRef.current = null;
-        });
+      const original = entry._staged_original || entry;
+      const key = persistedEntryKey(original);
+      const range = eraseStart == null
+        ? { start: toMinutes(original.start_time), end: toMinutes(original.end_time) }
+        : { start: eraseStart, end: eraseEnd };
+      setStagedErases(current => {
+        const existing = current.find(item => item.key === key);
+        const next = existing
+          ? current.map(item => item.key === key ? { ...item, ranges: [...item.ranges, range] } : item)
+          : [...current, { key, original, ranges: [range] }];
+        stagedErasesRef.current = next;
+        return next;
+      });
       return;
     }
     const collection = persistedMode ? scratchRef.current : entriesRef.current;
@@ -328,7 +351,7 @@ export default function ObjectTaskSchedule({
 
   const currentOwnEntries = () => persistedMode
     ? [
-      ...persistedOwnEntries,
+      ...displayedPersistedEntries,
       ...projectObjectTaskDrafts(scratchRef.current, selectedWeek),
     ]
     : projectObjectTaskDrafts(entriesRef.current, selectedWeek);
@@ -535,13 +558,67 @@ export default function ObjectTaskSchedule({
     setEditor(null);
   };
 
+  const saveDrafts = async () => {
+    if (!persistedMode || (scratchRef.current.length === 0 && stagedErasesRef.current.length === 0) || savingDrafts || pending) return;
+    setLocalError(null);
+    setSavingDrafts(true);
+    try {
+      for (const staged of [...stagedErasesRef.current]) {
+        const remaining = remainingAfterRanges(staged.original, staged.ranges);
+        if (remaining.length === 0) {
+          await onPersistedStop?.(staged.original);
+        } else {
+          await onPersistedChange?.(staged.original, {
+            start_time: toTime(remaining[0].start),
+            end_time: toTime(remaining[0].end),
+            frequency: staged.original.frequency,
+            repeat_until: staged.original.repeat_until || null,
+          });
+          for (const interval of remaining.slice(1)) {
+            await onPersistedCreate?.({
+              ...staged.original,
+              start_time: toTime(interval.start),
+              end_time: toTime(interval.end),
+            });
+          }
+        }
+        const next = stagedErasesRef.current.filter(item => item.key !== staged.key);
+        stagedErasesRef.current = next;
+        setStagedErases(next);
+      }
+      for (const entry of [...scratchRef.current]) {
+        await onPersistedCreate?.(entry);
+        commitScratch(scratchRef.current.filter(item => item.client_id !== entry.client_id));
+      }
+      onSaved?.();
+    } catch (saveError) {
+      setLocalError(saveError);
+    } finally {
+      setSavingDrafts(false);
+    }
+  };
+
+  const cancelDrafts = () => {
+    if (savingDrafts || pending) return;
+    commitScratch([]);
+    stagedErasesRef.current = [];
+    setStagedErases([]);
+    setEditor(null);
+    setLocalError(null);
+    onCancel?.();
+  };
+
   const changeWeek = value => {
     const normalized = objectTaskWeekStart(value);
     if (!normalized || normalized < currentWeekStart) return;
     setLocalWeek(normalized);
     setEditor(null);
     setLocalError(null);
-    if (persistedMode) commitScratch([]);
+    if (persistedMode) {
+      commitScratch([]);
+      stagedErasesRef.current = [];
+      setStagedErases([]);
+    }
     onWeekChange?.(normalized);
   };
 
@@ -625,6 +702,15 @@ export default function ObjectTaskSchedule({
           ? "Sleep over blokken van 30 minuten. Met Wissen verwijder je alleen de gekozen tijdblokken; klik op een taak voor exacte tijden en herhaling."
           : `Klik in het rooster om een losse taak van ${durationMinutes} minuten te plaatsen. Klik op de taak om de exacte starttijd en herhaling in te stellen.`}
       </p>
+
+      {persistedMode && (
+        <div className="flex items-center justify-end gap-2 border-t border-border/70 pt-3">
+          <Button type="button" size="sm" variant="ghost" disabled={savingDrafts || pending} onClick={cancelDrafts}>Annuleren</Button>
+          <Button type="button" size="sm" disabled={(scratchEntries.length === 0 && stagedErases.length === 0) || savingDrafts || pending} onClick={saveDrafts}>
+            {savingDrafts ? "Opslaan..." : "Opslaan"}
+          </Button>
+        </div>
+      )}
 
       {editor && (
         <ObjectTaskTimePopup

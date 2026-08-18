@@ -296,7 +296,7 @@ export default function ObjectTasksTab({
               <h2 className="mt-1 text-base font-semibold">{taskTypeLabel(scheduleDefinition)}</h2>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Teken zoals voorheen in het rooster. Klik op een bestaand taakblok om de exacte tijd en herhaling vanaf dat moment te wijzigen.</p>
             </div>
-            <Button type="button" variant="outline" size="sm" disabled={schedulePending} onClick={closeSchedule}>Sluiten</Button>
+            <Button type="button" variant="outline" size="sm" disabled={schedulePending} onClick={closeSchedule}>Annuleren</Button>
           </div>
           <ObjectTaskSchedule
             contextData={data}
@@ -312,6 +312,8 @@ export default function ObjectTasksTab({
             onPersistedCreate={values => addMutation.mutateAsync({ definition: scheduleDefinition, values })}
             onPersistedChange={(entry, values) => changeMutation.mutateAsync({ entry, values })}
             onPersistedStop={entry => stopMutation.mutateAsync(entry)}
+            onCancel={closeSchedule}
+            onSaved={closeSchedule}
           />
         </section>
       )}
