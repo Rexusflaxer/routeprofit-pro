@@ -351,6 +351,8 @@ export function projectObjectTaskSchedules({ definitions = [], series = [], revi
         end_time: revision.end_time,
         end_day_offset: revision.end_day_offset,
         frequency: revision.frequency,
+        recurrence_type: revision.recurrence_type,
+        recurrence_interval: revision.recurrence_interval,
         repeat_until: revision.repeat_until,
         label: definitionLabel(definition),
         source_change: sourceChangeFor(sourceChanges, scheduleSeries.id, dateKey),

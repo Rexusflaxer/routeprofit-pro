@@ -139,6 +139,46 @@ function remainingAfterRanges(entry, ranges) {
   );
 }
 
+function mergeTaskIntervals(intervals) {
+  return [...intervals]
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+    .reduce((merged, interval) => {
+      const previous = merged.at(-1);
+      if (!previous || interval.start > previous.end) merged.push({ ...interval });
+      else previous.end = Math.max(previous.end, interval.end);
+      return merged;
+    }, []);
+}
+
+function connectedDraftIntervals(baseIntervals, drafts) {
+  let intervals = mergeTaskIntervals(baseIntervals);
+  const connected = [];
+  let found = true;
+  while (found) {
+    found = false;
+    drafts.forEach(entry => {
+      if (connected.includes(entry)) return;
+      const interval = { start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) };
+      if (!intervals.some(current => interval.start <= current.end && current.start <= interval.end)) return;
+      connected.push(entry);
+      intervals = mergeTaskIntervals([...intervals, interval]);
+      found = true;
+    });
+  }
+  return { intervals, connected };
+}
+
+function stagedChangeForEntry(stagedErases, entry) {
+  const matching = stagedErases.filter(item => {
+    const sameSeries = String(item.original.series_id || "") === String(entry.series_id || "");
+    if (!sameSeries) return item.key === persistedEntryKey(entry);
+    return objectTaskRecurrence(item.original).repeating
+      ? item.original.occurrence_date <= entry.occurrence_date
+      : item.original.occurrence_date === entry.occurrence_date;
+  });
+  return matching.sort((left, right) => right.original.occurrence_date.localeCompare(left.original.occurrence_date))[0] || null;
+}
+
 function recurrenceIdentity(entry) {
   const recurrence = objectTaskRecurrence(entry);
   return {
@@ -297,7 +337,7 @@ export default function ObjectTaskSchedule({
     ? projectedContextEntries.filter(entry => String(entry.definition_id) === String(taskDefinitionId))
     : [];
   const displayedPersistedEntries = useMemo(() => persistedOwnEntries.flatMap(entry => {
-    const staged = stagedErases.find(item => item.key === persistedEntryKey(entry));
+    const staged = stagedChangeForEntry(stagedErases, entry);
     if (!staged) return [entry];
     return remainingAfterRanges(entry, staged.ranges).map((interval, index) => ({
       ...entry,
@@ -596,7 +636,12 @@ export default function ObjectTaskSchedule({
     setSavingDrafts(true);
     try {
       for (const staged of [...stagedErasesRef.current]) {
-        const remaining = remainingAfterRanges(staged.original, staged.ranges);
+        const candidates = scratchRef.current.filter(entry => entry.occurrence_date === staged.original.occurrence_date);
+        const { intervals: remaining, connected: adjoiningDrafts } = connectedDraftIntervals(
+          remainingAfterRanges(staged.original, staged.ranges),
+          candidates,
+        );
+        if (adjoiningDrafts.length) commitScratch(scratchRef.current.filter(entry => !adjoiningDrafts.includes(entry)));
         if (remaining.length === 0) {
           await onPersistedStop?.(staged.original);
         } else {
