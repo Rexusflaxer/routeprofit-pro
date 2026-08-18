@@ -505,19 +505,25 @@ export default function ObjectTaskSchedule({
       return;
     }
 
+    const collection = persistedMode ? scratchRef.current : entriesRef.current;
+    const source = sourceId ? collection.find(entry => entry.client_id === sourceId) : null;
     const adjacentPersisted = persistedMode ? current.find(entry => (
       !entry.draft
       && entry.occurrence_date === occurrenceDate
       && (toMinutes(entry.end_time) === startMinute || toMinutes(entry.start_time) === endMinute)
     )) : null;
     if (adjacentPersisted) {
-      const key = stagePersistedAddition(adjacentPersisted, { start: startMinute, end: endMinute });
+      const connectedSource = source?.occurrence_date === occurrenceDate
+        && toMinutes(source.start_time) <= endMinute
+        && startMinute <= toMinutes(source.end_time);
+      const range = connectedSource
+        ? { start: Math.min(startMinute, toMinutes(source.start_time)), end: Math.max(endMinute, toMinutes(source.end_time)) }
+        : { start: startMinute, end: endMinute };
+      const key = stagePersistedAddition(adjacentPersisted, range);
+      if (connectedSource) commitScratch(collection.filter(entry => entry.client_id !== source.client_id));
       paintingSourceRef.current = `persisted:${key}`;
       return;
     }
-
-    const collection = persistedMode ? scratchRef.current : entriesRef.current;
-    const source = sourceId ? collection.find(entry => entry.client_id === sourceId) : null;
     if (source && source.occurrence_date === occurrenceDate) {
       const nextStart = Math.min(toMinutes(source.start_time), startMinute);
       const nextEnd = Math.max(toMinutes(source.end_time), endMinute);

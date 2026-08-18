@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ObjectTaskSchedule from "@/components/objects/ObjectTaskSchedule";
 
@@ -283,6 +283,59 @@ describe("ObjectTaskSchedule vertrouwde tijdlijn", () => {
       && element.classList.contains("bg-primary/25")
     ));
     expect(visibleTaskBlocks).toHaveLength(1);
+  });
+
+  it("voegt een van rechts naar links getekend blok direct samen met een bestaande taakreeks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_CLOCK.iso));
+    const onPersistedChange = vi.fn().mockResolvedValue({ ok: true });
+    const contextData = {
+      definitions: [{ id: "persisted-reception", status: "active", task_type: "reception", execution_mode: "continuous" }],
+      series: [{ id: "persisted-wednesday", status: "active", version: 1, task_definition_id: "persisted-reception" }],
+      revisions: [{
+        id: "persisted-wednesday-r1",
+        series_id: "persisted-wednesday",
+        revision_number: 1,
+        operation: "schedule",
+        effective_from: "2026-08-19",
+        recurrence_type: "weekly",
+        weekday: 3,
+        start_time: "06:30",
+        end_time: "12:00",
+      }],
+      source_changes: [],
+    };
+    const { container } = render(
+      <ObjectTaskSchedule
+        contextData={contextData}
+        taskDefinitionId="persisted-reception"
+        executionMode="continuous"
+        weekStart="2026-08-17"
+        serverClock={SERVER_CLOCK}
+        onPersistedChange={onPersistedChange}
+      />,
+    );
+    const row = screen.getByText("19 aug").closest(".flex");
+    const slot = time => within(row).getByRole("button", { name: `Woensdag ${time}` });
+
+    fireEvent.pointerDown(slot("17:30"));
+    ["17:00", "16:30", "16:00", "15:30", "15:00", "14:30", "14:00", "13:30", "13:00", "12:30", "12:00"].forEach(time => {
+      fireEvent.pointerEnter(slot(time));
+    });
+    fireEvent.pointerUp(slot("12:00"));
+    fireEvent.pointerUp(window);
+
+    const visibleTaskBlocks = Array.from(row.querySelectorAll("[style]")).filter(element => (
+      element.classList.contains("border-primary/40")
+      && element.classList.contains("bg-primary/25")
+    ));
+    expect(visibleTaskBlocks).toHaveLength(1);
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Opslaan" })));
+    expect(onPersistedChange).toHaveBeenCalledWith(
+      expect.objectContaining({ occurrence_date: "2026-08-19" }),
+      expect.objectContaining({ start_time: "06:30", end_time: "18:00" }),
+    );
   });
 
   it("houdt aangrenzende tijdvakken met een andere herhaling of einddatum gescheiden", () => {
