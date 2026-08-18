@@ -3452,10 +3452,8 @@ async function mutateObjectTaskSeries(
     { series_id: series.id },
     'revision_number',
   );
-  const currentRevision = allRevisions.find(item => String(item.id) === String(series.current_revision_id))
-    || [...allRevisions].sort((a, b) => Number(b.revision_number) - Number(a.revision_number))[0]
-    || null;
-  if (!currentRevision) throw new ApiError(409, 'De taakreeks heeft geen geldige revisie');
+  const currentRevision = taskRevisionForDate(allRevisions, effectiveFrom);
+  if (!currentRevision) throw new ApiError(409, 'De taakreeks heeft op deze datum geen geldige revisie');
   if (!taskScheduleRevisionApplies(currentRevision, effectiveFrom)) {
     throw new ApiError(409, 'De gekozen datum is geen taakuitvoering van deze reeks');
   }
