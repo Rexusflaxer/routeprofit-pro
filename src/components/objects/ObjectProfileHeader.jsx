@@ -128,7 +128,7 @@ export default function ObjectProfileHeader({
           </div>
         </div>
 
-        <div className="relative z-10 flex shrink-0 flex-wrap justify-end gap-2">
+        <div className={`relative z-20 flex shrink-0 flex-wrap justify-end gap-2 ${editing ? "" : "lg:absolute lg:right-5 lg:top-5"}`}>
           {editing ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={disabled}><X className="h-4 w-4" /> Annuleren</Button>
