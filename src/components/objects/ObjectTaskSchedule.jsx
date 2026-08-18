@@ -208,6 +208,7 @@ export default function ObjectTaskSchedule({
   const entriesRef = useRef(entries);
   const scratchRef = useRef(scratchEntries);
   const paintingSourceRef = useRef(null);
+  const stoppingEntryRef = useRef(null);
 
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   useEffect(() => { scratchRef.current = scratchEntries; }, [scratchEntries]);
@@ -290,8 +291,14 @@ export default function ObjectTaskSchedule({
     setLocalError(null);
     const sourceId = entry.draft_source_id || entry.client_id;
     if (persistedMode && !entry.draft) {
-      // Bestaande reeksen worden uitsluitend via de bevestigde, awaited
-      // stopactie in de popup gewijzigd. De wis-tool is in deze modus verborgen.
+      const stopKey = `${entry.series_id || entry.id}:${entry.occurrence_date}`;
+      if (pending || stoppingEntryRef.current === stopKey) return;
+      stoppingEntryRef.current = stopKey;
+      Promise.resolve(onPersistedStop?.(entry))
+        .catch(() => {})
+        .finally(() => {
+          if (stoppingEntryRef.current === stopKey) stoppingEntryRef.current = null;
+        });
       return;
     }
     const collection = persistedMode ? scratchRef.current : entriesRef.current;
@@ -385,8 +392,8 @@ export default function ObjectTaskSchedule({
       else commitEntries([...entriesRef.current, nextEntry]);
       return;
     }
-    if (tool === null && active) {
-      removeEntry(projectedEntryAt(dayIndex, active.interval));
+    if (tool === null) {
+      if (active) removeEntry(projectedEntryAt(dayIndex, active.interval));
       return;
     }
     paintContinuousSlot(dayIndex, startMinute, start);
@@ -552,7 +559,7 @@ export default function ObjectTaskSchedule({
       )}
       <div className="flex gap-2">
         <button type="button" onClick={() => setTool("available")} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === "available" ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/25" />{continuous ? "Taak uitvoeren" : `Taak plaatsen (${durationMinutes} min.)`}</button>
-        {!persistedMode && <button type="button" onClick={() => setTool(null)} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>}
+        <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
       </div>
 
       <div className="overflow-auto">
