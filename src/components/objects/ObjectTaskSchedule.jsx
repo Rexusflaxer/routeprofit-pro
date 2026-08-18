@@ -756,6 +756,7 @@ export default function ObjectTaskSchedule({
                     weekNumbers={weekNumbers}
                     rowActive={rowActive}
                     showHeader={false}
+                    hoverOnlyActive={readOnly}
                   />
                 </div>
                 {visibleDates.map((dateKey, dayIndex) => {

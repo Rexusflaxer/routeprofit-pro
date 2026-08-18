@@ -39,7 +39,7 @@ const matchesRow = (period, dayKey, dateKey) => dateKey ? period.date === dateKe
 const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(period => ({ start: toMinutes(period.start_time), end: toMinutes(period.end_time) }));
 const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: { start: toMinutes(period.start_time), end: toMinutes(period.end_time) } } : null; };
 
-export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true }) {
+export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true, hoverOnlyActive = false }) {
   const [hover, setHover] = useState(null);
   const pointerStart = useRef(null);
   const rows = rowDates || WEEKDAY_OPTIONS.map(day => day.key);
@@ -48,6 +48,10 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
   const activeAtPointer = (event, dayIndex, slot) => { if (!exactPeriods) return intervalAt(schedule[dayIndex], slot); const bounds = event.currentTarget.getBoundingClientRect(); const minute = slot * SLOT_MINUTES + ((event.clientX - bounds.left) / bounds.width) * SLOT_MINUTES; return exactIntervalAt(exactPeriods, weekdayAt(dayIndex).key, minute, rowDates?.[dayIndex]); };
   const showHover = (event, dayIndex, slot) => {
     const active = activeAtPointer(event, dayIndex, slot);
+    if (hoverOnlyActive && !active) {
+      setHover(null);
+      return;
+    }
     setHover({ x: Math.min(event.clientX + 14, window.innerWidth - 190), y: Math.min(event.clientY + 14, window.innerHeight - 76), dayIndex, slot, day: dayLabels?.[dayIndex] || weekdayAt(dayIndex).label, minute: slot * SLOT_MINUTES, interval: active?.interval || null, kind: active?.kind || null });
   };
   const startPointer = (event, dayIndex, slot) => { const active = activeAtPointer(event, dayIndex, slot); pointerStart.current = { dayIndex, slot, active, moved: false }; showHover(event, dayIndex, slot); if (!(active && tool === active.kind && onIntervalClick)) onPaint(dayIndex, slot, true, active); };
