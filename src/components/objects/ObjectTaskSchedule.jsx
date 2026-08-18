@@ -690,7 +690,7 @@ export default function ObjectTaskSchedule({
   const todayIndex = visibleDates.indexOf(now.dateKey);
   const selectedWeekNumber = objectTaskIsoWeek(selectedWeek).week;
   const weekNumbers = visibleDates.map(dateKey => objectTaskWeekday(dateKey) === 1 ? objectTaskIsoWeek(dateKey).week : null);
-  const rowActive = visibleDates.map(dateKey => objectTaskWeekStart(dateKey) === selectedWeek);
+  const rowActive = visibleDates.map(dateKey => dateKey === now.dateKey);
   const nowLeft = `calc(${GRID_LABEL_WIDTH}px + (100% - ${GRID_LABEL_WIDTH}px) * ${Math.min(1, now.minute / 1440)})`;
 
   return (
