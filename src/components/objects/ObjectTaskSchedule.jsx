@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
+import ObjectTaskScheduleNavigator from "./ObjectTaskScheduleNavigator";
 import ObjectTaskTimePopup from "./ObjectTaskTimePopup";
+import { getCaoPbPlanningPeriodByKey, listCaoPbPlanningPeriods, resolveCaoPbPlanningPeriod } from "@/components/planning/planningCaoPeriodDomain";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
-import { periodsToSchedule } from "./warningAvailabilityScheduleModel";
 import {
   OBJECT_TASK_DAY_KEYS,
   addObjectTaskDays,
@@ -15,6 +16,7 @@ import {
   getAmsterdamNow,
   objectTaskClockToMinutes,
   objectTaskEditableBoundary,
+  objectTaskIsoWeek,
   objectTaskWeek,
   objectTaskWeekStart,
   objectTaskWeekday,
@@ -25,7 +27,7 @@ import { eraseTaskOccurrence, remainingTaskIntervals } from "./objectTaskSchedul
 
 const GRID_HEADER_HEIGHT = 36;
 const GRID_DAY_HEIGHT = 48;
-const GRID_LABEL_WIDTH = 56;
+const GRID_LABEL_WIDTH = 80;
 
 function liveAmsterdamClock(serverClock) {
   const serverInstant = serverClock?.iso && Number.isFinite(Date.parse(serverClock.iso))
@@ -62,6 +64,13 @@ function useLiveAmsterdamNow(serverClock) {
   return now;
 }
 
+function isoWeekStart(year, weekNumber) {
+  const januaryFourth = new Date(Date.UTC(year, 0, 4, 12));
+  const mondayOffset = (januaryFourth.getUTCDay() + 6) % 7;
+  januaryFourth.setUTCDate(januaryFourth.getUTCDate() - mondayOffset + (weekNumber - 1) * 7);
+  return januaryFourth.toISOString().slice(0, 10);
+}
+
 function toMinutes(value) {
   return objectTaskClockToMinutes(value) ?? 0;
 }
@@ -76,6 +85,7 @@ function entryPeriod(entry) {
   if (dayIndex < 0) return null;
   return {
     days: [OBJECT_TASK_DAY_KEYS[dayIndex]],
+    date: entry.occurrence_date,
     start_time: entry.start_time,
     end_time: entry.end_time,
     kind: "available",
@@ -219,6 +229,16 @@ export default function ObjectTaskSchedule({
   const week = objectTaskWeek(selectedWeek);
   const persistedMode = Boolean(taskDefinitionId);
   const continuous = executionMode === "continuous";
+  const planningPeriods = useMemo(() => listCaoPbPlanningPeriods(2026), []);
+  const [periodKey, setPeriodKey] = useState(() => (resolveCaoPbPlanningPeriod(selectedWeek) || planningPeriods[0])?.key || "");
+  const selectedPeriod = getCaoPbPlanningPeriodByKey(periodKey) || resolveCaoPbPlanningPeriod(selectedWeek) || planningPeriods[0];
+  const periodDates = useMemo(() => selectedPeriod
+    ? Array.from({ length: selectedPeriod.duration_days }, (_, index) => addObjectTaskDays(selectedPeriod.start_date, index))
+    : week.days, [selectedPeriod, week.days]);
+  const visibleDates = persistedMode ? periodDates : week.days;
+  const visibleWeekStarts = useMemo(() => [...new Set(visibleDates.map(objectTaskWeekStart))], [visibleDates]);
+  const scheduleScrollRef = useRef(null);
+  const lastScrolledWeekRef = useRef(selectedWeek);
   const [tool, setTool] = useState("available");
   const [painting, setPainting] = useState(false);
   const [editor, setEditor] = useState(null);
@@ -234,6 +254,7 @@ export default function ObjectTaskSchedule({
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   useEffect(() => { scratchRef.current = scratchEntries; }, [scratchEntries]);
   useEffect(() => { stagedErasesRef.current = stagedErases; }, [stagedErases]);
+  useEffect(() => { lastScrolledWeekRef.current = selectedWeek; }, [selectedWeek]);
   useEffect(() => {
     const stop = () => {
       setPainting(false);
@@ -243,27 +264,32 @@ export default function ObjectTaskSchedule({
     return () => window.removeEventListener("pointerup", stop);
   }, []);
   useEffect(() => {
-    if (selectedWeek < currentWeekStart) {
+    if (!persistedMode && selectedWeek < currentWeekStart) {
       setLocalWeek(currentWeekStart);
       onWeekChange?.(currentWeekStart);
     }
-  }, [currentWeekStart, onWeekChange, selectedWeek]);
+  }, [currentWeekStart, onWeekChange, persistedMode, selectedWeek]);
+  useEffect(() => {
+    if (!persistedMode || !selectedPeriod) return;
+    const index = Math.max(0, Math.floor((Date.parse(selectedWeek) - Date.parse(selectedPeriod.start_date)) / 86_400_000));
+    scheduleScrollRef.current?.scrollTo({ top: index * GRID_DAY_HEIGHT });
+  }, [persistedMode, taskDefinitionId]);
 
   const projectedLocalEntries = useMemo(
-    () => projectObjectTaskDrafts(entries, selectedWeek),
-    [entries, selectedWeek],
+    () => visibleWeekStarts.flatMap(weekStartValue => projectObjectTaskDrafts(entries, weekStartValue)),
+    [entries, visibleWeekStarts],
   );
   const projectedScratchEntries = useMemo(
-    () => projectObjectTaskDrafts(scratchEntries, selectedWeek),
-    [scratchEntries, selectedWeek],
+    () => visibleWeekStarts.flatMap(weekStartValue => projectObjectTaskDrafts(scratchEntries, weekStartValue)),
+    [scratchEntries, visibleWeekStarts],
   );
-  const projectedContextEntries = useMemo(() => contextData ? projectObjectTaskSchedules({
+  const projectedContextEntries = useMemo(() => contextData ? visibleWeekStarts.flatMap(weekStartValue => projectObjectTaskSchedules({
     definitions: contextData.definitions,
     series: contextData.series,
     revisions: contextData.revisions,
     sourceChanges: contextData.source_changes,
-    weekStart: selectedWeek,
-  }) : [], [contextData, selectedWeek]);
+    weekStart: weekStartValue,
+  })) : [], [contextData, visibleWeekStarts]);
   const persistedOwnEntries = persistedMode
     ? projectedContextEntries.filter(entry => String(entry.definition_id) === String(taskDefinitionId))
     : [];
@@ -285,7 +311,7 @@ export default function ObjectTaskSchedule({
     ? projectedContextEntries.filter(entry => String(entry.definition_id) !== String(taskDefinitionId))
     : projectedContextEntries;
   const exactPeriods = ownEntries.map(entryPeriod).filter(Boolean);
-  const schedule = useMemo(() => periodsToSchedule(exactPeriods), [exactPeriods]);
+  const schedule = useMemo(() => visibleDates.map(() => Array(48).fill(null)), [visibleDates]);
   const contextGroups = useMemo(() => {
     const colors = new Map();
     return contextEntries.map(entry => {
@@ -309,11 +335,11 @@ export default function ObjectTaskSchedule({
     scratchRef.current = value;
     setScratchEntries(value);
   };
-  const editableBoundary = dayIndex => objectTaskEditableBoundary(week.days[dayIndex], now);
+  const editableBoundary = dayIndex => objectTaskEditableBoundary(visibleDates[dayIndex], now);
   const momentEditable = (dayIndex, minute) => minute >= editableBoundary(dayIndex);
 
   const projectedEntryAt = (dayIndex, interval) => {
-    const occurrenceDate = week.days[dayIndex];
+    const occurrenceDate = visibleDates[dayIndex];
     return ownEntries.find(entry => entry.occurrence_date === occurrenceDate
       && toMinutes(entry.start_time) === interval.start
       && toMinutes(entry.end_time) === interval.end) || null;
@@ -353,7 +379,7 @@ export default function ObjectTaskSchedule({
   const currentOwnEntries = () => persistedMode
     ? [
       ...displayedPersistedEntries,
-      ...projectObjectTaskDrafts(scratchRef.current, selectedWeek),
+      ...visibleWeekStarts.flatMap(weekStartValue => projectObjectTaskDrafts(scratchRef.current, weekStartValue)),
     ]
     : projectObjectTaskDrafts(entriesRef.current, selectedWeek);
 
@@ -368,7 +394,7 @@ export default function ObjectTaskSchedule({
   });
 
   const paintContinuousSlot = (dayIndex, startMinute, start) => {
-    const occurrenceDate = week.days[dayIndex];
+    const occurrenceDate = visibleDates[dayIndex];
     const endMinute = startMinute + 30;
     if (start) {
       setPainting(true);
@@ -424,11 +450,11 @@ export default function ObjectTaskSchedule({
       }
       const endMinute = startMinute + Number(durationMinutes || 0);
       if (!durationMinutes || endMinute > 1440) return;
-      const overlaps = currentOwnEntries().some(entry => entry.occurrence_date === week.days[dayIndex]
+      const overlaps = currentOwnEntries().some(entry => entry.occurrence_date === visibleDates[dayIndex]
         && toMinutes(entry.start_time) < endMinute
         && toMinutes(entry.end_time) > startMinute);
       if (overlaps) return;
-      const nextEntry = createEntry(week.days[dayIndex], startMinute, endMinute);
+      const nextEntry = createEntry(visibleDates[dayIndex], startMinute, endMinute);
       if (persistedMode) commitScratch([...scratchRef.current, nextEntry]);
       else commitEntries([...entriesRef.current, nextEntry]);
       return;
@@ -485,13 +511,13 @@ export default function ObjectTaskSchedule({
   const openEditor = interval => {
     const entry = projectedEntryAt(interval.dayIndex, interval);
     if (!entry || !momentEditable(interval.dayIndex, interval.start)) return;
-    const occurrenceDate = week.days[interval.dayIndex];
+    const occurrenceDate = visibleDates[interval.dayIndex];
     setLocalError(null);
     setEditor({
       ...entry,
       ...interval,
       occurrence_date: occurrenceDate,
-      dayLabel: WEEKDAY_OPTIONS[interval.dayIndex].label,
+      dayLabel: WEEKDAY_OPTIONS[interval.dayIndex % 7].label,
       dateLabel: formatObjectTaskFullDate(occurrenceDate),
       start_time: entry.start_time || toTime(interval.start),
       end_time: entry.end_time || toTime(interval.end),
@@ -623,24 +649,71 @@ export default function ObjectTaskSchedule({
     onWeekChange?.(normalized);
   };
 
-  const todayIndex = week.days.indexOf(now.dateKey);
+  const updateSelectedWeek = value => {
+    const normalized = objectTaskWeekStart(value);
+    if (!normalized || normalized === lastScrolledWeekRef.current) return;
+    lastScrolledWeekRef.current = normalized;
+    setLocalWeek(normalized);
+    onWeekChange?.(normalized);
+  };
+
+  const scrollToPeriodWeek = (period, weekStartValue) => {
+    globalThis.setTimeout(() => {
+      const index = Math.max(0, Math.floor((Date.parse(weekStartValue) - Date.parse(period.start_date)) / 86_400_000));
+      scheduleScrollRef.current?.scrollTo({ top: index * GRID_DAY_HEIGHT, behavior: "smooth" });
+    }, 0);
+  };
+
+  const selectPeriod = key => {
+    const period = getCaoPbPlanningPeriodByKey(key);
+    if (!period) return;
+    setPeriodKey(key);
+    const target = selectedWeek >= period.start_date && selectedWeek <= period.end_date ? selectedWeek : period.start_date;
+    updateSelectedWeek(target);
+    scrollToPeriodWeek(period, objectTaskWeekStart(target));
+  };
+
+  const selectWeekNumber = weekNumber => {
+    const target = isoWeekStart(2026, weekNumber);
+    const period = resolveCaoPbPlanningPeriod(target);
+    if (period && period.key !== periodKey) setPeriodKey(period.key);
+    updateSelectedWeek(target);
+    if (period) scrollToPeriodWeek(period, target);
+  };
+
+  const handleScheduleScroll = event => {
+    const index = Math.min(visibleDates.length - 1, Math.max(0, Math.floor((event.currentTarget.scrollTop - GRID_HEADER_HEIGHT + GRID_DAY_HEIGHT / 2) / GRID_DAY_HEIGHT)));
+    updateSelectedWeek(visibleDates[index]);
+  };
+
+  const todayIndex = visibleDates.indexOf(now.dateKey);
+  const selectedWeekNumber = objectTaskIsoWeek(selectedWeek).week;
+  const weekNumbers = visibleDates.map(dateKey => objectTaskWeekday(dateKey) === 1 ? objectTaskIsoWeek(dateKey).week : null);
+  const rowActive = visibleDates.map(dateKey => objectTaskWeekStart(dateKey) === selectedWeek);
   const nowLeft = `calc(${GRID_LABEL_WIDTH}px + (100% - ${GRID_LABEL_WIDTH}px) * ${Math.min(1, now.minute / 1440)})`;
 
   return (
     <fieldset role="region" className="space-y-3" aria-label="Taakrooster per week">
       <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taakrooster *</legend>
 
-      <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold">Week {week.week} · {week.year}</p>
-          <p className="text-[10px] text-muted-foreground">{week.rangeLabel}</p>
+      {persistedMode ? (
+        <ObjectTaskScheduleNavigator
+          periods={planningPeriods}
+          periodKey={selectedPeriod?.key || periodKey}
+          weekNumber={selectedWeekNumber}
+          onPeriodChange={selectPeriod}
+          onWeekChange={selectWeekNumber}
+        />
+      ) : (
+        <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="text-xs font-semibold">Week {week.week} · {week.year}</p><p className="text-[10px] text-muted-foreground">{week.rangeLabel}</p></div>
+          <div className="flex items-center gap-1.5">
+            <Button type="button" size="icon" variant="outline" className="h-7 w-7" disabled={selectedWeek <= currentWeekStart} onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, -1))} aria-label="Vorige week"><ChevronLeft className="h-3.5 w-3.5" /></Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={selectedWeek === currentWeekStart} onClick={() => changeWeek(currentWeekStart)}><RotateCcw className="h-3 w-3" /> Deze week</Button>
+            <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, 1))} aria-label="Volgende week"><ChevronRight className="h-3.5 w-3.5" /></Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <Button type="button" size="icon" variant="outline" className="h-7 w-7" disabled={selectedWeek <= currentWeekStart} onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, -1))} aria-label="Vorige week"><ChevronLeft className="h-3.5 w-3.5" /></Button>
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={selectedWeek === currentWeekStart} onClick={() => changeWeek(currentWeekStart)}><RotateCcw className="h-3 w-3" /> Deze week</Button>
-          <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, 1))} aria-label="Volgende week"><ChevronRight className="h-3.5 w-3.5" /></Button>
-        </div>
-      </div>
+      )}
 
       {!persistedMode && (
         <div className="flex flex-wrap gap-2">
@@ -654,7 +727,7 @@ export default function ObjectTaskSchedule({
         <button type="button" onClick={() => setTool(null)} disabled={pending} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${tool === null ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/45"}`}><span className="h-3 w-3 rounded-sm border border-border bg-card" />Wissen</button>
       </div>
 
-      <div className="max-h-[288px] touch-pan-y overflow-auto overscroll-contain rounded-md border border-border/50">
+      <div ref={scheduleScrollRef} className="planning-persistent-scrollbar h-[288px] touch-pan-y overflow-auto overscroll-contain bg-transparent" onScroll={handleScheduleScroll}>
         <div className="relative min-w-[900px]">
           <div className="[&>div]:overflow-visible [&>div>div]:min-w-0">
             <WarningAvailabilityGrid
@@ -666,10 +739,14 @@ export default function ObjectTaskSchedule({
               onIntervalClick={openEditor}
               painting={painting}
               tool={tool}
-              dayLabels={week.days.map(formatObjectTaskCompactDate)}
+              dayLabels={visibleDates.map(formatObjectTaskCompactDate)}
+              rowDates={visibleDates}
+              weekNumbers={weekNumbers}
+              rowActive={rowActive}
+              transparentHeader
             />
           </div>
-          {week.days.map((dateKey, dayIndex) => {
+          {visibleDates.map((dateKey, dayIndex) => {
             const past = dateKey < now.dateKey;
             const today = dateKey === now.dateKey;
             if (!past && !today) return null;
