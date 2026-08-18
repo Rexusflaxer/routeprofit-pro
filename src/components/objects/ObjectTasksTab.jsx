@@ -5,6 +5,7 @@ import { AlertCircle, AlertTriangle, ClipboardList, Loader2, Plus, RefreshCw, Se
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
+import { base44 } from "@/api/base44Client";
 import ObjectTaskSchedule from "./ObjectTaskSchedule";
 import ObjectTaskSchedulePreviewDialog from "./ObjectTaskSchedulePreviewDialog";
 import ObjectTaskTable from "./ObjectTaskTable";
@@ -26,6 +27,7 @@ const EMPTY_TASK_DATA = {
   series: [],
   revisions: [],
   source_changes: [],
+  planning_coverage: [],
   server_clock: null,
 };
 
@@ -101,6 +103,25 @@ export default function ObjectTasksTab({
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
 
+  const coverageQuery = useQuery({
+    queryKey: ["object-card", object.id, "task-coverage"],
+    queryFn: async () => {
+      const [occurrences, segments, shifts] = await Promise.all([
+        base44.entities.PlanningTaskOccurrence.filter({ object_id: object.id }, "-service_date", 500),
+        base44.entities.PlanningShiftTaskSegment.filter({ object_id: object.id }, "-start_date", 500),
+        base44.entities.PlanningShift.filter({ object_id: object.id }, "-service_date", 500),
+      ]);
+      const activeShiftIds = new Set(shifts.filter(shift => shift.status !== "cancelled").map(shift => String(shift.id)));
+      return occurrences.map(occurrence => ({
+        ...occurrence,
+        services: segments.filter(segment => segment.status !== "removed"
+          && String(segment.task_occurrence_id) === String(occurrence.id)
+          && activeShiftIds.has(String(segment.shift_id))),
+      }));
+    },
+    enabled: Boolean(scheduleDefinitionId),
+  });
+
   const planQuery = useQuery({
     queryKey: ["object-card", object.id, "security-plans", "task-options"],
     queryFn: () => listObjectSecurityPlans({
@@ -174,17 +195,25 @@ export default function ObjectTasksTab({
   });
 
   const changeMutation = useMutation({
-    mutationFn: ({ entry, values }) => changeObjectTaskSeries({
-      customerId: object.customer_id,
-      objectId: object.id,
-      entry,
-      data: values,
-      idempotencyKey: stableMutationKey(changeKeyRef, "change-series", {
-        series_id: entry.series_id,
-        occurrence_date: entry.occurrence_date,
-        ...values,
-      }),
-    }),
+    mutationFn: async ({ entry, values }) => {
+      const latest = enrichedTaskData(await queryClient.fetchQuery({
+        queryKey,
+        queryFn: () => listObjectTasks({ customerId: object.customer_id, objectId: object.id }),
+        staleTime: 0,
+      }));
+      const latestSeries = latest.series.find(item => String(item.id) === String(entry.series_id));
+      return changeObjectTaskSeries({
+        customerId: object.customer_id,
+        objectId: object.id,
+        entry: latestSeries ? { ...entry, series: latestSeries, series_version: latestSeries.version } : entry,
+        data: values,
+        idempotencyKey: stableMutationKey(changeKeyRef, "change-series", {
+          series_id: entry.series_id,
+          occurrence_date: entry.occurrence_date,
+          ...values,
+        }),
+      });
+    },
     onSuccess: async response => {
       await refreshPlanning();
       changeKeyRef.current = null;
@@ -313,6 +342,7 @@ export default function ObjectTasksTab({
           </div>
           <ObjectTaskSchedule
             contextData={data}
+            planningCoverage={coverageQuery.data || []}
             taskDefinitionId={scheduleDefinition.id}
             executionMode={scheduleDefinition.execution_mode}
             durationMinutes={Number(scheduleDefinition.duration_minutes || 0)}

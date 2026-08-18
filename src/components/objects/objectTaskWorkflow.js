@@ -107,6 +107,7 @@ export function normalizeObjectTaskList(value) {
       item.id || item.change_key || `${item.schedule_series_id || item.series_id}:${item.service_date || item.occurrence_date}:${index}`,
       item,
     ])).values()],
+    planning_coverage: asArray(result.planning_coverage),
   };
 }
 

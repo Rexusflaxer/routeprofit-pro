@@ -5,6 +5,7 @@ import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
 import ObjectTaskScheduleNavigator from "./ObjectTaskScheduleNavigator";
 import ObjectTaskTimeScale from "./ObjectTaskTimeScale";
 import ObjectTaskTimePopup from "./ObjectTaskTimePopup";
+import ObjectTaskCoverageLegend from "./ObjectTaskCoverageLegend";
 import { getCaoPbPlanningPeriodByKey, listCaoPbPlanningPeriods, resolveCaoPbPlanningPeriod } from "@/components/planning/planningCaoPeriodDomain";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import {
@@ -263,6 +264,7 @@ function mergeConnectedDraftEntries(entries, preferredSourceId) {
 export default function ObjectTaskSchedule({
   entries = [],
   contextData = null,
+  planningCoverage = [],
   taskDefinitionId = null,
   onChange,
   executionMode,
@@ -383,6 +385,14 @@ export default function ObjectTaskSchedule({
     taskId: group.entry.id,
     colorIndex: group.colorIndex,
   }));
+  const servicePeriods = planningCoverage
+    .filter(item => String(item.object_task_definition_id) === String(taskDefinitionId))
+    .flatMap(item => (item.services || []).map(service => ({
+      ...service,
+      date: item.service_date,
+      start_time: service.start_time,
+      end_time: service.end_time,
+    })));
   const contextLegend = [...new Map(contextGroups.map(group => [group.label, group])).values()];
 
   const commitEntries = value => {
@@ -843,6 +853,7 @@ export default function ObjectTaskSchedule({
                     schedule={schedule}
                     exactPeriods={exactPeriods}
                     backgroundPeriods={backgroundPeriods}
+                    coveragePeriods={servicePeriods}
                     previewDurationMinutes={continuous ? null : durationMinutes}
                     onPaint={paint}
                     onIntervalClick={openEditor}
@@ -877,6 +888,7 @@ export default function ObjectTaskSchedule({
         </div>
       </div>
 
+      {persistedMode && <ObjectTaskCoverageLegend />}
       {contextLegend.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
           <span>Andere geplande taken:</span>
@@ -891,6 +903,11 @@ export default function ObjectTaskSchedule({
         </p>
       )}
 
+      {persistedMode && !readOnly && (localError || error) && (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {(localError || error).message || "Opslaan is niet gelukt. Vernieuw het taakrooster en probeer opnieuw."}
+        </p>
+      )}
       {persistedMode && !readOnly && (
         <div className="flex items-center justify-end gap-2 border-t border-border/70 pt-3">
           <Button type="button" size="sm" variant="ghost" disabled={savingDrafts || pending} onClick={cancelDrafts}>Annuleren</Button>
