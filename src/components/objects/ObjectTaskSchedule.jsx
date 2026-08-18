@@ -150,6 +150,21 @@ function mergeTaskIntervals(intervals) {
     }, []);
 }
 
+function intervalsAfterStagedChanges(entry, staged) {
+  const expanded = mergeTaskIntervals([
+    { start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) },
+    ...(staged.additions || []),
+  ]);
+  return (staged.ranges || []).reduce(
+    (segments, range) => segments.flatMap(segment => remainingTaskIntervals(
+      { start_time: toTime(segment.start), end_time: toTime(segment.end) },
+      range.start,
+      range.end,
+    )),
+    expanded,
+  );
+}
+
 function connectedDraftIntervals(baseIntervals, drafts) {
   let intervals = mergeTaskIntervals(baseIntervals);
   const connected = [];
@@ -339,10 +354,7 @@ export default function ObjectTaskSchedule({
   const displayedPersistedEntries = useMemo(() => persistedOwnEntries.flatMap(entry => {
     const staged = stagedChangeForEntry(stagedErases, entry);
     if (!staged) return [entry];
-    return mergeTaskIntervals([
-      ...remainingAfterRanges(entry, staged.ranges),
-      ...(staged.additions || []),
-    ]).map((interval, index) => ({
+    return intervalsAfterStagedChanges(entry, staged).map((interval, index) => ({
       ...entry,
       id: `staged:${entry.id}:${index}:${interval.start}`,
       start_time: toTime(interval.start),
@@ -675,10 +687,7 @@ export default function ObjectTaskSchedule({
       for (const staged of [...stagedErasesRef.current]) {
         const candidates = scratchRef.current.filter(entry => entry.occurrence_date === staged.original.occurrence_date);
         const { intervals: remaining, connected: adjoiningDrafts } = connectedDraftIntervals(
-          mergeTaskIntervals([
-            ...remainingAfterRanges(staged.original, staged.ranges),
-            ...(staged.additions || []),
-          ]),
+          intervalsAfterStagedChanges(staged.original, staged),
           candidates,
         );
         if (adjoiningDrafts.length) commitScratch(scratchRef.current.filter(entry => !adjoiningDrafts.includes(entry)));
