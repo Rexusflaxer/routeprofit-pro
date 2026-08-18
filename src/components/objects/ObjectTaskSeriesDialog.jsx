@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, Check, Infinity, Loader2, Repeat2, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Infinity, Loader2, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,8 +22,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence, objectTaskRecurrenceLabel } from "./objectTaskRecurrence";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence } from "./objectTaskRecurrence";
 import {
   formatObjectTaskCompactDate,
   formatObjectTaskFullDate,
@@ -51,23 +51,6 @@ function initialForm(entry, fixedDuration) {
     repeat_until: entry?.repeat_until || "",
     has_end_date: Boolean(entry?.repeat_until),
   };
-}
-
-function Choice({ active, icon: Icon, title, description, onClick }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex min-h-20 items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active ? "border-primary/60 bg-primary/10" : "border-border/70 bg-card/40 hover:border-primary/35 hover:bg-card/65",
-      )}
-    >
-      <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}><Icon className="h-4 w-4" /></span>
-      <span className="min-w-0"><span className="flex items-center gap-1.5 text-sm font-semibold">{title}{active && <Check className="h-3.5 w-3.5 text-primary" />}</span><span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{description}</span></span>
-    </button>
-  );
 }
 
 export default function ObjectTaskSeriesDialog({
@@ -171,9 +154,14 @@ export default function ObjectTaskSeriesDialog({
 
             <div className="space-y-2">
               <Label>Herhaling</Label>
-              <select value={form.recurrence_key} onChange={event => set("recurrence_key", event.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
-                {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
-              </select>
+              <Select value={form.recurrence_key} disabled={pending} onValueChange={value => set("recurrence_key", value)}>
+                <SelectTrigger className="border-border/70 bg-card/55 shadow-sm backdrop-blur-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             {recurrence.type !== "one_time" && (

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence } from "./objectTaskRecurrence";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const minutes = value => value === "24:00" ? 1440 : /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3)) : NaN;
 
@@ -28,6 +29,7 @@ export default function ObjectTaskTimePopup({
 
   useEffect(() => {
     const close = event => {
+      if (event.target.closest?.('[role="listbox"]')) return;
       if (!pending && ref.current && !ref.current.contains(event.target)) onClose();
     };
     document.addEventListener("mousedown", close);
@@ -74,9 +76,14 @@ export default function ObjectTaskTimePopup({
 
       <div className="mt-3 border-t border-border/70 pt-3">
         <Label htmlFor="exact-task-recurrence" className="text-[11px]">Herhaling</Label>
-        <select id="exact-task-recurrence" value={recurrenceKey} disabled={pending} onChange={event => { setRecurrenceKey(event.target.value); if (event.target.value === "once") setRepeatUntil(""); }} className="mt-1.5 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
-          {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
-        </select>
+        <Select value={recurrenceKey} disabled={pending} onValueChange={value => { setRecurrenceKey(value); if (value === "once") setRepeatUntil(""); }}>
+          <SelectTrigger id="exact-task-recurrence" className="mt-1.5 h-8 rounded-lg border-border/70 bg-card/55 px-2.5 text-xs shadow-sm backdrop-blur-xl">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[130]">
+            {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <SelectItem key={option.key} value={option.key} className="text-xs">{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         {recurrence.type !== "one_time" && (
           <div className="mt-2 space-y-1">
             <Label htmlFor="exact-task-repeat-until" className="text-[11px]">Einddatum <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
