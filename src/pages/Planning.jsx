@@ -35,7 +35,7 @@ import {
   PublishPlanningDialog,
   ShiftActionDialog,
 } from "@/components/planning/PlanningDialogs";
-import { invokePlanningApi } from "@/components/planning/planningApiClient";
+import { invokePlanningApi, invokeSinglePlanningTaskChange } from "@/components/planning/planningApiClient";
 import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 import { createPlanningRefreshScheduler } from "@/components/planning/planningRefreshScheduler";
 import {
@@ -1387,20 +1387,21 @@ export default function Planning() {
     }
     const revision = seriesEntry.current_revision;
     try {
-      await runIntentMutation(`edit-task:${occurrence.id}`, "planning-edit-task", {
-        action: "change_object_task_series",
+      const scope = `edit-task:${occurrence.id}`;
+      const request = mutationIntents.current.prepare(scope, {
+        occurrence_id: occurrence.id,
         customer_id: occurrence.customer_id,
         object_id: occurrence.object_id,
         task_definition_id: occurrence.object_task_definition_id,
         series_id: seriesEntry.series.id,
-        expected_version: Number(seriesEntry.series.version || 1),
-        effective_from: occurrence.service_date,
+        source_revision_id: occurrence.object_task_schedule_revision_id || revision.id,
+        service_date: occurrence.service_date,
         start_time: startTime,
         end_time: endTime,
-        repeat_weekly: revision.recurrence_type === "weekly",
-        recurrence_end_date: revision.recurrence_end_date || null,
         confirm_remove_outside_shifts: confirmRemoval,
-      });
+      }, { prefix: "planning-edit-single-task" });
+      await invokeSinglePlanningTaskChange(request);
+      mutationIntents.current.clear(scope, request.idempotency_key);
     } catch (error) {
       if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") {
         setTaskShiftRemovalRequest({ occurrence, startTime, endTime, shifts: error.details.shifts || [] });

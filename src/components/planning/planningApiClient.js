@@ -54,6 +54,17 @@ async function invokePlanningApiWithClient(client, request) {
   return data;
 }
 
+export async function invokeSinglePlanningTaskChange(payload) {
+  try {
+    const response = await base44.functions.invoke("changeSinglePlanningTask", payload);
+    const data = unwrapPlanningResponse(response);
+    if (data?.error) throw Object.assign(new Error(data.error), { status: data.status || 400, details: data.details || null });
+    return data;
+  } catch (error) {
+    throw normalizePlanningError(error);
+  }
+}
+
 export async function invokePlanningApi(payload, {
   ensureIdempotencyKey = true,
   preferLatestFunctions = false,

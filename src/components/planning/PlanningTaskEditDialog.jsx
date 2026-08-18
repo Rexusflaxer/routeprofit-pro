@@ -21,7 +21,7 @@ export default function PlanningTaskEditDialog({ occurrence, open, onOpenChange,
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[16px]"><Pencil className="h-4 w-4 text-primary" /> Taak bewerken</DialogTitle>
-          <DialogDescription className="text-[12px]">Wijzig het tijdvenster van deze taak vanaf de geselecteerde datum.</DialogDescription>
+          <DialogDescription className="text-[12px]">Wijzig alleen dit geselecteerde taakmoment. Andere herhalingen blijven ongewijzigd.</DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-border bg-muted/35 p-3">
           <p className="text-[12px] font-semibold">{occurrence?.task_name_snapshot || "Taak"}</p>
