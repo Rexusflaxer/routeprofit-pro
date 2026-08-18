@@ -43,7 +43,7 @@ const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods ||
   repeating: ["weekly", "week"].includes(String(period.entry?.frequency || period.entry?.recurrence_type || "").toLowerCase()),
   alternative: period.entry?.revision?.metadata?.planning_only_single_occurrence === true,
 }));
-const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: { start: toMinutes(period.start_time), end: toMinutes(period.end_time) } } : null; };
+const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: { start: toMinutes(period.start_time), end: toMinutes(period.end_time), repeating: ["weekly", "week"].includes(String(period.entry?.frequency || period.entry?.recurrence_type || "").toLowerCase()), alternative: period.entry?.revision?.metadata?.planning_only_single_occurrence === true } } : null; };
 
 export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true, hoverOnlyActive = false }) {
   const [hover, setHover] = useState(null);
