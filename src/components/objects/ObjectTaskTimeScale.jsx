@@ -10,7 +10,7 @@ function positionClass(index) {
 
 export default function ObjectTaskTimeScale() {
   return (
-    <div className="flex h-8 bg-background" aria-hidden="true">
+    <div className="flex h-8 bg-transparent" aria-hidden="true">
       <span className="w-20 shrink-0" />
       <div className="relative flex-1">
         {HOURS.map((hour, index) => (

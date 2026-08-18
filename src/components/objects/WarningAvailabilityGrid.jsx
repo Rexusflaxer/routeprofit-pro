@@ -62,7 +62,7 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
         </div>
       )}
       {rows.map((row, dayIndex) => { const day = weekdayAt(dayIndex); return <div key={row} className={`flex ${dayDisabled(dayIndex) ? "opacity-30" : ""}`}>
-        <span className={`${dayLabels ? `sticky left-0 z-20 w-20 flex-col justify-center bg-background leading-tight ${rowActive?.[dayIndex] ? "text-primary" : "text-foreground"}` : "w-10 items-center"} flex h-12 shrink-0 pr-2 text-xs font-semibold`}>
+        <span className={`${dayLabels ? `sticky left-0 z-20 w-20 flex-col justify-center bg-transparent leading-tight ${rowActive?.[dayIndex] ? "text-primary" : "text-foreground"}` : "w-10 items-center"} flex h-12 shrink-0 pr-2 text-xs font-semibold`}>
           <span>{day.label.slice(0, 2)}</span>
           {dayLabels?.[dayIndex] && <span className="text-[10px] font-normal text-muted-foreground">{dayLabels[dayIndex]}</span>}
         </span>

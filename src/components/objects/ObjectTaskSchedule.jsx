@@ -766,8 +766,8 @@ export default function ObjectTaskSchedule({
                 )}
               </div>
             </div>
-            <span className="pointer-events-none absolute left-0 top-0 z-40 h-8 w-20 bg-gradient-to-b from-background via-background/70 to-transparent" />
-            <span className="pointer-events-none absolute bottom-0 left-0 z-40 h-8 w-20 bg-gradient-to-t from-background via-background/70 to-transparent" />
+            <span className="pointer-events-none absolute left-0 top-0 z-40 h-8 w-20 bg-gradient-to-b from-card/35 to-transparent" />
+            <span className="pointer-events-none absolute bottom-0 left-0 z-40 h-8 w-20 bg-gradient-to-t from-card/35 to-transparent" />
           </div>
         </div>
       </div>
