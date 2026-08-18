@@ -3,6 +3,7 @@ import {
   createObjectTaskClientId,
   objectTaskClockToMinutes,
 } from "./objectTaskScheduleDomain";
+import { objectTaskRecurrence } from "./objectTaskRecurrence";
 
 const toTime = value => value === 1440
   ? "24:00"
@@ -22,7 +23,7 @@ export function remainingTaskIntervals(entry, eraseStart, eraseEnd) {
 
 export function eraseTaskOccurrence(source, occurrenceDate, eraseStart, eraseEnd) {
   const remaining = remainingTaskIntervals(source, eraseStart, eraseEnd);
-  const startsLater = source.frequency === "weekly" && occurrenceDate > source.occurrence_date;
+  const startsLater = objectTaskRecurrence(source).repeating && occurrenceDate > source.occurrence_date;
   const prefix = startsLater
     ? [{ ...source, repeat_until: addObjectTaskDays(occurrenceDate, -1) }]
     : [];

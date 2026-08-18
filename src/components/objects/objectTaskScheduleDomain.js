@@ -1,3 +1,5 @@
+import { objectTaskRecurrence, objectTaskRecurrenceLabel, objectTaskRecursOn } from "./objectTaskRecurrence";
+
 const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export const OBJECT_TASK_TIMEZONE = "Europe/Amsterdam";
@@ -186,7 +188,8 @@ export function createObjectTaskClientId(prefix = "schedule") {
 }
 
 function normalizedFrequency(value) {
-  return ["weekly", "week"].includes(String(value || "").toLowerCase()) ? "weekly" : "once";
+  const type = String(value || "").toLowerCase();
+  return ["weekly", "monthly", "yearly"].includes(type) ? type : "once";
 }
 
 export function normalizeObjectTaskRevision(revision = {}) {
@@ -205,6 +208,8 @@ export function normalizeObjectTaskRevision(revision = {}) {
     operation,
     effective_from: effectiveFrom,
     frequency: normalizedFrequency(revision.frequency || revision.recurrence_type),
+    recurrence_type: normalizedFrequency(revision.recurrence_type || revision.frequency),
+    recurrence_interval: Math.max(1, Number(revision.recurrence_interval || revision.metadata?.recurrence_interval || 1)),
     weekday: Number.isInteger(Number(revision.weekday)) && Number(revision.weekday) >= 1 && Number(revision.weekday) <= 7
       ? Number(revision.weekday)
       : objectTaskWeekday(effectiveFrom),
@@ -236,8 +241,7 @@ function activeRevisionForDate(series, revisions, dateKey) {
 function revisionOccursOnDate(revision, dateKey) {
   if (!revision || revision.operation === "stop" || dateKey < revision.effective_from) return false;
   if (revision.repeat_until && dateKey > revision.repeat_until) return false;
-  if (revision.frequency === "once") return dateKey === revision.effective_from;
-  return objectTaskWeekday(dateKey) === revision.weekday;
+  return objectTaskRecursOn(revision, dateKey);
 }
 
 function definitionLabel(definition = {}) {
@@ -375,9 +379,7 @@ export function projectObjectTaskDrafts(entries = [], weekStart) {
     return week.days.flatMap(dateKey => {
       const starts = normalized.occurrence_date || normalized.effective_from;
       if (!starts || dateKey < starts || (normalized.repeat_until && dateKey > normalized.repeat_until)) return [];
-      const applies = normalized.frequency === "weekly"
-        ? objectTaskWeekday(dateKey) === objectTaskWeekday(starts)
-        : dateKey === starts;
+      const applies = objectTaskRecursOn({ ...normalized, effective_from: starts }, dateKey);
       return applies ? [{ ...normalized, id: `${normalized.client_id}:${dateKey}`, occurrence_date: dateKey, draft_source_id: normalized.client_id, draft: true }] : [];
     });
   });
@@ -394,8 +396,8 @@ export function objectTaskEntryInterval(entry) {
 export function objectTaskEntrySummary(entry) {
   if (!entry) return "";
   const time = `${entry.start_time}–${entry.end_time}${Number(entry.end_day_offset || 0) > 0 ? " (+1)" : ""}`;
-  if (entry.frequency !== "weekly") return `${formatObjectTaskFullDate(entry.occurrence_date)} · ${time}`;
-  return `Elke ${formatObjectTaskFullDate(entry.occurrence_date).split(" ")[0]} · ${time}${entry.repeat_until ? ` · t/m ${formatObjectTaskCompactDate(entry.repeat_until)}` : " · zonder einddatum"}`;
+  if (!objectTaskRecurrence(entry).repeating) return `${formatObjectTaskFullDate(entry.occurrence_date)} · ${time}`;
+  return `${objectTaskRecurrenceLabel(entry)} · ${time}${entry.repeat_until ? ` · t/m ${formatObjectTaskCompactDate(entry.repeat_until)}` : " · zonder einddatum"}`;
 }
 
 export function firstUpcomingObjectTaskEntry(entries, now = getAmsterdamNow()) {

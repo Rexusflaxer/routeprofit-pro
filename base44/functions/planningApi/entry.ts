@@ -1559,100 +1559,82 @@ function isoWeekday(value: string) {
   return day === 0 ? 7 : day;
 }
 
+function recurrenceMatches(revision: LooseRecord, date: string) {
+  const type = revision.recurrence_type || 'one_time';
+  const interval = Math.max(1, Number(revision.recurrence_interval || revision.metadata?.recurrence_interval || 1));
+  const anchor = revision.effective_from;
+  if (!anchor || date < anchor) return false;
+  if (type === 'one_time') return date === anchor;
+  if (type === 'weekly') return isoWeekday(date) === Number(revision.weekday)
+    && (dateOrdinal(date) - dateOrdinal(anchor)) % (interval * 7) === 0;
+  const [anchorYear, anchorMonth, anchorDay] = anchor.split('-').map(Number);
+  const [year, month, day] = date.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(year, type === 'yearly' ? anchorMonth : month, 0)).getUTCDate();
+  if (type === 'monthly') return ((year * 12 + month) - (anchorYear * 12 + anchorMonth)) % interval === 0
+    && day === Math.min(anchorDay, lastDay);
+  return type === 'yearly' && (year - anchorYear) % interval === 0
+    && month === anchorMonth && day === Math.min(anchorDay, lastDay);
+}
+
 function normalizedObjectTaskInput(body: LooseRecord) {
   const input = body.task || body.definition || body.task_definition || {};
   const taskType = compact(input.task_type || body.task_type);
   if (!OBJECT_TASK_TYPES.has(taskType)) throw new ApiError(400, 'task.task_type is ongeldig');
   const executionMode = compact(input.execution_mode || body.execution_mode);
-  if (!['continuous', 'time_window'].includes(executionMode)) {
-    throw new ApiError(400, 'task.execution_mode moet continuous of time_window zijn');
-  }
+  if (!['continuous', 'time_window'].includes(executionMode)) throw new ApiError(400, 'task.execution_mode moet continuous of time_window zijn');
   const customTaskType = compact(input.custom_task_type || body.custom_task_type) || null;
-  if (taskType === 'other' && !customTaskType) {
-    throw new ApiError(400, 'task.custom_task_type is verplicht bij een andere taak');
-  }
-  const durationMinutes = executionMode === 'time_window'
-    ? positiveInteger(input.duration_minutes ?? body.duration_minutes, 'task.duration_minutes')
-    : null;
+  if (taskType === 'other' && !customTaskType) throw new ApiError(400, 'task.custom_task_type is verplicht bij een andere taak');
   return {
     security_plan_id: compact(input.security_plan_id || body.security_plan_id) || null,
     security_plan_revision_id: compact(input.security_plan_revision_id || body.security_plan_revision_id) || null,
-    task_type: taskType,
-    custom_task_type: customTaskType,
-    execution_mode: executionMode,
-    duration_minutes: durationMinutes,
+    task_type: taskType, custom_task_type: customTaskType, execution_mode: executionMode,
+    duration_minutes: executionMode === 'time_window' ? positiveInteger(input.duration_minutes ?? body.duration_minutes, 'task.duration_minutes') : null,
     instructions: compact(input.instructions ?? body.instructions) || null,
   };
 }
 
 function suppliedScheduleBlocks(body: LooseRecord) {
-  const supplied = body.schedule_blocks ?? body.schedules ?? body.schedule ?? body.series;
-  return normalizeArray<LooseRecord>(supplied).filter(item => item && typeof item === 'object');
+  return normalizeArray<LooseRecord>(body.schedule_blocks ?? body.schedules ?? body.schedule ?? body.series)
+    .filter(item => item && typeof item === 'object');
 }
 
-function normalizedScheduleBlock(
-  input: LooseRecord,
-  task: LooseRecord,
-  fieldPrefix: string,
-  clock = amsterdamServerClock(),
-) {
+function normalizedScheduleBlock(input: LooseRecord, task: LooseRecord, fieldPrefix: string, clock = amsterdamServerClock()) {
   const serviceDate = asDate(input.service_date || input.effective_from || input.date, `${fieldPrefix}.service_date`);
   const startTime = asTime(input.start_time, `${fieldPrefix}.start_time`);
   const endTime = scheduleEndTime(input.end_time, `${fieldPrefix}.end_time`);
-  const interval = normalizedPeriodInterval(serviceDate, startTime, endTime)?.interval;
-  if (!interval) throw new ApiError(400, `${fieldPrefix} heeft geen geldig tijdvenster`);
+  const period = normalizedPeriodInterval(serviceDate, startTime, endTime);
+  if (!period?.interval) throw new ApiError(400, `${fieldPrefix} heeft geen geldig tijdvenster`);
   assertFutureSchedule(serviceDate, startTime, clock);
-  const repeatWeekly = input.repeat_weekly === true
-    || input.recurrence_type === 'weekly'
-    || input.repeat?.frequency === 'weekly'
-    || input.recurrence?.frequency === 'weekly';
-  const recurrenceEndDate = optionalDate(
-    input.recurrence_end_date ?? input.end_date_recurrence ?? input.repeat?.end_date ?? input.recurrence?.end_date,
-    `${fieldPrefix}.recurrence_end_date`,
-  );
-  if (recurrenceEndDate && recurrenceEndDate < serviceDate) {
-    throw new ApiError(400, `${fieldPrefix}.recurrence_end_date ligt voor de eerste taak`);
-  }
-  const requiredMinutes = task.execution_mode === 'continuous'
-    ? interval.duration
-    : positiveInteger(task.duration_minutes, 'task.duration_minutes');
-  if (requiredMinutes > interval.duration) {
-    throw new ApiError(400, 'De taakduur past niet binnen het getekende tijdvenster');
-  }
-  return {
-    effective_from: serviceDate,
-    recurrence_type: repeatWeekly ? 'weekly' : 'one_time',
-    weekday: isoWeekday(serviceDate),
-    start_time: startTime,
-    end_time: endTime,
-    recurrence_end_date: repeatWeekly ? recurrenceEndDate : serviceDate,
-    required_minutes: requiredMinutes,
-  };
+  const suppliedType = compact(input.recurrence_type || input.repeat?.frequency || input.recurrence?.frequency);
+  const recurrenceType = ['weekly', 'monthly', 'yearly'].includes(suppliedType) ? suppliedType : input.repeat_weekly === true ? 'weekly' : 'one_time';
+  const recurrenceInterval = recurrenceType === 'one_time' ? 1 : positiveInteger(input.recurrence_interval || input.repeat?.interval || input.recurrence?.interval || input.metadata?.recurrence_interval || 1, `${fieldPrefix}.recurrence_interval`);
+  if (recurrenceInterval > 52) throw new ApiError(400, `${fieldPrefix}.recurrence_interval is te groot`);
+  const recurrenceEndDate = optionalDate(input.recurrence_end_date ?? input.end_date_recurrence ?? input.repeat?.end_date ?? input.recurrence?.end_date, `${fieldPrefix}.recurrence_end_date`);
+  if (recurrenceEndDate && recurrenceEndDate < serviceDate) throw new ApiError(400, `${fieldPrefix}.recurrence_end_date ligt voor de eerste taak`);
+  const requiredMinutes = task.execution_mode === 'continuous' ? period.interval.duration : positiveInteger(task.duration_minutes, 'task.duration_minutes');
+  if (requiredMinutes > period.interval.duration) throw new ApiError(400, 'De taakduur past niet binnen het getekende tijdvenster');
+  return { effective_from: serviceDate, recurrence_type: recurrenceType, recurrence_interval: recurrenceInterval,
+    weekday: isoWeekday(serviceDate), start_time: startTime, end_time: endTime,
+    recurrence_end_date: recurrenceType === 'one_time' ? serviceDate : recurrenceEndDate, required_minutes: requiredMinutes };
 }
 
 function taskRevisionForDate(revisions: LooseRecord[], serviceDate: string) {
-  return revisions
-    .filter(item => item.effective_from <= serviceDate)
+  return revisions.filter(item => item.effective_from <= serviceDate)
     .sort((left, right) => Number(right.revision_number || 0) - Number(left.revision_number || 0))[0] || null;
 }
 
 function taskScheduleRevisionApplies(revision: LooseRecord, serviceDate: string) {
-  if (!revision || revision.operation === 'stop') return false;
-  if (revision.recurrence_end_date && serviceDate > revision.recurrence_end_date) return false;
-  if (revision.recurrence_type === 'one_time') return revision.effective_from === serviceDate;
-  return revision.recurrence_type === 'weekly' && Number(revision.weekday) === isoWeekday(serviceDate);
+  return Boolean(revision && revision.operation !== 'stop'
+    && (!revision.recurrence_end_date || serviceDate <= revision.recurrence_end_date)
+    && recurrenceMatches(revision, serviceDate));
 }
 
 function nextScheduleOccurrenceDate(revision: LooseRecord, fromDate: string) {
   if (!revision || revision.operation === 'stop') return null;
-  if (revision.recurrence_type === 'one_time') {
-    return revision.effective_from >= fromDate ? revision.effective_from : null;
-  }
-  for (let offset = 0; offset < 7; offset += 1) {
+  for (let offset = 0; offset <= 366 * 52; offset += 1) {
     const candidate = addDateDays(fromDate, offset);
-    if (Number(revision.weekday) !== isoWeekday(candidate)) continue;
     if (revision.recurrence_end_date && candidate > revision.recurrence_end_date) return null;
-    return candidate;
+    if (recurrenceMatches(revision, candidate)) return candidate;
   }
   return null;
 }
@@ -2827,7 +2809,7 @@ async function scheduleRevisionPayload(
     previous_revision_id: previousRevision?.id || null,
     operation,
     effective_from: block.effective_from,
-    recurrence_type: block.recurrence_type || previousRevision?.recurrence_type || 'one_time',
+    recurrence_type: block.recurrence_type || previousRevision?.recurrence_type || 'one_time', recurrence_interval: Number(block.recurrence_interval || previousRevision?.recurrence_interval || previousRevision?.metadata?.recurrence_interval || 1),
     weekday: operation === 'schedule' ? block.weekday : (previousRevision?.weekday || isoWeekday(block.effective_from)),
     start_time: operation === 'schedule' ? block.start_time : null,
     end_time: operation === 'schedule' ? block.end_time : null,
@@ -3098,7 +3080,7 @@ async function createObjectTask(
   if (!rawBlocks.length) throw new ApiError(400, 'Teken minimaal één taak in het rooster');
   if (rawBlocks.length > 50) throw new ApiError(400, 'Per taak kunnen maximaal 50 roosterblokken worden opgeslagen');
   const blocks = rawBlocks.map((item, index) => normalizedScheduleBlock(item, task, `schedule_blocks.${index}`, clock));
-  const duplicateKeys = blocks.map(item => `${item.effective_from}:${item.start_time}:${item.end_time}:${item.recurrence_type}`);
+  const duplicateKeys = blocks.map(item => `${item.effective_from}:${item.start_time}:${item.end_time}:${item.recurrence_type}:${item.recurrence_interval}`);
   if (new Set(duplicateKeys).size !== duplicateKeys.length) {
     throw new ApiError(409, 'Het rooster bevat dezelfde taak meer dan één keer');
   }
@@ -3135,7 +3117,7 @@ async function createObjectTask(
           start_time: item.start_time,
           end_time: item.end_time,
         })),
-        recurrence_type: first.recurrence_type,
+        recurrence_type: first.recurrence_type === 'one_time' ? 'one_time' : 'weekly',
         weekdays,
         valid_from: blocks.map(item => item.effective_from).sort()[0],
         valid_until: blocks.map(item => item.recurrence_end_date).filter(Boolean).sort().at(-1) || null,

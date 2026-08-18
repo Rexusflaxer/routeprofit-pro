@@ -129,6 +129,8 @@ function scheduleBlockPayload(block = {}) {
     service_date: required(block.occurrence_date || block.service_date, "Datum"),
     start_time: required(block.start_time, "Starttijd"),
     end_time: required(block.end_time, "Eindtijd"),
+    recurrence_type: block.recurrence_type || (block.frequency === "once" ? "one_time" : block.frequency) || "one_time",
+    recurrence_interval: Number(block.recurrence_interval || 1),
     repeat_weekly: (block.frequency || block.recurrence_type) === "weekly" || block.repeat_weekly === true,
     recurrence_end_date: block.repeat_until || block.recurrence_end_date || null,
   };
@@ -179,6 +181,8 @@ export async function changeObjectTaskSeries({ customerId, objectId, entry, data
     effective_from: required(entry?.occurrence_date, "Ingangsdatum"),
     start_time: required(data.start_time, "Starttijd"),
     end_time: required(data.end_time, "Eindtijd"),
+    recurrence_type: data.recurrence_type || (data.frequency === "once" ? "one_time" : data.frequency) || "one_time",
+    recurrence_interval: Number(data.recurrence_interval || 1),
     repeat_weekly: data.frequency === "weekly" || data.repeat_weekly === true,
     recurrence_end_date: data.repeat_until || data.recurrence_end_date || null,
   });

@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence, objectTaskRecurrenceLabel } from "./objectTaskRecurrence";
 import {
   formatObjectTaskCompactDate,
   formatObjectTaskFullDate,
@@ -35,6 +36,7 @@ import {
 
 function initialForm(entry, fixedDuration) {
   const start = entry?.start_time || "08:00";
+  const recurrence = objectTaskRecurrence(entry);
   const startMinute = objectTaskClockToMinutes(start) || 0;
   const fixedEnd = fixedDuration
     ? (startMinute + Number(fixedDuration) >= 1440
@@ -45,7 +47,7 @@ function initialForm(entry, fixedDuration) {
     start_time: start,
     end_time: fixedEnd || entry?.end_time || "17:00",
     end_day_offset: Number(entry?.end_day_offset || (fixedDuration && startMinute + Number(fixedDuration) >= 1440 ? 1 : 0)),
-    frequency: entry?.frequency === "weekly" ? "weekly" : "once",
+    recurrence_key: recurrence.key,
     repeat_until: entry?.repeat_until || "",
     has_end_date: Boolean(entry?.repeat_until),
   };
@@ -101,6 +103,7 @@ export default function ObjectTaskSeriesDialog({
   }, [entry, fixedDuration, open]);
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
+  const recurrence = OBJECT_TASK_RECURRENCE_OPTIONS.find(option => option.key === form.recurrence_key) || OBJECT_TASK_RECURRENCE_OPTIONS[0];
   const startMinute = objectTaskClockToMinutes(form.start_time);
   const fixedEnd = useMemo(() => {
     if (!fixedDuration || startMinute == null) return null;
@@ -115,7 +118,7 @@ export default function ObjectTaskSeriesDialog({
   const resolvedEndMinute = objectTaskClockToMinutes(resolvedEnd);
   const intervalValid = startMinute != null && resolvedEndMinute != null
     && (resolvedOffset > 0 ? resolvedEndMinute + 1440 > startMinute : resolvedEndMinute > startMinute);
-  const recurrenceValid = form.frequency !== "weekly" || !form.has_end_date
+  const recurrenceValid = recurrence.type === "one_time" || !form.has_end_date
     || Boolean(form.repeat_until && form.repeat_until >= entry?.occurrence_date);
   const futureValid = Boolean(entry?.occurrence_date) && startMinute != null
     && isObjectTaskMomentEditable(entry.occurrence_date, startMinute, now);
@@ -125,7 +128,10 @@ export default function ObjectTaskSeriesDialog({
     ...form,
     end_time: resolvedEnd,
     end_day_offset: resolvedOffset,
-    repeat_until: form.frequency === "weekly" && form.has_end_date ? form.repeat_until : null,
+    frequency: recurrence.type === "one_time" ? "once" : recurrence.type,
+    recurrence_type: recurrence.type,
+    recurrence_interval: recurrence.interval,
+    repeat_until: recurrence.type !== "one_time" && form.has_end_date ? form.repeat_until : null,
   });
 
   const submit = event => {
@@ -135,11 +141,13 @@ export default function ObjectTaskSeriesDialog({
       start_time: form.start_time,
       end_time: resolvedEnd,
       end_day_offset: resolvedOffset,
-      frequency: form.frequency,
-      repeat_until: form.frequency === "weekly" && form.has_end_date ? form.repeat_until : null,
+      frequency: recurrence.type === "one_time" ? "once" : recurrence.type,
+      recurrence_type: recurrence.type,
+      recurrence_interval: recurrence.interval,
+      repeat_until: recurrence.type !== "one_time" && form.has_end_date ? form.repeat_until : null,
     });
   };
-  const recurring = entry?.frequency === "weekly";
+  const recurring = objectTaskRecurrence(entry).repeating;
 
   return (
     <>
@@ -149,7 +157,7 @@ export default function ObjectTaskSeriesDialog({
             <DialogTitle>{entry?.draft ? "Taakmoment instellen" : "Taakmoment wijzigen"}</DialogTitle>
             <DialogDescription>
               {entry?.draft
-                ? `${formatObjectTaskFullDate(entry?.occurrence_date)}. Stel de exacte tijd en eventuele wekelijkse herhaling in.`
+                ? `${formatObjectTaskFullDate(entry?.occurrence_date)}. Stel de exacte tijd en eventuele herhaling in.`
                 : `De wijziging geldt vanaf ${formatObjectTaskFullDate(entry?.occurrence_date)}. Eerdere weken blijven ongewijzigd.`}
             </DialogDescription>
           </DialogHeader>
@@ -163,13 +171,12 @@ export default function ObjectTaskSeriesDialog({
 
             <div className="space-y-2">
               <Label>Herhaling</Label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Choice active={form.frequency === "once"} icon={CalendarClock} title="Eenmalig" description="Alleen op deze kalenderdatum." onClick={() => set("frequency", "once")} />
-                <Choice active={form.frequency === "weekly"} icon={Repeat2} title="Wekelijks" description="Iedere week op dezelfde dag en tijd." onClick={() => set("frequency", "weekly")} />
-              </div>
+              <select value={form.recurrence_key} onChange={event => set("recurrence_key", event.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+              </select>
             </div>
 
-            {form.frequency === "weekly" && (
+            {recurrence.type !== "one_time" && (
               <div className="rounded-xl border border-border/70 bg-card/35 p-4">
                 <label className="flex items-center justify-between gap-3">
                   <span><span className="flex items-center gap-1.5 text-sm font-semibold"><Infinity className="h-4 w-4 text-primary" /> Zonder einddatum</span><span className="mt-0.5 block text-xs text-muted-foreground">Zet uit om een laatste uitvoeringsdatum te kiezen.</span></span>
@@ -184,7 +191,7 @@ export default function ObjectTaskSeriesDialog({
             {!futureValid && <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">Dit taakmoment ligt inmiddels in het verleden. Kies een tijd na {now.clock} of een volgende week.</p>}
             {error && <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error.message}</p>}
             <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-              {onDelete ? <Button type="button" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" /> {recurring && !entry?.draft ? "Vanaf deze week verwijderen" : "Taakmoment verwijderen"}</Button> : <span />}
+              {onDelete ? <Button type="button" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" /> {recurring && !entry?.draft ? "Vanaf dit moment verwijderen" : "Taakmoment verwijderen"}</Button> : <span />}
               <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>Annuleren</Button><Button type="submit" disabled={!valid || pending}>{pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{pending ? "Opslaan…" : "Toepassen"}</Button></div>
             </DialogFooter>
           </form>
@@ -194,8 +201,8 @@ export default function ObjectTaskSeriesDialog({
       <AlertDialog open={confirmDelete} onOpenChange={next => !pending && setConfirmDelete(next)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{recurring && !entry?.draft ? "Reeks vanaf deze week stoppen?" : "Taakmoment verwijderen?"}</AlertDialogTitle>
-            <AlertDialogDescription>{recurring && !entry?.draft ? `Vanaf ${formatObjectTaskCompactDate(entry?.occurrence_date)} wordt dit wekelijkse taakmoment niet meer aangemaakt. Eerdere weken blijven behouden. Reeds ingeplande diensten worden in Planning gemarkeerd voor controle.` : "Dit nog niet opgeslagen taakmoment wordt uit het rooster verwijderd."}</AlertDialogDescription>
+            <AlertDialogTitle>{recurring && !entry?.draft ? "Reeks vanaf dit moment stoppen?" : "Taakmoment verwijderen?"}</AlertDialogTitle>
+            <AlertDialogDescription>{recurring && !entry?.draft ? `Vanaf ${formatObjectTaskCompactDate(entry?.occurrence_date)} wordt dit herhalende taakmoment niet meer aangemaakt. Eerdere weken blijven behouden. Reeds ingeplande diensten worden in Planning gemarkeerd voor controle.` : "Dit nog niet opgeslagen taakmoment wordt uit het rooster verwijderd."}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuleren</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={pending} onClick={event => { event.preventDefault(); setConfirmDelete(false); onDelete(); }}>{pending && <Loader2 className="h-4 w-4 animate-spin" />} Verwijderen</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>

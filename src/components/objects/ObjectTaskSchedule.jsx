@@ -25,6 +25,7 @@ import {
   projectObjectTaskSchedules,
 } from "./objectTaskScheduleDomain";
 import { eraseTaskOccurrence, remainingTaskIntervals } from "./objectTaskScheduleEditing";
+import { objectTaskRecurrence } from "./objectTaskRecurrence";
 
 const GRID_HEADER_HEIGHT = 0;
 const GRID_DAY_HEIGHT = 48;
@@ -95,7 +96,7 @@ function entryPeriod(entry) {
 }
 
 function occurrenceReplacement(source, occurrenceDate, values) {
-  const startsLater = source.frequency === "weekly" && occurrenceDate > source.occurrence_date;
+  const startsLater = objectTaskRecurrence(source).repeating && occurrenceDate > source.occurrence_date;
   const next = {
     ...source,
     ...values,
@@ -113,7 +114,7 @@ function occurrenceReplacement(source, occurrenceDate, values) {
 }
 
 function occurrenceRemoval(source, occurrenceDate) {
-  if (source.frequency === "weekly" && occurrenceDate > source.occurrence_date) {
+  if (objectTaskRecurrence(source).repeating && occurrenceDate > source.occurrence_date) {
     return [{ ...source, repeat_until: addObjectTaskDays(occurrenceDate, -1) }];
   }
   return [];
@@ -139,12 +140,11 @@ function remainingAfterRanges(entry, ranges) {
 }
 
 function recurrenceIdentity(entry) {
-  const frequency = ["weekly", "week"].includes(String(entry.frequency || entry.recurrence_type || "").toLowerCase())
-    ? "weekly"
-    : "once";
+  const recurrence = objectTaskRecurrence(entry);
   return {
     occurrenceDate: entry.occurrence_date || entry.effective_from || "",
-    frequency,
+    frequency: recurrence.type,
+    recurrenceInterval: recurrence.interval,
     repeatUntil: entry.repeat_until || entry.recurrence_end_date || entry.valid_until || "",
     endDayOffset: Number(entry.end_day_offset || 0),
     definitionId: String(entry.definition_id || entry.task_definition_id || entry.object_task_definition_id || ""),
@@ -161,6 +161,7 @@ function entriesCanJoin(left, right) {
   const rightIdentity = recurrenceIdentity(right);
   return leftIdentity.occurrenceDate === rightIdentity.occurrenceDate
     && leftIdentity.frequency === rightIdentity.frequency
+    && leftIdentity.recurrenceInterval === rightIdentity.recurrenceInterval
     && leftIdentity.repeatUntil === rightIdentity.repeatUntil
     && leftIdentity.endDayOffset === rightIdentity.endDayOffset
     && sameOptionalIdentity(leftIdentity.definitionId, rightIdentity.definitionId)
@@ -603,6 +604,8 @@ export default function ObjectTaskSchedule({
             start_time: toTime(remaining[0].start),
             end_time: toTime(remaining[0].end),
             frequency: staged.original.frequency,
+            recurrence_type: staged.original.recurrence_type || staged.original.frequency,
+            recurrence_interval: staged.original.recurrence_interval || 1,
             repeat_until: staged.original.repeat_until || null,
           });
           for (const interval of remaining.slice(1)) {

@@ -3,6 +3,7 @@ import { Repeat2, Shuffle } from "lucide-react";
 import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import { SLOT_COUNT, SLOT_MINUTES } from "./warningAvailabilityScheduleModel";
 import WarningAvailabilityHoverTooltip from "./WarningAvailabilityHoverTooltip";
+import { objectTaskRecurrence, objectTaskRecurrenceLabel } from "./objectTaskRecurrence";
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index * 2);
 const TIME_LABELS = Array.from({ length: 13 }, (_, index) => index * 2);
@@ -37,14 +38,15 @@ const intervalAt = (slots, slot) => {
 };
 const toMinutes = value => value === "24:00" ? 1440 : Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
 const matchesRow = (period, dayKey, dateKey) => dateKey ? period.date === dateKey : period.days?.includes(dayKey);
-const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(period => ({
-  start: toMinutes(period.start_time),
-  end: toMinutes(period.end_time),
-  repeating: ["weekly", "week"].includes(String(period.entry?.frequency || period.entry?.recurrence_type || "").toLowerCase()),
+const intervalDetails = period => ({
+  start: toMinutes(period.start_time), end: toMinutes(period.end_time),
+  repeating: objectTaskRecurrence(period.entry).repeating,
+  recurrenceLabel: objectTaskRecurrenceLabel(period.entry),
   repeatUntil: period.entry?.repeat_until || period.entry?.revision?.repeat_until || period.entry?.revision?.recurrence_end_date || null,
   alternative: period.entry?.revision?.metadata?.planning_only_single_occurrence === true,
-}));
-const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: { start: toMinutes(period.start_time), end: toMinutes(period.end_time), repeating: ["weekly", "week"].includes(String(period.entry?.frequency || period.entry?.recurrence_type || "").toLowerCase()), repeatUntil: period.entry?.repeat_until || period.entry?.revision?.repeat_until || period.entry?.revision?.recurrence_end_date || null, alternative: period.entry?.revision?.metadata?.planning_only_single_occurrence === true } } : null; };
+});
+const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(intervalDetails);
+const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: intervalDetails(period) } : null; };
 
 export default function WarningAvailabilityGrid({ schedule, exactPeriods = null, backgroundPeriods = [], previewDurationMinutes = null, onPaint, onIntervalClick, painting, tool, activeDayIndex = null, dayLabels = null, rowDates = null, weekNumbers = null, rowActive = null, showHeader = true, hoverOnlyActive = false }) {
   const [hover, setHover] = useState(null);
@@ -81,7 +83,7 @@ export default function WarningAvailabilityGrid({ schedule, exactPeriods = null,
           {weekNumbers?.[dayIndex] && <span className="pointer-events-none absolute left-3 top-1/2 z-[6] -translate-y-1/2 text-[40px] font-black leading-none text-muted-foreground/10">{weekNumbers[dayIndex]}</span>}
           {HOURS.map((hour, index) => <div key={hour} className="absolute inset-y-0 border-l border-border/70" style={{ left: `${(index / 12) * 100}%`, width: `${100 / 12}%` }}><div className="absolute inset-y-0 left-1/2 border-l border-border/30" /></div>)}
           {backgroundPeriods.filter(period => matchesRow(period, day.key, rowDates?.[dayIndex])).map((period, index) => { const start = toMinutes(period.start_time), end = toMinutes(period.end_time); return <div key={`${period.taskId}-${day.key}-${index}`} className={`pointer-events-none absolute inset-y-2 rounded-sm border ${BACKGROUND_STYLES[period.colorIndex % BACKGROUND_STYLES.length]}`} style={{ left: `${(start / 1440) * 100}%`, width: `${((end - start) / 1440) * 100}%` }} />; })}
-          {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "available", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "available")).map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 flex items-center justify-center overflow-hidden rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }}>{interval.alternative ? <Shuffle className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Aangepast alternatief taakmoment" /> : interval.repeating && <Repeat2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Wekelijks herhalende taak" />}</div>) }
+          {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "available", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "available")).map((interval, index) => <div key={`available-${index}`} className="pointer-events-none absolute inset-y-1 flex items-center justify-center overflow-hidden rounded-sm border border-primary/40 bg-primary/25" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }}>{interval.alternative ? <Shuffle className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Aangepast alternatief taakmoment" /> : interval.repeating && <Repeat2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Herhalende taak" />}</div>) }
           {(exactPeriods ? exactIntervalsFor(exactPeriods, day.key, "emergency_only", rowDates?.[dayIndex]) : intervalsFor(schedule[dayIndex], "emergency_only")).map((interval, index) => <div key={`emergency-${index}`} className="pointer-events-none absolute inset-y-1 rounded-sm border border-chart-4/60 bg-chart-4/45" style={{ left: `${(interval.start / 1440) * 100}%`, width: `${((interval.end - interval.start) / 1440) * 100}%` }} />)}
           {hover?.dayIndex === dayIndex && schedule[dayIndex][hover.slot] !== tool && (!previewDurationMinutes || hover.slot * SLOT_MINUTES + previewDurationMinutes <= 1440) && <div className={`pointer-events-none absolute inset-y-1 z-[5] rounded-sm border ${previewStyle(tool)}`} style={{ left: `${(hover.slot * SLOT_MINUTES / 1440) * 100}%`, width: `${((previewDurationMinutes || SLOT_MINUTES) / 1440) * 100}%` }} />}
           <div className="absolute inset-0 z-10 grid grid-cols-[repeat(48,minmax(0,1fr))]">{Array.from({ length: SLOT_COUNT }, (_, slot) => <button key={slot} type="button" disabled={dayDisabled(dayIndex)} aria-label={`${day.label} ${String(Math.floor(slot / 2)).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`} className="h-full touch-none bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed" onPointerDown={event => { event.preventDefault(); if (!dayDisabled(dayIndex)) startPointer(event, dayIndex, slot); }} onPointerUp={finishPointer} onPointerEnter={event => { if (!dayDisabled(dayIndex)) enterPointer(event, dayIndex, slot); }} onPointerMove={event => !dayDisabled(dayIndex) && showHover(event, dayIndex, slot)} />)}</div>

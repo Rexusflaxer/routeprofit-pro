@@ -3,46 +3,142 @@
   "type": "object",
   "description": "Append-only wijziging van een objecttaakreeks; een bestaande revisie wordt nooit aangepast of verwijderd.",
   "properties": {
-    "customer_id": { "type": "string" },
-    "object_id": { "type": "string" },
-    "object_task_definition_id": { "type": "string" },
-    "series_id": { "type": "string" },
-    "series_key": { "type": "string", "minLength": 1, "maxLength": 180 },
-    "revision_number": { "type": "number", "minimum": 1 },
-    "previous_revision_id": { "type": ["string", "null"] },
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "object_task_definition_id": {
+      "type": "string"
+    },
+    "series_id": {
+      "type": "string"
+    },
+    "series_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "revision_number": {
+      "type": "number",
+      "minimum": 1
+    },
+    "previous_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "operation": {
       "type": "string",
-      "enum": ["schedule", "stop"]
+      "enum": [
+        "schedule",
+        "stop"
+      ]
     },
-    "effective_from": { "type": "string", "format": "date" },
+    "effective_from": {
+      "type": "string",
+      "format": "date"
+    },
     "recurrence_type": {
       "type": "string",
-      "enum": ["one_time", "weekly"]
+      "enum": [
+        "one_time",
+        "weekly",
+        "monthly",
+        "yearly"
+      ]
     },
-    "weekday": { "type": ["number", "null"], "minimum": 1, "maximum": 7 },
+    "recurrence_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 52,
+      "default": 1,
+      "description": "Aantal weken, maanden of jaren tussen uitvoeringen."
+    },
+    "weekday": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 7
+    },
     "start_time": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
     },
     "end_time": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "pattern": "^(?:([01]\\d|2[0-3]):[0-5]\\d|24:00)$"
     },
-    "recurrence_end_date": { "type": ["string", "null"], "format": "date" },
+    "recurrence_end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
     "timezone": {
       "type": "string",
-      "enum": ["Europe/Amsterdam"],
+      "enum": [
+        "Europe/Amsterdam"
+      ],
       "default": "Europe/Amsterdam"
     },
-    "security_plan_id": { "type": ["string", "null"] },
-    "security_plan_revision_id": { "type": ["string", "null"] },
-    "task_snapshot": { "type": ["object", "null"], "additionalProperties": true },
-    "content_checksum": { "type": "string" },
-    "creation_idempotency_key": { "type": "string", "maxLength": 180 },
-    "creation_request_fingerprint": { "type": "string" },
-    "created_by_user_id": { "type": ["string", "null"] },
-    "created_at": { "type": "string", "format": "date-time" },
-    "metadata": { "type": ["object", "null"], "additionalProperties": true }
+    "security_plan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "security_plan_revision_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "content_checksum": {
+      "type": "string"
+    },
+    "creation_idempotency_key": {
+      "type": "string",
+      "maxLength": 180
+    },
+    "creation_request_fingerprint": {
+      "type": "string"
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
   },
   "required": [
     "customer_id",
@@ -62,7 +158,11 @@
   ],
   "rls": {
     "create": false,
-    "read": { "user_condition": { "role": "admin" } },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
     "update": false,
     "delete": false
   }

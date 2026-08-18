@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Repeat2, Trash2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { OBJECT_TASK_RECURRENCE_OPTIONS, objectTaskRecurrence } from "./objectTaskRecurrence";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -21,8 +22,9 @@ export default function ObjectTaskTimePopup({
   const ref = useRef(null);
   const [start, setStart] = useState(editor.start_time);
   const [end, setEnd] = useState(editor.end_time);
-  const [frequency, setFrequency] = useState(editor.frequency === "weekly" ? "weekly" : "once");
+  const [recurrenceKey, setRecurrenceKey] = useState(() => objectTaskRecurrence(editor).key);
   const [repeatUntil, setRepeatUntil] = useState(editor.repeat_until || "");
+  const recurrence = OBJECT_TASK_RECURRENCE_OPTIONS.find(option => option.key === recurrenceKey) || OBJECT_TASK_RECURRENCE_OPTIONS[0];
 
   useEffect(() => {
     const close = event => {
@@ -36,7 +38,7 @@ export default function ObjectTaskTimePopup({
   const validTime = Number.isFinite(minutes(start))
     && Number.isFinite(minutes(resolvedEnd))
     && minutes(start) < minutes(resolvedEnd);
-  const validRepeatUntil = frequency !== "weekly"
+  const validRepeatUntil = recurrence.type === "one_time"
     || !repeatUntil
     || repeatUntil >= editor.occurrence_date;
   const valid = validTime && validRepeatUntil;
@@ -71,41 +73,15 @@ export default function ObjectTaskTimePopup({
       </p>
 
       <div className="mt-3 border-t border-border/70 pt-3">
-        <Label className="text-[11px]">Herhaling</Label>
-        <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/30 p-1" role="radiogroup" aria-label="Herhaling">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={frequency === "once"}
-            disabled={pending}
-            onClick={() => { setFrequency("once"); setRepeatUntil(""); }}
-            className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${frequency === "once" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            Eenmalig
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={frequency === "weekly"}
-            disabled={pending}
-            onClick={() => setFrequency("weekly")}
-            className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${frequency === "weekly" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            <Repeat2 className="h-3 w-3" /> Wekelijks
-          </button>
-        </div>
-        {frequency === "weekly" && (
+        <Label htmlFor="exact-task-recurrence" className="text-[11px]">Herhaling</Label>
+        <select id="exact-task-recurrence" value={recurrenceKey} disabled={pending} onChange={event => { setRecurrenceKey(event.target.value); if (event.target.value === "once") setRepeatUntil(""); }} className="mt-1.5 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
+          {OBJECT_TASK_RECURRENCE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+        </select>
+        {recurrence.type !== "one_time" && (
           <div className="mt-2 space-y-1">
             <Label htmlFor="exact-task-repeat-until" className="text-[11px]">Einddatum <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
-            <Input
-              id="exact-task-repeat-until"
-              type="date"
-              min={editor.occurrence_date}
-              value={repeatUntil}
-              disabled={pending}
-              onChange={event => setRepeatUntil(event.target.value)}
-            />
-            <p className="text-[10px] text-muted-foreground">Zonder einddatum loopt de taak iedere week door.</p>
+            <Input id="exact-task-repeat-until" type="date" min={editor.occurrence_date} value={repeatUntil} disabled={pending} onChange={event => setRepeatUntil(event.target.value)} />
+            <p className="text-[10px] text-muted-foreground">Zonder einddatum loopt dit herhalingspatroon door.</p>
           </div>
         )}
       </div>
@@ -126,8 +102,10 @@ export default function ObjectTaskTimePopup({
           onClick={() => onSave({
             start_time: start,
             end_time: resolvedEnd,
-            frequency,
-            repeat_until: frequency === "weekly" ? repeatUntil || null : null,
+            frequency: recurrence.type === "one_time" ? "once" : recurrence.type,
+            recurrence_type: recurrence.type,
+            recurrence_interval: recurrence.interval,
+            repeat_until: recurrence.type !== "one_time" ? repeatUntil || null : null,
           })}
         >
           {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
