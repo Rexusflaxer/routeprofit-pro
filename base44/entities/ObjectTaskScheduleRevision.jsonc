@@ -41,6 +41,14 @@
       "type": "string",
       "format": "date"
     },
+    "recurrence_anchor_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Stabiele ankerdatum voor de herhalingsfase. effective_from bepaalt wanneer deze revisie ingaat; dit anker voorkomt dat tweewekelijkse, maandelijkse of jaarlijkse reeksen door een latere revisie verschuiven."
+    },
     "recurrence_type": {
       "type": "string",
       "enum": [

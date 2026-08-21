@@ -1,0 +1,62 @@
+{
+  "name": "ObjectTaskScheduleException",
+  "type": "object",
+  "description": "Datumgebonden uitzondering op een taakblauwdruk. De bronreeks blijft intact; een actief record onderdrukt uitsluitend de gekoppelde servicedatum en kan naar één afzonderlijke eenmalige alternatiefreeks verwijzen.",
+  "properties": {
+    "exception_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 220,
+      "description": "Deterministische sleutel per bronreeks en servicedatum."
+    },
+    "customer_id": { "type": "string" },
+    "object_id": { "type": "string" },
+    "object_task_definition_id": { "type": "string" },
+    "source_series_id": { "type": "string" },
+    "source_series_key": { "type": ["string", "null"] },
+    "source_revision_id": { "type": ["string", "null"] },
+    "source_logical_key": { "type": ["string", "null"] },
+    "service_date": { "type": "string", "format": "date" },
+    "kind": {
+      "type": "string",
+      "enum": ["alternative", "cancelled"],
+      "default": "alternative"
+    },
+    "alternative_series_id": { "type": ["string", "null"] },
+    "alternative_series_key": { "type": ["string", "null"] },
+    "alternative_revision_id": { "type": ["string", "null"] },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "active", "restored"],
+      "default": "pending",
+      "description": "pending laat de bron zichtbaar totdat de mutatie compleet is; active vervangt of annuleert die datum; restored activeert de blauwdrukdatum opnieuw."
+    },
+    "creation_idempotency_key": { "type": "string", "maxLength": 180 },
+    "creation_request_fingerprint": { "type": "string" },
+    "creation_actor_user_id": { "type": ["string", "null"] },
+    "created_by_user_id": { "type": ["string", "null"] },
+    "created_at": { "type": ["string", "null"], "format": "date-time" },
+    "version": { "type": "number", "minimum": 1, "default": 1 },
+    "last_modified_by_user_id": { "type": ["string", "null"] },
+    "last_modified_at": { "type": ["string", "null"], "format": "date-time" },
+    "metadata": { "type": ["object", "null"], "additionalProperties": true }
+  },
+  "required": [
+    "exception_key",
+    "customer_id",
+    "object_id",
+    "object_task_definition_id",
+    "source_series_id",
+    "service_date",
+    "status",
+    "creation_idempotency_key",
+    "creation_request_fingerprint",
+    "version"
+  ],
+  "rls": {
+    "create": false,
+    "read": { "user_condition": { "role": "admin" } },
+    "update": false,
+    "delete": false
+  }
+}

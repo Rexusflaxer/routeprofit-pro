@@ -11,6 +11,7 @@
         "add_object_task_series",
         "change_object_task_series",
         "stop_object_task_series",
+        "change_single_task_occurrence",
         "compose_shift",
         "compose_and_assign",
         "update_shift_composition",

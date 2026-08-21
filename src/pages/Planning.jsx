@@ -35,7 +35,7 @@ import {
   PublishPlanningDialog,
   ShiftActionDialog,
 } from "@/components/planning/PlanningDialogs";
-import { invokePlanningApi, invokeSinglePlanningTaskChange } from "@/components/planning/planningApiClient";
+import { invokePlanningApi } from "@/components/planning/planningApiClient";
 import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 import { createPlanningRefreshScheduler } from "@/components/planning/planningRefreshScheduler";
 import {
@@ -391,6 +391,8 @@ export default function Planning() {
   if (!mutationIntents.current) mutationIntents.current = createPlanningMutationIntentRegistry();
   const refreshScheduler = useRef(null);
   const refreshPlanningRef = useRef(null);
+  const taskMaterializationRequest = useRef(null);
+  const taskMaterializationRunning = useRef(false);
   const pendingResourceKeysRef = useRef(new Set());
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
@@ -627,7 +629,11 @@ export default function Planning() {
       refreshPlanningInBackground();
       if (
         result?.repaired_shared_boundary_occurrence_ids?.length
+        || result?.repaired_single_task_occurrence_ids?.length
         || result?.resolved_task_source_change_ids?.length
+        || result?.created_task_occurrence_ids?.length
+        || result?.refreshed_task_occurrence_ids?.length
+        || result?.superseded_task_occurrence_ids?.length
       ) {
         void refreshScheduler.current?.flush();
       }
@@ -640,6 +646,33 @@ export default function Planning() {
       });
     },
   });
+
+  const materializeTaskSchedulesInBackground = () => {
+    taskMaterializationRequest.current = {
+      period_start: bootstrapStart,
+      period_end: periodEnd,
+    };
+    if (taskMaterializationRunning.current) return;
+    taskMaterializationRunning.current = true;
+
+    void (async () => {
+      let completed = false;
+      try {
+        while (taskMaterializationRequest.current) {
+          const payload = taskMaterializationRequest.current;
+          taskMaterializationRequest.current = null;
+          await bootstrapMutation.mutateAsync(payload);
+          completed = true;
+        }
+      } catch {
+        // bootstrapMutation.onError already reports the background failure.
+      } finally {
+        taskMaterializationRunning.current = false;
+      }
+      if (completed) await refreshScheduler.current?.flush();
+      if (taskMaterializationRequest.current) materializeTaskSchedulesInBackground();
+    })();
+  };
 
   useEffect(() => {
     const key = `${bootstrapStart}:${periodEnd}`;
@@ -995,17 +1028,6 @@ export default function Planning() {
 
   const runActionMutation = useMutation({
     mutationFn: payload => invokePlanningApi(payload),
-    onSuccess: (_result, variables) => {
-      if ([
-        "compose_shift",
-        "compose_and_assign",
-        "update_shift_composition",
-        "cancel_task_shift",
-        "resize_shared_task_boundary",
-      ].includes(variables?.action)) {
-        bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
-      }
-    },
     onError: (error, variables) => {
       if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") return;
       if (variables?.action === "resize_shared_task_boundary") {
@@ -1325,36 +1347,21 @@ export default function Planning() {
   };
 
   const saveTaskEdit = async ({ occurrence, startTime, endTime, confirmRemoval = false }) => {
-    const catalog = await invokePlanningApi({
-      action: "list_object_tasks",
-      object_id: occurrence.object_id,
-      customer_id: occurrence.customer_id,
-    });
-    const taskRow = (catalog.tasks || []).find(item => String(item.definition?.id) === String(occurrence.object_task_definition_id));
-    const seriesEntry = occurrence.object_task_schedule_series_id
-      ? taskRow?.series?.find(item => String(item.series?.id) === String(occurrence.object_task_schedule_series_id))
-      : taskRow?.series?.find(item => item.current_revision?.start_time === occurrence.window_start_time && item.current_revision?.end_time === occurrence.window_end_time);
-    if (!taskRow || !seriesEntry?.series || !seriesEntry.current_revision) {
-      toast({ variant: "destructive", title: "Taak kan niet worden bewerkt", description: "De bijbehorende taakreeks kon niet veilig worden vastgesteld." });
-      return;
-    }
-    const revision = seriesEntry.current_revision;
+    let result;
     try {
-      const scope = `edit-task:${occurrence.id}`;
-      const request = mutationIntents.current.prepare(scope, {
-        occurrence_id: occurrence.id,
-        customer_id: occurrence.customer_id,
-        object_id: occurrence.object_id,
-        task_definition_id: occurrence.object_task_definition_id,
-        series_id: seriesEntry.series.id,
-        source_revision_id: occurrence.object_task_schedule_revision_id || revision.id,
-        service_date: occurrence.service_date,
-        start_time: startTime,
-        end_time: endTime,
-        confirm_remove_outside_shifts: confirmRemoval,
-      }, { prefix: "planning-edit-single-task" });
-      await invokeSinglePlanningTaskChange(request);
-      mutationIntents.current.clear(scope, request.idempotency_key);
+      result = await runIntentMutation(
+        `edit-task:${occurrence.id}`,
+        "planning-edit-single-task",
+        {
+          action: "change_single_task_occurrence",
+          occurrence_id: occurrence.id,
+          source_revision_id: occurrence.object_task_schedule_revision_id || null,
+          start_time: startTime,
+          end_time: endTime,
+          expected_occurrence_revision: Number(occurrence.revision || 1),
+          confirm_remove_outside_shifts: confirmRemoval,
+        },
+      );
     } catch (error) {
       if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") {
         setTaskShiftRemovalRequest({ occurrence, startTime, endTime, shifts: error.details.shifts || [] });
@@ -1362,9 +1369,9 @@ export default function Planning() {
       }
       throw error;
     }
+    reconcilePlanningResult(result);
+    refreshPlanningInBackground();
     setTaskShiftRemovalRequest(null);
-    await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
-    await refreshPlanning();
     setTaskEditor(null);
     const description = `${occurrence.task_name_snapshot || "Taak"} loopt nu van ${startTime} tot ${endTime}.`;
     toast({ title: "Taaktijden aangepast", description });
@@ -1378,6 +1385,23 @@ export default function Planning() {
     setLiveMessage(description);
   };
 
+  const reconcileTaskDefinitionVersion = result => {
+    const definitionId = result?.definition?.id;
+    const definitionVersion = Number(result?.definition?.version || 0);
+    if (!definitionId || definitionVersion < 1) return;
+    const occurrenceUpdates = taskOccurrences
+      .filter(item => String(item.object_task_definition_id) === String(definitionId))
+      .map(item => ({ id: item.id, definition_version: definitionVersion }));
+    if (occurrenceUpdates.length > 0) {
+      reconcilePlanningResult({ task_occurrences: occurrenceUpdates });
+    }
+    setTaskClipboard(current => (
+      current && String(current.object_task_definition_id) === String(definitionId)
+        ? { ...current, definition_version: definitionVersion }
+        : current
+    ));
+  };
+
   const deleteTaskOccurrence = async request => {
     const occurrence = request?.occurrence;
     if (!occurrence) return;
@@ -1388,68 +1412,25 @@ export default function Planning() {
     ]);
     if (!releasePendingResources) return;
     try {
-      const catalog = await invokePlanningApi({
-        action: "list_object_tasks",
-        object_id: occurrence.object_id,
-        customer_id: occurrence.customer_id,
-      });
-      const taskRow = (catalog.tasks || []).find(item => String(item.definition?.id) === String(occurrence.object_task_definition_id));
-      const seriesEntry = occurrence.object_task_schedule_series_id
-        ? taskRow?.series?.find(item => String(item.series?.id) === String(occurrence.object_task_schedule_series_id))
-        : taskRow?.series?.find(item => item.current_revision?.start_time === occurrence.window_start_time && item.current_revision?.end_time === occurrence.window_end_time);
-      if (!taskRow || !seriesEntry?.series || !seriesEntry.current_revision) {
-        toast({ variant: "destructive", title: "Taak kan niet worden verwijderd", description: "De bijbehorende taakreeks kon niet veilig worden vastgesteld." });
-        return;
-      }
-
-      let currentOccurrence = occurrence;
-      for (const shift of linkedShifts) {
-        const result = await runIntentMutation(`delete-task-shift:${occurrence.id}:${shift.id}`, "planning-delete-task-shift", {
-          action: "cancel_task_shift",
-          shift_id: shift.id,
-          expected_shift_revision: Number(shift.revision || 1),
-          expected_occurrence_revisions: { [occurrence.id]: Number(currentOccurrence.revision || 1) },
-        });
-        currentOccurrence = result.task_occurrences?.find(item => String(item.id) === String(occurrence.id)) || currentOccurrence;
-        reconcilePlanningResult(result);
-      }
-
-      const revision = seriesEntry.current_revision;
-      const stopped = await runIntentMutation(`delete-task:${occurrence.id}`, "planning-delete-task", {
-        action: "stop_object_task_series",
-        object_id: occurrence.object_id,
-        customer_id: occurrence.customer_id,
-        task_definition_id: occurrence.object_task_definition_id,
-        series_id: seriesEntry.series.id,
-        expected_version: Number(seriesEntry.series.version || 1),
-        effective_from: occurrence.service_date,
-      });
-      const resumeDate = toDateKey(addDays(occurrence.service_date, 7));
-      const shouldResume = revision.recurrence_type === "weekly"
-        && (!revision.recurrence_end_date || resumeDate <= revision.recurrence_end_date);
-      if (shouldResume) {
-        await runIntentMutation(`resume-task:${occurrence.id}`, "planning-resume-task", {
-          action: "add_object_task_series",
-          object_id: occurrence.object_id,
-          customer_id: occurrence.customer_id,
-          task_definition_id: occurrence.object_task_definition_id,
-          expected_version: Number(stopped.definition?.version || 1),
-          schedule_block: {
-            service_date: resumeDate,
-            start_time: revision.start_time,
-            end_time: revision.end_time,
-            repeat_weekly: true,
-            recurrence_end_date: revision.recurrence_end_date || null,
-          },
-        });
-      }
-      await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
-      await refreshPlanning();
+      const result = await runIntentMutation(
+        `cancel-task-occurrence:${occurrence.id}`,
+        "planning-cancel-task-occurrence",
+        {
+          action: "change_single_task_occurrence",
+          occurrence_id: occurrence.id,
+          source_revision_id: occurrence.object_task_schedule_revision_id || null,
+          expected_occurrence_revision: Number(occurrence.revision || 1),
+          cancel_occurrence: true,
+          confirm_remove_outside_shifts: true,
+        },
+      );
+      reconcilePlanningResult(result);
       if (String(taskClipboard?.id) === String(occurrence.id)) setTaskClipboard(null);
+      setTaskDeleteRequest(null);
+      refreshPlanningInBackground();
       const description = `${occurrence.task_name_snapshot || "Taak"} is verwijderd${linkedShifts.length ? `, inclusief ${linkedShifts.length} ${linkedShifts.length === 1 ? "dienst" : "diensten"}` : ""}.`;
       toast({ title: "Taak verwijderd", description });
       setLiveMessage(description);
-      setTaskDeleteRequest(null);
     } finally {
       releasePendingResources();
     }
@@ -1475,7 +1456,7 @@ export default function Planning() {
     const releasePendingResources = acquirePendingResources([`task-date:${objectId}:${serviceDate}`]);
     if (!releasePendingResources) return;
     try {
-      await runIntentMutation(`paste-task:${task.id}:${serviceDate}`, "planning-paste-task", {
+      const result = await runIntentMutation(`paste-task:${task.id}:${serviceDate}`, "planning-paste-task", {
         action: "add_object_task_series",
         object_id: task.object_id,
         customer_id: task.customer_id,
@@ -1488,8 +1469,8 @@ export default function Planning() {
           repeat_weekly: false,
         },
       });
-      await bootstrapMutation.mutateAsync({ period_start: bootstrapStart, period_end: periodEnd });
-      await refreshPlanning();
+      reconcileTaskDefinitionVersion(result);
+      materializeTaskSchedulesInBackground();
       const description = `${task.task_name_snapshot || "Taak"} is op ${serviceDate} geplaatst zonder diensten of medewerkers.`;
       toast({ title: "Taak geplakt", description });
       setLiveMessage(description);
@@ -2396,13 +2377,13 @@ export default function Planning() {
         open={Boolean(taskEditor)}
         onOpenChange={open => { if (!open && !runActionMutation.isPending) setTaskEditor(null); }}
         onSave={payload => saveTaskEdit(payload).catch(() => undefined)}
-        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
+        isPending={runActionMutation.isPending}
       />
       <PlanningTaskShiftRemovalDialog
         request={taskShiftRemovalRequest}
         onCancel={() => setTaskShiftRemovalRequest(null)}
         onConfirm={() => saveTaskEdit({ ...taskShiftRemovalRequest, confirmRemoval: true }).catch(() => undefined)}
-        isPending={runActionMutation.isPending || bootstrapMutation.isPending}
+        isPending={runActionMutation.isPending}
       />
       <PlanningServiceEditDialog
         request={serviceEditor}

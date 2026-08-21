@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getISOWeek } from "date-fns";
 import { Droppable } from "@hello-pangea/dnd";
 import {
-  AlertTriangle,
   Check,
   Clock3,
   ClipboardPaste,
@@ -290,6 +289,11 @@ function OpenTaskIntervalCard({
           </button>
         )}
       </div>
+      {!embeddedInLane && (
+        <p className="compact-hide mt-1 text-[9px] font-medium text-muted-foreground">
+          {formatMinutesAsHours(gap.allocatableMinutes)} nog niet ingepland
+        </p>
+      )}
       {editable && isDraggingOver && (
         <p className="compact-hide mt-1.5 flex items-center gap-1 border-t border-primary/15 pt-1.5 text-[9px] font-semibold text-primary">
           <UserRoundPlus className="h-2.5 w-2.5" />

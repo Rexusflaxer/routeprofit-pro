@@ -16,6 +16,7 @@ import {
   changeObjectTaskSeries,
   createObjectTask,
   listObjectTasks,
+  normalizeObjectTaskList,
   stopObjectTaskSeries,
 } from "@/components/objects/objectTaskWorkflow";
 
@@ -114,8 +115,11 @@ describe("objectTaskWorkflow mutatiecontract", () => {
         service_date: "2099-08-17",
         start_time: "06:30",
         end_time: "18:00",
+        recurrence_type: "weekly",
+        recurrence_interval: 1,
         repeat_weekly: true,
         recurrence_end_date: "2099-08-31",
+        recurrence_anchor_date: "2099-08-17",
       }],
     });
     expect(invoke).toHaveBeenNthCalledWith(2, "planningApi", {
@@ -129,8 +133,11 @@ describe("objectTaskWorkflow mutatiecontract", () => {
         service_date: "2099-08-31",
         start_time: "12:00",
         end_time: "18:00",
+        recurrence_type: "weekly",
+        recurrence_interval: 1,
         repeat_weekly: true,
         recurrence_end_date: null,
+        recurrence_anchor_date: "2099-08-31",
       },
     });
     expect(invoke).toHaveBeenNthCalledWith(3, "planningApi", {
@@ -144,8 +151,11 @@ describe("objectTaskWorkflow mutatiecontract", () => {
       effective_from: "2099-08-31",
       start_time: "10:00",
       end_time: "18:00",
+      recurrence_type: "weekly",
+      recurrence_interval: 1,
       repeat_weekly: true,
       recurrence_end_date: "2099-12-31",
+      recurrence_anchor_date: "2099-08-31",
     });
     expect(invoke).toHaveBeenNthCalledWith(4, "planningApi", {
       action: "stop_object_task_series",
@@ -157,6 +167,105 @@ describe("objectTaskWorkflow mutatiecontract", () => {
       expected_version: 4,
       effective_from: "2099-08-31",
     });
+  });
+
+  it("normaliseert herhalingsankers en draagt taakuitzonderingen uit de lijstrespons over", () => {
+    const normalized = normalizeObjectTaskList({
+      data: {
+        ok: true,
+        object_id: "object-1",
+        tasks: [{
+          id: "definition-1",
+          version: 3,
+          series: [{
+            id: "series-1",
+            version: 4,
+            current_revision: {
+              id: "revision-1",
+              effective_from: "2099-08-31",
+              recurrence_type: "weekly",
+              recurrence_interval: 2,
+              metadata: { recurrence_anchor_date: "2099-08-17" },
+              start_time: "06:30",
+              end_time: "18:00",
+            },
+          }],
+          schedule_exceptions: [{
+            id: "exception-1",
+            object_task_schedule_series_id: "series-1",
+            replacement_series_id: "series-alternative-1",
+            occurrence_date: "2099-08-31",
+            status: "active",
+            version: 2,
+          }],
+        }],
+        exceptions: [{
+          id: "exception-1",
+          source_series_id: "series-1",
+          alternative_series_id: "series-alternative-1",
+          service_date: "2099-08-31",
+          status: "active",
+          version: 2,
+        }],
+      },
+    });
+
+    expect(normalized.revisions).toEqual([
+      expect.objectContaining({
+        id: "revision-1",
+        series_id: "series-1",
+        recurrence_anchor_date: "2099-08-17",
+        recurrence_interval: 2,
+      }),
+    ]);
+    expect(normalized.exceptions).toEqual([
+      expect.objectContaining({
+        id: "exception-1",
+        source_series_id: "series-1",
+        alternative_series_id: "series-alternative-1",
+        service_date: "2099-08-31",
+        status: "active",
+        version: 2,
+      }),
+    ]);
+  });
+
+  it("stuurt verwijderbevestiging alleen mee bij de expliciet bevestigde wijziging", async () => {
+    const entry = {
+      definition_id: "definition-1",
+      definition: { id: "definition-1", version: 3 },
+      series_id: "series-1",
+      series_version: 4,
+      occurrence_date: "2099-08-31",
+    };
+    const data = {
+      start_time: "10:00",
+      end_time: "18:00",
+      frequency: "weekly",
+    };
+
+    await changeObjectTaskSeries({
+      customerId: "customer-1",
+      objectId: "object-1",
+      entry,
+      data,
+      idempotencyKey: "change-unconfirmed-key",
+    });
+    await changeObjectTaskSeries({
+      customerId: "customer-1",
+      objectId: "object-1",
+      entry,
+      data,
+      idempotencyKey: "change-confirmed-key",
+      confirmRemoveOutsideShifts: true,
+    });
+
+    expect(invoke.mock.calls[0][1]).not.toHaveProperty("confirm_remove_outside_shifts");
+    expect(invoke.mock.calls[1][1]).toEqual(expect.objectContaining({
+      idempotency_key: "change-confirmed-key",
+      expected_version: 4,
+      confirm_remove_outside_shifts: true,
+    }));
   });
 
   it("probeert een onbekende actie uit een vastgezette preview exact eenmaal via de nieuwste functies", async () => {

@@ -26,9 +26,12 @@ export function objectTaskRecurrenceLabel(entry = {}) {
 
 export function objectTaskRecursOn(entry, date) {
   const pattern = objectTaskRecurrence(entry);
-  const anchor = entry.effective_from || entry.occurrence_date;
-  if (!anchor || date < anchor) return false;
-  if (!pattern.repeating) return date === anchor;
+  const effectiveFrom = entry.effective_from || entry.occurrence_date;
+  const anchor = entry.recurrence_anchor_date
+    || entry.revision?.recurrence_anchor_date
+    || effectiveFrom;
+  if (!effectiveFrom || !anchor || date < effectiveFrom || date < anchor) return false;
+  if (!pattern.repeating) return date === effectiveFrom;
   const start = new Date(`${anchor}T12:00:00Z`), target = new Date(`${date}T12:00:00Z`);
   if (pattern.type === "weekly") return Math.round((target - start) / 86400000) % (pattern.interval * 7) === 0;
   const monthDelta = (target.getUTCFullYear() - start.getUTCFullYear()) * 12 + target.getUTCMonth() - start.getUTCMonth();

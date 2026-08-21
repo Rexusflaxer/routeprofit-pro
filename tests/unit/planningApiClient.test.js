@@ -73,6 +73,35 @@ describe("planningApiClient functieversieherstel", () => {
     });
   });
 
+  it("stuurt een wijziging van één taak-occurrence uitsluitend via planningApi", async () => {
+    const { invokePlanningApi, invoke, invokeLatest } = await loadPlanningClient({ pinned: true });
+    const request = {
+      action: "change_single_task_occurrence",
+      occurrence_id: "occurrence-1",
+      source_revision_id: "source-revision-4",
+      start_time: "07:00",
+      end_time: "15:00",
+      expected_occurrence_revision: 3,
+      confirm_remove_outside_shifts: false,
+      idempotency_key: "planning-edit-single-task:key-1",
+    };
+    invoke.mockResolvedValueOnce({
+      data: {
+        ok: true,
+        task_occurrences: [{ id: "occurrence-1", revision: 4 }],
+      },
+    });
+
+    await expect(invokePlanningApi(request)).resolves.toMatchObject({
+      ok: true,
+      task_occurrences: [{ id: "occurrence-1", revision: 4 }],
+    });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("planningApi", request);
+    expect(invokeLatest).not.toHaveBeenCalled();
+  });
+
   it("doet zonder vastgezette versie geen tweede call en geeft een duidelijke publicatiemelding", async () => {
     const { invokePlanningApi, invoke, invokeLatest } = await loadPlanningClient({ pinned: false });
     invoke.mockRejectedValueOnce(planningError(400, "Onbekende planningactie."));
