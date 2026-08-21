@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import WarningAvailabilityGrid from "./WarningAvailabilityGrid";
 import ObjectTaskScheduleNavigator from "./ObjectTaskScheduleNavigator";
@@ -11,7 +10,6 @@ import { WEEKDAY_OPTIONS } from "./objectWarningAddressConfig";
 import {
   OBJECT_TASK_DAY_KEYS,
   addObjectTaskDays,
-  addObjectTaskWeeks,
   createObjectTaskClientId,
   formatObjectTaskCompactDate,
   formatObjectTaskFullDate,
@@ -341,7 +339,7 @@ export default function ObjectTaskSchedule({
   const periodDates = useMemo(() => selectedPeriod
     ? Array.from({ length: selectedPeriod.duration_days }, (_, index) => addObjectTaskDays(selectedPeriod.start_date, index))
     : week.days, [selectedPeriod, week.days]);
-  const visibleDates = persistedMode ? periodDates : week.days;
+  const visibleDates = periodDates;
   const visibleWeekStarts = useMemo(() => [...new Set(visibleDates.map(objectTaskWeekStart))], [visibleDates]);
   const scheduleScrollRef = useRef(null);
   const lastScrolledWeekRef = useRef(selectedWeek);
@@ -377,10 +375,10 @@ export default function ObjectTaskSchedule({
     }
   }, [currentWeekStart, onWeekChange, persistedMode, selectedWeek]);
   useEffect(() => {
-    if (!persistedMode || !selectedPeriod) return;
+    if (!selectedPeriod) return;
     const index = Math.max(0, Math.floor((Date.parse(selectedWeek) - Date.parse(selectedPeriod.start_date)) / 86_400_000));
     scheduleScrollRef.current?.scrollTo?.({ top: index * GRID_DAY_HEIGHT });
-  }, [persistedMode, taskDefinitionId]);
+  }, [selectedPeriod?.key, taskDefinitionId]);
 
   const projectedLocalEntries = useMemo(
     () => visibleWeekStarts.flatMap(weekStartValue => projectObjectTaskDrafts(entries, weekStartValue)),
@@ -850,21 +848,6 @@ export default function ObjectTaskSchedule({
     onCancel?.();
   };
 
-  const changeWeek = value => {
-    const normalized = objectTaskWeekStart(value);
-    if (!normalized || normalized < currentWeekStart) return;
-    setLocalWeek(normalized);
-    setEditor(null);
-    setLocalError(null);
-    if (persistedMode) {
-      commitScratch([]);
-      stagedErasesRef.current = [];
-      setStagedErases([]);
-      draftSaveSessionRef.current = null;
-    }
-    onWeekChange?.(normalized);
-  };
-
   const updateSelectedWeek = value => {
     const normalized = objectTaskWeekStart(value);
     if (!normalized || normalized === lastScrolledWeekRef.current) return;
@@ -912,26 +895,15 @@ export default function ObjectTaskSchedule({
     <fieldset role="region" className="space-y-3" aria-label="Taakrooster per week">
       <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Taakrooster{readOnly ? "" : " *"}</legend>
 
-      {persistedMode ? (
-        <ObjectTaskScheduleNavigator
-          periods={planningPeriods}
-          periodKey={selectedPeriod?.key || periodKey}
-          weekNumber={selectedWeekNumber}
-          currentPeriodKey={resolveCaoPbPlanningPeriod(now.dateKey)?.key || ""}
-          currentWeekNumber={objectTaskIsoWeek(now.dateKey).week}
-          onPeriodChange={selectPeriod}
-          onWeekChange={selectWeekNumber}
-        />
-      ) : (
-        <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="text-xs font-semibold">Week {week.week} · {week.year}</p><p className="text-[10px] text-muted-foreground">{week.rangeLabel}</p></div>
-          <div className="flex items-center gap-1.5">
-            <Button type="button" size="icon" variant="outline" className="h-7 w-7" disabled={selectedWeek <= currentWeekStart} onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, -1))} aria-label="Vorige week"><ChevronLeft className="h-3.5 w-3.5" /></Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={selectedWeek === currentWeekStart} onClick={() => changeWeek(currentWeekStart)}><RotateCcw className="h-3 w-3" /> Deze week</Button>
-            <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => changeWeek(addObjectTaskWeeks(selectedWeek, 1))} aria-label="Volgende week"><ChevronRight className="h-3.5 w-3.5" /></Button>
-          </div>
-        </div>
-      )}
+      <ObjectTaskScheduleNavigator
+        periods={planningPeriods}
+        periodKey={selectedPeriod?.key || periodKey}
+        weekNumber={selectedWeekNumber}
+        currentPeriodKey={resolveCaoPbPlanningPeriod(now.dateKey)?.key || ""}
+        currentWeekNumber={objectTaskIsoWeek(now.dateKey).week}
+        onPeriodChange={selectPeriod}
+        onWeekChange={selectWeekNumber}
+      />
 
       {!persistedMode && (
         <div className="flex flex-wrap gap-2">
