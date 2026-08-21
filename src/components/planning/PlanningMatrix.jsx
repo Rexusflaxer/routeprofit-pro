@@ -4,6 +4,7 @@ import { Droppable } from "@hello-pangea/dnd";
 import {
   Check,
   Clock3,
+  Cloud,
   ClipboardPaste,
   Copy,
   GripHorizontal,
@@ -190,6 +191,7 @@ function OpenTaskIntervalCard({
   onEditTask,
   onDeleteTask,
   mutationPending,
+  actionPending = mutationPending,
   embeddedInLane = false,
   style,
   editable = false,
@@ -216,10 +218,10 @@ function OpenTaskIntervalCard({
       available={editable}
       detail={`${occurrence.task_name_snapshot || "Taak"} · ${gap.startTime}–${gap.endTime}`}
       items={[
-        { label: "Dienst hier plakken", disabled: mutationPending || !canPaste, onSelect: () => onPasteService?.({ occurrence, serviceDate: dropServiceDate, startTime: serviceClipboard.startTime, endTime: serviceClipboard.endTime, personnelId: serviceClipboard.personnelId }), Icon: ClipboardPaste },
-        { label: "Taak bewerken", disabled: mutationPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
-        { label: "Taak kopiëren", disabled: mutationPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
-        { label: "Taak verwijderen", disabled: mutationPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+        { label: "Dienst hier plakken", disabled: actionPending || !canPaste, onSelect: () => onPasteService?.({ occurrence, serviceDate: dropServiceDate, startTime: serviceClipboard.startTime, endTime: serviceClipboard.endTime, personnelId: serviceClipboard.personnelId }), Icon: ClipboardPaste },
+        { label: "Taak bewerken", disabled: actionPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
+        { label: "Taak kopiëren", disabled: actionPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
+        { label: "Taak verwijderen", disabled: actionPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
       ]}
     >
     <article
@@ -232,7 +234,7 @@ function OpenTaskIntervalCard({
       data-planning-start-minute={gap.startMinute}
       data-planning-width="full"
       data-start-minute={gap.startMinute}
-      aria-busy={mutationPending ? "true" : "false"}
+      aria-busy={actionPending ? "true" : "false"}
       style={style}
       className={cn(
         "group/open-task w-full rounded-lg border border-rose-300/20 border-l-2 border-l-rose-500 bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(255,255,255,0.24)_0%,rgba(255,241,242,0.14)_58%,rgba(254,205,211,0.07)_100%)] px-2.5 py-2 text-left shadow-none backdrop-blur-xl backdrop-saturate-150 transition-[top,height,padding,border-color,background-color] duration-300 ease-out motion-reduce:transition-none hover:border-rose-400/35 dark:border-rose-700/20 dark:bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.08),transparent_46%),linear-gradient(145deg,rgba(30,15,23,0.24)_0%,rgba(76,5,25,0.14)_58%,rgba(136,19,55,0.08)_100%)]",
@@ -244,7 +246,7 @@ function OpenTaskIntervalCard({
       <div className="flex min-w-0 items-start gap-2">
         <button
           type="button"
-          disabled={!editable}
+          disabled={!editable || actionPending}
           className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", embeddedInLane && "flex h-full items-center cursor-pointer")}
           onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
         >
@@ -274,7 +276,7 @@ function OpenTaskIntervalCard({
         {editable && (
           <button
             type="button"
-            disabled={mutationPending}
+            disabled={actionPending}
             onClick={() => onCreateOpenTaskSlice?.({
               occurrence,
               serviceDate: dropServiceDate,
@@ -713,6 +715,7 @@ function MatrixShiftBlock({
   onDeleteService,
   onResizeTaskSegment,
   mutationPending,
+  actionPending = mutationPending,
   personnelById,
   editable = false,
   controlledInterval = null,
@@ -722,6 +725,7 @@ function MatrixShiftBlock({
   elementId,
   style,
 }) {
+  const controlsPending = mutationPending || actionPending;
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
   const assignmentsBySlot = mapAssignmentsToSlots(currentAssignments, requiredCount);
@@ -863,15 +867,15 @@ function MatrixShiftBlock({
       available={editable}
       detail={`${shift.name || shift.service_name_snapshot || "Dienst"} · ${displayedStartTime}–${displayedEndTime}`}
       items={[
-        { label: "Dienst bewerken", disabled: mutationPending || isPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
-        { label: "Dienst kopiëren", disabled: !copiedAssignment || mutationPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
+        { label: "Dienst bewerken", disabled: controlsPending || isPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
+        { label: "Dienst kopiëren", disabled: !copiedAssignment || controlsPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
         ...currentAssignments.map(assignment => ({
           label: currentAssignments.length === 1 ? "Medewerker uitplannen" : `${assignmentIdentity(assignment, personnelById).name} uitplannen`,
-          disabled: mutationPending || isPending,
+          disabled: controlsPending || isPending,
           onSelect: () => onUnassign?.(assignment),
           Icon: UserMinus,
         })),
-        { label: "Dienst verwijderen", disabled: mutationPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
+        { label: "Dienst verwijderen", disabled: controlsPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
       ]}
     >
     <article className={cn(
@@ -879,7 +883,7 @@ function MatrixShiftBlock({
       embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-primary/35 !bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100",
       shift.status === "draft" && !embeddedInLane && "border-primary/60",
       currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
-      isPending && "animate-pulse border-primary/70",
+      isPending && "border-primary/70",
       selected && !embeddedInLane && "border-primary ring-2 ring-primary/35 ring-offset-1 ring-offset-background",
     )}
       id={elementId}
@@ -906,12 +910,12 @@ function MatrixShiftBlock({
           onPreview={setResizePreview}
           onCommit={commitResize}
           onCancel={() => setResizePreview(null)}
-          disabled={mutationPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          disabled={controlsPending || isPending || resizeSaving || Boolean(committedResizePreview)}
           label={`Begintijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
       <div className="relative z-10 flex items-start gap-1">
-        <button type="button" disabled={mutationPending || isPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait", embeddedInLane && "sr-only")}>
+        <button type="button" disabled={controlsPending || isPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default", embeddedInLane && "sr-only")}>
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             <span className={cn(
@@ -922,7 +926,7 @@ function MatrixShiftBlock({
                 ? occurrence?.task_name_snapshot || shift.name || shift.service_name_snapshot || "Dienst"
                 : shift.name || shift.service_name_snapshot || "Dienst"}
             </span>
-            {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Dienst wordt opgeslagen" />}
+            {isPending && <Cloud className="h-3 w-3 shrink-0 text-primary" aria-label="Lokaal verwerkt; synchroniseert op de achtergrond" />}
             {isResizeSaving && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-label="Diensttijd wordt opgeslagen" />}
             {shift.status === "published" && <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Gepubliceerd" />}
           </span>
@@ -1006,7 +1010,7 @@ function MatrixShiftBlock({
           onPreview={setResizePreview}
           onCommit={commitResize}
           onCancel={() => setResizePreview(null)}
-          disabled={mutationPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          disabled={controlsPending || isPending || resizeSaving || Boolean(committedResizePreview)}
           label={`Eindtijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
@@ -1061,6 +1065,7 @@ function TaskCoverageLane({
   onResizeTaskSegment,
   onResizeTaskBoundary,
   mutationPending,
+  actionPending = mutationPending,
   compact,
   editable = false,
 }) {
@@ -1175,6 +1180,7 @@ function TaskCoverageLane({
   });
   const laneHeight = getTaskTimelineLaneHeight(duration, { compact });
   const isLaneBusy = mutationPending || resizeSaving;
+  const isLaneActionPending = actionPending || isLaneBusy;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
 
   const segmentPayload = (service, interval) => {
@@ -1238,21 +1244,21 @@ function TaskCoverageLane({
     <section
       className="w-full overflow-hidden rounded-[10px] border border-primary/20 bg-card shadow-[0_7px_22px_hsl(var(--primary)/0.08)]"
       data-task-coverage-group={occurrence.id}
-      aria-busy={isLaneBusy ? "true" : "false"}
+      aria-busy={isLaneActionPending ? "true" : "false"}
     >
       <PlanningClipboardContextMenu
         mode="copy"
         available={editable}
         detail={`${occurrence.task_name_snapshot || "Taak"} · ${demand.startTime}–${demand.endTime}`}
         items={[
-          { label: "Taak bewerken", disabled: isLaneBusy, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
-          { label: "Taak kopiëren", disabled: isLaneBusy, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
-          { label: "Taak verwijderen", disabled: isLaneBusy, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+          { label: "Taak bewerken", disabled: isLaneActionPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
+          { label: "Taak kopiëren", disabled: isLaneActionPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
+          { label: "Taak verwijderen", disabled: isLaneActionPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
         ]}
       >
       <button
         type="button"
-        disabled={!editable}
+        disabled={!editable || isLaneActionPending}
         onClick={() => { if (editable) onSelectOccurrence?.(occurrence); }}
         className="flex w-full items-start justify-between gap-2 border-b border-primary/15 bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-2.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
@@ -1316,6 +1322,7 @@ function TaskCoverageLane({
               onDeleteService={onDeleteService}
               onResizeTaskSegment={onResizeTaskSegment}
               mutationPending={isLaneBusy}
+              actionPending={isLaneActionPending}
               editable={editable}
               controlledInterval={interval}
               embeddedInLane
@@ -1341,6 +1348,7 @@ function TaskCoverageLane({
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             mutationPending={isLaneBusy}
+            actionPending={isLaneActionPending}
             editable={editable}
             embeddedInLane
             style={pieceStyle(gap.startMinute, gap.endMinute)}
@@ -1356,7 +1364,7 @@ function TaskCoverageLane({
             onPreview={minute => setActivePreview(previewForBoundary(boundary, minute))}
             onCommit={minute => commitBoundary(boundary, minute)}
             onCancel={() => setActivePreview(null)}
-            disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
+            disabled={isLaneActionPending || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
           />
         ))}
       </div>
@@ -1614,6 +1622,7 @@ function ObjectDayCell({
   onResizeTaskBoundary,
   mutationPending,
   pendingResourceKeys,
+  queuedResourceKeys,
   compact,
   editable,
 }) {
@@ -1733,6 +1742,12 @@ function ObjectDayCell({
             `occurrence:${occurrenceId}`,
             ...laneShiftIds,
           );
+          const laneActionPending = lanePending || isPlanningResourcePending(
+            queuedResourceKeys,
+            false,
+            `occurrence:${occurrenceId}`,
+            ...laneShiftIds,
+          );
           return (
             <TaskCoverageLane
               key={item.key}
@@ -1766,12 +1781,18 @@ function ObjectDayCell({
               onResizeTaskSegment={onResizeTaskSegment}
               onResizeTaskBoundary={onResizeTaskBoundary}
               mutationPending={lanePending}
+              actionPending={laneActionPending}
               compact={compact}
               editable={editable}
             />
           );
         }
         if (item.kind === "open-task") {
+          const openTaskPending = isPlanningResourcePending(
+            pendingResourceKeys,
+            mutationPending,
+            `occurrence:${item.occurrence.id}`,
+          );
           return (
             <OpenTaskIntervalCard
               key={item.key}
@@ -1787,9 +1808,10 @@ function ObjectDayCell({
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               editable={editable}
-              mutationPending={isPlanningResourcePending(
-                pendingResourceKeys,
-                mutationPending,
+              mutationPending={openTaskPending}
+              actionPending={openTaskPending || isPlanningResourcePending(
+                queuedResourceKeys,
+                false,
                 `occurrence:${item.occurrence.id}`,
               )}
             />
@@ -1801,6 +1823,12 @@ function ObjectDayCell({
         const occurrenceContext = projectionSegment
           ? occurrenceById.get(String(projectionSegment.task_occurrence_id))?.occurrence || null
           : null;
+        const shiftPending = isPlanningResourcePending(
+          pendingResourceKeys,
+          mutationPending,
+          `shift:${shift.id}`,
+          occurrenceContext ? `occurrence:${occurrenceContext.id}` : null,
+        );
         return (
           <MatrixShiftBlock
             key={item.key}
@@ -1827,9 +1855,10 @@ function ObjectDayCell({
             onDeleteService={onDeleteService}
             onResizeTaskSegment={onResizeTaskSegment}
             editable={editable}
-            mutationPending={isPlanningResourcePending(
-              pendingResourceKeys,
-              mutationPending,
+            mutationPending={shiftPending}
+            actionPending={shiftPending || isPlanningResourcePending(
+              queuedResourceKeys,
+              false,
               `shift:${shift.id}`,
               occurrenceContext ? `occurrence:${occurrenceContext.id}` : null,
             )}
@@ -1854,6 +1883,7 @@ function EmployeeDayCell({
   onDeleteService,
   mutationPending,
   pendingResourceKeys,
+  queuedResourceKeys,
   editable,
 }) {
   const droppableId = `employee-day:${resource.id}:${dayKey}`;
@@ -1883,6 +1913,12 @@ function EmployeeDayCell({
           `shift:${shift.id}`,
           ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
         );
+        const placementActionPending = placementPending || isPlanningResourcePending(
+          queuedResourceKeys,
+          false,
+          `shift:${shift.id}`,
+          ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
+        );
         return (
           <EmployeeAssignmentBlock
             key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
@@ -1896,7 +1932,7 @@ function EmployeeDayCell({
             onEditService={onEditService}
             onCopyService={onCopyService}
             onDeleteService={onDeleteService}
-            disabled={placementPending}
+            disabled={placementActionPending}
             editable={editable}
           />
         );
@@ -1968,6 +2004,7 @@ export default function PlanningMatrix({
   onResizeTaskBoundary,
   mutationPending = false,
   pendingResourceKeys = null,
+  queuedResourceKeys = null,
 }) {
   const [selectedObjectResource, setSelectedObjectResource] = useState(null);
   const orientation = perspective === "object" ? "days_horizontal" : "resources_horizontal";
@@ -2167,6 +2204,7 @@ export default function PlanningMatrix({
         onDeleteService={onDeleteService}
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
+        queuedResourceKeys={queuedResourceKeys}
         editable={editable}
       />
     ) : (
@@ -2203,6 +2241,7 @@ export default function PlanningMatrix({
         onResizeTaskBoundary={onResizeTaskBoundary}
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
+        queuedResourceKeys={queuedResourceKeys}
         compact={compact}
         editable={editable}
       />

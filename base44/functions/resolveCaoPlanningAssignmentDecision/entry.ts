@@ -1,6 +1,12 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const KNOWN_SECURITY_CAO_KEYS = [
+  CAO_PB_KEY,
+  'cao_evenementen_horecabeveiliging',
+  'cao_verkeersregelaars',
+  'cao_veiligheidsdomein'
+];
 const SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
@@ -115,15 +121,22 @@ function resolveRuntimeReadiness(caoKey, caoRuntimeReadiness) {
   }
 
   const supported = SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS.includes(caoKey);
+  const known = KNOWN_SECURITY_CAO_KEYS.includes(caoKey);
   return {
     cao_key: caoKey,
-    status: supported ? 'local_payroll_runtime_supported' : 'known_cao_runtime_not_implemented',
+    status: supported
+      ? 'local_payroll_runtime_supported'
+      : known
+      ? 'known_cao_runtime_not_implemented'
+      : 'blocked_unknown_cao_key',
     payroll_final_allowed_by_static_runtime: supported,
     planning_final_allowed_by_static_runtime: supported,
     manual_review_required: !supported,
     blocking_reasons: supported
       ? []
-      : [`CAO ${caoKey} heeft geen geverifieerde lokale runtime voor definitieve planning/payroll.`]
+      : known
+      ? [`CAO ${caoKey} heeft geen geverifieerde lokale runtime voor definitieve planning/payroll.`]
+      : [`Onbekende cao_key ${caoKey}. Voeg eerst een CAO-catalogus, bronbewaking en runtime-dekking toe.`]
   };
 }
 
@@ -321,6 +334,54 @@ function buildCaoPlanningAssignmentDecision({
   };
 }
 
+function serviceContextValidationFromContract(
+  contractResolution: Record<string, any> | null,
+  servicePayload: Record<string, any>
+) {
+  const serviceContext = contractResolution?.service_context || null;
+  const readiness = contractResolution?.service_context_readiness || null;
+  if (!serviceContext || !readiness) return null;
+  const unsupportedCao = !!serviceContext.cao_key &&
+    !SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS.includes(serviceContext.cao_key);
+  const unsupportedMessage = unsupportedCao
+    ? `Dienst gebruikt ${serviceContext.cao_key}; automatische planning/payroll-runtime is hiervoor nog niet lokaal geverifieerd.`
+    : null;
+  const manualReviewReasons = unique([
+    ...normalizeArray(readiness.manual_review_reasons),
+    unsupportedMessage
+  ]);
+  // validateTaskPlanningContext adds this same manual-review fence. The
+  // contract resolver exposes an otherwise equivalent readiness projection,
+  // so normalize the one intentional difference before reusing it.
+  const normalizedReadiness = {
+    ...readiness,
+    status: unsupportedCao && readiness.status === 'planning_context_ready'
+      ? 'manual_review_required'
+      : readiness.status,
+    ready: unsupportedCao ? false : readiness.ready === true,
+    manual_review_reasons: manualReviewReasons
+  };
+
+  return {
+    success: true,
+    saved: false,
+    task_id: servicePayload.task_id || null,
+    object_id: serviceContext.object_id || servicePayload.object_id || null,
+    service_context: serviceContext,
+    service_context_readiness: normalizedReadiness,
+    planning_contract_context: {
+      ...serviceContext,
+      readiness_status: normalizedReadiness.status || null,
+      readiness_checked_at: normalizedReadiness.checked_at || null,
+      readiness_missing_fields: normalizedReadiness.missing_fields || [],
+      readiness_manual_review_reasons: normalizedReadiness.manual_review_reasons || [],
+      readiness_blocking_reasons: normalizedReadiness.blocking_reasons || [],
+      readiness_warnings: normalizedReadiness.warnings || [],
+      readiness_source_rule_ids: normalizedReadiness.source_rule_ids || []
+    }
+  };
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -349,9 +410,20 @@ Deno.serve(async (req) => {
       },
       save: body.save_task_planning_context === true || body.persist_task_planning_context === true
     };
+    const usePlanningInteractiveFastPath = body.planning_interactive_fast_path === true &&
+      servicePayload.save !== true;
 
-    const serviceContextRes = await base44.asServiceRole.functions.invoke('validateTaskPlanningContext', servicePayload);
-    const serviceContextValidation = unwrapFunctionData(serviceContextRes);
+    // The public/default contract keeps the complete historical validation
+    // response. planningApi opts into the lean path only for high-frequency
+    // drag/drop, where the contract resolver supplies the same readiness data.
+    let serviceContextValidation = null;
+    if (!usePlanningInteractiveFastPath) {
+      const serviceContextRes = await base44.asServiceRole.functions.invoke(
+        'validateTaskPlanningContext',
+        servicePayload
+      );
+      serviceContextValidation = unwrapFunctionData(serviceContextRes);
+    }
 
     const contractPayload = {
       personnel_id: personnelId,
@@ -367,19 +439,41 @@ Deno.serve(async (req) => {
     const contractRes = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', contractPayload);
     const contractResolution = unwrapFunctionData(contractRes);
 
+    // resolvePersonnelContractForService already resolves the same task/object
+    // context and evaluates the same readiness fields. Reusing that result on
+    // the high-frequency planning path avoids a second serverless cold start
+    // plus duplicate Task/Route/Object reads. Keep the dedicated context call
+    // only when the caller explicitly asks to persist the context, or when an
+    // older contract resolver does not yet return the readiness projection.
+    if (usePlanningInteractiveFastPath) {
+      serviceContextValidation = serviceContextValidationFromContract(
+        contractResolution,
+        servicePayload
+      );
+    }
+    if (!serviceContextValidation) {
+      const serviceContextRes = await base44.asServiceRole.functions.invoke(
+        'validateTaskPlanningContext',
+        servicePayload
+      );
+      serviceContextValidation = unwrapFunctionData(serviceContextRes);
+    }
+
     const provisionalCaoKey = contractResolution?.cao_key ||
       contractResolution?.selected_contract?.cao_key ||
       serviceContextValidation?.service_context?.cao_key ||
       servicePayload.cao_key ||
       null;
     let caoRuntimeReadiness = null;
-    try {
-      const runtimeRes = await base44.asServiceRole.functions.invoke('resolveCaoRuntimeReadiness', {
-        cao_key: provisionalCaoKey
-      });
-      caoRuntimeReadiness = unwrapFunctionData(runtimeRes);
-    } catch {
-      caoRuntimeReadiness = null;
+    if (!usePlanningInteractiveFastPath) {
+      try {
+        const runtimeRes = await base44.asServiceRole.functions.invoke('resolveCaoRuntimeReadiness', {
+          cao_key: provisionalCaoKey
+        });
+        caoRuntimeReadiness = unwrapFunctionData(runtimeRes);
+      } catch {
+        caoRuntimeReadiness = null;
+      }
     }
 
     let scheduleValidation = body.schedule_validation || null;
