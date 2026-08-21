@@ -127,8 +127,59 @@ function setup(occurrences) {
   };
 }
 
+function instrumentBackendCalls(base44, entities) {
+  const counts = new Map();
+  const increment = key => counts.set(key, Number(counts.get(key) || 0) + 1);
+  for (const [entityName, entityClient] of Object.entries(entities)) {
+    for (const method of ["list", "filter", "get", "create", "updateMany"]) {
+      if (typeof entityClient[method] !== "function") continue;
+      const original = entityClient[method].bind(entityClient);
+      entityClient[method] = async (...args) => {
+        increment(`${entityName}.${method}`);
+        return original(...args);
+      };
+    }
+  }
+  const originalInvoke = base44.asServiceRole.functions.invoke.bind(base44.asServiceRole.functions);
+  base44.asServiceRole.functions.invoke = async (...args) => {
+    increment(`functions.invoke:${args[0]}`);
+    return originalInvoke(...args);
+  };
+  return {
+    count: key => Number(counts.get(key) || 0),
+    total: () => [...counts.values()].reduce((sum, value) => sum + value, 0),
+  };
+}
+
 const user = { id: "admin-1", role: "admin", name: "Planner" };
 const context = key => ({ idempotencyKey: key, correlationId: key });
+
+async function idempotencyClaimId(key) {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new NodeTextEncoder().encode(`${user.id}:${key}`),
+  );
+  const hash = [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return hash;
+}
+
+async function idempotencyRegistryKey(key) {
+  return `idempotency_registry:v3:${(await idempotencyClaimId(key)).slice(0, 2)}`;
+}
+
+async function simulateLegacyV2PendingClaim(entityClient, claimId, requestHash) {
+  const [registry] = await entityClient.filter({ coordinator_key: "idempotency_registry:v2" });
+  const existing = registry?.metadata?.claims?.[claimId];
+  if (existing?.request_hash && existing.request_hash !== requestHash) {
+    throw Object.assign(new Error("legacy idempotency_key hoort bij een andere opdracht"), { status: 409 });
+  }
+  if (existing?.status === "pending" && Date.parse(existing.expires_at || "") > Date.now()) {
+    throw Object.assign(new Error("legacy compose_and_assign wordt al verwerkt"), { status: 409 });
+  }
+  throw new Error("Gesimuleerde legacy writer trof onverwacht geen actieve v2-claim");
+}
 
 async function createWeeklyObjectTask({
   base44,
@@ -2151,10 +2202,19 @@ describe("planningApi dienstsamenstelling", () => {
     const { base44, entities } = setup([demand]);
     entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
     let assignmentValidationCalls = 0;
-    base44.asServiceRole.functions.invoke = async () => {
+    let assignmentValidationSawProvisionalWrite = false;
+    let assignmentValidationPayload = null;
+    base44.asServiceRole.functions.invoke = async (_functionName, payload) => {
       assignmentValidationCalls += 1;
+      assignmentValidationPayload = payload;
+      assignmentValidationSawProvisionalWrite = entities.PlanningAssignment.records.some(item => (
+        item.personnel_id === "personnel-1"
+        && item.personnel_contract_id == null
+        && item.revision === 1
+      ));
       return {};
     };
+    const calls = instrumentBackendCalls(base44, entities);
 
     const result = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
@@ -2176,6 +2236,18 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(assignmentValidationCalls).toBe(1);
+    expect(assignmentValidationSawProvisionalWrite).toBe(true);
+    expect(assignmentValidationPayload).toMatchObject({
+      planning_interactive_fast_path: true,
+      require_schedule_validation: false,
+      run_schedule_validation: false,
+      final_validation: false,
+    });
+    expect(calls.count("PlanningAssignment.create")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("PlanningMutationCoordinator.get")).toBe(20);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
+    expect(calls.total()).toBeLessThanOrEqual(77);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -2338,14 +2410,16 @@ describe("planningApi dienstsamenstelling", () => {
       name: "Directe Beveiliger",
       status: "active",
     });
-    const coordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
-      entities.PlanningMutationCoordinator,
-    );
-    let coordinatorWriteCount = 0;
-    entities.PlanningMutationCoordinator.updateMany = async (...args) => {
-      coordinatorWriteCount += 1;
-      return coordinatorUpdateMany(...args);
+    let assignmentValidationSawProvisionalWrite = false;
+    base44.asServiceRole.functions.invoke = async () => {
+      assignmentValidationSawProvisionalWrite = entities.PlanningAssignment.records.some(item => (
+        item.personnel_id === "personnel-assign-lease-callcount"
+        && item.personnel_contract_id == null
+        && item.revision === 1
+      ));
+      return {};
     };
+    const calls = instrumentBackendCalls(base44, entities);
 
     await backend.assignPersonnel(base44, user, {
       shift_id: "shift-assign-lease-callcount",
@@ -2355,7 +2429,13 @@ describe("planningApi dienstsamenstelling", () => {
     }, context("assign-lease-callcount"));
 
     expect(entities.PlanningMutationCoordinator.records).toHaveLength(2);
-    expect(coordinatorWriteCount).toBe(4);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(4);
+    expect(calls.count("PlanningMutationCoordinator.get")).toBe(8);
+    expect(calls.count("PlanningAssignment.create")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
+    expect(calls.total()).toBeLessThanOrEqual(36);
+    expect(assignmentValidationSawProvisionalWrite).toBe(true);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
 
@@ -2784,15 +2864,17 @@ describe("planningApi dienstsamenstelling", () => {
       .toHaveLength(1);
   });
 
-  it("snoeit verlopen idempotencyclaims uit het gedeelde register", async () => {
+  it("snoeit verlopen idempotencyclaims uit de bijbehorende registershard", async () => {
     const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
     entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
+    const mutationKey = "compose-and-assign-prunes-expired-claims";
+    const registryKey = await idempotencyRegistryKey(mutationKey);
     entities.PlanningMutationCoordinator.records.push({
       id: "coordinator-registry",
-      coordinator_key: "idempotency_registry:v2",
+      coordinator_key: registryKey,
       resource_type: "idempotency_registry",
-      resource_id: "compose_and_assign",
+      resource_id: `compose_and_assign:${registryKey.split(":").at(-1)}`,
       lease: null,
       revision: 1,
       created_date: "2026-08-11T08:00:00.000Z",
@@ -2812,12 +2894,188 @@ describe("planningApi dienstsamenstelling", () => {
       personnel_id: "personnel-1",
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
-    }, context("compose-and-assign-prunes-expired-claims"));
+    }, context(mutationKey));
 
     const registry = entities.PlanningMutationCoordinator.records.find(
       item => item.resource_type === "idempotency_registry",
     );
     expect(registry.metadata.claims).toEqual({});
+  });
+
+  it("blokkeert current op een actieve legacy-v2-claim voordat de v3-shard wordt geraakt", async () => {
+    const demand = occurrence("occurrence-legacy-v2-pending", "object-1", "08:00", "12:00", 240);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-legacy-v2-pending", name: "Legacy Beveiliger", status: "active" });
+    const mutationKey = "compose-legacy-v2-pending";
+    const claimId = await idempotencyClaimId(mutationKey);
+    entities.PlanningMutationCoordinator.records.push({
+      id: "coordinator-legacy-v2-pending",
+      coordinator_key: "idempotency_registry:v2",
+      resource_type: "idempotency_registry",
+      resource_id: "compose_and_assign",
+      lease: null,
+      revision: 1,
+      created_date: "2026-08-11T08:00:00.000Z",
+      metadata: {
+        claims: {
+          [claimId]: {
+            idempotency_key: mutationKey,
+            actor_user_id: user.id,
+            request_hash: "legacy-disjoint-payload-hash",
+            status: "pending",
+            expires_at: "2099-08-17T12:00:00.000Z",
+          },
+        },
+      },
+    });
+
+    await expect(backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-legacy-v2-pending",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context(mutationKey))).rejects.toMatchObject({ status: 409 });
+
+    expect(entities.PlanningMutationCoordinator.records.some(
+      item => item.coordinator_key.startsWith("idempotency_registry:v3:"),
+    )).toBe(false);
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
+  });
+
+  it("herstelt idempotent een partial dual-claim met alleen de current v2-helft", async () => {
+    const demand = occurrence("occurrence-partial-dual-claim", "object-1", "08:00", "12:00", 240);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-partial-dual-claim", name: "Herstel Beveiliger", status: "active" });
+    const mutationKey = "compose-partial-dual-claim";
+    const claimId = await idempotencyClaimId(mutationKey);
+    const originalCoordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let failV3ClaimOnce = true;
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      const coordinator = entities.PlanningMutationCoordinator.records.find(item => item.id === query.id);
+      if (
+        failV3ClaimOnce
+        && coordinator?.coordinator_key.startsWith("idempotency_registry:v3:")
+        && update.$set?.metadata?.claims?.[claimId]?.status === "pending"
+      ) {
+        failV3ClaimOnce = false;
+        throw new Error("gesimuleerde uitval tussen v2 en v3");
+      }
+      return originalCoordinatorUpdateMany(query, update);
+    };
+    const payload = {
+      personnel_id: "personnel-partial-dual-claim",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    };
+    const mutationContext = context(mutationKey);
+
+    await expect(backend.composeAndAssign(base44, user, payload, mutationContext))
+      .rejects.toThrow("gesimuleerde uitval tussen v2 en v3");
+    const legacyClaim = entities.PlanningMutationCoordinator.records
+      .find(item => item.coordinator_key === "idempotency_registry:v2")
+      ?.metadata?.claims?.[claimId];
+    expect(legacyClaim).toMatchObject({
+      status: "pending",
+      claim_protocol: "dual_v2_v3_transition",
+    });
+    expect(entities.PlanningShift.records).toEqual([]);
+
+    const recovered = await backend.composeAndAssign(base44, user, payload, mutationContext);
+
+    expect(recovered.assignment.personnel_id).toBe("personnel-partial-dual-claim");
+    const shardKey = await idempotencyRegistryKey(mutationKey);
+    for (const registry of entities.PlanningMutationCoordinator.records.filter(
+      item => item.coordinator_key === "idempotency_registry:v2"
+        || item.coordinator_key === shardKey,
+    )) {
+      expect(registry.metadata?.claims || {}).toEqual({});
+    }
+  });
+
+  it("laat een gesimuleerde oude writer niet passeren nadat current de v2-helft heeft geclaimd", async () => {
+    const demand = occurrence("occurrence-current-v2-fences-old", "object-1", "08:00", "12:00", 240);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-current-v2-fences-old", name: "Current Beveiliger", status: "active" });
+    const mutationKey = "compose-current-v2-fences-old";
+    const claimId = await idempotencyClaimId(mutationKey);
+    const originalCoordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let oldWriterAttempted = false;
+    let oldWriterBlocked = false;
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      const result = await originalCoordinatorUpdateMany(query, update);
+      const coordinator = entities.PlanningMutationCoordinator.records.find(item => item.id === query.id);
+      const currentClaim = coordinator?.metadata?.claims?.[claimId];
+      if (
+        !oldWriterAttempted
+        && coordinator?.coordinator_key === "idempotency_registry:v2"
+        && currentClaim?.status === "pending"
+        && currentClaim?.claim_protocol === "dual_v2_v3_transition"
+      ) {
+        oldWriterAttempted = true;
+        try {
+          await simulateLegacyV2PendingClaim(
+            entities.PlanningMutationCoordinator,
+            claimId,
+            currentClaim.request_hash,
+          );
+        } catch (error) {
+          oldWriterBlocked = error?.status === 409;
+        }
+      }
+      return result;
+    };
+
+    const result = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-current-v2-fences-old",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context(mutationKey));
+
+    expect(result.assignment.personnel_id).toBe("personnel-current-v2-fences-old");
+    expect(oldWriterAttempted).toBe(true);
+    expect(oldWriterBlocked).toBe(true);
+  });
+
+  it("behoudt v3-shards naast exact één tijdelijke globale v2-rolloutfence", async () => {
+    const morning = occurrence("occurrence-registry-shard-morning", "object-1", "08:00", "12:00", 240);
+    const afternoon = occurrence("occurrence-registry-shard-afternoon", "object-1", "12:00", "16:00", 240);
+    const { base44, entities } = setup([morning, afternoon]);
+    entities.Personnel.records.push(
+      { id: "personnel-registry-shard-morning", name: "Ochtend Beveiliger", status: "active" },
+      { id: "personnel-registry-shard-afternoon", name: "Middag Beveiliger", status: "active" },
+    );
+    const firstKey = "compose-registry-shard-first";
+    let secondKey = "compose-registry-shard-second";
+    while (await idempotencyRegistryKey(secondKey) === await idempotencyRegistryKey(firstKey)) {
+      secondKey += "-next";
+    }
+
+    await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-registry-shard-morning",
+      segments: [{ task_occurrence_id: morning.id, start_time: "08:00", end_time: "12:00" }],
+      expected_occurrence_revisions: { [morning.id]: 1 },
+    }, context(firstKey));
+    await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-registry-shard-afternoon",
+      segments: [{ task_occurrence_id: afternoon.id, start_time: "12:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [afternoon.id]: 1 },
+    }, context(secondKey));
+
+    expect(entities.PlanningMutationCoordinator.records
+      .filter(item => item.coordinator_key.startsWith("idempotency_registry:v3:"))
+      .map(item => item.coordinator_key)
+      .sort()).toEqual([
+        await idempotencyRegistryKey(firstKey),
+        await idempotencyRegistryKey(secondKey),
+      ].sort());
+    expect(entities.PlanningMutationCoordinator.records).toContainEqual(expect.objectContaining({
+      coordinator_key: "idempotency_registry:v2",
+      metadata: expect.objectContaining({ claims: {} }),
+    }));
   });
 
   it("geeft eerder verkregen occurrence-reserveringen vrij als een latere reservation-CAS faalt", async () => {
@@ -2884,8 +3142,36 @@ describe("planningApi dienstsamenstelling", () => {
     };
     const retryContext = context("compose-and-assign-recovery");
 
-    await expect(backend.composeAndAssign(base44, user, payload, retryContext))
-      .rejects.toThrow("tijdelijke auditstoring");
+    const originalConsoleInfo = console.info;
+    let errorTelemetry = null;
+    console.info = (label, serialized) => {
+      if (label !== "[planningApi:mutation_latency]") return;
+      const telemetry = JSON.parse(serialized);
+      if (telemetry.action !== "compose_and_assign" || telemetry.outcome !== "error") return;
+      errorTelemetry = {
+        telemetry,
+        shift_compensated: entities.PlanningShift.records[0]?.metadata?.compose_and_assign?.phase === "compensated",
+        active_segment_count: entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed").length,
+        active_assignment_count: entities.PlanningAssignment.records.filter(item => item.status !== "removed").length,
+        all_leases_released: entities.PlanningMutationCoordinator.records.every(item => item.lease == null),
+      };
+    };
+    try {
+      await expect(backend.composeAndAssign(base44, user, payload, retryContext))
+        .rejects.toThrow("tijdelijke auditstoring");
+    } finally {
+      console.info = originalConsoleInfo;
+    }
+    expect(errorTelemetry).toMatchObject({
+      telemetry: {
+        outcome: "error",
+        phases_ms: expect.objectContaining({ recovery: expect.any(Number), release: expect.any(Number) }),
+      },
+      shift_compensated: true,
+      active_segment_count: 0,
+      active_assignment_count: 0,
+      all_leases_released: true,
+    });
     expect(entities.PlanningShift.records[0]).toMatchObject({
       status: "cancelled",
       metadata: { compose_and_assign: { phase: "compensated" } },
@@ -3133,6 +3419,7 @@ describe("planningApi dienstsamenstelling", () => {
       });
       return created;
     };
+    const calls = instrumentBackendCalls(base44, entities);
 
     const result = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
@@ -3143,6 +3430,9 @@ describe("planningApi dienstsamenstelling", () => {
     expect(result.assignment.has_critical_warnings).toBe(true);
     expect(result.assignment.warning_codes).toContain("shift_overlap");
     expect(result.assignment.metadata?.final_assignment_validation_at).toBeTruthy();
+    expect(calls.count("PlanningAssignment.create")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
   });
 
   it("herlaadt de medewerker na de assignment-write voor de definitieve geschiktheidscontrole", async () => {
@@ -3155,6 +3445,7 @@ describe("planningApi dienstsamenstelling", () => {
       entities.Personnel.records[0].status = "inactive";
       return created;
     };
+    const calls = instrumentBackendCalls(base44, entities);
 
     const result = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
@@ -3165,6 +3456,9 @@ describe("planningApi dienstsamenstelling", () => {
     expect(result.assignment.has_critical_warnings).toBe(true);
     expect(result.assignment.warning_codes).toContain("personnel_not_active");
     expect(result.assignment.metadata?.final_assignment_validation_at).toBeTruthy();
+    expect(calls.count("PlanningAssignment.create")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
   });
 
   it("laat bij twee gelijktijdige composities met dezelfde occurrence-revision exact één request slagen", async () => {

@@ -66,6 +66,45 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function planningMutationLatencyProbe(
+  action: 'assign' | 'compose_and_assign',
+  context: ReturnType<typeof mutationContext>,
+) {
+  const startedAt = performance.now();
+  let previousMark = startedAt;
+  let completed = false;
+  const phasesMs: Record<string, number> = {};
+  const correlationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(String(context.correlationId || ''))
+      ? context.correlationId
+      : null;
+  const requestId = crypto.randomUUID();
+  const rounded = (milliseconds: number) => Math.round(milliseconds * 10) / 10;
+
+  return {
+    mark(phase: 'replay' | 'preflight' | 'claim' | 'leases' | 'composition' | 'eligibility' | 'writes_audit' | 'recovery' | 'release') {
+      if (completed) return;
+      const markedAt = performance.now();
+      phasesMs[phase] = rounded(Number(phasesMs[phase] || 0) + markedAt - previousMark);
+      previousMark = markedAt;
+    },
+    finish(outcome: 'ok' | 'error') {
+      if (completed) return;
+      completed = true;
+      // Structured, PII-free phase telemetry makes Base44 p50/p95 regressions
+      // observable without adding entity reads or writes to the hot path.
+      console.info('[planningApi:mutation_latency]', JSON.stringify({
+        action,
+        request_id: requestId,
+        correlation_id: correlationId,
+        outcome,
+        phases_ms: phasesMs,
+        total_ms: rounded(performance.now() - startedAt),
+      }));
+    },
+  };
+}
+
 function compact(value: unknown) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
@@ -581,7 +620,9 @@ const PLANNING_LEASE_RELEASE_CONCURRENCY = 8;
 // the remaining 105 seconds; after 15 seconds every fence check renews to 120.
 const PLANNING_RESOURCE_LEASE_RENEW_WINDOW_MS = PLANNING_RESOURCE_LEASE_MS - 15 * 1000;
 const PLANNING_IDEMPOTENCY_CLAIM_MS = 2 * 60 * 1000;
-const IDEMPOTENCY_REGISTRY_KEY = 'idempotency_registry:v2';
+const LEGACY_IDEMPOTENCY_REGISTRY_KEY = 'idempotency_registry:v2';
+const IDEMPOTENCY_REGISTRY_KEY_PREFIX = 'idempotency_registry:v3';
+const DUAL_IDEMPOTENCY_CLAIM_PROTOCOL = 'dual_v2_v3_transition';
 const MAX_COMPOSED_SHIFT_MINUTES = 24 * 60;
 const MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES = 12 * 60;
 
@@ -765,6 +806,12 @@ async function acquirePlanningResourceLeases(
         resourceType: descriptor.resourceType,
         resourceId: descriptor.resourceId,
         token,
+        // This deadline came from the successful token-CAS above. A conforming
+        // writer cannot replace an active lease, so repeated fence checks can
+        // stay local until the renewal window is reached. This removes a
+        // coordinator read before virtually every business write while keeping
+        // the stale-worker check at the point where the lease can expire.
+        verifiedExpiresAt: locked.lease?.expires_at || null,
         idempotencyKey: context.idempotencyKey,
         requestHash,
       });
@@ -898,6 +945,13 @@ async function renewPlanningResourceLeases(
   leases: LooseRecord[],
 ) {
   const renewLease = async (lease: LooseRecord) => {
+    const locallyVerifiedExpiry = Date.parse(lease.verifiedExpiresAt || '');
+    if (
+      Number.isFinite(locallyVerifiedExpiry)
+      && locallyVerifiedExpiry - Date.now() > PLANNING_RESOURCE_LEASE_RENEW_WINDOW_MS
+    ) {
+      return;
+    }
     let renewed = false;
     for (let attempt = 0; attempt < 5 && !renewed; attempt += 1) {
       const coordinator = await requireRecord(base44, 'PlanningMutationCoordinator', lease.coordinatorId, 'Planningcoordinator');
@@ -912,11 +966,12 @@ async function renewPlanningResourceLeases(
       }
       const remainingLeaseMs = Date.parse(coordinator.lease.expires_at || '') - Date.now();
       if (remainingLeaseMs > PLANNING_RESOURCE_LEASE_RENEW_WINDOW_MS) {
+        lease.verifiedExpiresAt = coordinator.lease.expires_at;
         renewed = true;
         continue;
       }
       try {
-        await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+        const renewedCoordinator = await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
           lease: {
             ...coordinator.lease,
             renewed_at: nowIso(),
@@ -925,6 +980,7 @@ async function renewPlanningResourceLeases(
           last_modified_by_user_id: user.id || null,
           last_modified_at: nowIso(),
         });
+        lease.verifiedExpiresAt = renewedCoordinator.lease?.expires_at || null;
         renewed = true;
       } catch (error) {
         if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
@@ -989,20 +1045,21 @@ async function withPlanningResourceLeases<T>(
   }
 }
 
-async function mutateIdempotencyClaim(
+async function mutateIdempotencyRegistryClaim(
   base44: LooseRecord,
   user: LooseRecord,
   context: ReturnType<typeof mutationContext>,
   requestHash: string,
   status: 'pending' | 'retryable' | 'completed',
+  claimId: string,
+  registry: { coordinatorKey: string; resourceId: string },
 ) {
-  const claimId = await sha256(`${user.id || 'anonymous'}:${context.idempotencyKey}`);
   const coordinator = await ensurePlanningCoordinator(
     base44,
     user,
-    IDEMPOTENCY_REGISTRY_KEY,
+    registry.coordinatorKey,
     'idempotency_registry',
-    'compose_and_assign',
+    registry.resourceId,
   );
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const current = await requireRecord(base44, 'PlanningMutationCoordinator', coordinator.id, 'Idempotencyregister');
@@ -1021,8 +1078,23 @@ async function mutateIdempotencyClaim(
       && existing?.status === 'pending'
       && Date.parse(existing.expires_at || '') > Date.now()
     ) {
+      const ownedDualTransition = (
+        existing.claim_protocol === DUAL_IDEMPOTENCY_CLAIM_PROTOCOL
+        && existing.idempotency_key === context.idempotencyKey
+        && existing.actor_user_id === (user.id || null)
+        && existing.request_hash === requestHash
+      );
+      // A crash can happen after v2 was acquired but before the v3 shard was
+      // written. The exact same dual-protocol request may finish that partial
+      // transition; an old writer has no protocol marker and remains blocked.
+      // Concurrent identical current requests still converge on the same
+      // business-resource leases after this claim phase.
+      if (ownedDualTransition) {
+        return { claimId, status, registryKey: registry.coordinatorKey, alreadyOwned: true };
+      }
       throw new ApiError(409, 'Deze compose_and_assign-opdracht wordt al verwerkt', {
         reservation_expires_at: existing.expires_at,
+        registry_key: registry.coordinatorKey,
       });
     }
     if (status === 'completed') delete claims[claimId];
@@ -1032,6 +1104,7 @@ async function mutateIdempotencyClaim(
       actor_user_id: user.id || null,
       request_hash: requestHash,
       status,
+      claim_protocol: DUAL_IDEMPOTENCY_CLAIM_PROTOCOL,
       updated_at: nowIso(),
       expires_at: new Date(Date.now() + PLANNING_IDEMPOTENCY_CLAIM_MS).toISOString(),
     };
@@ -1041,12 +1114,58 @@ async function mutateIdempotencyClaim(
         last_modified_by_user_id: user.id || null,
         last_modified_at: nowIso(),
       });
-      return { claimId, status };
+      return { claimId, status, registryKey: registry.coordinatorKey, alreadyOwned: false };
     } catch (error) {
       if (Number((error as any)?.status) !== 409 || attempt === 7) throw error;
     }
   }
   throw new ApiError(409, 'Idempotencyclaim kon niet worden vastgelegd');
+}
+
+async function mutateIdempotencyClaim(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  status: 'pending' | 'retryable' | 'completed',
+) {
+  const claimId = await sha256(`${user.id || 'anonymous'}:${context.idempotencyKey}`);
+  const registryShard = claimId.slice(0, 2);
+  // One transition release deliberately keeps the legacy v2 document as the
+  // first fence. That makes old v2-only and current dual writers mutually
+  // exclusive during rollout. The v3 shard is always second, so partial state
+  // is deterministic and can be resumed idempotently by the same request.
+  const registries = [
+    {
+      coordinatorKey: LEGACY_IDEMPOTENCY_REGISTRY_KEY,
+      resourceId: 'compose_and_assign',
+    },
+    {
+      coordinatorKey: `${IDEMPOTENCY_REGISTRY_KEY_PREFIX}:${registryShard}`,
+      resourceId: `compose_and_assign:${registryShard}`,
+    },
+  ];
+  const results = [];
+  for (const registry of registries) {
+    results.push(await mutateIdempotencyRegistryClaim(
+      base44,
+      user,
+      context,
+      requestHash,
+      status,
+      claimId,
+      registry,
+    ));
+  }
+  if (status === 'pending' && results.at(-1)?.alreadyOwned) {
+    // A complete dual claim belongs to an invocation that can still be live.
+    // Only the worker that creates the v3 half may proceed. A retry may repair
+    // a legacy-only partial claim, but never take over both active halves.
+    throw new ApiError(409, 'Deze compose_and_assign-opdracht wordt al verwerkt', {
+      registry_key: results.at(-1)?.registryKey || null,
+    });
+  }
+  return { claimId, status, registries: results };
 }
 
 async function releaseComposeAndAssignOccurrenceReservations(
@@ -2856,7 +2975,6 @@ async function evaluateAssignmentWarnings(
   const coveredDates = planningIntervalDates(shift);
   let routingSnapshot: LooseRecord | null = null;
   let personnelContractId: string | null = null;
-  const ignoredShiftIdSet = new Set(uniqueStrings(ignoredShiftIds));
 
   if (personnel.status !== 'active' || personnel.is_active === false) {
     warnings.push(warning(
@@ -2867,12 +2985,76 @@ async function evaluateAssignmentWarnings(
     ));
   }
 
+  // Contract/CAO routing is independent from the local overlap, absence and
+  // restriction reads. Start it immediately so its function/runtime latency is
+  // hidden behind those checks instead of being added afterwards.
+  const routingResultsPromise = Promise.all(coveredDates.map(async serviceDate => {
+    const dateWarnings: LooseRecord[] = [];
+    try {
+      const response = await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', {
+        personnel_id: personnel.id,
+        company_id: shift.company_id || null,
+        operating_company_id: shift.company_id || null,
+        task_id: shift.task_id || null,
+        object_id: shift.object_id || null,
+        route_id: shift.route_id || null,
+        service_date: serviceDate,
+        cao_key: shift.cao_key || null,
+        service_context: {
+          ...serviceContextFromShift(shift, personnel.id),
+          service_date: serviceDate,
+          covered_service_dates: coveredDates,
+        },
+        require_schedule_validation: false,
+        run_schedule_validation: false,
+        final_validation: false,
+        planning_interactive_fast_path: true,
+      });
+      const decision = response?.data || response || null;
+      const dateCode = serviceDate.replaceAll('-', '_');
+      normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
+        dateWarnings.push(warning(
+          `contract_cao_blocking_${dateCode}_${index + 1}`,
+          'critical',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+      normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
+        dateWarnings.push(warning(
+          `contract_cao_review_${dateCode}_${index + 1}`,
+          'warning',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+      normalizeArray(decision?.warnings).forEach((message, index) => {
+        dateWarnings.push(warning(
+          `contract_cao_warning_${dateCode}_${index + 1}`,
+          'info',
+          compact(message),
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      });
+      return { service_date: serviceDate, decision, warnings: dateWarnings, resolved: true };
+    } catch (error) {
+      dateWarnings.push(warning(
+        `assignment_validation_unavailable_${serviceDate.replaceAll('-', '_')}`,
+        'warning',
+        `Contract-/CAO-controle voor ${serviceDate} kon niet worden afgerond: ${(error as Error)?.message || String(error)}.`,
+        'resolveCaoPlanningAssignmentDecision',
+        { service_date: serviceDate },
+      ));
+      return { service_date: serviceDate, decision: null, warnings: dateWarnings, resolved: false };
+    }
+  }));
+  const ignoredShiftIdSet = new Set(uniqueStrings(ignoredShiftIds));
   const firstCoveredDate = coveredDates[0] || asDate(shift.service_date, 'service_date');
   const lastCoveredDate = coveredDates.at(-1) || firstCoveredDate;
-  const overlapCandidateDates = dateKeysBetween(
-    addDateDays(firstCoveredDate, -1),
-    lastCoveredDate,
-  );
+  const overlapCandidateDates = dateKeysBetween(addDateDays(firstCoveredDate, -1), lastCoveredDate);
   const [candidateShifts, absences, restrictions] = await Promise.all([
     filterAllRecords(base44.asServiceRole.entities.PlanningShift, {
       service_date: { $in: overlapCandidateDates },
@@ -2886,7 +3068,7 @@ async function evaluateAssignmentWarnings(
     && intervalsOverlap(shift, candidate)
   ));
   const personnelAssignments: LooseRecord[] = [];
-  const candidateShiftIds = uniqueStrings(relevantCandidateShifts.map(item => item.id));
+  const candidateShiftIds = uniqueStrings(relevantCandidateShifts.map((item: LooseRecord) => item.id));
   for (let index = 0; index < candidateShiftIds.length; index += 200) {
     personnelAssignments.push(...await filterAllRecords(
       base44.asServiceRole.entities.PlanningAssignment,
@@ -2943,68 +3125,7 @@ async function evaluateAssignmentWarnings(
     ));
   }
 
-  const routingResults = await Promise.all(coveredDates.map(async serviceDate => {
-    const dateWarnings: LooseRecord[] = [];
-    try {
-      const response = await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', {
-        personnel_id: personnel.id,
-        company_id: shift.company_id || null,
-        operating_company_id: shift.company_id || null,
-        task_id: shift.task_id || null,
-        object_id: shift.object_id || null,
-        route_id: shift.route_id || null,
-        service_date: serviceDate,
-        cao_key: shift.cao_key || null,
-        service_context: {
-          ...serviceContextFromShift(shift, personnel.id),
-          service_date: serviceDate,
-          covered_service_dates: coveredDates,
-        },
-        require_schedule_validation: false,
-        run_schedule_validation: false,
-        final_validation: false,
-      });
-      const decision = response?.data || response || null;
-      const dateCode = serviceDate.replaceAll('-', '_');
-      normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
-        dateWarnings.push(warning(
-          `contract_cao_blocking_${dateCode}_${index + 1}`,
-          'critical',
-          compact(message),
-          'resolveCaoPlanningAssignmentDecision',
-          { service_date: serviceDate },
-        ));
-      });
-      normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
-        dateWarnings.push(warning(
-          `contract_cao_review_${dateCode}_${index + 1}`,
-          'warning',
-          compact(message),
-          'resolveCaoPlanningAssignmentDecision',
-          { service_date: serviceDate },
-        ));
-      });
-      normalizeArray(decision?.warnings).forEach((message, index) => {
-        dateWarnings.push(warning(
-          `contract_cao_warning_${dateCode}_${index + 1}`,
-          'info',
-          compact(message),
-          'resolveCaoPlanningAssignmentDecision',
-          { service_date: serviceDate },
-        ));
-      });
-      return { service_date: serviceDate, decision, warnings: dateWarnings, resolved: true };
-    } catch (error) {
-      dateWarnings.push(warning(
-        `assignment_validation_unavailable_${serviceDate.replaceAll('-', '_')}`,
-        'warning',
-        `Contract-/CAO-controle voor ${serviceDate} kon niet worden afgerond: ${(error as Error)?.message || String(error)}.`,
-        'resolveCaoPlanningAssignmentDecision',
-        { service_date: serviceDate },
-      ));
-      return { service_date: serviceDate, decision: null, warnings: dateWarnings, resolved: false };
-    }
-  }));
+  const routingResults = await routingResultsPromise;
   const routingDecisions: LooseRecord[] = [];
   for (const result of routingResults) {
     warnings.push(...result.warnings);
@@ -7833,6 +7954,9 @@ async function composeShift(
     : requestedShiftId
     ? 'update_shift_composition'
     : 'compose_shift';
+  const latencyProbe = composeAndAssignMode
+    ? planningMutationLatencyProbe('compose_and_assign', context)
+    : null;
 
   const requestedSegments = normalizeArray<LooseRecord>(body.segments);
   let requestedPersonnelId: string | null = null;
@@ -7915,6 +8039,8 @@ async function composeShift(
             'completed',
           );
         }
+        latencyProbe?.mark('replay');
+        latencyProbe?.finish('ok');
         return replayResult(replay);
       }
       completedCompositionReplay = replay;
@@ -7922,6 +8048,7 @@ async function composeShift(
       pendingCompositionAudit = replay;
     }
   }
+  latencyProbe?.mark('replay');
 
   if (!requestedSegments.length) throw new ApiError(400, 'Voeg minimaal één taaksegment toe');
   if (requestedSegments.length > 50) throw new ApiError(400, 'Een dienst mag maximaal 50 taaksegmenten bevatten');
@@ -8122,6 +8249,7 @@ async function composeShift(
       maximum_duration_minutes: MAX_COMPOSED_SHIFT_MINUTES,
     });
   }
+  latencyProbe?.mark('preflight');
 
   try {
     if (composeAndAssignMode) {
@@ -8134,6 +8262,7 @@ async function composeShift(
       );
       composeAndAssignClaimed = true;
     }
+    latencyProbe?.mark('claim');
 
     const compositionDescriptors: LooseRecord[] = await Promise.all([
       ...affectedOccurrenceIds.map(id => resourceCoordinatorDescriptor('task_occurrence', id)),
@@ -8173,6 +8302,7 @@ async function composeShift(
       compositionRequestHash,
       compositionDescriptors,
     );
+    latencyProbe?.mark('leases');
 
   const sourceKey = composeAndAssignMode
     ? `task-compose-and-assign:${context.idempotencyKey}`
@@ -8900,6 +9030,7 @@ async function composeShift(
     base44.asServiceRole.entities.PlanningAssignment,
     { shift_id: shift.id },
   );
+  latencyProbe?.mark('composition');
   let requestedAssignment: LooseRecord | null = null;
   if (composeAndAssignMode) {
     const targetAssignment = await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex);
@@ -8978,6 +9109,7 @@ async function composeShift(
       writtenAssignment.id,
       finalSuppliedWarnings,
     );
+    latencyProbe?.mark('eligibility');
     await renewPlanningResourceLeases(base44, user, compositionLeases);
     requestedAssignment = await casUpdate(
       base44,
@@ -9170,6 +9302,7 @@ async function composeShift(
       recovery_errors: occurrenceClearErrors,
     });
   }
+  latencyProbe?.mark('writes_audit');
   if (composeAndAssignMode) composeAndAssignState.phaseCompleted = true;
   if (composeAndAssignMode) {
     composeAndAssignState.auditCompleted = true;
@@ -9197,6 +9330,8 @@ async function composeShift(
       });
     }
   }
+  latencyProbe?.mark('release');
+  latencyProbe?.finish('ok');
   return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
   } catch (error) {
     if (composeAndAssignMode) {
@@ -9242,7 +9377,9 @@ async function composeShift(
           });
         }
       }
+      latencyProbe?.mark('recovery');
       recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
+      latencyProbe?.mark('release');
       compositionLeases = [];
       if (recoveryErrors.length && error && typeof error === 'object') {
         (error as any).details = {
@@ -9261,7 +9398,9 @@ async function composeShift(
             affectedOccurrenceIds,
             compositionLeases,
           );
+      latencyProbe?.mark('recovery');
       recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
+      latencyProbe?.mark('release');
       compositionLeases = [];
       if (recoveryErrors.length && error && typeof error === 'object') {
         (error as any).details = {
@@ -9270,6 +9409,7 @@ async function composeShift(
         };
       }
     }
+    latencyProbe?.finish('error');
     throw error;
   }
 }
@@ -11017,12 +11157,16 @@ async function assignPersonnel(
   context: ReturnType<typeof mutationContext>,
 ) {
   requireMutationIdempotency(context, 'assign');
+  const latencyProbe = planningMutationLatencyProbe('assign', context);
   const requestHash = await mutationRequestHash('assign', body);
   const replay = await findReplay(base44, 'assign', context.idempotencyKey);
   if (replay) {
     assertReplayFingerprint(replay, user, requestHash, 'assign');
+    latencyProbe.mark('replay');
+    latencyProbe.finish('ok');
     return replayResult(replay);
   }
+  latencyProbe.mark('replay');
 
   const shiftId = requireId(body, 'shift_id');
   const personnelId = requireId(body, 'personnel_id');
@@ -11031,7 +11175,12 @@ async function assignPersonnel(
   const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
   const descriptors = await personnelDayDescriptors([personnelId], [initialShift]);
   descriptors.push(await resourceCoordinatorDescriptor('shift_composition', shiftId));
-  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+  latencyProbe.mark('preflight');
+  latencyProbe.mark('claim');
+  try {
+    const result = await withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    latencyProbe.mark('leases');
+    latencyProbe.mark('composition');
     const [shift, personnel] = await Promise.all([
       requireRecord(base44, 'PlanningShift', shiftId, 'Dienst'),
       requireRecord(base44, 'Personnel', personnelId, 'Medewerker'),
@@ -11123,6 +11272,7 @@ async function assignPersonnel(
       writtenAssignment.id,
       normalizeSuppliedWarnings(body),
     );
+    latencyProbe.mark('eligibility');
     await renewPlanningResourceLeases(base44, user, leases);
     const assignment = await casUpdate(
       base44,
@@ -11164,6 +11314,7 @@ async function assignPersonnel(
         previous_assignment: existing || null,
       },
     });
+    latencyProbe.mark('writes_audit');
     return {
       ok: true,
       ...result,
@@ -11171,7 +11322,14 @@ async function assignPersonnel(
       undoable: audit.undoable === true,
       undo_token: audit.undoable === true ? (audit.undo_token || null) : null,
     };
-  });
+    });
+    latencyProbe.mark('release');
+    latencyProbe.finish('ok');
+    return result;
+  } catch (error) {
+    latencyProbe.finish('error');
+    throw error;
+  }
 }
 
 async function unassignPersonnel(

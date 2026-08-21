@@ -59,6 +59,7 @@ export default function PlanningBoard({
   onResizeTaskBoundary,
   mutationPending = false,
   pendingResourceKeys = null,
+  queuedResourceKeys = null,
   searchQuery = "",
   isLoading,
 }) {
@@ -119,6 +120,7 @@ export default function PlanningBoard({
       onResizeTaskBoundary={onResizeTaskBoundary}
       mutationPending={mutationPending}
       pendingResourceKeys={pendingResourceKeys}
+      queuedResourceKeys={queuedResourceKeys}
       searchQuery={searchQuery}
     />
     </PlanningSearchFocus>
