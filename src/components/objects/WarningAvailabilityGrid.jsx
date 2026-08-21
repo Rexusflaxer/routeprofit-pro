@@ -43,7 +43,8 @@ const intervalDetails = period => ({
   repeating: objectTaskRecurrence(period.entry).repeating,
   recurrenceLabel: objectTaskRecurrenceLabel(period.entry),
   repeatUntil: period.entry?.repeat_until || period.entry?.revision?.repeat_until || period.entry?.revision?.recurrence_end_date || null,
-  alternative: period.entry?.revision?.metadata?.planning_only_single_occurrence === true,
+  alternative: period.entry?.alternative === true
+    || period.entry?.revision?.metadata?.planning_only_single_occurrence === true,
 });
 const exactIntervalsFor = (periods, dayKey, kind, dateKey = null) => (periods || []).filter(period => matchesRow(period, dayKey, dateKey) && (period.kind || "available") === kind).map(intervalDetails);
 const exactIntervalAt = (periods, dayKey, minute, dateKey = null) => { const period = (periods || []).find(item => matchesRow(item, dayKey, dateKey) && toMinutes(item.start_time) <= minute && toMinutes(item.end_time) > minute); return period ? { kind: period.kind || "available", interval: intervalDetails(period) } : null; };

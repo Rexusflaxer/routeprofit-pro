@@ -152,10 +152,10 @@ function mergeTaskIntervals(intervals) {
 }
 
 function intervalsAfterStagedChanges(entry, staged) {
-  const expanded = mergeTaskIntervals([
-    { start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) },
-    ...(staged.additions || []),
-  ]);
+  const baseIntervals = Array.isArray(staged?.base_intervals) && staged.base_intervals.length
+    ? staged.base_intervals
+    : [{ start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) }];
+  const expanded = mergeTaskIntervals([...baseIntervals, ...(staged.additions || [])]);
   return (staged.ranges || []).reduce(
     (segments, range) => segments.flatMap(segment => remainingTaskIntervals(
       { start_time: toTime(segment.start), end_time: toTime(segment.end) },
@@ -164,6 +164,39 @@ function intervalsAfterStagedChanges(entry, staged) {
     )),
     expanded,
   );
+}
+
+function stagedChangesForEntry(stagedErases, entry) {
+  return stagedErases.filter(item => {
+    const sameSeries = String(item.original.series_id || "") === String(entry.series_id || "");
+    if (!sameSeries) return item.key === persistedEntryKey(entry);
+    return objectTaskRecurrence(item.original).repeating
+      ? item.original.occurrence_date <= entry.occurrence_date
+      : item.original.occurrence_date === entry.occurrence_date;
+  }).sort((left, right) => (
+    left.original.occurrence_date.localeCompare(right.original.occurrence_date)
+    || left.key.localeCompare(right.key)
+  ));
+}
+
+function projectedIntervalsAfterStagedChanges(entry, stagedErases) {
+  const changes = stagedChangesForEntry(stagedErases, entry);
+  if (!changes.length) {
+    return [{ start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) }];
+  }
+  // Every effective-dated edit stores the complete interval state that was
+  // visible when that edit started. Applying these targets chronologically
+  // keeps an explicit later edit authoritative, while an edit created after an
+  // earlier one naturally inherits that earlier concept state.
+  return changes.reduce((intervals, staged) => intervalsAfterStagedChanges(
+    staged.original,
+    {
+      ...staged,
+      base_intervals: Array.isArray(staged.base_intervals) && staged.base_intervals.length
+        ? staged.base_intervals
+        : intervals,
+    },
+  ), [{ start: toMinutes(entry.start_time), end: toMinutes(entry.end_time) }]);
 }
 
 function connectedDraftIntervals(baseIntervals, drafts) {
@@ -184,15 +217,22 @@ function connectedDraftIntervals(baseIntervals, drafts) {
   return { intervals, connected };
 }
 
-function stagedChangeForEntry(stagedErases, entry) {
-  const matching = stagedErases.filter(item => {
-    const sameSeries = String(item.original.series_id || "") === String(entry.series_id || "");
-    if (!sameSeries) return item.key === persistedEntryKey(entry);
-    return objectTaskRecurrence(item.original).repeating
-      ? item.original.occurrence_date <= entry.occurrence_date
-      : item.original.occurrence_date === entry.occurrence_date;
-  });
-  return matching.sort((left, right) => right.original.occurrence_date.localeCompare(left.original.occurrence_date))[0] || null;
+export const PLANNING_ALTERNATIVE_SPLIT_ERROR = "Een losse taakafwijking kan maar uit één aaneengesloten tijdvak bestaan. Pas de begin- of eindtijd aan, of verwijder het hele blok.";
+
+export function planningAlternativeSplitError(stagedChanges = [], scratchEntries = []) {
+  for (const staged of stagedChanges) {
+    const original = staged?.original;
+    if (!original?.alternative) continue;
+    const candidates = scratchEntries.filter(entry => (
+      entry.occurrence_date === original.occurrence_date
+    ));
+    const { intervals } = connectedDraftIntervals(
+      intervalsAfterStagedChanges(original, staged),
+      candidates,
+    );
+    if (intervals.length > 1) return new Error(PLANNING_ALTERNATIVE_SPLIT_ERROR);
+  }
+  return null;
 }
 
 function recurrenceIdentity(entry) {
@@ -202,6 +242,11 @@ function recurrenceIdentity(entry) {
     frequency: recurrence.type,
     recurrenceInterval: recurrence.interval,
     repeatUntil: entry.repeat_until || entry.recurrence_end_date || entry.valid_until || "",
+    recurrenceAnchorDate: entry.recurrence_anchor_date
+      || entry.revision?.recurrence_anchor_date
+      || entry.occurrence_date
+      || entry.effective_from
+      || "",
     endDayOffset: Number(entry.end_day_offset || 0),
     definitionId: String(entry.definition_id || entry.task_definition_id || entry.object_task_definition_id || ""),
     seriesId: String(entry.series_id || entry.schedule_series_id || entry.object_task_schedule_series_id || ""),
@@ -219,6 +264,7 @@ function entriesCanJoin(left, right) {
     && leftIdentity.frequency === rightIdentity.frequency
     && leftIdentity.recurrenceInterval === rightIdentity.recurrenceInterval
     && leftIdentity.repeatUntil === rightIdentity.repeatUntil
+    && leftIdentity.recurrenceAnchorDate === rightIdentity.recurrenceAnchorDate
     && leftIdentity.endDayOffset === rightIdentity.endDayOffset
     && sameOptionalIdentity(leftIdentity.definitionId, rightIdentity.definitionId)
     && sameOptionalIdentity(leftIdentity.seriesId, rightIdentity.seriesId);
@@ -310,6 +356,7 @@ export default function ObjectTaskSchedule({
   const scratchRef = useRef(scratchEntries);
   const stagedErasesRef = useRef(stagedErases);
   const paintingSourceRef = useRef(null);
+  const draftSaveSessionRef = useRef(null);
 
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   useEffect(() => { scratchRef.current = scratchEntries; }, [scratchEntries]);
@@ -332,7 +379,7 @@ export default function ObjectTaskSchedule({
   useEffect(() => {
     if (!persistedMode || !selectedPeriod) return;
     const index = Math.max(0, Math.floor((Date.parse(selectedWeek) - Date.parse(selectedPeriod.start_date)) / 86_400_000));
-    scheduleScrollRef.current?.scrollTo({ top: index * GRID_DAY_HEIGHT });
+    scheduleScrollRef.current?.scrollTo?.({ top: index * GRID_DAY_HEIGHT });
   }, [persistedMode, taskDefinitionId]);
 
   const projectedLocalEntries = useMemo(
@@ -347,6 +394,7 @@ export default function ObjectTaskSchedule({
     definitions: contextData.definitions,
     series: contextData.series,
     revisions: contextData.revisions,
+    exceptions: contextData.exceptions,
     sourceChanges: contextData.source_changes,
     weekStart: weekStartValue,
   })) : [], [contextData, visibleWeekStarts]);
@@ -354,9 +402,9 @@ export default function ObjectTaskSchedule({
     ? projectedContextEntries.filter(entry => String(entry.definition_id) === String(taskDefinitionId))
     : [];
   const displayedPersistedEntries = useMemo(() => persistedOwnEntries.flatMap(entry => {
-    const staged = stagedChangeForEntry(stagedErases, entry);
-    if (!staged) return [entry];
-    return intervalsAfterStagedChanges(entry, staged).map((interval, index) => ({
+    const matchingChanges = stagedChangesForEntry(stagedErases, entry);
+    if (!matchingChanges.length) return [entry];
+    return projectedIntervalsAfterStagedChanges(entry, stagedErases).map((interval, index) => ({
       ...entry,
       id: `staged:${entry.id}:${index}:${interval.start}`,
       start_time: toTime(interval.start),
@@ -400,9 +448,20 @@ export default function ObjectTaskSchedule({
     onChange?.(value);
   };
   const commitScratch = value => {
+    draftSaveSessionRef.current = null;
     scratchRef.current = value;
     setScratchEntries(value);
   };
+  const draftSaveOperationKey = (kind, index) => {
+    if (!draftSaveSessionRef.current) {
+      draftSaveSessionRef.current = `object-task:draft:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+    }
+    return `${draftSaveSessionRef.current}:${kind}:${index}`;
+  };
+  const stagedBaseIntervals = entry => projectedIntervalsAfterStagedChanges(
+    entry,
+    stagedErasesRef.current,
+  );
   const editableBoundary = dayIndex => objectTaskEditableBoundary(visibleDates[dayIndex], now);
   const momentEditable = (dayIndex, minute) => minute >= editableBoundary(dayIndex);
 
@@ -414,6 +473,7 @@ export default function ObjectTaskSchedule({
   };
 
   const stagePersistedAddition = (entry, range) => {
+    draftSaveSessionRef.current = null;
     const original = entry._staged_original || entry;
     const key = persistedEntryKey(original);
     setStagedErases(current => {
@@ -423,7 +483,13 @@ export default function ObjectTaskSchedule({
           ...item,
           additions: mergeTaskIntervals([...(item.additions || []), range]),
         } : item)
-        : [...current, { key, original, ranges: [], additions: [range] }];
+        : [...current, {
+            key,
+            original,
+            base_intervals: stagedBaseIntervals(original),
+            ranges: [],
+            additions: [range],
+          }];
       stagedErasesRef.current = next;
       return next;
     });
@@ -435,8 +501,10 @@ export default function ObjectTaskSchedule({
     setLocalError(null);
     const sourceId = entry.draft_source_id || entry.client_id;
     if (persistedMode && !entry.draft) {
+      draftSaveSessionRef.current = null;
       const original = entry._staged_original || entry;
       const key = persistedEntryKey(original);
+      const baseIntervals = stagedBaseIntervals(original);
       const range = eraseStart == null
         ? { start: toMinutes(original.start_time), end: toMinutes(original.end_time) }
         : { start: eraseStart, end: eraseEnd };
@@ -444,7 +512,13 @@ export default function ObjectTaskSchedule({
         const existing = current.find(item => item.key === key);
         const next = existing
           ? current.map(item => item.key === key ? { ...item, ranges: [...item.ranges, range] } : item)
-          : [...current, { key, original, ranges: [range] }];
+          : [...current, {
+              key,
+              original,
+              base_intervals: baseIntervals,
+              ranges: [range],
+              additions: [],
+            }];
         stagedErasesRef.current = next;
         return next;
       });
@@ -697,18 +771,36 @@ export default function ObjectTaskSchedule({
 
   const saveDrafts = async () => {
     if (!persistedMode || (scratchRef.current.length === 0 && stagedErasesRef.current.length === 0) || savingDrafts || pending) return;
+    const alternativeSplitError = planningAlternativeSplitError(
+      stagedErasesRef.current,
+      scratchRef.current,
+    );
+    if (alternativeSplitError) {
+      setLocalError(alternativeSplitError);
+      return;
+    }
     setLocalError(null);
     setSavingDrafts(true);
     try {
-      for (const staged of [...stagedErasesRef.current]) {
-        const candidates = scratchRef.current.filter(entry => entry.occurrence_date === staged.original.occurrence_date);
+      const stagedSnapshot = [...stagedErasesRef.current].sort((left, right) => (
+        String(left.original.series_id || "").localeCompare(String(right.original.series_id || ""))
+        || left.original.occurrence_date.localeCompare(right.original.occurrence_date)
+        || left.key.localeCompare(right.key)
+      ));
+      const scratchSnapshot = [...scratchRef.current];
+      const consumedDraftIds = new Set();
+      let operationIndex = 0;
+      for (const staged of stagedSnapshot) {
+        const candidates = scratchSnapshot.filter(entry => entry.occurrence_date === staged.original.occurrence_date);
         const { intervals: remaining, connected: adjoiningDrafts } = connectedDraftIntervals(
           intervalsAfterStagedChanges(staged.original, staged),
           candidates,
         );
-        if (adjoiningDrafts.length) commitScratch(scratchRef.current.filter(entry => !adjoiningDrafts.includes(entry)));
+        adjoiningDrafts.forEach(entry => consumedDraftIds.add(entry.client_id));
         if (remaining.length === 0) {
-          await onPersistedStop?.(staged.original);
+          await onPersistedStop?.(staged.original, {
+            idempotencyKey: draftSaveOperationKey("stop", operationIndex++),
+          });
         } else {
           await onPersistedChange?.(staged.original, {
             start_time: toTime(remaining[0].start),
@@ -717,23 +809,28 @@ export default function ObjectTaskSchedule({
             recurrence_type: staged.original.recurrence_type || staged.original.frequency,
             recurrence_interval: staged.original.recurrence_interval || 1,
             repeat_until: staged.original.repeat_until || null,
+          }, {
+            idempotencyKey: draftSaveOperationKey("change", operationIndex++),
           });
           for (const interval of remaining.slice(1)) {
             await onPersistedCreate?.({
               ...staged.original,
               start_time: toTime(interval.start),
               end_time: toTime(interval.end),
+            }, {
+              idempotencyKey: draftSaveOperationKey("split", operationIndex++),
             });
           }
         }
-        const next = stagedErasesRef.current.filter(item => item.key !== staged.key);
-        stagedErasesRef.current = next;
-        setStagedErases(next);
       }
-      for (const entry of [...scratchRef.current]) {
-        await onPersistedCreate?.(entry);
-        commitScratch(scratchRef.current.filter(item => item.client_id !== entry.client_id));
+      for (const entry of scratchSnapshot.filter(item => !consumedDraftIds.has(item.client_id))) {
+        await onPersistedCreate?.(entry, {
+          idempotencyKey: draftSaveOperationKey("create", operationIndex++),
+        });
       }
+      commitScratch([]);
+      stagedErasesRef.current = [];
+      setStagedErases([]);
       onSaved?.();
     } catch (saveError) {
       setLocalError(saveError);
@@ -747,6 +844,7 @@ export default function ObjectTaskSchedule({
     commitScratch([]);
     stagedErasesRef.current = [];
     setStagedErases([]);
+    draftSaveSessionRef.current = null;
     setEditor(null);
     setLocalError(null);
     onCancel?.();
@@ -762,6 +860,7 @@ export default function ObjectTaskSchedule({
       commitScratch([]);
       stagedErasesRef.current = [];
       setStagedErases([]);
+      draftSaveSessionRef.current = null;
     }
     onWeekChange?.(normalized);
   };
@@ -777,7 +876,7 @@ export default function ObjectTaskSchedule({
   const scrollToPeriodWeek = (period, weekStartValue) => {
     globalThis.setTimeout(() => {
       const index = Math.max(0, Math.floor((Date.parse(weekStartValue) - Date.parse(period.start_date)) / 86_400_000));
-      scheduleScrollRef.current?.scrollTo({ top: index * GRID_DAY_HEIGHT, behavior: "smooth" });
+      scheduleScrollRef.current?.scrollTo?.({ top: index * GRID_DAY_HEIGHT, behavior: "smooth" });
     }, 0);
   };
 

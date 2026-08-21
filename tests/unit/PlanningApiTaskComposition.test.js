@@ -108,6 +108,7 @@ function setup(occurrences) {
     ObjectTaskDefinition: entity([], "object-task-definition"),
     ObjectTaskScheduleSeries: entity([], "object-task-schedule-series"),
     ObjectTaskScheduleRevision: entity([], "object-task-schedule-revision"),
+    ObjectTaskScheduleException: entity([], "object-task-schedule-exception"),
     PlanningTaskSourceChange: entity([], "planning-task-source-change"),
     ObjectSecurityPlan: entity([], "object-security-plan"),
     ObjectSecurityPlanRevision: entity([], "object-security-plan-revision"),
@@ -137,6 +138,8 @@ async function createWeeklyObjectTask({
   startTime = "06:30",
   endTime = "18:00",
   recurrenceEndDate = null,
+  recurrenceInterval = 1,
+  recurrenceAnchorDate = startDate,
   withSecurityPlan = false,
 }) {
   let securityPlanId = null;
@@ -179,6 +182,8 @@ async function createWeeklyObjectTask({
       start_time: startTime,
       end_time: endTime,
       repeat_weekly: true,
+      recurrence_interval: recurrenceInterval,
+      recurrence_anchor_date: recurrenceAnchorDate,
       recurrence_end_date: recurrenceEndDate,
     }],
   }, context(`create-object-task-${key}`));
@@ -485,6 +490,71 @@ describe("planningApi occurrence-generatie", () => {
     ]);
   });
 
+  it("projecteert uitsluitend revisies die vanaf current_revision_id bereikbaar zijn", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "ignore-orphan-blueprint-revision",
+    });
+    const scheduleSeries = created.series[0].series;
+    const currentRevision = created.series[0].current_revision;
+    await entities.ObjectTaskScheduleRevision.create({
+      ...currentRevision,
+      id: "orphan-blueprint-revision",
+      revision_number: 99,
+      previous_revision_id: currentRevision.id,
+      effective_from: "2099-08-24",
+      start_time: "22:00",
+      end_time: "23:00",
+      creation_idempotency_key: "orphan-blueprint-revision",
+      creation_request_fingerprint: "orphan-blueprint-revision",
+    });
+
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-ignores-orphan-blueprint-revision"));
+
+    expect(await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id)).toMatchObject({
+      current_revision_id: currentRevision.id,
+      current_revision_number: 1,
+    });
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active" && item.service_date === "2099-08-24"
+    ))).toEqual([expect.objectContaining({
+      object_task_schedule_revision_id: currentRevision.id,
+      window_start_time: "06:30",
+      window_end_time: "18:00",
+    })]);
+  });
+
+  it("projecteert fail-closed zolang een nieuwe reeks nog geen current_revision_id heeft", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "null-pointer-orphan-blueprint-revision",
+    });
+    const scheduleSeries = entities.ObjectTaskScheduleSeries.records.find(item => (
+      item.id === created.series[0].series.id
+    ));
+    scheduleSeries.current_revision_id = null;
+    scheduleSeries.current_revision_number = 0;
+
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-ignores-null-pointer-orphan-revision"));
+
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === scheduleSeries.id
+    ))).toHaveLength(1);
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active" && item.service_date === "2099-08-24"
+    ))).toEqual([]);
+  });
+
   it("stopt een weekreeks vanaf de gekozen occurrence en laat eerdere uitvoeringen staan", async () => {
     const { base44, entities } = setup([]);
     const created = await createWeeklyObjectTask({
@@ -609,7 +679,1403 @@ describe("planningApi occurrence-generatie", () => {
   });
 });
 
+describe("planningApi losse taakuitzonderingen vanuit Planning", () => {
+  it("houdt bij een oorspronkelijke eenmalige taak ook de legacy objectkaartspiegel gelijk", async () => {
+    const { base44, entities } = setup([]);
+    const created = await backend.createObjectTask(base44, user, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      expected_version: 0,
+      task: {
+        task_type: "reception",
+        execution_mode: "continuous",
+        instructions: "Eenmalige receptietaak.",
+      },
+      schedule_blocks: [{
+        service_date: "2099-08-24",
+        start_time: "08:00",
+        end_time: "12:00",
+        recurrence_type: "one_time",
+      }],
+    }, context("create-one-time-task-for-single-edit"));
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-one-time-task-for-single-edit"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+
+    const changed = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "09:00",
+      end_time: "13:30",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("edit-one-time-task-and-mirror"));
+
+    expect(changed.task_schedule_exception).toBeNull();
+    expect(changed.alternative_series).toBeNull();
+    expect(await entities.ObjectTaskDefinition.get(created.definition.id)).toMatchObject({
+      recurrence_type: "one_time",
+      specific_date: "2099-08-24",
+      start_time: "09:00",
+      end_time: "13:30",
+      schedule_periods: [expect.objectContaining({
+        start_time: "09:00",
+        end_time: "13:30",
+      })],
+      metadata: expect.objectContaining({
+        last_single_occurrence_mirror_mutation: expect.objectContaining({
+          idempotency_key: "edit-one-time-task-and-mirror",
+          revision_id: changed.task_occurrences.find(item => item.lifecycle_status === "active")
+            .object_task_schedule_revision_id,
+        }),
+      }),
+    });
+  });
+
+  it("maakt voor één weekoccurrence een actieve uitzondering en een eigen one_time-reeks en replayt idempotent", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "single-weekly-alternative",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-single-weekly-alternative"));
+    const sourceSeries = created.series[0].series;
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    };
+    const mutation = context("change-single-weekly-alternative");
+
+    const changed = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+    const replacement = changed.task_occurrences.find(item => item.lifecycle_status === "active");
+    const stateAfterFirst = structuredClone({
+      occurrences: entities.PlanningTaskOccurrence.records,
+      series: entities.ObjectTaskScheduleSeries.records,
+      revisions: entities.ObjectTaskScheduleRevision.records,
+      exceptions: entities.ObjectTaskScheduleException.records,
+    });
+    const replay = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+
+    expect(changed.task_schedule_exception).toMatchObject({
+      source_series_id: sourceSeries.id,
+      service_date: "2099-08-24",
+      kind: "alternative",
+      status: "active",
+      alternative_series_id: changed.alternative_series.id,
+      alternative_revision_id: changed.alternative_revision.id,
+    });
+    expect(changed.alternative_series).toMatchObject({
+      object_task_definition_id: created.definition.id,
+      status: "active",
+      metadata: {
+        schedule_kind: "alternative",
+        source_series_id: sourceSeries.id,
+      },
+    });
+    expect(changed.alternative_series.id).not.toBe(sourceSeries.id);
+    expect(changed.alternative_revision).toMatchObject({
+      series_id: changed.alternative_series.id,
+      recurrence_type: "one_time",
+      recurrence_interval: 1,
+      recurrence_anchor_date: "2099-08-24",
+      effective_from: "2099-08-24",
+      recurrence_end_date: "2099-08-24",
+      start_time: "08:00",
+      end_time: "16:00",
+    });
+    expect(await entities.PlanningTaskOccurrence.get(sourceOccurrence.id)).toMatchObject({
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: replacement.id,
+    });
+    expect(replacement).toMatchObject({
+      lifecycle_status: "active",
+      supersedes_task_occurrence_id: sourceOccurrence.id,
+      object_task_schedule_series_id: changed.alternative_series.id,
+      object_task_schedule_revision_id: changed.alternative_revision.id,
+      logical_source_key: sourceOccurrence.logical_source_key,
+      service_date: "2099-08-24",
+      window_start_time: "08:00",
+      window_end_time: "16:00",
+      metadata: expect.objectContaining({
+        planning_alternative: true,
+        task_schedule_exception_id: changed.task_schedule_exception.id,
+      }),
+    });
+    expect(replay).toMatchObject({
+      ok: true,
+      idempotent: true,
+      audit_event_id: changed.audit_event_id,
+      task_schedule_exception: { id: changed.task_schedule_exception.id },
+      alternative_series: { id: changed.alternative_series.id },
+      alternative_revision: { id: changed.alternative_revision.id },
+    });
+    expect({
+      occurrences: entities.PlanningTaskOccurrence.records,
+      series: entities.ObjectTaskScheduleSeries.records,
+      revisions: entities.ObjectTaskScheduleRevision.records,
+      exceptions: entities.ObjectTaskScheduleException.records,
+    }).toEqual(stateAfterFirst);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_single_task_occurrence"
+    ))).toHaveLength(1);
+  });
+
+  it("behoudt een week-2-alternatief en de oorspronkelijke recurrence-anchor bij een latere bronwijziging", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "weekly-two-anchor-alternative",
+      recurrenceInterval: 2,
+      recurrenceAnchorDate: "2099-08-17",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-17",
+      period_end: "2099-08-31",
+    }, context("bootstrap-weekly-two-before-alternative"));
+    const sourceSeries = created.series[0].series;
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-31"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "09:00",
+      end_time: "15:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("change-weekly-two-alternative"));
+    const alternativeOccurrence = alternative.task_occurrences.find(item => item.lifecycle_status === "active");
+    const currentSourceSeries = await entities.ObjectTaskScheduleSeries.get(sourceSeries.id);
+
+    const changedSource = await backend.mutateObjectTaskSeries(base44, user, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: sourceSeries.id,
+      effective_from: "2099-08-31",
+      start_time: "07:00",
+      end_time: "17:00",
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: currentSourceSeries.version,
+    }, context("change-weekly-two-source-after-alternative"), "schedule");
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-17",
+      period_end: "2099-09-28",
+    }, context("bootstrap-weekly-two-after-source-change"));
+
+    expect(changedSource.current_revision).toMatchObject({
+      recurrence_type: "weekly",
+      recurrence_interval: 2,
+      recurrence_anchor_date: "2099-08-17",
+      effective_from: "2099-08-31",
+      start_time: "07:00",
+      end_time: "17:00",
+    });
+    expect(await entities.ObjectTaskScheduleException.get(alternative.task_schedule_exception.id)).toMatchObject({
+      status: "active",
+      source_series_id: sourceSeries.id,
+      alternative_series_id: alternative.alternative_series.id,
+      service_date: "2099-08-31",
+    });
+    expect(await entities.PlanningTaskOccurrence.get(alternativeOccurrence.id)).toMatchObject({
+      lifecycle_status: "active",
+      object_task_schedule_series_id: alternative.alternative_series.id,
+      window_start_time: "09:00",
+      window_end_time: "15:00",
+    });
+    const active = entities.PlanningTaskOccurrence.records
+      .filter(item => (
+        item.lifecycle_status === "active"
+        && item.object_task_definition_id === created.definition.id
+      ))
+      .sort((left, right) => left.service_date.localeCompare(right.service_date));
+    expect(active.map(item => item.service_date)).toEqual([
+      "2099-08-17",
+      "2099-08-31",
+      "2099-09-14",
+      "2099-09-28",
+    ]);
+    expect(active.find(item => item.service_date === "2099-08-31")).toMatchObject({
+      id: alternativeOccurrence.id,
+      object_task_schedule_series_id: alternative.alternative_series.id,
+      window_start_time: "09:00",
+    });
+    expect(active.filter(item => ["2099-09-14", "2099-09-28"].includes(item.service_date))).toEqual([
+      expect.objectContaining({
+        object_task_schedule_series_id: sourceSeries.id,
+        object_task_schedule_revision_id: changedSource.current_revision.id,
+        window_start_time: "07:00",
+      }),
+      expect.objectContaining({
+        object_task_schedule_series_id: sourceSeries.id,
+        object_task_schedule_revision_id: changedSource.current_revision.id,
+        window_start_time: "07:00",
+      }),
+    ]);
+  });
+
+  it("annuleert alleen de gekozen week-2-occurrence en laat de blauwdrukcadans intact", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "cancel-single-weekly-two-occurrence",
+      recurrenceInterval: 2,
+      recurrenceAnchorDate: "2099-08-17",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-17",
+      period_end: "2099-09-14",
+    }, context("bootstrap-before-cancel-single-weekly-two"));
+    const sourceSeries = created.series[0].series;
+    const sourceRevision = created.series[0].current_revision;
+    const sourceSeriesBefore = structuredClone(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id));
+    const sourceRevisionsBefore = structuredClone(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    )));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === sourceSeries.id
+      && item.service_date === "2099-08-31"
+    ));
+    const composition = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: sourceOccurrence.id,
+        start_time: "06:30",
+        end_time: "18:00",
+      }],
+      expected_occurrence_revisions: { [sourceOccurrence.id]: sourceOccurrence.revision },
+    }, context("compose-before-cancel-single-weekly-two"));
+    const plannedOccurrence = await entities.PlanningTaskOccurrence.get(sourceOccurrence.id);
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceRevision.id,
+      expected_occurrence_revision: plannedOccurrence.revision,
+      cancel_occurrence: true,
+      confirm_remove_outside_shifts: true,
+    };
+    const mutation = context("cancel-single-weekly-two");
+
+    const cancelled = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+    const replay = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+
+    expect(cancelled.task_schedule_exception).toMatchObject({
+      source_series_id: sourceSeries.id,
+      source_revision_id: sourceRevision.id,
+      service_date: "2099-08-31",
+      kind: "cancelled",
+      status: "active",
+      alternative_series_id: null,
+      alternative_revision_id: null,
+    });
+    expect(cancelled.alternative_series).toBeNull();
+    expect(cancelled.alternative_revision).toBeNull();
+    expect(cancelled.task_occurrences).toEqual([expect.objectContaining({
+      id: sourceOccurrence.id,
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: null,
+      metadata: expect.objectContaining({ cancelled_from_planning: true }),
+    })]);
+    expect(cancelled.shifts).toEqual([expect.objectContaining({
+      id: composition.shift.id,
+      status: "cancelled",
+      task_occurrence_ids: [],
+      task_segment_count: 0,
+    })]);
+    expect(cancelled.segments).toEqual([expect.objectContaining({
+      id: composition.segments[0].id,
+      status: "removed",
+    })]);
+    expect(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id)).toEqual(sourceSeriesBefore);
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    ))).toEqual(sourceRevisionsBefore);
+    expect(replay).toMatchObject({
+      ok: true,
+      idempotent: true,
+      audit_event_id: cancelled.audit_event_id,
+      task_schedule_exception: { id: cancelled.task_schedule_exception.id },
+    });
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_single_task_occurrence"
+    ))).toHaveLength(1);
+
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-17",
+      period_end: "2099-09-14",
+    }, context("bootstrap-after-cancel-single-weekly-two"));
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === sourceSeries.id
+    )).map(item => item.service_date).sort()).toEqual([
+      "2099-08-17",
+      "2099-09-14",
+    ]);
+  });
+
+  it("wijzigt een bestaand planningalternatief alleen binnen diens eigen one_time-reeks", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "edit-existing-alternative",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-edit-existing-alternative"));
+    const sourceSeries = created.series[0].series;
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const first = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-existing-alternative"));
+    const firstAlternativeOccurrence = first.task_occurrences.find(item => item.lifecycle_status === "active");
+    const sourceSeriesBefore = structuredClone(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id));
+    const sourceRevisionsBefore = structuredClone(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    )));
+
+    const second = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: firstAlternativeOccurrence.id,
+      source_revision_id: firstAlternativeOccurrence.object_task_schedule_revision_id,
+      start_time: "09:00",
+      end_time: "13:00",
+      expected_occurrence_revision: firstAlternativeOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("edit-existing-alternative-second-time"));
+    const secondAlternativeOccurrence = second.task_occurrences.find(item => item.lifecycle_status === "active");
+
+    expect(second.task_schedule_exception).toMatchObject({
+      id: first.task_schedule_exception.id,
+      status: "active",
+      source_series_id: sourceSeries.id,
+      alternative_series_id: first.alternative_series.id,
+      alternative_revision_id: second.alternative_revision.id,
+    });
+    expect(second.alternative_series).toMatchObject({
+      id: first.alternative_series.id,
+      current_revision_id: second.alternative_revision.id,
+      current_revision_number: 2,
+      metadata: expect.objectContaining({ schedule_kind: "alternative" }),
+    });
+    expect(second.alternative_revision).toMatchObject({
+      series_id: first.alternative_series.id,
+      previous_revision_id: first.alternative_revision.id,
+      revision_number: 2,
+      recurrence_type: "one_time",
+      recurrence_anchor_date: "2099-08-24",
+      start_time: "09:00",
+      end_time: "13:00",
+    });
+    expect(await entities.PlanningTaskOccurrence.get(firstAlternativeOccurrence.id)).toMatchObject({
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: secondAlternativeOccurrence.id,
+    });
+    expect(secondAlternativeOccurrence).toMatchObject({
+      lifecycle_status: "active",
+      object_task_schedule_series_id: first.alternative_series.id,
+      object_task_schedule_revision_id: second.alternative_revision.id,
+      supersedes_task_occurrence_id: firstAlternativeOccurrence.id,
+      window_start_time: "09:00",
+      window_end_time: "13:00",
+    });
+    expect(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id)).toEqual(sourceSeriesBefore);
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    ))).toEqual(sourceRevisionsBefore);
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(1);
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ))).toEqual([expect.objectContaining({ id: secondAlternativeOccurrence.id })]);
+  });
+
+  it("annuleert een bestaand planningalternatief zonder de oorspronkelijke weekreeks te stoppen", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "cancel-existing-alternative",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-31",
+    }, context("bootstrap-before-cancel-existing-alternative"));
+    const sourceSeries = created.series[0].series;
+    const sourceSeriesBefore = structuredClone(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === sourceSeries.id
+      && item.service_date === "2099-08-24"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-before-cancel-existing-alternative"));
+    const alternativeOccurrence = alternative.task_occurrences.find(item => (
+      item.lifecycle_status === "active"
+    ));
+
+    const cancelled = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: alternativeOccurrence.id,
+      source_revision_id: alternativeOccurrence.object_task_schedule_revision_id,
+      expected_occurrence_revision: alternativeOccurrence.revision,
+      cancel_occurrence: true,
+      confirm_remove_outside_shifts: true,
+    }, context("cancel-existing-alternative"));
+
+    expect(cancelled.task_schedule_exception).toMatchObject({
+      id: alternative.task_schedule_exception.id,
+      source_series_id: sourceSeries.id,
+      alternative_series_id: alternative.alternative_series.id,
+      service_date: "2099-08-24",
+      kind: "cancelled",
+      status: "active",
+    });
+    expect(cancelled.alternative_series).toBeNull();
+    expect(cancelled.alternative_revision).toBeNull();
+    expect(await entities.ObjectTaskScheduleSeries.get(alternative.alternative_series.id)).toMatchObject({
+      status: "stopped",
+      current_revision_number: 2,
+    });
+    expect(await entities.PlanningTaskOccurrence.get(alternativeOccurrence.id)).toMatchObject({
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: null,
+      metadata: expect.objectContaining({ cancelled_from_planning: true }),
+    });
+    expect(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id)).toEqual(sourceSeriesBefore);
+
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-31",
+    }, context("bootstrap-after-cancel-existing-alternative"));
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+    )).map(item => item.service_date)).toEqual(["2099-08-31"]);
+  });
+
+  it("wijzigt en verwijdert een planningalternatief vanuit de objectkaart zonder de bronreeks te veranderen", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "object-card-edits-alternative",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-31",
+    }, context("bootstrap-object-card-alternative"));
+    const sourceSeries = created.series[0].series;
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === sourceSeries.id
+      && item.service_date === "2099-08-24"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-object-card-alternative"));
+    const sourceSeriesBefore = structuredClone(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id));
+    const sourceRevisionsBefore = structuredClone(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    )));
+
+    const changed = await backend.mutateObjectTaskSeries(base44, user, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: alternative.alternative_series.id,
+      effective_from: "2099-08-24",
+      start_time: "09:15",
+      end_time: "13:45",
+      recurrence_type: "one_time",
+      recurrence_interval: 1,
+      recurrence_end_date: "2099-08-24",
+      expected_version: alternative.alternative_series.version,
+    }, context("object-card-change-alternative"), "schedule");
+
+    expect(changed.task_schedule_exception).toMatchObject({
+      id: alternative.task_schedule_exception.id,
+      source_series_id: sourceSeries.id,
+      alternative_series_id: alternative.alternative_series.id,
+      alternative_revision_id: changed.current_revision.id,
+      service_date: "2099-08-24",
+      kind: "alternative",
+      status: "active",
+    });
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ))).toEqual([expect.objectContaining({
+      object_task_schedule_series_id: alternative.alternative_series.id,
+      object_task_schedule_revision_id: changed.current_revision.id,
+      window_start_time: "09:15",
+      window_end_time: "13:45",
+    })]);
+    expect(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id)).toEqual(sourceSeriesBefore);
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    ))).toEqual(sourceRevisionsBefore);
+
+    const stopped = await backend.mutateObjectTaskSeries(base44, user, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: alternative.alternative_series.id,
+      effective_from: "2099-08-24",
+      expected_version: changed.series.version,
+    }, context("object-card-stop-alternative"), "stop");
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-31",
+    }, context("bootstrap-after-object-card-stop-alternative"));
+
+    expect(stopped.task_schedule_exception).toMatchObject({
+      id: alternative.task_schedule_exception.id,
+      kind: "cancelled",
+      status: "active",
+      alternative_revision_id: stopped.current_revision.id,
+    });
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ))).toEqual([]);
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === sourceSeries.id
+      && item.service_date === "2099-08-31"
+    ))).toHaveLength(1);
+    expect(await entities.ObjectTaskScheduleSeries.get(sourceSeries.id)).toEqual(sourceSeriesBefore);
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === sourceSeries.id
+    ))).toEqual(sourceRevisionsBefore);
+  });
+
+  it("houdt een objectkaart-alternatief strikt eenmalig en blokkeert dubbel gekoppelde uitzonderingen", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "object-card-alternative-fences",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-object-card-alternative-fences"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active" && item.service_date === "2099-08-24"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-object-card-alternative-fences"));
+    const recurringBody = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: alternative.alternative_series.id,
+      effective_from: "2099-08-24",
+      start_time: "09:00",
+      end_time: "13:00",
+      recurrence_type: "weekly",
+      recurrence_interval: 1,
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: alternative.alternative_series.version,
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      recurringBody,
+      context("reject-recurring-object-card-alternative"),
+      "schedule",
+    )).rejects.toMatchObject({
+      status: 409,
+      details: { code: "TASK_ALTERNATIVE_MUST_REMAIN_ONE_TIME" },
+    });
+
+    entities.ObjectTaskScheduleException.records.push({
+      ...structuredClone(alternative.task_schedule_exception),
+      id: "duplicate-object-card-alternative-exception",
+      exception_key: "duplicate-object-card-alternative-exception",
+      version: 1,
+    });
+    await expect(backend.mutateObjectTaskSeries(base44, user, {
+      ...recurringBody,
+      recurrence_type: "one_time",
+      repeat_weekly: false,
+      recurrence_end_date: "2099-08-24",
+    }, context("reject-ambiguous-object-card-alternative"), "schedule")).rejects.toMatchObject({
+      status: 409,
+      details: { code: "TASK_ALTERNATIVE_EXCEPTION_AMBIGUOUS" },
+    });
+  });
+
+  it("herstelt een objectkaart-stop van een alternatief idempotent na uitval tussen uitzondering en reeks", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "recover-object-card-alternative-stop",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-recover-object-card-alternative-stop"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active" && item.service_date === "2099-08-24"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-recoverable-object-card-alternative"));
+    const stopBody = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: alternative.alternative_series.id,
+      effective_from: "2099-08-24",
+      expected_version: alternative.alternative_series.version,
+    };
+    const stopContext = context("recover-object-card-alternative-stop");
+    const originalUpdateMany = entities.ObjectTaskScheduleSeries.updateMany
+      .bind(entities.ObjectTaskScheduleSeries);
+    let failSeriesAdvanceOnce = true;
+    entities.ObjectTaskScheduleSeries.updateMany = async (query, update) => {
+      if (
+        failSeriesAdvanceOnce
+        && String(query.id) === String(alternative.alternative_series.id)
+        && update?.$set?.status === "stopped"
+      ) {
+        failSeriesAdvanceOnce = false;
+        throw new Error("simulated series pointer failure");
+      }
+      return originalUpdateMany(query, update);
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      stopBody,
+      stopContext,
+      "stop",
+    )).rejects.toThrow("simulated series pointer failure");
+    const preparedException = await entities.ObjectTaskScheduleException.get(
+      alternative.task_schedule_exception.id,
+    );
+    const unchangedAlternative = await entities.ObjectTaskScheduleSeries.get(
+      alternative.alternative_series.id,
+    );
+    expect(preparedException).toMatchObject({
+      kind: "cancelled",
+      alternative_revision_id: expect.any(String),
+      metadata: {
+        last_alternative_object_task_mutation: expect.objectContaining({
+          idempotency_key: stopContext.idempotencyKey,
+        }),
+      },
+    });
+    expect(unchangedAlternative).toMatchObject({
+      status: "active",
+      current_revision_id: alternative.alternative_revision.id,
+    });
+
+    const recovered = await backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      stopBody,
+      stopContext,
+      "stop",
+    );
+    expect(recovered).toMatchObject({
+      ok: true,
+      series: {
+        id: alternative.alternative_series.id,
+        status: "stopped",
+      },
+      task_schedule_exception: {
+        id: alternative.task_schedule_exception.id,
+        kind: "cancelled",
+        alternative_revision_id: recovered.current_revision.id,
+      },
+    });
+    expect(entities.ObjectTaskScheduleRevision.records.filter(item => (
+      item.series_id === alternative.alternative_series.id
+      && item.operation === "stop"
+    ))).toHaveLength(1);
+  });
+
+  it("laat een late retry van een oude alternatief-stop een nieuwere uitzondering niet annuleren", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "stale-object-card-alternative-stop",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-stale-object-card-alternative-stop"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active" && item.service_date === "2099-08-24"
+    ));
+    const alternative = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("create-stale-stop-alternative"));
+    const stopBody = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: alternative.alternative_series.id,
+      effective_from: "2099-08-24",
+      expected_version: alternative.alternative_series.version,
+    };
+    const stopContext = context("stale-alternative-stop-retry");
+    const originalSeriesUpdateMany = entities.ObjectTaskScheduleSeries.updateMany
+      .bind(entities.ObjectTaskScheduleSeries);
+    let failSeriesAdvanceOnce = true;
+    entities.ObjectTaskScheduleSeries.updateMany = async (query, update) => {
+      if (
+        failSeriesAdvanceOnce
+        && String(query.id) === String(alternative.alternative_series.id)
+        && update?.$set?.status === "stopped"
+      ) {
+        failSeriesAdvanceOnce = false;
+        throw new Error("simulated stale stop pointer failure");
+      }
+      return originalSeriesUpdateMany(query, update);
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      stopBody,
+      stopContext,
+      "stop",
+    )).rejects.toThrow("simulated stale stop pointer failure");
+    const staleStopRevision = entities.ObjectTaskScheduleRevision.records.find(item => (
+      item.series_id === alternative.alternative_series.id && item.operation === "stop"
+    ));
+    const newerRevision = await entities.ObjectTaskScheduleRevision.create({
+      ...alternative.alternative_revision,
+      id: "newer-alternative-revision-after-stale-stop",
+      revision_number: Number(staleStopRevision.revision_number) + 1,
+      previous_revision_id: alternative.alternative_revision.id,
+      start_time: "09:00",
+      end_time: "15:00",
+      creation_idempotency_key: "newer-alternative-revision-after-stale-stop",
+      creation_request_fingerprint: "newer-alternative-revision-after-stale-stop",
+    });
+    const seriesBeforeNewer = await entities.ObjectTaskScheduleSeries.get(
+      alternative.alternative_series.id,
+    );
+    await originalSeriesUpdateMany(
+      { id: seriesBeforeNewer.id, version: seriesBeforeNewer.version },
+      {
+        $set: {
+          current_revision_id: newerRevision.id,
+          current_revision_number: newerRevision.revision_number,
+          status: "active",
+        },
+        $inc: { version: 1 },
+      },
+    );
+    const exceptionBeforeNewer = await entities.ObjectTaskScheduleException.get(
+      alternative.task_schedule_exception.id,
+    );
+    await entities.ObjectTaskScheduleException.updateMany(
+      { id: exceptionBeforeNewer.id, version: exceptionBeforeNewer.version },
+      {
+        $set: {
+          kind: "alternative",
+          alternative_revision_id: newerRevision.id,
+        },
+        $inc: { version: 1 },
+      },
+    );
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      stopBody,
+      stopContext,
+      "stop",
+    )).rejects.toMatchObject({
+      status: 409,
+      details: { code: "TASK_SERIES_NEWER_REVISION" },
+    });
+    expect(await entities.ObjectTaskScheduleException.get(
+      alternative.task_schedule_exception.id,
+    )).toMatchObject({
+      kind: "alternative",
+      alternative_revision_id: newerRevision.id,
+    });
+    expect(await entities.ObjectTaskScheduleSeries.get(
+      alternative.alternative_series.id,
+    )).toMatchObject({
+      current_revision_id: newerRevision.id,
+      current_revision_number: newerRevision.revision_number,
+      status: "active",
+    });
+  });
+
+  it("vereist bevestiging voor een buitenvallende dienst en migreert daarna segmenten en dienstgrenzen", async () => {
+    const { base44, entities } = setup([]);
+    entities.Personnel.records.push({
+      id: "personnel-task-boundary-revalidation",
+      name: "Hercontrole Beveiliger",
+      status: "active",
+    });
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "planned-alternative-migration",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-planned-alternative-migration"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const outside = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: sourceOccurrence.id,
+        start_time: "06:30",
+        end_time: "08:00",
+      }],
+      expected_occurrence_revisions: { [sourceOccurrence.id]: sourceOccurrence.revision },
+    }, context("compose-outside-before-single-change"));
+    const afterOutside = await entities.PlanningTaskOccurrence.get(sourceOccurrence.id);
+    const overlapping = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-task-boundary-revalidation",
+      segments: [{
+        task_occurrence_id: sourceOccurrence.id,
+        start_time: "08:00",
+        end_time: "18:00",
+      }],
+      expected_occurrence_revisions: { [sourceOccurrence.id]: afterOutside.revision },
+    }, context("compose-overlap-before-single-change"));
+    const plannedOccurrence = await entities.PlanningTaskOccurrence.get(sourceOccurrence.id);
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "14:00",
+      expected_occurrence_revision: plannedOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    };
+
+    await expect(backend.changeSingleTaskOccurrence(
+      base44,
+      user,
+      body,
+      context("reject-unconfirmed-outside-shift"),
+    )).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED",
+        shifts: [expect.objectContaining({ id: outside.shift.id })],
+      },
+    });
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(0);
+    expect(entities.ObjectTaskScheduleSeries.records).toHaveLength(1);
+
+    const changed = await backend.changeSingleTaskOccurrence(base44, user, {
+      ...body,
+      confirm_remove_outside_shifts: true,
+    }, context("confirm-outside-shift-migration"));
+    const replacement = changed.task_occurrences.find(item => item.lifecycle_status === "active");
+    const outsideSegment = await entities.PlanningShiftTaskSegment.get(outside.segments[0].id);
+    const overlappingSegment = await entities.PlanningShiftTaskSegment.get(overlapping.segments[0].id);
+
+    expect(await entities.PlanningShift.get(outside.shift.id)).toMatchObject({
+      status: "cancelled",
+      task_occurrence_ids: [],
+      task_segment_count: 0,
+    });
+    expect(outsideSegment).toMatchObject({
+      status: "removed",
+      task_occurrence_id: sourceOccurrence.id,
+      metadata: expect.objectContaining({ removed_by_task_boundary_change: true }),
+    });
+    expect(await entities.PlanningShift.get(overlapping.shift.id)).toMatchObject({
+      status: "draft",
+      service_date: "2099-08-24",
+      start_time: "08:00",
+      end_time: "14:00",
+      duration_minutes: 360,
+      task_occurrence_ids: [replacement.id],
+      task_segment_count: 1,
+      metadata: expect.objectContaining({
+        source_task_occurrence_id: sourceOccurrence.id,
+        replacement_task_occurrence_id: replacement.id,
+      }),
+    });
+    expect(overlappingSegment).toMatchObject({
+      status: "draft",
+      task_occurrence_id: replacement.id,
+      start_time: "08:00",
+      end_time: "14:00",
+      duration_minutes: 360,
+      metadata: expect.objectContaining({
+        source_task_occurrence_id: sourceOccurrence.id,
+        migrated_by_task_boundary_change: true,
+      }),
+    });
+    expect(await entities.PlanningAssignment.get(overlapping.assignment.id)).toMatchObject({
+      status: "draft",
+      personnel_id: "personnel-task-boundary-revalidation",
+      metadata: expect.objectContaining({
+        task_boundary_revalidated_at: expect.any(String),
+        source_task_occurrence_id: sourceOccurrence.id,
+        replacement_task_occurrence_id: replacement.id,
+      }),
+    });
+    expect(changed.removed_segment_ids).toContain(outsideSegment.id);
+    expect(changed.shifts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: outside.shift.id, status: "cancelled" }),
+      expect.objectContaining({ id: overlapping.shift.id, end_time: "14:00" }),
+    ]));
+    expect(changed.segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: outsideSegment.id, status: "removed" }),
+      expect.objectContaining({ id: overlappingSegment.id, task_occurrence_id: replacement.id }),
+    ]));
+  });
+
+  it("herstelt dezelfde dienst nadat de segmentmigratie wel en de dienstgrens nog niet was opgeslagen", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "recover-partial-single-occurrence-migration",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-partial-single-occurrence-migration"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const composition = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: sourceOccurrence.id,
+        start_time: "06:30",
+        end_time: "18:00",
+      }],
+      expected_occurrence_revisions: { [sourceOccurrence.id]: sourceOccurrence.revision },
+    }, context("compose-before-partial-single-occurrence-migration"));
+    const plannedOccurrence = await entities.PlanningTaskOccurrence.get(sourceOccurrence.id);
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "14:00",
+      expected_occurrence_revision: plannedOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    };
+    const mutation = context("partial-single-occurrence-migration");
+    const originalShiftUpdateMany = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let failBoundaryShiftOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (failBoundaryShiftOnce && update.$set?.metadata?.task_boundary_migrated_at) {
+        failBoundaryShiftOnce = false;
+        throw new Error("tijdelijke dienstgrens-writefout");
+      }
+      return originalShiftUpdateMany(query, update);
+    };
+
+    await expect(backend.changeSingleTaskOccurrence(base44, user, body, mutation))
+      .rejects.toThrow("tijdelijke dienstgrens-writefout");
+    const replacementAfterFailure = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.supersedes_task_occurrence_id === sourceOccurrence.id
+    ));
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id)).toMatchObject({
+      task_occurrence_id: replacementAfterFailure.id,
+      start_time: "08:00",
+      end_time: "14:00",
+    });
+    expect(await entities.PlanningShift.get(composition.shift.id)).toMatchObject({
+      start_time: "06:30",
+      end_time: "18:00",
+      task_occurrence_ids: [sourceOccurrence.id],
+    });
+
+    const recovered = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+    const replacement = recovered.task_occurrences.find(item => item.lifecycle_status === "active");
+    expect(await entities.PlanningShift.get(composition.shift.id)).toMatchObject({
+      status: "draft",
+      start_time: "08:00",
+      end_time: "14:00",
+      duration_minutes: 360,
+      task_occurrence_ids: [replacement.id],
+      task_segment_count: 1,
+    });
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_single_task_occurrence"
+    ))).toHaveLength(1);
+  });
+
+  it("herlaadt de blauwdrukprojectie nadat bootstrap een onderbroken alternatief heeft hersteld", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "bootstrap-reloads-repaired-alternative",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-before-repaired-alternative"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "09:00",
+      end_time: "15:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    };
+    const originalExceptionCreate = entities.ObjectTaskScheduleException.create
+      .bind(entities.ObjectTaskScheduleException);
+    let failExceptionOnce = true;
+    entities.ObjectTaskScheduleException.create = async data => {
+      if (failExceptionOnce) {
+        failExceptionOnce = false;
+        throw new Error("tijdelijke exception-writefout");
+      }
+      return originalExceptionCreate(data);
+    };
+
+    await expect(backend.changeSingleTaskOccurrence(
+      base44,
+      user,
+      body,
+      context("repair-alternative-during-bootstrap"),
+    )).rejects.toThrow("tijdelijke exception-writefout");
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-repairs-and-reloads-alternative"));
+    const active = entities.PlanningTaskOccurrence.records.filter(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+
+    expect(bootstrap.repaired_single_task_occurrence_ids).toContain(sourceOccurrence.id);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({
+      window_start_time: "09:00",
+      window_end_time: "15:00",
+      metadata: expect.objectContaining({ planning_alternative: true }),
+    });
+    expect(active[0].object_task_schedule_series_id)
+      .toBe(entities.ObjectTaskScheduleException.records[0].alternative_series_id);
+    expect(await entities.PlanningTaskOccurrence.get(sourceOccurrence.id)).toMatchObject({
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: active[0].id,
+    });
+  });
+
+  it("weigert een losse taakwijziging als er tussen preflight en lease een dienst bijkomt", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "single-occurrence-impact-race",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-single-occurrence-impact-race"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany
+      .bind(entities.PlanningMutationCoordinator);
+    let injectLinkedShift = true;
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      const result = await originalCoordinatorUpdate(query, update);
+      if (injectLinkedShift && update.$set?.lease?.status === "pending") {
+        injectLinkedShift = false;
+        entities.PlanningShift.records.push({
+          id: "shift-added-during-single-task-preflight",
+          source_key: "manual:single-task-race",
+          source_type: "task",
+          service_date: "2099-08-24",
+          start_time: "06:30",
+          end_time: "18:00",
+          task_occurrence_ids: [sourceOccurrence.id],
+          task_segment_count: 1,
+          required_count: 1,
+          status: "draft",
+          revision: 1,
+        });
+        entities.PlanningShiftTaskSegment.records.push({
+          id: "segment-added-during-single-task-preflight",
+          shift_id: "shift-added-during-single-task-preflight",
+          task_occurrence_id: sourceOccurrence.id,
+          object_task_definition_id: created.definition.id,
+          start_date: "2099-08-24",
+          end_date: "2099-08-24",
+          start_time: "06:30",
+          end_time: "18:00",
+          duration_minutes: 690,
+          status: "draft",
+          revision: 1,
+        });
+      }
+      return result;
+    };
+
+    await expect(backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("single-occurrence-impact-race"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_OCCURRENCE_COMPOSITION_CHANGED",
+        task_occurrence_id: sourceOccurrence.id,
+      },
+    });
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(0);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_single_task_occurrence"
+    ))).toHaveLength(0);
+  });
+
+  it("blokkeert een andere sleutel zolang een losse taakwijziging herstel nodig heeft", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "foreign-single-occurrence-marker",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-foreign-single-occurrence-marker"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    sourceOccurrence.metadata = {
+      ...(sourceOccurrence.metadata || {}),
+      single_task_occurrence_mutation: {
+        phase: "state_written_audit_pending",
+        idempotency_key: "older-single-task-key",
+        request_hash: "older-request-hash",
+        actor_user_id: user.id,
+      },
+    };
+    sourceOccurrence.revision += 1;
+
+    await expect(backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    }, context("new-key-cannot-overtake-pending-single-task"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_OCCURRENCE_RECOVERY_PENDING",
+        task_occurrence_id: sourceOccurrence.id,
+        pending_idempotency_key: "older-single-task-key",
+      },
+    });
+  });
+
+  it("replayt occurrences met de werkelijk afgeronde marker in plaats van de oude auditsnapshot", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "fresh-single-occurrence-replay",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-fresh-single-occurrence-replay"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    const body = {
+      occurrence_id: sourceOccurrence.id,
+      source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+      start_time: "08:00",
+      end_time: "16:00",
+      expected_occurrence_revision: sourceOccurrence.revision,
+      confirm_remove_outside_shifts: false,
+    };
+    const mutation = context("fresh-single-occurrence-replay");
+    const changed = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+    for (const occurrence of entities.PlanningTaskOccurrence.records.filter(item => (
+      changed.task_occurrences.some(result => String(result.id) === String(item.id))
+    ))) {
+      occurrence.metadata.single_task_occurrence_mutation.phase = "state_written_audit_pending";
+      occurrence.metadata.single_task_occurrence_mutation.audit_event_id = null;
+    }
+
+    const replay = await backend.changeSingleTaskOccurrence(base44, user, body, mutation);
+
+    expect(replay.idempotent).toBe(true);
+    expect(replay.task_occurrences).toHaveLength(2);
+    expect(replay.task_occurrences.every(item => (
+      item.metadata.single_task_occurrence_mutation.phase === "completed"
+      && item.metadata.single_task_occurrence_mutation.audit_event_id === changed.audit_event_id
+    ))).toBe(true);
+  });
+
+  it("serialiseert dezelfde idempotency key ook voor twee volledig verschillende taakuitvoeringen", async () => {
+    const { base44, entities } = setup([]);
+    const firstTask = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "global-single-key-first-task",
+    });
+    const secondTask = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "global-single-key-second-task",
+      startTime: "19:00",
+      endTime: "23:00",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-global-single-key"));
+    const occurrenceFor = definitionId => entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === definitionId
+      && item.service_date === "2099-08-24"
+    ));
+    const firstOccurrence = occurrenceFor(firstTask.definition.id);
+    const secondOccurrence = occurrenceFor(secondTask.definition.id);
+    const sharedContext = context("same-key-for-two-single-task-edits");
+
+    const outcomes = await Promise.allSettled([
+      backend.changeSingleTaskOccurrence(base44, user, {
+        occurrence_id: firstOccurrence.id,
+        source_revision_id: firstOccurrence.object_task_schedule_revision_id,
+        start_time: "08:00",
+        end_time: "16:00",
+        expected_occurrence_revision: firstOccurrence.revision,
+        confirm_remove_outside_shifts: false,
+      }, sharedContext),
+      backend.changeSingleTaskOccurrence(base44, user, {
+        occurrence_id: secondOccurrence.id,
+        source_revision_id: secondOccurrence.object_task_schedule_revision_id,
+        start_time: "20:00",
+        end_time: "22:00",
+        expected_occurrence_revision: secondOccurrence.revision,
+        confirm_remove_outside_shifts: false,
+      }, sharedContext),
+    ]);
+
+    expect(outcomes.filter(item => item.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter(item => item.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) }),
+    ]);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_single_task_occurrence"
+      && item.idempotency_key === sharedContext.idempotencyKey
+    ))).toHaveLength(1);
+    expect(entities.ObjectTaskScheduleException.records).toHaveLength(1);
+  });
+});
+
 describe("planning coverage-entiteiten", () => {
+  it("staat de auditactie voor een losse taakafwijking toe", () => {
+    const schema = JSON.parse(fs.readFileSync(
+      path.join(root, "base44/entities/PlanningAuditEvent.jsonc"),
+      "utf8",
+    ));
+
+    expect(schema.properties.action.enum).toContain("change_single_task_occurrence");
+  });
+
   it("staan alleen service-role writes toe en geven admins uitsluitend leesrechten", () => {
     for (const file of [
       "PlanningAssignment.jsonc",
@@ -621,6 +2087,7 @@ describe("planning coverage-entiteiten", () => {
       "PlanningMutationCoordinator.jsonc",
       "ObjectTaskScheduleSeries.jsonc",
       "ObjectTaskScheduleRevision.jsonc",
+      "ObjectTaskScheduleException.jsonc",
       "PlanningTaskSourceChange.jsonc",
     ]) {
       const schema = JSON.parse(fs.readFileSync(path.join(root, "base44/entities", file), "utf8"));
@@ -708,7 +2175,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShift.records).toHaveLength(1);
     expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
-    expect(assignmentValidationCalls).toBe(2);
+    expect(assignmentValidationCalls).toBe(1);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -784,6 +2251,112 @@ describe("planningApi dienstsamenstelling", () => {
     const rejectedOccurrence = await rejected.entities.PlanningTaskOccurrence.get(tooLongDemand.id);
     expect(rejectedOccurrence.revision).toBe(1);
     expect(rejectedOccurrence).not.toHaveProperty("metadata");
+  });
+
+  it("controleert beide kalenderdagen van een nachtdienst parallel en bewaart de datumvolgorde", async () => {
+    const overnightDemand = {
+      ...occurrence("occurrence-parallel-cao-night", "object-1", "18:00", "06:00", 720),
+      end_date: "2026-08-18",
+    };
+    const { base44, entities } = setup([overnightDemand]);
+    entities.Personnel.records.push({
+      id: "personnel-parallel-cao-night",
+      name: "Nacht Beveiliger",
+      status: "active",
+    });
+    let enteredCount = 0;
+    let resolveBothEntered;
+    let releaseValidation;
+    const bothEntered = new Promise(resolve => { resolveBothEntered = resolve; });
+    const validationReleased = new Promise(resolve => { releaseValidation = resolve; });
+    base44.asServiceRole.functions.invoke = async (_functionName, payload) => {
+      enteredCount += 1;
+      if (enteredCount === 2) resolveBothEntered();
+      await validationReleased;
+      return {
+        data: {
+          contract_id: "contract-night",
+          warnings: [`Controle ${payload.service_date}`],
+        },
+      };
+    };
+
+    const pending = backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-parallel-cao-night",
+      segments: [{
+        task_occurrence_id: overnightDemand.id,
+        start_date: "2026-08-17",
+        end_date: "2026-08-18",
+        start_time: "18:00",
+        end_time: "06:00",
+      }],
+      expected_occurrence_revisions: { [overnightDemand.id]: 1 },
+    }, context("compose-parallel-cao-night"));
+    const bothEnteredBeforeRelease = await Promise.race([
+      bothEntered.then(() => true),
+      new Promise(resolve => setTimeout(() => resolve(false), 250)),
+    ]);
+    releaseValidation();
+    const result = await pending;
+
+    expect(bothEnteredBeforeRelease).toBe(true);
+    expect(enteredCount).toBe(2);
+    expect(result.assignment.contract_routing_snapshot.decisions.map(item => item.service_date)).toEqual([
+      "2026-08-17",
+      "2026-08-18",
+    ]);
+    expect(result.assignment.warning_snapshot
+      .filter(item => item.code.startsWith("contract_cao_warning_"))
+      .map(item => item.message)).toEqual([
+        "Controle 2026-08-17",
+        "Controle 2026-08-18",
+      ]);
+  });
+
+  it("vermijdt coordinator-writes voor ruime lease-renewals tijdens een gewone toewijzing", async () => {
+    const { base44, entities } = setup([]);
+    entities.PlanningShift.records.push({
+      id: "shift-assign-lease-callcount",
+      source_key: "manual:shift-assign-lease-callcount",
+      source_type: "manual",
+      source_id: null,
+      service_name_snapshot: "Beveiligingsdienst",
+      company_id: "company-1",
+      service_date: "2026-08-17",
+      end_date: null,
+      start_time: "08:00",
+      end_time: "16:00",
+      duration_minutes: 480,
+      required_count: 1,
+      status: "draft",
+      revision: 1,
+      published_revision: 0,
+      metadata: {},
+    });
+    entities.Personnel.records.push({
+      id: "personnel-assign-lease-callcount",
+      name: "Directe Beveiliger",
+      status: "active",
+    });
+    const coordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let coordinatorWriteCount = 0;
+    entities.PlanningMutationCoordinator.updateMany = async (...args) => {
+      coordinatorWriteCount += 1;
+      return coordinatorUpdateMany(...args);
+    };
+
+    await backend.assignPersonnel(base44, user, {
+      shift_id: "shift-assign-lease-callcount",
+      personnel_id: "personnel-assign-lease-callcount",
+      slot_index: 0,
+      expected_shift_revision: 1,
+    }, context("assign-lease-callcount"));
+
+    expect(entities.PlanningMutationCoordinator.records).toHaveLength(2);
+    expect(coordinatorWriteCount).toBe(4);
+    expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
 
   it("behoudt voor handmatig gevormde open diensten de bestaande grens van 24 uur", async () => {
@@ -870,6 +2443,62 @@ describe("planningApi dienstsamenstelling", () => {
       .toMatchObject({ status: "draft" });
     expect(segmentQueries).toContainEqual({ task_occurrence_id: { $in: [demand.id] } });
     expect(shiftQueries.some(query => query.id?.$in?.includes(composed.shift.id))).toBe(true);
+  });
+
+  it("begrensst overlapcontrole tot relevante dagen in plaats van de volledige medewerkerhistorie", async () => {
+    const demand = occurrence("occurrence-date-scoped-eligibility", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({
+      id: "personnel-date-scoped-eligibility",
+      name: "Historie Beveiliger",
+      status: "active",
+    });
+    for (let index = 0; index < 100; index += 1) {
+      const shiftId = `historical-shift-${index}`;
+      entities.PlanningShift.records.push({
+        id: shiftId,
+        service_date: `2025-${String((index % 12) + 1).padStart(2, "0")}-01`,
+        start_time: "08:00",
+        end_time: "16:00",
+        status: "published",
+        revision: 1,
+      });
+      entities.PlanningAssignment.records.push({
+        id: `historical-assignment-${index}`,
+        shift_id: shiftId,
+        personnel_id: "personnel-date-scoped-eligibility",
+        slot_index: 0,
+        status: "published",
+        revision: 1,
+      });
+    }
+    const originalAssignmentFilter = entities.PlanningAssignment.filter.bind(entities.PlanningAssignment);
+    const originalShiftFilter = entities.PlanningShift.filter.bind(entities.PlanningShift);
+    const personnelQueries = [];
+    const shiftQueries = [];
+    entities.PlanningAssignment.filter = async (query, ...args) => {
+      if (query.personnel_id) personnelQueries.push(structuredClone(query));
+      return originalAssignmentFilter(query, ...args);
+    };
+    entities.PlanningShift.filter = async (query, ...args) => {
+      shiftQueries.push(structuredClone(query));
+      return originalShiftFilter(query, ...args);
+    };
+
+    await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-date-scoped-eligibility",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("date-scoped-eligibility"));
+
+    expect(personnelQueries.every(query => Array.isArray(query.shift_id?.$in))).toBe(true);
+    expect(personnelQueries.flatMap(query => query.shift_id.$in)).not.toEqual(expect.arrayContaining([
+      "historical-shift-0",
+      "historical-shift-99",
+    ]));
+    expect(shiftQueries).toContainEqual({
+      service_date: { $in: ["2026-08-16", "2026-08-17"] },
+    });
   });
 
   it("plant en auditeert een taak als het uitvoerende bedrijf nog niet is gekoppeld", async () => {
@@ -2990,6 +4619,54 @@ describe("planningApi medewerker/dag-reserveringen", () => {
   });
 });
 
+describe("planningApi bootstrap snapshots", () => {
+  it("leest occurrence-, segment- en dienstsnapshot aan het einde gelijktijdig", async () => {
+    const { base44, entities } = setup([]);
+    let enteredFinalReadCount = 0;
+    let resolveAllFinalReadsEntered;
+    let releaseFinalReads;
+    const allFinalReadsEntered = new Promise(resolve => { resolveAllFinalReadsEntered = resolve; });
+    const finalReadsReleased = new Promise(resolve => { releaseFinalReads = resolve; });
+    const finalReadCallCounts = new Map();
+
+    for (const [name, target] of [
+      ["PlanningTaskOccurrence", entities.PlanningTaskOccurrence],
+      ["PlanningShiftTaskSegment", entities.PlanningShiftTaskSegment],
+      ["PlanningShift", entities.PlanningShift],
+    ]) {
+      const originalList = target.list.bind(target);
+      target.list = async (...args) => {
+        const callCount = Number(finalReadCallCounts.get(name) || 0) + 1;
+        finalReadCallCounts.set(name, callCount);
+        if (callCount === 2) {
+          enteredFinalReadCount += 1;
+          if (enteredFinalReadCount === 3) resolveAllFinalReadsEntered();
+          await finalReadsReleased;
+        }
+        return originalList(...args);
+      };
+    }
+
+    const pending = backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-17",
+      period_end: "2026-08-17",
+    }, context("bootstrap-parallel-final-snapshots"));
+    const allEnteredBeforeRelease = await Promise.race([
+      allFinalReadsEntered.then(() => true),
+      new Promise(resolve => setTimeout(() => resolve(false), 250)),
+    ]);
+    releaseFinalReads();
+    await pending;
+
+    expect(allEnteredBeforeRelease).toBe(true);
+    expect(Object.fromEntries(finalReadCallCounts)).toEqual({
+      PlanningTaskOccurrence: 2,
+      PlanningShiftTaskSegment: 2,
+      PlanningShift: 2,
+    });
+  });
+});
+
 describe("planningApi ingangsdatum van wekelijkse objecttaken", () => {
   it("maakt voor een maandag-vrijdagtaak vanaf 17 augustus geen planningskaarten in de week ervoor", async () => {
     const definition = weeklyReceptionDefinitionStartingAugust17();
@@ -3235,7 +4912,175 @@ describe("planningApi legacy occurrence-reconciliatie", () => {
 });
 
 describe("planningApi publicatie van taakdekking", () => {
-  it("legt roosterwijziging van een ingeplande taak vast en blokkeert publicatie tot herplanning", async () => {
+  it("blokkeert een nieuwe reekswijziging totdat de eerdere impact ook duurzaam is geaudit", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "series-impact-audit-recovery",
+    });
+    const scheduleSeries = created.series[0].series;
+    const body = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: scheduleSeries.id,
+      effective_from: "2099-08-24",
+      start_time: "08:00",
+      end_time: "16:00",
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: scheduleSeries.version,
+    };
+    const mutation = context("series-impact-audit-recovery");
+    const originalAuditCreate = entities.PlanningAuditEvent.create
+      .bind(entities.PlanningAuditEvent);
+    let failAuditOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (
+        failAuditOnce
+        && data.action === "change_object_task_series"
+        && data.idempotency_key === mutation.idempotencyKey
+      ) {
+        failAuditOnce = false;
+        throw new Error("simulated series audit failure");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      mutation,
+      "schedule",
+    )).rejects.toThrow("simulated series audit failure");
+    const preparedSeries = await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id);
+    expect(preparedSeries.metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      idempotency_key: mutation.idempotencyKey,
+    });
+    expect((await entities.ObjectTaskDefinition.get(created.definition.id))
+      .metadata.last_schedule_series_mutation).toMatchObject({
+      idempotency_key: mutation.idempotencyKey,
+    });
+
+    const foreignMutation = context("series-impact-audit-foreign-key");
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      foreignMutation,
+      "schedule",
+    )).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_SERIES_IMPACT_RECOVERY_PENDING",
+        pending_idempotency_key: mutation.idempotencyKey,
+      },
+    });
+    expect((await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id))
+      .metadata.object_task_series_impact_mutation.idempotency_key).toBe(
+      mutation.idempotencyKey,
+    );
+
+    const recovered = await backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      mutation,
+      "schedule",
+    );
+    expect(recovered.series.metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "impact_completed",
+      idempotency_key: mutation.idempotencyKey,
+      audit_event_id: recovered.audit_event_id,
+    });
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_object_task_series"
+      && item.idempotency_key === mutation.idempotencyKey
+    ))).toHaveLength(1);
+  });
+
+  it("finaliseert na browserreload een geaudite reeksimpact waarvan alleen de marker-CAS uitviel", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "series-impact-final-marker-recovery",
+    });
+    const scheduleSeries = created.series[0].series;
+    const body = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: scheduleSeries.id,
+      effective_from: "2099-08-24",
+      start_time: "08:00",
+      end_time: "16:00",
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: scheduleSeries.version,
+    };
+    const mutation = context("series-impact-final-marker-recovery");
+    const originalSeriesUpdateMany = entities.ObjectTaskScheduleSeries.updateMany
+      .bind(entities.ObjectTaskScheduleSeries);
+    let failFinalMarkerOnce = true;
+    entities.ObjectTaskScheduleSeries.updateMany = async (query, update) => {
+      if (
+        failFinalMarkerOnce
+        && update?.$set?.metadata?.object_task_series_impact_mutation?.phase
+          === "impact_completed"
+      ) {
+        failFinalMarkerOnce = false;
+        throw new Error("simulated final series impact marker failure");
+      }
+      return originalSeriesUpdateMany(query, update);
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      mutation,
+      "schedule",
+    )).rejects.toThrow("simulated final series impact marker failure");
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "change_object_task_series"
+      && item.idempotency_key === mutation.idempotencyKey
+    ));
+    expect(audit).toBeTruthy();
+    expect((await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id))
+      .metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      idempotency_key: mutation.idempotencyKey,
+    });
+
+    const firstOpen = await backend.listObjectTasks(base44, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+    }, user);
+    expect(firstOpen.series_impact_recovery).toEqual([
+      expect.objectContaining({
+        series_id: scheduleSeries.id,
+        status: "completed",
+        audit_event_id: audit.id,
+      }),
+    ]);
+    expect((await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id))
+      .metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "impact_completed",
+      audit_event_id: audit.id,
+    });
+
+    const secondOpen = await backend.listObjectTasks(base44, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+    }, user);
+    expect(secondOpen.series_impact_recovery).toEqual([]);
+  });
+
+  it("migreert een ingeplande blauwdrukwijziging direct en houdt die daarna publiceerbaar", async () => {
     const { base44, entities } = setup([]);
     const created = await createWeeklyObjectTask({
       base44,
@@ -3280,24 +5125,10 @@ describe("planningApi publicatie van taakdekking", () => {
       end_time: "18:00",
       revision_number: 2,
     });
-    expect(changed.reconciled.source_change_ids).toHaveLength(1);
+    expect(changed.reconciled.source_change_ids).toEqual([]);
     expect(changed.reconciled.created_occurrence_ids).toHaveLength(1);
     const replacementOccurrenceId = changed.reconciled.created_occurrence_ids[0];
-    expect(entities.PlanningTaskSourceChange.records).toEqual([
-      expect.objectContaining({
-        id: changed.reconciled.source_change_ids[0],
-        status: "open",
-        change_type: "schedule_changed",
-        task_occurrence_id: scheduledOccurrence.id,
-        source_task_occurrence_id: scheduledOccurrence.id,
-        replacement_task_occurrence_id: replacementOccurrenceId,
-        shift_id: composition.shift.id,
-        shift_ids: [composition.shift.id],
-        service_date: "2099-08-24",
-        previous_snapshot: expect.objectContaining({ window_start_time: "06:30" }),
-        desired_snapshot: expect.objectContaining({ window_start_time: "10:00" }),
-      }),
-    ]);
+    expect(entities.PlanningTaskSourceChange.records).toEqual([]);
     expect(await entities.PlanningTaskOccurrence.get(scheduledOccurrence.id)).toMatchObject({
       lifecycle_status: "superseded",
       window_start_time: "06:30",
@@ -3307,22 +5138,175 @@ describe("planningApi publicatie van taakdekking", () => {
       window_start_time: "10:00",
       supersedes_task_occurrence_id: scheduledOccurrence.id,
     });
+    const migratedShift = await entities.PlanningShift.get(composition.shift.id);
+    expect(migratedShift).toMatchObject({
+      status: "draft",
+      start_time: "10:00",
+      end_time: "18:00",
+      task_occurrence_ids: [replacementOccurrenceId],
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id)).toMatchObject({
+      status: "draft",
+      task_occurrence_id: replacementOccurrenceId,
+      start_time: "10:00",
+      end_time: "18:00",
+    });
 
-    await expect(backend.publishPlanning(base44, user, {
+    const publication = await backend.publishPlanning(base44, user, {
       scope_type: "selection",
       shift_ids: [composition.shift.id],
-      expected_shift_revisions: { [composition.shift.id]: composition.shift.revision },
-      publication_reason: "Publicatie moet wachten op herplanning",
-    }, context("publish-with-open-task-source-change"))).rejects.toMatchObject({
+      expected_shift_revisions: { [composition.shift.id]: migratedShift.revision },
+      publication_reason: "Gemigreerde taakdienst is gecontroleerd",
+    }, context("publish-automatically-migrated-task-source-change"));
+    expect(publication.publication.snapshot.task_occurrences).toEqual([
+      expect.objectContaining({ id: replacementOccurrenceId }),
+    ]);
+    expect(entities.PlanningPublication.records).toHaveLength(1);
+  });
+
+  it("herstelt een blauwdrukwijziging als het segment al is omgezet maar de dienstgrens nog niet", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "recover-planned-series-boundary-impact",
+      withSecurityPlan: true,
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-recover-planned-series-boundary-impact"));
+    const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.service_date === "2099-08-24" && item.lifecycle_status === "active"
+    ));
+    const composition = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: sourceOccurrence.id,
+        start_time: "06:30",
+        end_time: "18:00",
+      }],
+      expected_occurrence_revisions: { [sourceOccurrence.id]: sourceOccurrence.revision },
+    }, context("compose-before-recover-planned-series-boundary-impact"));
+    const scheduleSeries = created.series[0].series;
+    const body = {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: scheduleSeries.id,
+      effective_from: "2099-08-24",
+      start_time: "10:00",
+      end_time: "18:00",
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: scheduleSeries.version,
+      confirm_remove_outside_shifts: true,
+    };
+    const mutation = context("recover-planned-series-boundary-impact");
+    const originalShiftUpdateMany = entities.PlanningShift.updateMany
+      .bind(entities.PlanningShift);
+    let failBoundaryShiftOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        failBoundaryShiftOnce
+        && String(query.id) === String(composition.shift.id)
+        && update?.$set?.metadata?.task_boundary_migrated_at
+      ) {
+        failBoundaryShiftOnce = false;
+        throw new Error("simulated object-task series boundary failure");
+      }
+      return originalShiftUpdateMany(query, update);
+    };
+
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      mutation,
+      "schedule",
+    )).rejects.toThrow("simulated object-task series boundary failure");
+    const preparedSeries = await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id);
+    expect(preparedSeries.metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      idempotency_key: mutation.idempotencyKey,
+      linked_shift_ids: [composition.shift.id],
+      occurrence_shift_ids: [{
+        occurrence_id: sourceOccurrence.id,
+        shift_ids: [composition.shift.id],
+      }],
+    });
+    const partiallyMigratedSegment = await entities.PlanningShiftTaskSegment.get(
+      composition.segments[0].id,
+    );
+    expect(partiallyMigratedSegment.task_occurrence_id).not.toBe(sourceOccurrence.id);
+    expect(await entities.PlanningShift.get(composition.shift.id)).toMatchObject({
+      start_time: "06:30",
+      end_time: "18:00",
+    });
+
+    const preparedRevisionCount = entities.ObjectTaskScheduleRevision.records.length;
+    const foreignMutation = context("foreign-series-change-during-impact-recovery");
+    await expect(backend.mutateObjectTaskSeries(
+      base44,
+      user,
+      body,
+      foreignMutation,
+      "schedule",
+    )).rejects.toMatchObject({
       status: 409,
       details: {
-        code: "TASK_SOURCE_CHANGE_REQUIRES_REPLAN",
-        source_change_ids: changed.reconciled.source_change_ids,
-        shift_ids: [composition.shift.id],
-        task_occurrence_ids: [scheduledOccurrence.id, replacementOccurrenceId],
+        code: "TASK_SERIES_IMPACT_RECOVERY_PENDING",
+        pending_idempotency_key: mutation.idempotencyKey,
       },
     });
-    expect(entities.PlanningPublication.records).toHaveLength(0);
+    expect((await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id))
+      .metadata.object_task_series_impact_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      idempotency_key: mutation.idempotencyKey,
+    });
+    expect(entities.ObjectTaskScheduleRevision.records).toHaveLength(preparedRevisionCount);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.idempotency_key === foreignMutation.idempotencyKey
+    ))).toHaveLength(0);
+
+    const reopened = await backend.listObjectTasks(base44, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+    }, user);
+    expect(reopened.series_impact_recovery).toEqual([
+      expect.objectContaining({
+        series_id: scheduleSeries.id,
+        status: "recovered",
+        audit_event_id: expect.any(String),
+      }),
+    ]);
+    const replacementOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_schedule_series_id === scheduleSeries.id
+      && item.service_date === "2099-08-24"
+    ));
+    expect(await entities.PlanningShift.get(composition.shift.id)).toMatchObject({
+      status: "draft",
+      start_time: "10:00",
+      end_time: "18:00",
+      task_occurrence_ids: [replacementOccurrence.id],
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id)).toMatchObject({
+      task_occurrence_id: replacementOccurrence.id,
+      start_time: "10:00",
+      end_time: "18:00",
+    });
+    expect(await entities.ObjectTaskScheduleSeries.get(scheduleSeries.id)).toMatchObject({
+      metadata: {
+        object_task_series_impact_mutation: expect.objectContaining({
+          phase: "impact_completed",
+          idempotency_key: mutation.idempotencyKey,
+        }),
+      },
+    });
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "change_object_task_series"
+      && item.idempotency_key === mutation.idempotencyKey
+    ))).toHaveLength(1);
   });
 
   it("houdt een carry-in nachtdienst buiten periodepublicatie die op startdatum wordt begrensd", async () => {

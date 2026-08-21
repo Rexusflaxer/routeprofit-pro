@@ -8,6 +8,7 @@ import {
   objectTaskWeekStrip,
   projectObjectTaskSchedules,
 } from "@/components/objects/objectTaskScheduleDomain";
+import { objectTaskRecursOn } from "@/components/objects/objectTaskRecurrence";
 
 const definition = {
   id: "definition-fire-closing-round",
@@ -21,13 +22,25 @@ const series = {
   task_definition_id: definition.id,
   status: "active",
   version: 4,
+  current_revision_id: "revision-1",
 };
 
 function projectWeek(weekStart, revisions, sourceChanges = []) {
+  const connectedRevisions = [...revisions]
+    .sort((left, right) => Number(left.revision_number || 0) - Number(right.revision_number || 0))
+    .map((revision, index, ordered) => ({
+      ...revision,
+      ...(index > 0 && !revision.previous_revision_id
+        ? { previous_revision_id: ordered[index - 1].id }
+        : {}),
+    }));
   return projectObjectTaskSchedules({
     definitions: [definition],
-    series: [series],
-    revisions,
+    series: [{
+      ...series,
+      current_revision_id: connectedRevisions.at(-1)?.id || null,
+    }],
+    revisions: connectedRevisions,
     sourceChanges,
     weekStart,
   });
@@ -106,6 +119,50 @@ describe("objecttaak bewerken vanaf vandaag en nu", () => {
   });
 });
 
+describe("stabiele herhalingsankers", () => {
+  it("behoudt bij een latere revisie de fase van een tweewekelijkse reeks", () => {
+    const revised = {
+      effective_from: "2026-08-24",
+      recurrence_anchor_date: "2026-08-17",
+      recurrence_type: "weekly",
+      recurrence_interval: 2,
+    };
+
+    expect(objectTaskRecursOn(revised, "2026-08-24")).toBe(false);
+    expect(objectTaskRecursOn(revised, "2026-08-31")).toBe(true);
+    expect(objectTaskRecursOn(revised, "2026-09-07")).toBe(false);
+    expect(objectTaskRecursOn(revised, "2026-09-14")).toBe(true);
+  });
+
+  it("klemt een maandultimo-anker op de laatste dag van kortere maanden", () => {
+    const monthly = {
+      effective_from: "2026-01-31",
+      recurrence_anchor_date: "2026-01-31",
+      recurrence_type: "monthly",
+      recurrence_interval: 1,
+    };
+
+    expect(objectTaskRecursOn(monthly, "2026-02-27")).toBe(false);
+    expect(objectTaskRecursOn(monthly, "2026-02-28")).toBe(true);
+    expect(objectTaskRecursOn(monthly, "2026-03-31")).toBe(true);
+    expect(objectTaskRecursOn(monthly, "2026-04-30")).toBe(true);
+  });
+
+  it("projecteert een jaarlijks schrikkeljaaranker op 28 februari en terug op 29 februari", () => {
+    const yearly = {
+      effective_from: "2024-02-29",
+      recurrence_anchor_date: "2024-02-29",
+      recurrence_type: "yearly",
+      recurrence_interval: 1,
+    };
+
+    expect(objectTaskRecursOn(yearly, "2025-02-28")).toBe(true);
+    expect(objectTaskRecursOn(yearly, "2025-03-01")).toBe(false);
+    expect(objectTaskRecursOn(yearly, "2028-02-28")).toBe(false);
+    expect(objectTaskRecursOn(yearly, "2028-02-29")).toBe(true);
+  });
+});
+
 describe("wekelijkse objecttaakreeks", () => {
   const initialRevision = {
     id: "revision-1",
@@ -169,6 +226,76 @@ describe("wekelijkse objecttaakreeks", () => {
     ]);
   });
 
+  it("negeert een orphan revisie die niet bereikbaar is vanaf current_revision_id", () => {
+    const connectedRevision = {
+      ...initialRevision,
+      id: "revision-connected",
+      previous_revision_id: initialRevision.id,
+      revision_number: 2,
+      effective_from: "2026-08-24",
+      recurrence_end_date: null,
+      start_time: "07:00",
+      end_time: "17:00",
+    };
+    const orphanRevision = {
+      ...connectedRevision,
+      id: "revision-orphan",
+      previous_revision_id: initialRevision.id,
+      revision_number: 99,
+      start_time: "13:00",
+      end_time: "14:00",
+    };
+
+    const projected = projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [{ ...series, current_revision_id: connectedRevision.id }],
+      revisions: [initialRevision, orphanRevision, connectedRevision],
+      weekStart: "2026-08-24",
+    });
+
+    expect(projected).toEqual([
+      expect.objectContaining({
+        revision_id: connectedRevision.id,
+        start_time: "07:00",
+        end_time: "17:00",
+      }),
+    ]);
+  });
+
+  it("projecteert fail-closed wanneer de aangewezen current revisie ontbreekt", () => {
+    const projected = projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [{ ...series, current_revision_id: "revision-missing" }],
+      revisions: [initialRevision, {
+        ...initialRevision,
+        id: "revision-orphan",
+        revision_number: 99,
+        start_time: "13:00",
+        end_time: "14:00",
+      }],
+      weekStart: "2026-08-17",
+    });
+
+    expect(projected).toEqual([]);
+  });
+
+  it("projecteert fail-closed wanneer een moderne reeks nog geen current revisiepointer heeft", () => {
+    const projected = projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [{ ...series, current_revision_id: null }],
+      revisions: [initialRevision, {
+        ...initialRevision,
+        id: "revision-uncommitted",
+        revision_number: 99,
+        start_time: "13:00",
+        end_time: "14:00",
+      }],
+      weekStart: "2026-08-17",
+    });
+
+    expect(projected).toEqual([]);
+  });
+
   it("laat een latere objectkaartwijziging een planningalternatief en hervatting vanaf dezelfde reeks overschrijven", () => {
     const planningAlternative = {
       ...initialRevision,
@@ -211,6 +338,7 @@ describe("wekelijkse objecttaakreeks", () => {
     const stoppedFromWeek31 = {
       id: "revision-3",
       series_id: series.id,
+      previous_revision_id: initialRevision.id,
       revision_number: 3,
       operation: "stop",
       effective_from: "2026-08-31",
@@ -226,10 +354,11 @@ describe("wekelijkse objecttaakreeks", () => {
   });
 
   it("behoudt bij een gestopte reeks de occurrences van voor de toekomstige stopdatum", () => {
-    const stoppedSeries = { ...series, status: "stopped" };
+    const stoppedSeries = { ...series, status: "stopped", current_revision_id: "revision-3" };
     const stoppedFromWeek31 = {
       id: "revision-3",
       series_id: series.id,
+      previous_revision_id: initialRevision.id,
       revision_number: 3,
       operation: "stop",
       effective_from: "2026-08-31",
@@ -265,6 +394,166 @@ describe("wekelijkse objecttaakreeks", () => {
       id: "source-change-1",
       service_date: "2026-08-24",
     });
+  });
+
+  it("verwisselt alleen bij een actieve uitzondering de bronoccurrence voor de gekoppelde alternatiefreeks", () => {
+    const alternativeSeries = {
+      id: "series-monday-alternative",
+      task_definition_id: definition.id,
+      status: "active",
+      version: 1,
+      current_revision_id: "revision-alternative",
+      metadata: { alternative: true },
+    };
+    const alternativeRevision = {
+      id: "revision-alternative",
+      series_id: alternativeSeries.id,
+      revision_number: 1,
+      operation: "schedule",
+      effective_from: "2026-08-24",
+      recurrence_anchor_date: "2026-08-24",
+      recurrence_type: "one_time",
+      start_time: "10:00",
+      end_time: "12:00",
+      recurrence_end_date: "2026-08-24",
+    };
+    const exception = status => ({
+      id: `exception-${status}`,
+      source_series_id: series.id,
+      alternative_series_id: alternativeSeries.id,
+      service_date: "2026-08-24",
+      status,
+    });
+    const project = exceptions => projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [series, alternativeSeries],
+      revisions: [initialRevision, alternativeRevision],
+      exceptions,
+      weekStart: "2026-08-24",
+    });
+
+    for (const status of ["pending", "restored"]) {
+      expect(project([exception(status)])).toEqual([
+        expect.objectContaining({
+          series_id: series.id,
+          occurrence_date: "2026-08-24",
+          alternative: false,
+        }),
+      ]);
+    }
+    expect(project([])).toEqual([
+      expect.objectContaining({ series_id: series.id, alternative: false }),
+    ]);
+    expect(project([exception("active")])).toEqual([
+      expect.objectContaining({
+        series_id: alternativeSeries.id,
+        source_series_id: series.id,
+        occurrence_date: "2026-08-24",
+        start_time: "10:00",
+        end_time: "12:00",
+        alternative: true,
+        schedule_exception: expect.objectContaining({ status: "active" }),
+      }),
+    ]);
+    expect(project([{ ...exception("active"), kind: "cancelled" }])).toEqual([]);
+  });
+
+  it("onderdrukt een geannuleerde bronoccurrence zonder een niet-gekoppeld alternatief te lekken", () => {
+    const unrelatedAlternative = {
+      id: "series-unrelated-alternative",
+      task_definition_id: definition.id,
+      status: "active",
+      current_revision_id: "revision-unrelated-alternative",
+      metadata: { alternative: true },
+    };
+    const unrelatedRevision = {
+      id: "revision-unrelated-alternative",
+      series_id: unrelatedAlternative.id,
+      revision_number: 1,
+      operation: "schedule",
+      effective_from: "2026-08-24",
+      recurrence_type: "one_time",
+      start_time: "14:00",
+      end_time: "16:00",
+    };
+
+    expect(projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [series, unrelatedAlternative],
+      revisions: [initialRevision, unrelatedRevision],
+      exceptions: [{
+        id: "exception-cancelled-occurrence",
+        source_series_id: series.id,
+        alternative_series_id: null,
+        service_date: "2026-08-24",
+        status: "active",
+      }],
+      weekStart: "2026-08-24",
+    })).toEqual([]);
+  });
+
+  it("isoleert een alternatief op zijn servicedatum wanneer de blauwdruk later wordt gewijzigd", () => {
+    const alternativeSeries = {
+      id: "series-isolated-alternative",
+      task_definition_id: definition.id,
+      status: "active",
+      current_revision_id: "revision-isolated-alternative",
+      metadata: { alternative: true },
+    };
+    const alternativeRevision = {
+      id: "revision-isolated-alternative",
+      series_id: alternativeSeries.id,
+      revision_number: 1,
+      operation: "schedule",
+      effective_from: "2026-08-24",
+      recurrence_type: "one_time",
+      start_time: "10:00",
+      end_time: "12:00",
+    };
+    const laterBlueprintRevision = {
+      ...initialRevision,
+      id: "revision-later-blueprint",
+      previous_revision_id: initialRevision.id,
+      revision_number: 2,
+      effective_from: "2026-08-24",
+      recurrence_anchor_date: "2026-08-17",
+      recurrence_end_date: null,
+      start_time: "07:00",
+      end_time: "19:00",
+    };
+    const activeException = {
+      id: "exception-isolated-alternative",
+      source_series_id: series.id,
+      alternative_series_id: alternativeSeries.id,
+      service_date: "2026-08-24",
+      status: "active",
+    };
+    const project = weekStart => projectObjectTaskSchedules({
+      definitions: [definition],
+      series: [{ ...series, current_revision_id: laterBlueprintRevision.id }, alternativeSeries],
+      revisions: [initialRevision, laterBlueprintRevision, alternativeRevision],
+      exceptions: [activeException],
+      weekStart,
+    });
+
+    expect(project("2026-08-24")).toEqual([
+      expect.objectContaining({
+        series_id: alternativeSeries.id,
+        occurrence_date: "2026-08-24",
+        start_time: "10:00",
+        end_time: "12:00",
+      }),
+    ]);
+    expect(project("2026-08-31")).toEqual([
+      expect.objectContaining({
+        series_id: series.id,
+        occurrence_date: "2026-08-31",
+        revision_id: laterBlueprintRevision.id,
+        start_time: "07:00",
+        end_time: "19:00",
+        alternative: false,
+      }),
+    ]);
   });
 
   it.each(["archived", "stopped", "deleted"])(

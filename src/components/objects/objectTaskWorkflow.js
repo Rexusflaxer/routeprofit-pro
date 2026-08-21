@@ -1,5 +1,6 @@
 import { invokePlanningApi } from "@/components/planning/planningApiClient";
 import {
+  normalizeObjectTaskException,
   normalizeObjectTaskRevision,
   normalizeObjectTaskSeries,
 } from "./objectTaskScheduleDomain";
@@ -46,9 +47,11 @@ function normalizeDefinition(value = {}) {
 
 function normalizeSeriesItem(value = {}, fallbackDefinitionId = null) {
   const series = normalizeObjectTaskSeries(value.series || value.schedule_series || value);
-  const currentRevision = normalizeObjectTaskRevision(
-    value.current_revision || value.revision || series.current_revision || {},
-  );
+  const revision = value.current_revision || value.revision || series.current_revision || {};
+  const currentRevision = normalizeObjectTaskRevision({
+    ...revision,
+    series_id: revision.series_id || revision.schedule_series_id || series.id,
+  });
   return {
     ...series,
     task_definition_id: series.task_definition_id || fallbackDefinitionId,
@@ -62,6 +65,7 @@ export function normalizeObjectTaskList(value) {
   const definitions = [];
   const series = [];
   const revisions = [];
+  const exceptions = [];
   const nestedSourceChanges = [];
 
   groups.forEach(group => {
@@ -73,6 +77,9 @@ export function normalizeObjectTaskList(value) {
       series.push(normalized);
       if (normalized.current_revision) revisions.push(normalized.current_revision);
       asArray(item.revisions).forEach(revision => revisions.push(normalizeObjectTaskRevision({ ...revision, series_id: revision.series_id || normalized.id })));
+    });
+    asArray(group.exceptions || group.schedule_exceptions).forEach(exception => {
+      exceptions.push(normalizeObjectTaskException(exception));
     });
     nestedSourceChanges.push(...asArray(group.source_changes));
   });
@@ -91,6 +98,10 @@ export function normalizeObjectTaskList(value) {
     asArray(result.revisions).forEach(revision => revisions.push(normalizeObjectTaskRevision(revision)));
   }
 
+  asArray(result.exceptions || result.schedule_exceptions).forEach(exception => {
+    exceptions.push(normalizeObjectTaskException(exception));
+  });
+
   const sourceChanges = [...nestedSourceChanges, ...asArray(result.source_changes)];
   return {
     ok: result.ok !== false,
@@ -101,6 +112,10 @@ export function normalizeObjectTaskList(value) {
     series,
     revisions: [...new Map(revisions.filter(item => item.effective_from).map(item => [
       item.id || `${item.series_id}:${item.revision_number}:${item.effective_from}`,
+      item,
+    ])).values()],
+    exceptions: [...new Map(exceptions.filter(item => item.source_series_id && item.service_date).map((item, index) => [
+      item.id || item.exception_key || `${item.source_series_id}:${item.service_date}:${index}`,
       item,
     ])).values()],
     source_changes: [...new Map(sourceChanges.map((item, index) => [
@@ -126,14 +141,19 @@ function taskPayload(data = {}) {
 }
 
 function scheduleBlockPayload(block = {}) {
+  const recurrenceType = block.recurrence_type || (block.frequency === "once" ? "one_time" : block.frequency) || "one_time";
+  const serviceDate = required(block.occurrence_date || block.service_date, "Datum");
   return {
-    service_date: required(block.occurrence_date || block.service_date, "Datum"),
+    service_date: serviceDate,
     start_time: required(block.start_time, "Starttijd"),
     end_time: required(block.end_time, "Eindtijd"),
-    recurrence_type: block.recurrence_type || (block.frequency === "once" ? "one_time" : block.frequency) || "one_time",
+    recurrence_type: recurrenceType,
     recurrence_interval: Number(block.recurrence_interval || 1),
     repeat_weekly: (block.frequency || block.recurrence_type) === "weekly" || block.repeat_weekly === true,
     recurrence_end_date: block.repeat_until || block.recurrence_end_date || null,
+    recurrence_anchor_date: recurrenceType === "one_time"
+      ? serviceDate
+      : block.recurrence_anchor_date || block.revision?.recurrence_anchor_date || serviceDate,
   };
 }
 
@@ -170,7 +190,14 @@ export async function addObjectTaskSeries({ customerId, objectId, entry, data, i
   });
 }
 
-export async function changeObjectTaskSeries({ customerId, objectId, entry, data, idempotencyKey }) {
+export async function changeObjectTaskSeries({
+  customerId,
+  objectId,
+  entry,
+  data,
+  idempotencyKey,
+  confirmRemoveOutsideShifts = false,
+}) {
   return invoke({
     action: "change_object_task_series",
     customer_id: required(customerId, "Klant"),
@@ -186,6 +213,11 @@ export async function changeObjectTaskSeries({ customerId, objectId, entry, data
     recurrence_interval: Number(data.recurrence_interval || 1),
     repeat_weekly: data.frequency === "weekly" || data.repeat_weekly === true,
     recurrence_end_date: data.repeat_until || data.recurrence_end_date || null,
+    recurrence_anchor_date: data.recurrence_anchor_date
+      || entry?.recurrence_anchor_date
+      || entry?.revision?.recurrence_anchor_date
+      || entry?.occurrence_date,
+    ...(confirmRemoveOutsideShifts ? { confirm_remove_outside_shifts: true } : {}),
   });
 }
 

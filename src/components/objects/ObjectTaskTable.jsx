@@ -24,17 +24,10 @@ function byDefinition(items, key = "task_definition_id") {
   }, new Map());
 }
 
-function latestRevisionsBySeries(revisions) {
+function revisionsById(revisions) {
   return revisions.reduce((map, revision) => {
-    const seriesId = String(revision?.series_id || revision?.schedule_series_id || "");
-    if (!seriesId) return map;
-    const current = map.get(seriesId);
-    if (!current
-      || Number(revision.revision_number || 0) > Number(current.revision_number || 0)
-      || (
-        Number(revision.revision_number || 0) === Number(current.revision_number || 0)
-        && String(revision.effective_from || "") > String(current.effective_from || "")
-      )) map.set(seriesId, revision);
+    const revisionId = String(revision?.id || "");
+    if (revisionId) map.set(revisionId, revision);
     return map;
   }, new Map());
 }
@@ -42,7 +35,12 @@ function latestRevisionsBySeries(revisions) {
 function activeSchedules(series, revisionMap) {
   return series.flatMap(item => {
     if (["archived", "stopped"].includes(item.status)) return [];
-    const revision = item.current_revision || revisionMap.get(String(item.id));
+    const currentRevisionId = String(item.current_revision_id || "");
+    if (!currentRevisionId) return [];
+    const nestedCurrent = String(item.current_revision?.id || "") === currentRevisionId
+      ? item.current_revision
+      : null;
+    const revision = nestedCurrent || revisionMap.get(currentRevisionId);
     if (!revision || revision.operation === "stop") return [];
     return [{ series: item, revision }];
   });
@@ -117,7 +115,7 @@ export default function ObjectTaskTable({
   onOpenSchedule,
 }) {
   const seriesMap = useMemo(() => byDefinition(series), [series]);
-  const revisionMap = useMemo(() => latestRevisionsBySeries(revisions), [revisions]);
+  const revisionMap = useMemo(() => revisionsById(revisions), [revisions]);
   const changeMap = useMemo(
     () => byDefinition(sourceChanges.filter(change => !["resolved", "closed"].includes(change.status)), "object_task_definition_id"),
     [sourceChanges],

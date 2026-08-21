@@ -10,9 +10,7 @@ function initials(name) {
 }
 
 function compactName(name) {
-  const parts = String(name || "Onbekend").trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return parts[0] || "Onbekend";
-  return `${parts[0][0].toUpperCase()}. ${parts.at(-1)}`;
+  return String(name || "Onbekend").trim().replace(/\s+/g, " ") || "Onbekend";
 }
 
 export default function CompactEmployeeIdentity({ name, photoUrl, employee, disabled, onClick, warningCount = 0, variant = "default" }) {

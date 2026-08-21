@@ -207,6 +207,9 @@ export function normalizeObjectTaskRevision(revision = {}) {
     revision_number: Number(revision.revision_number || revision.version || 1),
     operation,
     effective_from: effectiveFrom,
+    recurrence_anchor_date: revision.recurrence_anchor_date
+      || revision.metadata?.recurrence_anchor_date
+      || effectiveFrom,
     frequency: normalizedFrequency(revision.frequency || revision.recurrence_type),
     recurrence_type: normalizedFrequency(revision.recurrence_type || revision.frequency),
     recurrence_interval: Math.max(1, Number(revision.recurrence_interval || revision.metadata?.recurrence_interval || 1)),
@@ -232,8 +235,29 @@ export function normalizeObjectTaskSeries(series = {}) {
 }
 
 function activeRevisionForDate(series, revisions, dateKey) {
-  return revisions
-    .filter(revision => String(revision.series_id) === String(series.id) && revision.effective_from && revision.effective_from <= dateKey)
+  const seriesRevisions = revisions.filter(revision => (
+    String(revision.series_id) === String(series.id)
+  ));
+  // Every modern series is committed through its current-revision pointer.
+  // Legacy schedules do not have a series record at all and are projected by
+  // legacyEntries below. A series without a pointer is therefore incomplete
+  // mutation state; selecting any stored revision would expose an orphan.
+  if (!series.current_revision_id) return null;
+  const revisionById = new Map(seriesRevisions.map(revision => [String(revision.id), revision]));
+  const reachableRevisions = [];
+  const visited = new Set();
+  let revisionId = series.current_revision_id ? String(series.current_revision_id) : "";
+  while (revisionId && !visited.has(revisionId)) {
+    visited.add(revisionId);
+    const revision = revisionById.get(revisionId);
+    if (!revision) break;
+    reachableRevisions.push(revision);
+    revisionId = revision.previous_revision_id ? String(revision.previous_revision_id) : "";
+  }
+  // If the pointed revision is absent from a partial/stale response,
+  // reachableRevisions stays empty and projection fails closed.
+  return reachableRevisions
+    .filter(revision => revision.effective_from && revision.effective_from <= dateKey)
     .sort((left, right) => right.revision_number - left.revision_number)[0] || null;
 }
 
@@ -241,6 +265,36 @@ function revisionOccursOnDate(revision, dateKey) {
   if (!revision || revision.operation === "stop" || dateKey < revision.effective_from) return false;
   if (revision.repeat_until && dateKey > revision.repeat_until) return false;
   return objectTaskRecursOn(revision, dateKey);
+}
+
+export function normalizeObjectTaskException(exception = {}) {
+  return {
+    ...exception,
+    id: exception.id || exception.exception_id || null,
+    source_series_id: exception.source_series_id
+      || exception.object_task_schedule_series_id
+      || exception.series_id
+      || null,
+    alternative_series_id: exception.alternative_series_id
+      || exception.replacement_series_id
+      || null,
+    service_date: exception.service_date || exception.occurrence_date || null,
+    status: exception.status || "pending",
+    version: Number(exception.version || 1),
+  };
+}
+
+function activeScheduleExceptions(exceptions = []) {
+  return exceptions
+    .map(normalizeObjectTaskException)
+    .filter(exception => exception.status === "active" && exception.source_series_id && exception.service_date);
+}
+
+function isAlternativeSeries(series = {}) {
+  return series.metadata?.alternative === true
+    || series.metadata?.schedule_kind === "alternative"
+    || series.metadata?.planning_alternative === true
+    || series.metadata?.series_kind === "occurrence_alternative";
 }
 
 function definitionLabel(definition = {}) {
@@ -323,16 +377,31 @@ function legacyEntries(definition, week) {
   });
 }
 
-export function projectObjectTaskSchedules({ definitions = [], series = [], revisions = [], sourceChanges = [], weekStart }) {
+export function projectObjectTaskSchedules({ definitions = [], series = [], revisions = [], exceptions = [], sourceChanges = [], weekStart }) {
   const week = objectTaskWeek(weekStart);
   const normalizedSeries = series.map(normalizeObjectTaskSeries);
   const normalizedRevisions = revisions.map(normalizeObjectTaskRevision);
+  const activeExceptions = activeScheduleExceptions(exceptions);
+  const exceptionForSourceDate = new Map(activeExceptions.map(exception => [
+    `${exception.source_series_id}:${exception.service_date}`,
+    exception,
+  ]));
+  const exceptionForAlternativeDate = new Map(activeExceptions
+    .filter(exception => exception.alternative_series_id)
+    .map(exception => [`${exception.alternative_series_id}:${exception.service_date}`, exception]));
   const definitionById = new Map(definitions.map(definition => [String(definition.id), definition]));
   const entries = normalizedSeries.flatMap(scheduleSeries => {
     if (!seriesCanBeProjected(scheduleSeries, normalizedRevisions)) return [];
     const definition = definitionById.get(String(scheduleSeries.task_definition_id));
     if (!definitionCanBeProjected(definition)) return [];
     return week.days.flatMap(dateKey => {
+      const alternative = isAlternativeSeries(scheduleSeries);
+      const sourceException = exceptionForSourceDate.get(`${scheduleSeries.id}:${dateKey}`) || null;
+      const linkedException = exceptionForAlternativeDate.get(`${scheduleSeries.id}:${dateKey}`) || null;
+      if (
+        (!alternative && sourceException)
+        || (alternative && (!linkedException || linkedException.kind === "cancelled"))
+      ) return [];
       const revision = activeRevisionForDate(scheduleSeries, normalizedRevisions, dateKey);
       if (!revisionOccursOnDate(revision, dateKey)) return [];
       return [{
@@ -352,8 +421,12 @@ export function projectObjectTaskSchedules({ definitions = [], series = [], revi
         frequency: revision.frequency,
         recurrence_type: revision.recurrence_type,
         recurrence_interval: revision.recurrence_interval,
+        recurrence_anchor_date: revision.recurrence_anchor_date,
         repeat_until: revision.repeat_until,
         label: definitionLabel(definition),
+        alternative,
+        schedule_exception: linkedException,
+        source_series_id: linkedException?.source_series_id || null,
         source_change: sourceChangeFor(sourceChanges, scheduleSeries.id, dateKey),
       }];
     });

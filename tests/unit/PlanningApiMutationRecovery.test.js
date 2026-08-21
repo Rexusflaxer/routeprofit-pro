@@ -133,6 +133,7 @@ function setup({ shifts = [], assignments = [], occurrences = [], segments = [] 
     ObjectTaskDefinition: entity([], "object-task-definition"),
     ObjectTaskScheduleSeries: entity([], "object-task-schedule-series"),
     ObjectTaskScheduleRevision: entity([], "object-task-schedule-revision"),
+    ObjectTaskScheduleException: entity([], "object-task-schedule-exception"),
     PlanningTaskSourceChange: entity([], "planning-task-source-change"),
     ObjectSecurityPlan: entity([], "object-security-plan"),
     ObjectSecurityPlanRevision: entity([], "object-security-plan-revision"),
@@ -584,7 +585,7 @@ describe("planningApi route-bootstrap reconciliatie", () => {
 describe("planningApi lease fencing", () => {
   it("vernieuwt onafhankelijke leases begrensd parallel met behoud van ownership-readback", async () => {
     const { base44, entities } = setup();
-    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const expiresAt = new Date(Date.now() + 90_000).toISOString();
     entities.PlanningMutationCoordinator.records.push(
       {
         id: "coordinator-parallel-a",
@@ -644,6 +645,153 @@ describe("planningApi lease fencing", () => {
     });
   });
 
+  it("controleert ownership maar schrijft een ruime lease niet bij elke mutationele stap opnieuw", async () => {
+    const { base44, entities } = setup();
+    const expiresAt = new Date(Date.now() + 110_000).toISOString();
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-fresh-a",
+        coordinator_key: "task_occurrence:occurrence-a",
+        resource_type: "task_occurrence",
+        resource_id: "occurrence-a",
+        revision: 1,
+        lease: { token: "fresh-token", status: "pending", expires_at: expiresAt },
+      },
+      {
+        id: "coordinator-fresh-b",
+        coordinator_key: "shift_composition:shift-a",
+        resource_type: "shift_composition",
+        resource_id: "shift-a",
+        revision: 1,
+        lease: { token: "fresh-token", status: "pending", expires_at: expiresAt },
+      },
+    );
+    const coordinatorGet = entities.PlanningMutationCoordinator.get.bind(entities.PlanningMutationCoordinator);
+    const coordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let ownershipReadCount = 0;
+    let coordinatorWriteCount = 0;
+    entities.PlanningMutationCoordinator.get = async id => {
+      ownershipReadCount += 1;
+      return coordinatorGet(id);
+    };
+    entities.PlanningMutationCoordinator.updateMany = async (...args) => {
+      coordinatorWriteCount += 1;
+      return coordinatorUpdateMany(...args);
+    };
+
+    await backend.renewPlanningResourceLeases(base44, user, [
+      {
+        coordinatorId: "coordinator-fresh-a",
+        resourceType: "task_occurrence",
+        resourceId: "occurrence-a",
+        token: "fresh-token",
+      },
+      {
+        coordinatorId: "coordinator-fresh-b",
+        resourceType: "shift_composition",
+        resourceId: "shift-a",
+        token: "fresh-token",
+      },
+    ]);
+
+    expect(ownershipReadCount).toBe(2);
+    expect(coordinatorWriteCount).toBe(0);
+    expect(await coordinatorGet("coordinator-fresh-a")).toMatchObject({ revision: 1 });
+    expect(await coordinatorGet("coordinator-fresh-b")).toMatchObject({ revision: 1 });
+  });
+
+  it("geeft onafhankelijke leases begrensd parallel vrij", async () => {
+    const { base44, entities } = setup();
+    const expiresAt = new Date(Date.now() + 90_000).toISOString();
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-release-a",
+        coordinator_key: "task_occurrence:occurrence-a",
+        resource_type: "task_occurrence",
+        resource_id: "occurrence-a",
+        revision: 1,
+        lease: { token: "release-token", status: "pending", expires_at: expiresAt },
+      },
+      {
+        id: "coordinator-release-b",
+        coordinator_key: "shift_composition:shift-a",
+        resource_type: "shift_composition",
+        resource_id: "shift-a",
+        revision: 1,
+        lease: { token: "release-token", status: "pending", expires_at: expiresAt },
+      },
+    );
+    const coordinatorGet = entities.PlanningMutationCoordinator.get.bind(entities.PlanningMutationCoordinator);
+    let inFlightReads = 0;
+    let maximumConcurrentReads = 0;
+    entities.PlanningMutationCoordinator.get = async id => {
+      inFlightReads += 1;
+      maximumConcurrentReads = Math.max(maximumConcurrentReads, inFlightReads);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const record = await coordinatorGet(id);
+      inFlightReads -= 1;
+      return record;
+    };
+
+    const errors = await backend.releasePlanningResourceLeases(base44, user, [
+      { coordinatorId: "coordinator-release-a", token: "release-token" },
+      { coordinatorId: "coordinator-release-b", token: "release-token" },
+    ]);
+
+    expect(errors).toEqual([]);
+    expect(maximumConcurrentReads).toBeGreaterThan(1);
+    expect(await coordinatorGet("coordinator-release-a")).toMatchObject({ lease: null, revision: 2 });
+    expect(await coordinatorGet("coordinator-release-b")).toMatchObject({ lease: null, revision: 2 });
+  });
+
+  it("ruimt alle overige leases op wanneer een parallelle release definitief faalt", async () => {
+    const { base44, entities } = setup();
+    const expiresAt = new Date(Date.now() + 90_000).toISOString();
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-release-fails",
+        coordinator_key: "task_occurrence:occurrence-fails",
+        resource_type: "task_occurrence",
+        resource_id: "occurrence-fails",
+        revision: 1,
+        lease: { token: "release-token", status: "pending", expires_at: expiresAt },
+      },
+      {
+        id: "coordinator-release-succeeds",
+        coordinator_key: "shift_composition:shift-succeeds",
+        resource_type: "shift_composition",
+        resource_id: "shift-succeeds",
+        revision: 1,
+        lease: { token: "release-token", status: "pending", expires_at: expiresAt },
+      },
+    );
+    const coordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      if (query.id === "coordinator-release-fails") throw new Error("release storage unavailable");
+      return coordinatorUpdateMany(query, update);
+    };
+
+    const errors = await backend.releasePlanningResourceLeases(base44, user, [
+      { coordinatorId: "coordinator-release-fails", token: "release-token" },
+      { coordinatorId: "coordinator-release-succeeds", token: "release-token" },
+    ]);
+
+    expect(errors).toEqual([
+      expect.objectContaining({
+        id: "coordinator-release-fails",
+        message: "release storage unavailable",
+      }),
+    ]);
+    expect(await entities.PlanningMutationCoordinator.get("coordinator-release-fails"))
+      .toMatchObject({ lease: { token: "release-token" }, revision: 1 });
+    expect(await entities.PlanningMutationCoordinator.get("coordinator-release-succeeds"))
+      .toMatchObject({ lease: null, revision: 2 });
+  });
+
   it("laat een verlopen eigenaar zijn lease niet hernieuwen of een write hervatten", async () => {
     const { base44, entities } = setup();
     entities.PlanningMutationCoordinator.records.push({
@@ -670,6 +818,36 @@ describe("planningApi lease fencing", () => {
     expect(await entities.PlanningMutationCoordinator.get("coordinator-stale")).toMatchObject({
       revision: 1,
       lease: { token: "stale-token", expires_at: "2026-08-10T00:00:00.000Z" },
+    });
+  });
+
+  it("laat een oude eigenaar een verse lease met een ander token niet hernieuwen", async () => {
+    const { base44, entities } = setup();
+    const expiresAt = new Date(Date.now() + 120_000).toISOString();
+    entities.PlanningMutationCoordinator.records.push({
+      id: "coordinator-reowned",
+      coordinator_key: "shift_composition:shift-1",
+      resource_type: "shift_composition",
+      resource_id: "shift-1",
+      revision: 1,
+      lease: {
+        token: "new-owner-token",
+        status: "pending",
+        idempotency_key: "new-owner-request",
+        actor_user_id: "admin-2",
+        expires_at: expiresAt,
+      },
+    });
+
+    await expect(backend.renewPlanningResourceLeases(base44, user, [{
+      coordinatorId: "coordinator-reowned",
+      resourceType: "shift_composition",
+      resourceId: "shift-1",
+      token: "old-owner-token",
+    }])).rejects.toMatchObject({ status: 409 });
+    expect(await entities.PlanningMutationCoordinator.get("coordinator-reowned")).toMatchObject({
+      revision: 1,
+      lease: { token: "new-owner-token", expires_at: expiresAt },
     });
   });
 });

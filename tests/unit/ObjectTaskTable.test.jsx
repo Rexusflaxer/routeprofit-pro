@@ -21,7 +21,9 @@ describe("ObjectTaskTable oude compacte weergave", () => {
           id: "series-1",
           task_definition_id: task.id,
           status: "active",
+          current_revision_id: "revision-2",
           current_revision: {
+            id: "revision-2",
             series_id: "series-1",
             revision_number: 2,
             operation: "upsert",
@@ -53,6 +55,39 @@ describe("ObjectTaskTable oude compacte weergave", () => {
       />,
     );
 
+    expect(screen.queryByText("07:00 – 17:00")).not.toBeInTheDocument();
+  });
+
+  it("toont geen orphan revisie zolang een moderne reeks geen current pointer heeft", () => {
+    render(
+      <ObjectTaskTable
+        rows={[task]}
+        series={[{
+          id: "series-1",
+          task_definition_id: task.id,
+          status: "active",
+          current_revision_id: null,
+          current_revision: {
+            id: "revision-uncommitted",
+            operation: "schedule",
+            start_time: "13:00",
+            end_time: "14:00",
+          },
+        }]}
+        revisions={[{
+          id: "revision-uncommitted",
+          series_id: "series-1",
+          revision_number: 99,
+          operation: "upsert",
+          start_time: "13:00",
+          end_time: "14:00",
+          frequency: "weekly",
+          weekday: 1,
+        }]}
+      />,
+    );
+
+    expect(screen.queryByText("13:00 – 14:00")).not.toBeInTheDocument();
     expect(screen.queryByText("07:00 – 17:00")).not.toBeInTheDocument();
   });
 });
