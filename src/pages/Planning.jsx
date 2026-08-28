@@ -58,6 +58,7 @@ import {
   withPlanningOptimisticIntentIdentity,
 } from "@/components/planning/planningEffectivePlan";
 import {
+  createPlanningBackgroundRequestGate,
   getPlanningMutationQueue,
   planningPersonnelDayResourceKey,
   planningPersonnelDayResourceKeys,
@@ -632,6 +633,7 @@ export default function Planning() {
   const [eligibilityServerDecisions, setEligibilityServerDecisions] = useState([]);
   const [dragEligibilityPreview, setDragEligibilityPreview] = useState(null);
   const [eligibilityFreshnessTick, setEligibilityFreshnessTick] = useState(0);
+  const [planningResizeGestureActive, setPlanningResizeGestureActive] = useState(false);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
   const lastBoundaryRecoveryKey = useRef("");
@@ -644,13 +646,37 @@ export default function Planning() {
   const pendingResourceKeysRef = useRef(new Set());
   const planningMutationQueue = useRef(sharedPlanningMutationQueue);
   const planningCommitFenceRef = useRef(null);
-  const eligibilityPrefetchGenerationRef = useRef(0);
+  const planningResizeGestureActiveRef = useRef(false);
+  const eligibilityBackgroundRequestGateRef = useRef(createPlanningBackgroundRequestGate());
+  const eligibilityBackgroundPrefetchGenerationRef = useRef(0);
   const eligibilityPrewarmBasisRef = useRef("");
   const eligibilityUrgentPrefetchKeysRef = useRef(new Set());
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
 
   useEffect(() => planningMutationQueue.current.subscribe(setPlanningQueueState), []);
+
+  useEffect(() => {
+    const setActive = active => {
+      if (planningResizeGestureActiveRef.current === active) return;
+      planningResizeGestureActiveRef.current = active;
+      setPlanningResizeGestureActive(active);
+    };
+    const handlePointerDown = event => {
+      if (event.target?.closest?.("[data-service-resize-edge]")) setActive(true);
+    };
+    const handlePointerEnd = () => setActive(false);
+    // Capture sees the pointer before the resize handle stops propagation and
+    // survives the optimistic-to-server rerender of that same handle.
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointerup", handlePointerEnd, true);
+    window.addEventListener("pointercancel", handlePointerEnd, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointerup", handlePointerEnd, true);
+      window.removeEventListener("pointercancel", handlePointerEnd, true);
+    };
+  }, []);
 
   const selectedCaoPeriod = useMemo(
     () => getCaoPbPlanningPeriodByKey(selectedCaoPeriodId),
@@ -1501,22 +1527,44 @@ export default function Planning() {
     () => buildEligibilityPrefetchCandidates(activePersonnel.slice(0, 20)).slice(0, 320),
     [activePersonnel, buildEligibilityPrefetchCandidates],
   );
-  const requestEligibilityPrefetch = useCallback(async ({ candidates, basisToken, generation }) => {
+  const requestEligibilityPrefetch = useCallback(async ({
+    candidates,
+    basisToken,
+    generation = null,
+    priority = "background",
+  }) => {
     if (!candidates.length) return;
     const batches = batchPlanningEligibilityCandidates(candidates);
     let cursor = 0;
+    const backgroundRequestIsCurrent = () => (
+      priority !== "background"
+      || (
+        eligibilityBackgroundPrefetchGenerationRef.current === generation
+        && planningMutationQueue.current.getSnapshot().isIdle
+        && !planningResizeGestureActiveRef.current
+      )
+    );
     const worker = async () => {
       while (cursor < batches.length) {
+        // Low-priority matrix warming yields immediately to a real planning
+        // write. Exact drag/hover requests remain urgent and are never gated.
+        if (!backgroundRequestIsCurrent()) return;
         const batch = batches[cursor];
         cursor += 1;
-        if (eligibilityPrefetchGenerationRef.current !== generation) return;
         let results;
         try {
-          const response = await invokePlanningApi({
+          if (
+            priority === "background"
+            && eligibilityBackgroundRequestGateRef.current.hasCurrentBackgroundBatch()
+          ) return;
+          const request = invokePlanningApi({
             action: "prefetch_assignment_eligibility",
             basis_token: basisToken,
             candidates: batch.map(({ _local, ...candidate }) => candidate),
           });
+          const response = priority === "background"
+            ? await eligibilityBackgroundRequestGateRef.current.trackBackgroundBatch(request)
+            : await request;
           results = (response?.results || []).map(item => ({
             ...item,
             basis_token: item.basis_token || response.basis_token,
@@ -1533,7 +1581,7 @@ export default function Planning() {
             warning_snapshot: [],
           }));
         }
-        if (eligibilityPrefetchGenerationRef.current !== generation) return;
+        if (!backgroundRequestIsCurrent()) return;
         setEligibilityServerDecisions(current => {
           const byKey = new Map(current
             .filter(item => item.basis_token === basisToken)
@@ -1543,7 +1591,8 @@ export default function Planning() {
         });
       }
     };
-    await Promise.all([worker(), worker()]);
+    if (priority === "background") await worker();
+    else await Promise.all([worker(), worker()]);
   }, []);
   const requestUrgentEligibilityCandidates = useCallback(candidates => {
     const now = Date.now();
@@ -1565,7 +1614,7 @@ export default function Planning() {
     void requestEligibilityPrefetch({
       candidates: requested,
       basisToken: eligibilityIndex.basisToken,
-      generation: eligibilityPrefetchGenerationRef.current,
+      priority: "urgent",
     }).finally(() => requestKeys.forEach(key => pending.delete(key)));
   }, [eligibilityIndex, eligibilityServerDecisions, requestEligibilityPrefetch]);
   const refetchEligibilityDependencies = useCallback(() => Promise.allSettled([
@@ -1612,8 +1661,12 @@ export default function Planning() {
     eligibilityIndex.prewarm(backgroundEligibilityCandidates.map(item => item._local));
   }, [backgroundEligibilityCandidates, eligibilityIndex]);
   useEffect(() => {
-    const generation = eligibilityPrefetchGenerationRef.current + 1;
-    eligibilityPrefetchGenerationRef.current = generation;
+    const generation = eligibilityBackgroundPrefetchGenerationRef.current + 1;
+    eligibilityBackgroundPrefetchGenerationRef.current = generation;
+    // A mutation gets the planning API lane exclusively. Its ACK may change
+    // the eligibility basis, but a 320-candidate background refill must not
+    // race the dependent resize that the user is already performing.
+    if (!planningQueueState.isIdle || planningResizeGestureActive) return undefined;
     setEligibilityServerDecisions([]);
     if (!backgroundEligibilityCandidates.length) return undefined;
     const schedule = typeof window.requestIdleCallback === "function"
@@ -1627,10 +1680,17 @@ export default function Planning() {
         candidates: backgroundEligibilityCandidates,
         basisToken: eligibilityIndex.basisToken,
         generation,
+        priority: "background",
       });
     });
     return () => cancel(handle);
-  }, [backgroundEligibilityCandidates, eligibilityIndex.basisToken, requestEligibilityPrefetch]);
+  }, [
+    backgroundEligibilityCandidates,
+    eligibilityIndex.basisToken,
+    planningQueueState.isIdle,
+    planningResizeGestureActive,
+    requestEligibilityPrefetch,
+  ]);
 
   const candidates = useMemo(() => {
     const ranked = buildCandidateRanking({
@@ -1723,6 +1783,10 @@ export default function Planning() {
 
   const runQueuedIntentMutation = async (idempotencyKey, payload) => {
     const request = { ...payload, idempotency_key: idempotencyKey };
+    // The optimistic intent is already visible. Yield network priority only to
+    // the one background batch that was in flight before this write started;
+    // the now-busy mutation queue prevents that worker from starting another.
+    await eligibilityBackgroundRequestGateRef.current.waitForCurrentBackgroundBatch();
     return invokePlanningApi(request);
   };
 
@@ -2130,7 +2194,28 @@ export default function Planning() {
     toast({ title: "Planning hersteld", description: message });
   };
 
-  const finishTimelineAssignment = (result, occurrence, personnelItem, { reconciled = false } = {}) => {
+  const timelineAssignmentDescription = (occurrence, personnelItem, warnings) => (
+    `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`
+  );
+
+  const notifyOptimisticTimelineAssignment = (occurrence, personnelItem, warnings = []) => {
+    const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
+    const description = timelineAssignmentDescription(occurrence, personnelItem, warnings);
+    toast({
+      title: criticalWarnings.length
+        ? "Ingepland met kritieke controle"
+        : warnings.length
+          ? "Ingepland met aandachtspunt"
+          : "Medewerker ingepland",
+      description,
+    });
+    setLiveMessage(description);
+  };
+
+  const finishTimelineAssignment = (result, occurrence, personnelItem, {
+    reconciled = false,
+    optimisticWarnings = null,
+  } = {}) => {
     setStatusFilter("all");
     if (!reconciled) {
       reconcilePlanningResult(result);
@@ -2138,10 +2223,37 @@ export default function Planning() {
     }
     const warnings = assignmentWarnings(result.assignment);
     const criticalWarnings = warnings.filter(warning => warning.severity === "critical");
-    const description = `${personnelName(personnelItem)} is ingepland voor ${occurrence.task_name_snapshot || "de taak"} bij ${occurrence.object_name_snapshot || "het object"}.${warnings.length ? ` Controleer ${warnings.length} inzetwaarschuwing${warnings.length === 1 ? "" : "en"}.` : ""}`;
-    toast({ title: criticalWarnings.length ? "Ingepland met kritieke controle" : warnings.length ? "Ingepland met aandachtspunt" : "Dienst gemaakt en ingepland", description });
+    const description = timelineAssignmentDescription(occurrence, personnelItem, warnings);
+    const optimisticKeys = new Set((optimisticWarnings || []).map(warning => [
+      warning.code,
+      warning.severity,
+      warning.title,
+      warning.detail,
+      warning.message,
+    ].map(value => String(value || "")).join("|")));
+    const newlyReportedWarnings = optimisticWarnings == null
+      ? warnings
+      : warnings.filter(warning => !optimisticKeys.has([
+          warning.code,
+          warning.severity,
+          warning.title,
+          warning.detail,
+          warning.message,
+        ].map(value => String(value || "")).join("|")));
+    if (optimisticWarnings == null || newlyReportedWarnings.length > 0) {
+      toast({
+        title: optimisticWarnings != null
+          ? "Inzetcontrole bijgewerkt"
+          : criticalWarnings.length
+            ? "Ingepland met kritieke controle"
+            : warnings.length
+              ? "Ingepland met aandachtspunt"
+              : "Medewerker ingepland",
+        description,
+      });
+      setLiveMessage(description);
+    }
     setSelectedShiftId(warnings.length ? result.shift?.id || null : null);
-    setLiveMessage(description);
     return result;
   };
 
@@ -2233,13 +2345,12 @@ export default function Planning() {
         ));
         refreshPlanningInBackground();
         if (replaceShiftSegments) {
-          const merged = executionResolution.adjacent.candidate.mergedSegment;
-          const description = `${personnelName(personnelItem)} blijft als één dienst aaneengesloten ingepland van ${merged.start_time} tot ${merged.end_time}.`;
-          toast({ title: "Aansluitende tijd samengevoegd", description });
-          setLiveMessage(description);
           return;
         }
-        finishTimelineAssignment(result, executionResolution.allocation.occurrence, personnelItem, { reconciled: true });
+        finishTimelineAssignment(result, executionResolution.allocation.occurrence, personnelItem, {
+          reconciled: true,
+          optimisticWarnings: immediateWarnings,
+        });
       },
       onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
         action: "compose_and_assign",
@@ -2250,6 +2361,7 @@ export default function Planning() {
         replaceShiftSegments: executionResolution?.kind === "merge",
       }),
     });
+    notifyOptimisticTimelineAssignment(occurrence, personnelItem, immediateWarnings);
     return operation;
   };
 
@@ -2497,7 +2609,7 @@ export default function Planning() {
       String(item.planning_shift_id || item.shift_id) === String(shift.id)
     ));
     const parentIntentId = planningOriginIntentId(shift) || planningOriginIntentId(segment);
-    const optimisticIntent = {
+    const staleGestureIntent = {
       ...buildDependentPlanningResizeIntent({
         key: pendingKey,
         originIntentId: pendingKey,
@@ -2513,6 +2625,49 @@ export default function Planning() {
       segment_id: segment.id,
       task_occurrence_id: occurrenceIds[0],
     };
+    const terminalParent = parentIntentId
+      ? planningMutationQueue.current.getTerminalState(parentIntentId)
+      : null;
+    if (terminalParent && terminalParent.status !== "succeeded") {
+      const description = "De oorspronkelijke dienst kon niet worden opgeslagen; deze tijdswijziging is daarom vervallen.";
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description });
+      setLiveMessage(description);
+      return null;
+    }
+    // Pointer listeners intentionally retain the optimistic records they were
+    // started with. If the compose ACK completed before pointer-up, recover
+    // its terminal identity map and enqueue the resize directly against the
+    // authoritative ids/revisions instead of retrying the stale temp ids.
+    const optimisticIntent = terminalParent?.status === "succeeded"
+      ? rebaseDependentPlanningIntent(
+          staleGestureIntent,
+          terminalParent.originalIntent || terminalParent.intent,
+          terminalParent.result,
+        )
+      : staleGestureIntent;
+    if (terminalParent?.status === "succeeded") {
+      const terminalSnapshot = planningExecutionSnapshotFromCache(
+        queryClient,
+        executionRange.periodStart,
+        executionRange.periodEnd,
+      );
+      const terminalTargets = [
+        resolvePlanningShiftTarget(terminalSnapshot, {
+          id: optimisticIntent.shift_id,
+          ref: optimisticIntent._planning_target_refs?.shift,
+        }),
+        resolvePlanningSegmentTarget(terminalSnapshot, {
+          id: optimisticIntent.segment_id,
+          ref: optimisticIntent._planning_target_refs?.segment,
+        }),
+      ];
+      if (terminalTargets.some(target => target.status !== "ready")) {
+        const description = "De opgeslagen dienst kon niet eenduidig aan de lokale tijdsgreep worden gekoppeld. Er is geen tweede planningactie verstuurd; ververs de planning en probeer opnieuw.";
+        toast({ variant: "destructive", title: "Diensttijd niet aangepast", description });
+        setLiveMessage(description);
+        return null;
+      }
+    }
     let executionIntent = optimisticIntent;
     let executedRequest = null;
     const operation = planningMutationQueue.current.enqueue({
@@ -2521,7 +2676,7 @@ export default function Planning() {
       coalesceKey: `resize:${planningRecordReference(shift, "shift")}:${planningRecordReference(segment, "segment")}`,
       coalesceIntent: (_current, incoming) => incoming,
       resourceKeys: [
-        `shift:${shift.id}`,
+        `shift:${optimisticIntent.shift_id}`,
         ...occurrenceIds.map(id => `occurrence:${id}`),
       ],
       intent: optimisticIntent,
@@ -2532,8 +2687,14 @@ export default function Planning() {
           executionRange.periodStart,
           executionRange.periodEnd,
         );
-        const currentShift = resolvePlanningShiftTarget(snapshot, { id: intent.shift_id });
-        const currentSegment = resolvePlanningSegmentTarget(snapshot, { id: intent.segment_id });
+        const currentShift = resolvePlanningShiftTarget(snapshot, {
+          id: intent.shift_id,
+          ref: intent._planning_target_refs?.shift,
+        });
+        const currentSegment = resolvePlanningSegmentTarget(snapshot, {
+          id: intent.segment_id,
+          ref: intent._planning_target_refs?.segment,
+        });
         const currentOccurrence = resolvePlanningOccurrenceTarget(snapshot, { id: intent.task_occurrence_id });
         const requestedShift = resolvePlanningShiftTarget(intent, { ref: intent._planning_target_refs?.shift });
         const requestedSegment = resolvePlanningSegmentTarget(intent, { ref: intent._planning_target_refs?.segment });
@@ -2867,13 +3028,12 @@ export default function Planning() {
         ));
         refreshPlanningInBackground();
         if (replaceShiftSegments) {
-          const merged = executionResolution.adjacent.candidate.mergedSegment;
-          const description = `${personnelName(personnelItem)} blijft als één dienst aaneengesloten ingepland van ${merged.start_time} tot ${merged.end_time}.`;
-          toast({ title: "Aansluitende tijd samengevoegd", description });
-          setLiveMessage(description);
           return;
         }
-        finishTimelineAssignment(result, executionResolution.allocation.occurrence, personnelItem, { reconciled: true });
+        finishTimelineAssignment(result, executionResolution.allocation.occurrence, personnelItem, {
+          reconciled: true,
+          optimisticWarnings: immediateWarnings,
+        });
       },
       onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
         action: "compose_and_assign",
@@ -2884,6 +3044,7 @@ export default function Planning() {
         replaceShiftSegments: executionResolution?.kind === "merge",
       }),
     });
+    notifyOptimisticTimelineAssignment(occurrence, personnelItem, immediateWarnings);
     return operation;
   };
 

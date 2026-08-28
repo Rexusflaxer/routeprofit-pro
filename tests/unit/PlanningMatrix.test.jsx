@@ -1054,6 +1054,120 @@ describe("Planning matrix", () => {
     }));
   });
 
+  it("behoudt een actieve resize wanneer de late compose-ACK temp-ids door server-ids vervangt", async () => {
+    const onResizeTaskSegment = vi.fn(() => new Promise(() => {}));
+    const deferredOccurrence = {
+      ...occurrence,
+      id: "occurrence-deferred-compose-ack",
+      window_start_time: "06:30",
+      window_end_time: "18:00",
+      required_minutes: 690,
+    };
+    const optimisticShift = {
+      ...shift,
+      id: "pending-shift-deferred-compose-ack",
+      source_type: "task",
+      service_date: deferredOccurrence.service_date,
+      start_time: "06:30",
+      end_time: "18:00",
+      _planning_ref: "compose-deferred:shift:0",
+      _planning_origin_intent_id: "compose-deferred",
+      _optimistic_pending: true,
+    };
+    const optimisticSegment = {
+      id: "pending-segment-deferred-compose-ack",
+      shift_id: optimisticShift.id,
+      task_occurrence_id: deferredOccurrence.id,
+      object_id: deferredOccurrence.object_id,
+      start_date: deferredOccurrence.service_date,
+      end_date: deferredOccurrence.end_date,
+      start_time: "06:30",
+      end_time: "18:00",
+      status: "draft",
+      _planning_ref: "compose-deferred:segment:0",
+      _planning_origin_intent_id: "compose-deferred",
+      _optimistic_pending: true,
+    };
+    const optimisticAssignment = {
+      ...assignment,
+      id: "pending-assignment-deferred-compose-ack",
+      planning_shift_id: optimisticShift.id,
+      shift_id: optimisticShift.id,
+      _planning_ref: "compose-deferred:assignment:0",
+      _planning_origin_intent_id: "compose-deferred",
+      _optimistic_pending: true,
+    };
+    const authoritativeShift = {
+      ...optimisticShift,
+      id: "shift-server-deferred-compose-ack",
+      revision: 2,
+      _planning_ref: undefined,
+      _planning_origin_intent_id: undefined,
+      _optimistic_pending: false,
+    };
+    const authoritativeSegment = {
+      ...optimisticSegment,
+      id: "segment-server-deferred-compose-ack",
+      shift_id: authoritativeShift.id,
+      revision: 2,
+      _planning_ref: undefined,
+      _planning_origin_intent_id: undefined,
+      _optimistic_pending: false,
+    };
+    const authoritativeAssignment = {
+      ...optimisticAssignment,
+      id: "assignment-server-deferred-compose-ack",
+      planning_shift_id: authoritativeShift.id,
+      shift_id: authoritativeShift.id,
+      revision: 2,
+      _planning_ref: undefined,
+      _planning_origin_intent_id: undefined,
+      _optimistic_pending: false,
+    };
+    const initialProps = boardProps({
+      occurrences: [deferredOccurrence],
+      shifts: [optimisticShift],
+      segments: [optimisticSegment],
+      assignments: [optimisticAssignment],
+      onResizeTaskSegment,
+    });
+    const view = renderInDragContext(<PlanningBoard {...initialProps} />);
+    const initialLane = view.container.querySelector(`[data-task-coverage-lane="${deferredOccurrence.id}"]`);
+    vi.spyOn(initialLane, "getBoundingClientRect").mockReturnValue({
+      top: 0, bottom: 230, left: 0, right: 220, width: 220, height: 230, x: 0, y: 0,
+      toJSON: () => ({}),
+    });
+    const initialHandle = within(initialLane).getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+
+    fireEvent.pointerDown(initialHandle, { button: 0, clientY: 230 });
+    fireEvent.pointerMove(window, { clientY: 180 });
+
+    view.rerender(
+      <DragDropContext onDragEnd={vi.fn()}>
+        <PlanningBoard {...boardProps({
+          occurrences: [deferredOccurrence],
+          shifts: [authoritativeShift],
+          segments: [authoritativeSegment],
+          assignments: [authoritativeAssignment],
+          onResizeTaskSegment,
+        })} />
+      </DragDropContext>,
+    );
+
+    const currentLane = view.container.querySelector(`[data-task-coverage-lane="${deferredOccurrence.id}"]`);
+    const currentHandle = within(currentLane).getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    expect(currentHandle).toBe(initialHandle);
+    fireEvent.pointerUp(window, { clientY: 180 });
+
+    expect(onResizeTaskSegment).toHaveBeenCalledTimes(1);
+    expect(onResizeTaskSegment).toHaveBeenCalledWith(expect.objectContaining({
+      shift: optimisticShift,
+      segment: optimisticSegment,
+      startTime: "06:30",
+      endTime: "15:30",
+    }));
+  });
+
   it("verplaatst één gedeelde lijn atomair tussen twee aansluitende diensten van dezelfde taak", () => {
     const onResizeTaskBoundary = vi.fn(() => new Promise(() => {}));
     const sharedOccurrence = {
@@ -1096,7 +1210,7 @@ describe("Planning matrix", () => {
     expect(sharedHandle).toHaveAttribute("data-service-resize-edge", "shared");
     expect(sharedHandle).toHaveAttribute(
       "aria-controls",
-      "planning-service-occurrence-shared-boundary-2026-08-17-segment-early planning-service-occurrence-shared-boundary-2026-08-17-segment-late",
+      "planning-service-task-service:occurrence-shared-boundary:2026-08-17:2026-08-17:10%3A00:14%3A00 planning-service-task-service:occurrence-shared-boundary:2026-08-17:2026-08-17:14%3A00:18%3A00",
     );
 
     fireEvent.keyDown(sharedHandle, { key: "ArrowDown", shiftKey: true });

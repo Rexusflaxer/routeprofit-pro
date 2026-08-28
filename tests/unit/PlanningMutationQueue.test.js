@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createPlanningBackgroundRequestGate,
   createPlanningMutationQueue,
   getPlanningMutationQueue,
   planningPersonnelDayResourceKey,
@@ -8,8 +9,11 @@ import {
   settlePlanningDropEnqueues,
 } from "@/components/planning/planningMutationQueue";
 import {
+  buildDependentPlanningResizeIntent,
   buildPlanningPublicationSnapshot,
   readPlanningRangeSnapshot,
+  rebaseDependentPlanningIntent,
+  withPlanningOptimisticIntentIdentity,
 } from "@/components/planning/planningEffectivePlan";
 
 function deferred() {
@@ -41,6 +45,52 @@ describe("planning mutation queue", () => {
       "personnel-day:person-1:2026-08-24",
       "personnel-day:person-1:2026-08-25",
     ]);
+  });
+
+  it("laat een lokale compose-write alleen de reeds lopende achtergrondbatch uitdrainen", async () => {
+    const queue = createPlanningMutationQueue();
+    const requestGate = createPlanningBackgroundRequestGate();
+    const firstBackgroundBatch = deferred();
+    const invokeBackgroundBatch = vi.fn(() => firstBackgroundBatch.promise);
+    const invokePlanningWrite = vi.fn(() => ({ shift: { id: "shift-server-single-flight" } }));
+
+    const backgroundWorker = (async () => {
+      if (!queue.getSnapshot().isIdle || requestGate.hasCurrentBackgroundBatch()) return;
+      await requestGate.trackBackgroundBatch(invokeBackgroundBatch("first"));
+      if (!queue.getSnapshot().isIdle || requestGate.hasCurrentBackgroundBatch()) return;
+      await requestGate.trackBackgroundBatch(invokeBackgroundBatch("second"));
+    })();
+    await flushMicrotasks();
+
+    const operation = queue.enqueue({
+      id: "compose-after-background-prefetch",
+      resourceKeys: ["occurrence:single-flight"],
+      intent: {
+        key: "compose-after-background-prefetch",
+        shifts: [{ id: "pending-shift-single-flight", _optimistic_pending: true }],
+      },
+      execute: async () => {
+        await requestGate.waitForCurrentBackgroundBatch();
+        return invokePlanningWrite();
+      },
+    });
+    await flushMicrotasks();
+
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 1, runningCount: 1, isIdle: false });
+    expect(queue.getSnapshot().intents).toContainEqual(expect.objectContaining({
+      key: "compose-after-background-prefetch",
+      shifts: [expect.objectContaining({ id: "pending-shift-single-flight" })],
+    }));
+    expect(invokeBackgroundBatch).toHaveBeenCalledTimes(1);
+    expect(invokePlanningWrite).not.toHaveBeenCalled();
+
+    firstBackgroundBatch.resolve({ results: [] });
+    await expect(operation).resolves.toEqual({ shift: { id: "shift-server-single-flight" } });
+    await backgroundWorker;
+
+    expect(invokePlanningWrite).toHaveBeenCalledTimes(1);
+    expect(invokeBackgroundBatch).toHaveBeenCalledTimes(1);
+    expect(queue.getSnapshot().isIdle).toBe(true);
   });
 
   it("start onafhankelijke opdrachten parallel en houdt dezelfde medewerker/dag FIFO", async () => {
@@ -499,6 +549,145 @@ describe("planning mutation queue", () => {
       },
     });
     expect(executions[0].getDependencyState("compose-temp-shift")).toMatchObject({ status: "succeeded" });
+  });
+
+  it("rebased een pas na de parent-ACK losgelaten resize vanuit de terminale intent", async () => {
+    const queue = createPlanningMutationQueue();
+    const parentServer = deferred();
+    const parentExecute = vi.fn(() => parentServer.promise);
+    const childExecute = vi.fn(({ intent }) => ({
+      shiftId: intent.shift_id,
+      segmentId: intent.segment_id,
+      shiftRevision: intent.shifts[0].revision,
+      segmentRevision: intent.segments[0].revision,
+      endTime: intent.segments[0].end_time,
+    }));
+    const parentIntent = withPlanningOptimisticIntentIdentity({
+      key: "compose-before-pointer-up",
+      shifts: [{
+        id: "pending-shift-before-pointer-up",
+        source_type: "task",
+        source_id: "definition-one",
+        service_date: "2026-08-24",
+        start_time: "06:30",
+        end_time: "18:00",
+        required_count: 1,
+        status: "draft",
+      }],
+      segments: [{
+        id: "pending-segment-before-pointer-up",
+        shift_id: "pending-shift-before-pointer-up",
+        task_occurrence_id: "occurrence-one",
+        start_date: "2026-08-24",
+        end_date: "2026-08-24",
+        start_time: "06:30",
+        end_time: "18:00",
+        status: "draft",
+      }],
+      assignments: [{
+        id: "pending-assignment-before-pointer-up",
+        planning_shift_id: "pending-shift-before-pointer-up",
+        shift_id: "pending-shift-before-pointer-up",
+        personnel_id: "employee-one",
+        slot_index: 0,
+        status: "draft",
+      }],
+      occurrences: [],
+    });
+    const parent = queue.enqueue({
+      id: parentIntent.key,
+      resourceKeys: ["occurrence:occurrence-one"],
+      intent: parentIntent,
+      execute: parentExecute,
+      onSuccess: result => {
+        queue.updateIntents(intent => rebaseDependentPlanningIntent(intent, parentIntent, result));
+      },
+    });
+    const composeResult = {
+      shift: {
+        ...parentIntent.shifts[0],
+        id: "shift-server-before-pointer-up",
+        revision: 7,
+        _planning_ref: undefined,
+      },
+      segments: [{
+        ...parentIntent.segments[0],
+        id: "segment-server-before-pointer-up",
+        shift_id: "shift-server-before-pointer-up",
+        revision: 8,
+        _planning_ref: undefined,
+      }],
+      assignment: {
+        ...parentIntent.assignments[0],
+        id: "assignment-server-before-pointer-up",
+        planning_shift_id: "shift-server-before-pointer-up",
+        shift_id: "shift-server-before-pointer-up",
+        revision: 9,
+        _planning_ref: undefined,
+      },
+    };
+
+    parentServer.resolve(composeResult);
+    await expect(parent).resolves.toBe(composeResult);
+    expect(queue.has(parentIntent.key)).toBe(false);
+    const terminalParent = queue.getTerminalState(parentIntent.key);
+    expect(terminalParent).toMatchObject({
+      status: "succeeded",
+      originalIntent: {
+        key: parentIntent.key,
+        shifts: [{ id: "pending-shift-before-pointer-up" }],
+        segments: [{ id: "pending-segment-before-pointer-up" }],
+      },
+      intent: {
+        key: parentIntent.key,
+        shifts: [{ id: "shift-server-before-pointer-up", revision: 7 }],
+        segments: [{ id: "segment-server-before-pointer-up", revision: 8 }],
+      },
+      result: composeResult,
+    });
+
+    const staleGestureIntent = {
+      ...buildDependentPlanningResizeIntent({
+        key: "resize-released-after-parent-ack",
+        shift: parentIntent.shifts[0],
+        segment: parentIntent.segments[0],
+        assignments: parentIntent.assignments,
+        nextEndTime: "15:30",
+      }),
+      shift_id: parentIntent.shifts[0].id,
+      segment_id: parentIntent.segments[0].id,
+      task_occurrence_id: "occurrence-one",
+    };
+    const rebasedFromAlreadyCommittedIdentity = rebaseDependentPlanningIntent(
+      staleGestureIntent,
+      terminalParent.intent,
+      terminalParent.result,
+    );
+    expect(rebasedFromAlreadyCommittedIdentity).toMatchObject({
+      shift_id: "pending-shift-before-pointer-up",
+      segment_id: "pending-segment-before-pointer-up",
+    });
+    const rebasedGestureIntent = rebaseDependentPlanningIntent(
+      staleGestureIntent,
+      terminalParent.originalIntent,
+      terminalParent.result,
+    );
+    const child = queue.enqueue({
+      id: rebasedGestureIntent.key,
+      resourceKeys: [`shift:${rebasedGestureIntent.shift_id}`],
+      intent: rebasedGestureIntent,
+      execute: childExecute,
+    });
+
+    await expect(child).resolves.toEqual({
+      shiftId: "shift-server-before-pointer-up",
+      segmentId: "segment-server-before-pointer-up",
+      shiftRevision: 7,
+      segmentRevision: 8,
+      endTime: "15:30",
+    });
+    expect(parentExecute).toHaveBeenCalledTimes(1);
+    expect(childExecute).toHaveBeenCalledTimes(1);
   });
 
   it("annuleert afhankelijke children transitief na parent-fout zonder execute- of toastcallbacks", async () => {

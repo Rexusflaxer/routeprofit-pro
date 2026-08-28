@@ -59,8 +59,8 @@ const SHIFT_COPY_FIELDS = [
   'service_context_snapshot',
 ] as const;
 
-function json(data: unknown, status = 200) {
-  return Response.json(data, { status });
+function json(data: unknown, status = 200, headers?: LooseRecord) {
+  return Response.json(data, { status, ...(headers ? { headers } : {}) });
 }
 
 function nowIso() {
@@ -68,7 +68,7 @@ function nowIso() {
 }
 
 function planningMutationLatencyProbe(
-  action: 'assign' | 'compose_and_assign',
+  action: 'assign' | 'compose_and_assign' | 'resize_task_shift_preserving_coverage',
   context: ReturnType<typeof mutationContext>,
 ) {
   const startedAt = performance.now();
@@ -451,9 +451,11 @@ async function assertNoForeignPendingMutation(
   expectedAction: string,
   user: LooseRecord,
   requestHash: string,
+  preloadedOccurrences: Map<string, LooseRecord> | null = null,
 ) {
   for (const occurrenceId of uniqueStrings(shift?.task_occurrence_ids)) {
-    const occurrence = await getRecord(base44, 'PlanningTaskOccurrence', occurrenceId);
+    const occurrence = preloadedOccurrences?.get(String(occurrenceId))
+      || await getRecord(base44, 'PlanningTaskOccurrence', occurrenceId);
     if (occurrence) {
       await assertNoForeignPendingSingleTaskOccurrenceMutation(
         base44,
@@ -597,7 +599,7 @@ async function casUpdate(
   record: LooseRecord,
   expectedRevision: number,
   patch: LooseRecord,
-) {
+): Promise<LooseRecord> {
   const actualRevision = revisionOf(record);
   if (expectedRevision !== actualRevision) {
     throw new ApiError(409, 'Planning is intussen gewijzigd', {
@@ -620,7 +622,18 @@ async function casUpdate(
       current_revision: current ? revisionOf(current) : null,
     });
   }
-  return requireRecord(base44, entityName, record.id, entityName);
+  // updateMany is already the authoritative compare-and-swap. A successful
+  // single-row result means this exact patch won the supplied revision fence;
+  // rereading the same entity here only doubles the hot-path API traffic and
+  // can itself trip Base44's rate limit. All planning writes in this function
+  // use top-level $set fields plus the deterministic revision increment, so we
+  // can safely carry the committed snapshot forward locally. A failed CAS
+  // still performs the diagnostic reread above.
+  return {
+    ...record,
+    ...patch,
+    revision: expectedRevision + 1,
+  };
 }
 
 async function casVersionUpdate(
@@ -658,6 +671,9 @@ async function casVersionUpdate(
 const PLANNING_RESOURCE_LEASE_MS = 2 * 60 * 1000;
 const PLANNING_LEASE_RENEWAL_CONCURRENCY = 8;
 const PLANNING_LEASE_RELEASE_CONCURRENCY = 8;
+const PLANNING_LEASE_RELEASE_MAX_ATTEMPTS = 6;
+const PLANNING_LEASE_RELEASE_RATE_LIMIT_BACKOFF_MS = [75, 150, 300, 600, 1200] as const;
+const PLANNING_LEASE_RELEASE_MAX_RETRY_AFTER_MS = 2000;
 // Skip only writes on a virtually fresh lease. Longer helpers can safely use
 // the remaining 105 seconds; after 15 seconds every fence check renews to 120.
 const PLANNING_RESOURCE_LEASE_RENEW_WINDOW_MS = PLANNING_RESOURCE_LEASE_MS - 15 * 1000;
@@ -667,6 +683,72 @@ const IDEMPOTENCY_REGISTRY_KEY_PREFIX = 'idempotency_registry:v3';
 const DUAL_IDEMPOTENCY_CLAIM_PROTOCOL = 'dual_v2_v3_transition';
 const MAX_COMPOSED_SHIFT_MINUTES = 24 * 60;
 const MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES = 12 * 60;
+
+function planningErrorStatus(error: unknown) {
+  const status = Number(
+    (error as any)?.status
+    || (error as any)?.statusCode
+    || (error as any)?.response?.status
+    || (error as any)?.response?.statusCode
+    || (error as any)?.details?.status
+    || 0,
+  );
+  if (Number.isFinite(status) && status > 0) return status;
+  return /rate[ _-]*limit|too many requests/i.test(
+    String((error as any)?.message || error || ''),
+  ) ? 429 : 0;
+}
+
+function planningHeaderValue(headers: unknown, name: string) {
+  if (!headers) return null;
+  if (typeof (headers as any).get === 'function') {
+    return (headers as any).get(name) || (headers as any).get(name.toLowerCase()) || null;
+  }
+  const record = headers as LooseRecord;
+  return record[name] ?? record[name.toLowerCase()] ?? record[name.toUpperCase()] ?? null;
+}
+
+function planningRetryAfterMilliseconds(error: unknown, attempt: number) {
+  if (planningErrorStatus(error) !== 429) return 0;
+  const explicitMilliseconds = Number(
+    (error as any)?.retry_after_ms
+    ?? (error as any)?.details?.retry_after_ms,
+  );
+  let milliseconds = Number.isFinite(explicitMilliseconds) && explicitMilliseconds >= 0
+    ? explicitMilliseconds
+    : NaN;
+  if (!Number.isFinite(milliseconds)) {
+    const retryAfter = (
+      planningHeaderValue((error as any)?.response?.headers, 'Retry-After')
+      ?? planningHeaderValue((error as any)?.headers, 'Retry-After')
+      ?? (error as any)?.retry_after
+      ?? (error as any)?.details?.retry_after
+    );
+    if (retryAfter != null && retryAfter !== '') {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        milliseconds = seconds * 1000;
+      } else {
+        const deadline = Date.parse(String(retryAfter));
+        if (Number.isFinite(deadline)) milliseconds = Math.max(0, deadline - Date.now());
+      }
+    }
+  }
+  if (!Number.isFinite(milliseconds)) {
+    milliseconds = PLANNING_LEASE_RELEASE_RATE_LIMIT_BACKOFF_MS[
+      Math.min(attempt, PLANNING_LEASE_RELEASE_RATE_LIMIT_BACKOFF_MS.length - 1)
+    ];
+  }
+  return Math.max(1, Math.min(
+    PLANNING_LEASE_RELEASE_MAX_RETRY_AFTER_MS,
+    Math.ceil(milliseconds),
+  ));
+}
+
+async function waitForPlanningRetry(milliseconds: number) {
+  if (milliseconds <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, milliseconds));
+}
 
 function coordinatorOrder(left: LooseRecord, right: LooseRecord) {
   const createdOrder = String(left.created_date || '').localeCompare(String(right.created_date || ''));
@@ -737,19 +819,31 @@ async function releasePlanningResourceLeases(
       nextLeaseIndex += 1;
       const lease = orderedLeases[leaseIndex];
       let released = false;
-      for (let attempt = 0; attempt < 5 && !released; attempt += 1) {
+      let lastRetryAfterMs = 0;
+      let lastErrorStatus = 0;
+      for (
+        let attempt = 0;
+        attempt < PLANNING_LEASE_RELEASE_MAX_ATTEMPTS && !released;
+        attempt += 1
+      ) {
         try {
-          const coordinator = await requireRecord(
-            base44,
-            'PlanningMutationCoordinator',
-            lease.coordinatorId,
-            'Planningcoordinator',
-          );
+          // A lease acquired by this request already carries the exact
+          // post-CAS coordinator snapshot. Use it for the normal uncontended
+          // release and reread only after a conflict. Direct recovery callers
+          // that do not have a snapshot retain the conservative read path.
+          const coordinator = attempt === 0 && lease.coordinatorSnapshot
+            ? lease.coordinatorSnapshot
+            : await requireRecord(
+                base44,
+                'PlanningMutationCoordinator',
+                lease.coordinatorId,
+                'Planningcoordinator',
+              );
           if (!coordinator.lease || coordinator.lease.token !== lease.token) {
             released = true;
             continue;
           }
-          await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+          const releasedCoordinator = await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
             lease: null,
             last_modified_by_user_id: user.id || null,
             last_modified_at: nowIso(),
@@ -759,13 +853,30 @@ async function releasePlanningResourceLeases(
               last_released_idempotency_key: lease.idempotencyKey || null,
             },
           });
+          lease.coordinatorSnapshot = releasedCoordinator;
           released = true;
         } catch (error) {
-          if (attempt === 4) releaseErrors[leaseIndex] = {
-            entity: 'PlanningMutationCoordinator',
-            id: lease.coordinatorId,
-            message: (error as Error)?.message || String(error),
-          };
+          lastErrorStatus = planningErrorStatus(error);
+          lastRetryAfterMs = planningRetryAfterMilliseconds(error, attempt);
+          const exhausted = attempt === PLANNING_LEASE_RELEASE_MAX_ATTEMPTS - 1;
+          if (exhausted) {
+            releaseErrors[leaseIndex] = {
+              entity: 'PlanningMutationCoordinator',
+              id: lease.coordinatorId,
+              resource_type: lease.resourceType || null,
+              resource_id: lease.resourceId || null,
+              status: lastErrorStatus || null,
+              rate_limited: lastErrorStatus === 429,
+              attempts: PLANNING_LEASE_RELEASE_MAX_ATTEMPTS,
+              retry_after_ms: lastRetryAfterMs || null,
+              lease_expires_at: lease.coordinatorSnapshot?.lease?.expires_at || null,
+              message: (error as Error)?.message || String(error),
+            };
+            continue;
+          }
+          if (lastErrorStatus === 429) {
+            await waitForPlanningRetry(lastRetryAfterMs);
+          }
         }
       }
     }
@@ -775,6 +886,21 @@ async function releasePlanningResourceLeases(
     releaseNextLease,
   ));
   return releaseErrors.filter((error): error is LooseRecord => Boolean(error));
+}
+
+function planningLeaseReleaseFailureDetails(releaseErrors: LooseRecord[]) {
+  if (!releaseErrors.length) return {};
+  const activeLeaseExpiries = releaseErrors
+    .map(item => Date.parse(item.lease_expires_at || ''))
+    .filter(value => Number.isFinite(value) && value > Date.now());
+  const retryAt = activeLeaseExpiries.length ? Math.max(...activeLeaseExpiries) : NaN;
+  return {
+    lease_release_exhausted: true,
+    ...(Number.isFinite(retryAt) ? {
+      retry_after: new Date(retryAt).toISOString(),
+      retry_after_ms: Math.max(1, retryAt - Date.now()),
+    } : {}),
+  };
 }
 
 async function acquirePlanningResourceLeases(
@@ -800,7 +926,12 @@ async function acquirePlanningResourceLeases(
       );
       let locked: LooseRecord | null = null;
       for (let attempt = 0; attempt < 5 && !locked; attempt += 1) {
-        const coordinator = await requireRecord(base44, 'PlanningMutationCoordinator', ensured.id, 'Planningcoordinator');
+        // The canonical coordinator returned by ensurePlanningCoordinator is
+        // already a complete CAS snapshot. Read again only after contention;
+        // the first update's revision predicate remains authoritative.
+        const coordinator = attempt === 0
+          ? ensured
+          : await requireRecord(base44, 'PlanningMutationCoordinator', ensured.id, 'Planningcoordinator');
         const pendingPublicationIntent = coordinator.metadata?.pending_publication_intent;
         if (pendingPublicationIntent && (
           pendingPublicationIntent.idempotency_key !== context.idempotencyKey
@@ -854,6 +985,7 @@ async function acquirePlanningResourceLeases(
         // coordinator read before virtually every business write while keeping
         // the stale-worker check at the point where the lease can expire.
         verifiedExpiresAt: locked.lease?.expires_at || null,
+        coordinatorSnapshot: locked,
         idempotencyKey: context.idempotencyKey,
         requestHash,
       });
@@ -895,7 +1027,7 @@ async function setPlanningPublicationIntent(
       });
     }
     if (existing) continue;
-    await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+    const updatedCoordinator = await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
       metadata: {
         ...(coordinator.metadata || {}),
         pending_publication_intent: intent,
@@ -903,6 +1035,7 @@ async function setPlanningPublicationIntent(
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
     });
+    lease.coordinatorSnapshot = updatedCoordinator;
   }
 }
 
@@ -937,7 +1070,7 @@ async function clearPlanningPublicationIntent(
       });
     }
     const { pending_publication_intent: _pending, ...metadata } = coordinator.metadata || {};
-    await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
+    const updatedCoordinator = await casUpdate(base44, 'PlanningMutationCoordinator', coordinator, revisionOf(coordinator), {
       metadata: {
         ...metadata,
         last_completed_publication_intent_id: intent.intent_id,
@@ -946,6 +1079,7 @@ async function clearPlanningPublicationIntent(
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
     });
+    lease.coordinatorSnapshot = updatedCoordinator;
   }
 }
 
@@ -1009,6 +1143,7 @@ async function renewPlanningResourceLeases(
       const remainingLeaseMs = Date.parse(coordinator.lease.expires_at || '') - Date.now();
       if (remainingLeaseMs > PLANNING_RESOURCE_LEASE_RENEW_WINDOW_MS) {
         lease.verifiedExpiresAt = coordinator.lease.expires_at;
+        lease.coordinatorSnapshot = coordinator;
         renewed = true;
         continue;
       }
@@ -1023,6 +1158,7 @@ async function renewPlanningResourceLeases(
           last_modified_at: nowIso(),
         });
         lease.verifiedExpiresAt = renewedCoordinator.lease?.expires_at || null;
+        lease.coordinatorSnapshot = renewedCoordinator;
         renewed = true;
       } catch (error) {
         if (Number((error as any)?.status) !== 409 || attempt === 4) throw error;
@@ -1073,13 +1209,16 @@ async function withPlanningResourceLeases<T>(
   } finally {
     const releaseErrors = await releasePlanningResourceLeases(base44, user, leases);
     if (releaseErrors.length) {
+      const retryDetails = planningLeaseReleaseFailureDetails(releaseErrors);
       if (operationError && typeof operationError === 'object') {
         (operationError as any).details = {
           ...((operationError as any).details || {}),
+          ...retryDetails,
           lease_release_errors: releaseErrors,
         };
       } else {
         throw new ApiError(503, 'Planningreservering kon niet worden vrijgegeven', {
+          ...retryDetails,
           release_errors: releaseErrors,
         });
       }
@@ -1104,7 +1243,9 @@ async function mutateIdempotencyRegistryClaim(
     registry.resourceId,
   );
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const current = await requireRecord(base44, 'PlanningMutationCoordinator', coordinator.id, 'Idempotencyregister');
+    const current = attempt === 0
+      ? coordinator
+      : await requireRecord(base44, 'PlanningMutationCoordinator', coordinator.id, 'Idempotencyregister');
     const claims = { ...(current.metadata?.claims || {}) };
     const claimMutationStartedAt = Date.now();
     for (const [storedClaimId, storedClaim] of Object.entries<LooseRecord>(claims)) {
@@ -1337,6 +1478,7 @@ async function clearCompletedCompositionOccurrenceReservations(
   requestHash: string,
   occurrenceIds: string[],
   leases: LooseRecord[] = [],
+  occurrenceSnapshots: Map<string, LooseRecord> | null = null,
 ) {
   const errors: LooseRecord[] = [];
   for (const occurrenceId of uniqueStrings(occurrenceIds)) {
@@ -1356,7 +1498,9 @@ async function clearCompletedCompositionOccurrenceReservations(
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 8 && !cleared; attempt += 1) {
       try {
-        const occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+        const occurrence = attempt === 0 && occurrenceSnapshots?.has(String(occurrenceId))
+          ? occurrenceSnapshots.get(String(occurrenceId)) as LooseRecord
+          : await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
         const reservation = occurrence.metadata?.planning_composition_reservation;
         if (!reservation) {
           cleared = true;
@@ -9937,14 +10081,19 @@ async function composeShift(
     }));
   }
 
-  const assignmentsBeforeMutation = lockedUpdateAssignmentsAll || await filterAllRecords(
-    base44.asServiceRole.entities.PlanningAssignment,
-    { shift_id: shift.id },
-  );
+  const assignmentsBeforeMutation = lockedUpdateAssignmentsAll
+    || (beforeShift
+      ? await filterAllRecords(
+          base44.asServiceRole.entities.PlanningAssignment,
+          { shift_id: shift.id },
+        )
+      : []);
   latencyProbe?.mark('composition');
   let requestedAssignment: LooseRecord | null = null;
   if (composeAndAssignMode) {
-    const targetAssignment = await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex);
+    const targetAssignment = beforeShift
+      ? await uniqueSlotAssignment(base44, shift.id, requestedSlotIndex)
+      : null;
     if (
       targetAssignment
       && targetAssignment.status !== 'removed'
@@ -10207,6 +10356,7 @@ async function composeShift(
     compositionRequestHash,
     affectedOccurrenceIds,
     compositionLeases,
+    new Map(finalizedOccurrences.map(item => [String(item.id), item])),
   );
   if (occurrenceClearErrors.length) {
     throw new ApiError(503, 'Dienst is opgeslagen, maar taakreserveringen konden niet worden afgerond', {
@@ -10229,6 +10379,7 @@ async function composeShift(
     compositionLeases = [];
     if (releaseErrors.length) {
       throw new ApiError(503, 'Planningactie is opgeslagen, maar de personeelsreservering kon niet worden vrijgegeven', {
+        ...planningLeaseReleaseFailureDetails(releaseErrors),
         release_errors: releaseErrors,
       });
     }
@@ -10237,6 +10388,7 @@ async function composeShift(
     compositionLeases = [];
     if (releaseErrors.length) {
       throw new ApiError(503, 'Dienst is opgeslagen, maar de samenstellingsreservering kon niet worden vrijgegeven', {
+        ...planningLeaseReleaseFailureDetails(releaseErrors),
         release_errors: releaseErrors,
       });
     }
@@ -10289,12 +10441,15 @@ async function composeShift(
         }
       }
       latencyProbe?.mark('recovery');
-      recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
+      const leaseReleaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+      recoveryErrors.push(...leaseReleaseErrors);
       latencyProbe?.mark('release');
       compositionLeases = [];
       if (recoveryErrors.length && error && typeof error === 'object') {
         (error as any).details = {
           ...((error as any).details || {}),
+          ...planningLeaseReleaseFailureDetails(leaseReleaseErrors),
+          ...(leaseReleaseErrors.length ? { lease_release_errors: leaseReleaseErrors } : {}),
           compensation_errors: recoveryErrors,
         };
       }
@@ -10310,12 +10465,15 @@ async function composeShift(
             compositionLeases,
           );
       latencyProbe?.mark('recovery');
-      recoveryErrors.push(...await releasePlanningResourceLeases(base44, user, compositionLeases));
+      const leaseReleaseErrors = await releasePlanningResourceLeases(base44, user, compositionLeases);
+      recoveryErrors.push(...leaseReleaseErrors);
       latencyProbe?.mark('release');
       compositionLeases = [];
       if (recoveryErrors.length && error && typeof error === 'object') {
         (error as any).details = {
           ...((error as any).details || {}),
+          ...planningLeaseReleaseFailureDetails(leaseReleaseErrors),
+          ...(leaseReleaseErrors.length ? { lease_release_errors: leaseReleaseErrors } : {}),
           compensation_errors: recoveryErrors,
         };
       }
@@ -11917,15 +12075,25 @@ async function finalizeTaskPartitionMarkers(
   base44: LooseRecord,
   user: LooseRecord,
   leases: LooseRecord[],
-  shiftIds: unknown,
+  shiftsOrIds: unknown,
   action: string,
   context: ReturnType<typeof mutationContext>,
   requestHash: string,
   auditEventId: string,
 ) {
   const finalized: LooseRecord[] = [];
-  for (const shiftId of uniqueStrings(shiftIds)) {
-    let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Taakdienst');
+  const candidates = uniqueRecords(
+    normalizeArray<LooseRecord | string>(
+      shiftsOrIds as LooseRecord | string | Array<LooseRecord | string> | null | undefined,
+    ).map(item => (
+      item && typeof item === 'object' ? item : { id: compact(item) }
+    )).filter(item => compact(item.id)),
+    item => String(item.id),
+  );
+  for (const candidate of candidates) {
+    let shift = Object.keys(candidate).length > 1
+      ? candidate
+      : await requireRecord(base44, 'PlanningShift', candidate.id, 'Taakdienst');
     const marker = taskPartitionMarker(shift, action, context, user, requestHash);
     if (!marker) {
       throw new ApiError(409, 'De duurzame herstelmarkering van de taakdienst ontbreekt', {
@@ -12121,8 +12289,10 @@ async function resizeTaskShiftPreservingCoverage(
 ) {
   const action = RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION;
   requireMutationIdempotency(context, action);
+  const latencyProbe = planningMutationLatencyProbe(action, context);
   const requestHash = await mutationRequestHash(action, body);
   const replay = await findReplay(base44, action, context.idempotencyKey);
+  latencyProbe.mark('replay');
   if (replay) {
     assertReplayFingerprint(replay, user, requestHash, action);
   }
@@ -12147,7 +12317,9 @@ async function resizeTaskShiftPreservingCoverage(
       replay.id,
     )
   )) {
-    return replayTaskPartitionMutation(base44, replay);
+    const replayed = await replayTaskPartitionMutation(base44, replay);
+    latencyProbe.finish('ok');
+    return replayed;
   }
   if (!initialMarker) assertDraftSingleTaskShift(initialShift);
   const occurrenceId = compact(initialMarker?.task_occurrence_id || initialSegment.task_occurrence_id);
@@ -12199,14 +12371,47 @@ async function resizeTaskShiftPreservingCoverage(
     initialAssignments.filter(item => item.status !== 'removed').map(item => item.personnel_id),
     [initialShift, { ...initialShift, ...shiftIntervalPatch(requestedInterval) }],
   ));
+  latencyProbe.mark('preflight');
 
   return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    latencyProbe.mark('leases');
     let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
     let segment = await requireRecord(base44, 'PlanningShiftTaskSegment', segmentId, 'Taakdeel');
     let occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
     let marker = taskPartitionMarker(shift, action, context, user, requestHash);
+    // Another request with the same idempotency key may complete after our
+    // optimistic replay check but before these resource leases are acquired.
+    // Recheck only on that initial miss, now while holding every mutation
+    // fence. A fully committed result can return before any recovery writes;
+    // an audit with pending markers is carried into the recovery path below.
+    const lockedReplay = replay || await findReplay(base44, action, context.idempotencyKey);
+    if (lockedReplay) {
+      assertReplayFingerprint(lockedReplay, user, requestHash, action);
+      if (
+        !marker
+        || await taskPartitionOperationIsCommitted(
+          base44,
+          marker,
+          action,
+          context,
+          user,
+          requestHash,
+          lockedReplay.id,
+        )
+      ) {
+        return replayTaskPartitionMutation(base44, lockedReplay);
+      }
+    }
     const recovering = Boolean(marker);
-    await assertNoForeignPendingMutation(base44, shift, context, action, user, requestHash);
+    await assertNoForeignPendingMutation(
+      base44,
+      shift,
+      context,
+      action,
+      user,
+      requestHash,
+      new Map([[String(occurrence.id), occurrence]]),
+    );
     if (!recovering) {
       assertDraftSingleTaskShift(shift);
       if (segment.status === 'removed' || String(segment.shift_id) !== String(shift.id)) {
@@ -12243,6 +12448,7 @@ async function resizeTaskShiftPreservingCoverage(
         suppliedWarnings,
       ));
     }
+    latencyProbe.mark('eligibility');
 
     const beforeState = recovering ? null : { shift, segment, assignments, occurrence };
     const preparedCompanions: Array<{
@@ -12252,6 +12458,7 @@ async function resizeTaskShiftPreservingCoverage(
     }> = [];
     for (const freed of freedIntervals) {
       const sourceKey = deterministicCompanionSourceKey(shift.id, String(context.idempotencyKey), freed.side);
+      let companionWasCreated = false;
       let companion = (await filterAllRecords(
         base44.asServiceRole.entities.PlanningShift,
         { source_key: sourceKey },
@@ -12303,6 +12510,7 @@ async function resizeTaskShiftPreservingCoverage(
             },
           },
         });
+        companionWasCreated = true;
       }
       if (!companion) throw new ApiError(503, 'Open companion-dienst kon niet duurzaam worden voorbereid');
       let companionSegments = await filterAllRecords(
@@ -12353,10 +12561,12 @@ async function resizeTaskShiftPreservingCoverage(
       if (unexpectedActiveSegments.length) {
         throw new ApiError(409, 'De open companion-dienst bevat onverwachte extra taakdelen');
       }
-      const companionAssignments = (await filterAllRecords(
-        base44.asServiceRole.entities.PlanningAssignment,
-        { shift_id: companion.id },
-      )).filter(item => item.status !== 'removed');
+      const companionAssignments = companionWasCreated
+        ? []
+        : (await filterAllRecords(
+            base44.asServiceRole.entities.PlanningAssignment,
+            { shift_id: companion.id },
+          )).filter(item => item.status !== 'removed');
       if (companionAssignments.length) {
         throw new ApiError(409, 'De open companion-dienst is intussen bezet; laad het rooster opnieuw');
       }
@@ -12383,7 +12593,12 @@ async function resizeTaskShiftPreservingCoverage(
         status: 'draft',
         last_modified_by_user_id: user.id || null,
         last_modified_at: nowIso(),
-        metadata: taskPartitionMetadata(shift, { ...marker, phase: 'original_pending', updated_at: nowIso() }),
+        metadata: taskPartitionMetadata(shift, {
+          ...marker,
+          phase: 'state_written_audit_pending',
+          state_written_at: marker.state_written_at || nowIso(),
+          updated_at: nowIso(),
+        }),
       });
     }
     if (!sameInterval(segment, requestedInterval, 'segment')) {
@@ -12432,13 +12647,8 @@ async function resizeTaskShiftPreservingCoverage(
 
     const completedCompanions: Array<{ shift: LooseRecord; segment: LooseRecord }> = [];
     for (const prepared of preparedCompanions) {
-      let companion = await requireRecord(base44, 'PlanningShift', prepared.shift.id, 'Open companion-dienst');
-      const companionSegment = await requireRecord(
-        base44,
-        'PlanningShiftTaskSegment',
-        prepared.segment.id,
-        'Open companion-taakdeel',
-      );
+      let companion = prepared.shift;
+      const companionSegment = prepared.segment;
       if (!sameInterval(companionSegment, prepared.interval, 'segment')) {
         throw new ApiError(409, 'De open companion-dienst wijkt af van de vrijgekomen taakdekking');
       }
@@ -12494,6 +12704,7 @@ async function resizeTaskShiftPreservingCoverage(
         last_modified_at: nowIso(),
       });
     }
+    latencyProbe.mark('composition');
     const shifts = [shift, ...completedCompanions.map(item => item.shift)];
     const segments = [segment, ...completedCompanions.map(item => item.segment)];
     const pendingResult = {
@@ -12509,7 +12720,7 @@ async function resizeTaskShiftPreservingCoverage(
       removed_segment_ids: [],
       removed_assignment_ids: [],
     };
-    let audit = replay || await findReplay(base44, action, context.idempotencyKey);
+    let audit = lockedReplay;
     if (audit) {
       assertReplayFingerprint(audit, user, requestHash, action);
     } else {
@@ -12535,7 +12746,7 @@ async function resizeTaskShiftPreservingCoverage(
       base44,
       user,
       leases,
-      shifts.map(item => item.id),
+      shifts,
       action,
       context,
       requestHash,
@@ -12551,7 +12762,16 @@ async function resizeTaskShiftPreservingCoverage(
       shift,
       shifts: [shift, ...finalCompanionShifts],
     };
+    latencyProbe.mark('writes_audit');
     return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  }).then(result => {
+    latencyProbe.mark('release');
+    latencyProbe.finish('ok');
+    return result;
+  }, error => {
+    latencyProbe.mark('recovery');
+    latencyProbe.finish('error');
+    throw error;
   });
 }
 
@@ -17253,10 +17473,15 @@ Deno.serve(async (req) => {
   } catch (error) {
     const status = Number((error as any)?.status || 500);
     console.error('[planningApi]', requestId, error);
+    const details = (error as any)?.details || undefined;
+    const retryAfterMs = Number(details?.retry_after_ms);
+    const responseHeaders = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+      ? { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }
+      : undefined;
     return json({
       error: status >= 500 ? 'Planningactie mislukt' : (error as Error)?.message || 'Planningactie mislukt',
-      details: (error as any)?.details || undefined,
+      details,
       request_id: requestId,
-    }, status);
+    }, status, responseHeaders);
   }
 });

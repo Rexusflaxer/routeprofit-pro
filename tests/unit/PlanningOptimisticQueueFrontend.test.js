@@ -106,4 +106,52 @@ describe("Planning queued optimistic frontend contract", () => {
     expect(matrixSource).toContain('aria-label="Lokaal verwerkt; synchroniseert op de achtergrond"');
     expect(matrixSource).not.toContain('aria-label="Dienst wordt opgeslagen"');
   });
+
+  it("herstelt een resize die pas na de compose-ACK wordt losgelaten uit de terminale identity-map", () => {
+    const resizeSource = between("const resizeTimelineTaskSegment", "const resizeTimelineSharedBoundary");
+
+    expect(queueSource).toContain("intent: entry.intent");
+    expect(queueSource).toContain("originalIntent: entry.originalIntent");
+    expect(resizeSource).toContain("planningMutationQueue.current.getTerminalState(parentIntentId)");
+    expect(resizeSource).toContain("rebaseDependentPlanningIntent(");
+    expect(resizeSource).toContain("terminalParent.originalIntent || terminalParent.intent");
+    expect(resizeSource).toContain("terminalParent.result");
+    expect(resizeSource).toContain("const terminalTargets = [");
+    expect(resizeSource).toContain('terminalTargets.some(target => target.status !== "ready")');
+    expect(resizeSource).toContain("Er is geen tweede planningactie verstuurd");
+    expect(resizeSource.indexOf('terminalParent.status !== "succeeded"')).toBeLessThan(
+      resizeSource.indexOf("planningMutationQueue.current.enqueue({"),
+    );
+    expect(resizeSource.indexOf('terminalTargets.some(target => target.status !== "ready")')).toBeLessThan(
+      resizeSource.indexOf("planningMutationQueue.current.enqueue({"),
+    );
+    expect(resizeSource).toContain('`shift:${optimisticIntent.shift_id}`');
+    expect(resizeSource).toContain("ref: intent._planning_target_refs?.shift");
+    expect(resizeSource).toContain("ref: intent._planning_target_refs?.segment");
+    expect(matrixSource).toContain("taskLaneServiceContinuityKey");
+    expect(matrixSource).toContain("key={service.continuityKey}");
+    expect(matrixSource).toContain("id: `${service.continuityKey}:end`");
+  });
+
+  it("bevestigt een drop direct en toont de late compose-ACK alleen bij nieuwe waarschuwingen", () => {
+    const sliceSource = between("const composeAndAssignOccurrenceSlice", "const saveTaskEdit");
+    const matrixFunctionSource = between("const composeAndAssignOccurrence =", "const openOccurrenceStaffing");
+    const finishSource = between("const finishTimelineAssignment", "const composeAndAssignOccurrenceSlice");
+
+    for (const composeSource of [sliceSource, matrixFunctionSource]) {
+      expect(composeSource).toContain("notifyOptimisticTimelineAssignment(occurrence, personnelItem, immediateWarnings)");
+      expect(composeSource).toContain("optimisticWarnings: immediateWarnings");
+      expect(composeSource.indexOf("planningMutationQueue.current.enqueue({")).toBeLessThan(
+        composeSource.indexOf("notifyOptimisticTimelineAssignment(occurrence, personnelItem, immediateWarnings)"),
+      );
+      expect(composeSource.indexOf("notifyOptimisticTimelineAssignment(occurrence, personnelItem, immediateWarnings)")).toBeLessThan(
+        composeSource.lastIndexOf("return operation"),
+      );
+      expect(composeSource).not.toContain('title: "Aansluitende tijd samengevoegd"');
+    }
+
+    expect(source).not.toContain('title: "Dienst gemaakt en ingepland"');
+    expect(finishSource).toContain("optimisticWarnings == null || newlyReportedWarnings.length > 0");
+    expect(finishSource).toContain('optimisticWarnings != null\n          ? "Inzetcontrole bijgewerkt"');
+  });
 });

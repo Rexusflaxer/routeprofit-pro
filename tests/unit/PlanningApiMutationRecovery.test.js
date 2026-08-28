@@ -584,7 +584,7 @@ describe("planningApi route-bootstrap reconciliatie", () => {
 });
 
 describe("planningApi lease fencing", () => {
-  it("vernieuwt onafhankelijke leases begrensd parallel met behoud van ownership-readback", async () => {
+  it("vernieuwt onafhankelijke leases begrensd parallel met één ownership-read en CAS", async () => {
     const { base44, entities } = setup();
     const expiresAt = new Date(Date.now() + 90_000).toISOString();
     entities.PlanningMutationCoordinator.records.push(
@@ -635,7 +635,7 @@ describe("planningApi lease fencing", () => {
     ]);
 
     expect(maximumConcurrentReads).toBeGreaterThan(1);
-    expect(readCount).toBe(4);
+    expect(readCount).toBe(2);
     expect(await coordinatorGet("coordinator-parallel-a")).toMatchObject({
       revision: 2,
       lease: { token: "shared-token" },
