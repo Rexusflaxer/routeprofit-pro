@@ -14,11 +14,63 @@ function normalizePlanningError(error) {
   const backend = error?.response?.data;
   const backendData = backend?.data || backend || {};
   const message = backendData?.error || backendData?.message || error?.message || "Planningactie mislukt.";
+  const responseHeaders = error?.response?.headers;
+  const retryAfter = responseHeaders?.get?.("retry-after")
+    ?? responseHeaders?.["retry-after"]
+    ?? backendData?.retry_after
+    ?? backendData?.details?.retry_after
+    ?? error?.retryAfter
+    ?? null;
   return Object.assign(new Error(message), {
     status: Number(error?.response?.status || backendData?.status || error?.status || 500),
     details: backendData?.details || error?.details || null,
     requestId: backendData?.request_id || error?.requestId || null,
+    retryAfter,
   });
+}
+
+const PLANNING_RATE_LIMIT_RETRY_DELAYS_MS = [450, 1_250];
+
+function isPlanningRateLimitError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return Number(error?.status || 0) === 429
+    || error?.details?.lease_release_exhausted === true
+    || message.includes("rate limit")
+    || message.includes("too many requests");
+}
+
+function retryAfterDelayMs(value, now = Date.now()) {
+  if (value == null || value === "") return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  const date = Date.parse(String(value));
+  if (!Number.isFinite(date)) return null;
+  return Math.max(0, date - now);
+}
+
+function wait(delayMs) {
+  return new Promise(resolve => globalThis.setTimeout(resolve, delayMs));
+}
+
+async function invokePlanningApiWithRateLimitRetry(client, request, { retryRateLimit = true } = {}) {
+  const action = String(request?.action || "");
+  const lowPriorityAction = /^(prefetch_|list_|bootstrap_|repair_)/.test(action);
+  const canRetry = retryRateLimit
+    && Boolean(request?.idempotency_key)
+    && !lowPriorityAction;
+  const maxRetries = canRetry ? PLANNING_RATE_LIMIT_RETRY_DELAYS_MS.length : 0;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await invokePlanningApiWithClient(client, request);
+    } catch (error) {
+      const normalized = normalizePlanningError(error);
+      if (!isPlanningRateLimitError(normalized) || attempt >= maxRetries) throw normalized;
+      const retryAfterMs = retryAfterDelayMs(normalized.retryAfter);
+      const fallbackMs = PLANNING_RATE_LIMIT_RETRY_DELAYS_MS[attempt]
+        + Math.floor(Math.random() * 150);
+      await wait(retryAfterMs ?? fallbackMs);
+    }
+  }
 }
 
 function isUnknownPlanningAction(error) {
@@ -57,6 +109,7 @@ async function invokePlanningApiWithClient(client, request) {
 export async function invokePlanningApi(payload, {
   ensureIdempotencyKey = true,
   preferLatestFunctions = false,
+  retryRateLimit = true,
 } = {}) {
   // Build this once so a retry against the latest function snapshot always
   // reuses the exact same idempotency key and payload.
@@ -73,7 +126,7 @@ export async function invokePlanningApi(payload, {
   // may exist but not understand the effective-dated task-series records.
   if (preferLatestFunctions && hasPinnedFunctionsVersion === true && base44LatestFunctions?.functions?.invoke) {
     try {
-      return await invokePlanningApiWithClient(base44LatestFunctions, request);
+      return await invokePlanningApiWithRateLimitRetry(base44LatestFunctions, request, { retryRateLimit });
     } catch (error) {
       const normalized = normalizePlanningError(error);
       if (isUnknownPlanningAction(normalized)) {
@@ -84,7 +137,7 @@ export async function invokePlanningApi(payload, {
   }
 
   try {
-    return await invokePlanningApiWithClient(base44, request);
+    return await invokePlanningApiWithRateLimitRetry(base44, request, { retryRateLimit });
   } catch (error) {
     const normalized = normalizePlanningError(error);
     if (!isUnknownPlanningAction(normalized)) throw normalized;
@@ -93,7 +146,7 @@ export async function invokePlanningApi(payload, {
       try {
         // An unknown action is rejected before dispatch. Retrying this exact
         // request against the unpinned snapshot is therefore safe for writes.
-        return await invokePlanningApiWithClient(base44LatestFunctions, request);
+        return await invokePlanningApiWithRateLimitRetry(base44LatestFunctions, request, { retryRateLimit });
       } catch (latestError) {
         const latest = normalizePlanningError(latestError);
         if (!isUnknownPlanningAction(latest)) throw latest;

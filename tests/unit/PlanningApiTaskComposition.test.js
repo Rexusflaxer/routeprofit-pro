@@ -2319,9 +2319,9 @@ describe("planningApi dienstsamenstelling", () => {
     });
     expect(calls.count("PlanningAssignment.create")).toBe(1);
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
-    expect(calls.count("PlanningMutationCoordinator.get")).toBe(20);
+    expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
-    expect(calls.total()).toBeLessThanOrEqual(85);
+    expect(calls.total()).toBeLessThanOrEqual(50);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -2558,11 +2558,11 @@ describe("planningApi dienstsamenstelling", () => {
 
     expect(entities.PlanningMutationCoordinator.records).toHaveLength(2);
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(4);
-    expect(calls.count("PlanningMutationCoordinator.get")).toBe(8);
+    expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningAssignment.create")).toBe(1);
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
     expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
-    expect(calls.total()).toBeLessThanOrEqual(37);
+    expect(calls.total()).toBeLessThanOrEqual(29);
     expect(assignmentValidationSawProvisionalWrite).toBe(true);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
@@ -4823,6 +4823,7 @@ describe("planningApi dienstsamenstelling", () => {
       validationCalls += 1;
       return {};
     };
+    const calls = instrumentBackendCalls(base44, entities);
     const payload = {
       shift_id: composed.shift.id,
       segment_id: composed.segments[0].id,
@@ -4859,6 +4860,9 @@ describe("planningApi dienstsamenstelling", () => {
       entities.PlanningShift.records,
     )).toMatchObject({ coverage_status: "full", allocated_minutes: 690, remaining_minutes: 0 });
     expect(validationCalls).toBe(1);
+    expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(8);
+    expect(calls.total()).toBeLessThanOrEqual(47);
 
     const shiftCount = entities.PlanningShift.records.length;
     const segmentCount = entities.PlanningShiftTaskSegment.records.length;
@@ -4892,6 +4896,300 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShift.records).toHaveLength(shiftCount);
     expect(entities.PlanningShiftTaskSegment.records).toHaveLength(segmentCount);
     expect(entities.PlanningAuditEvent.records).toHaveLength(auditCount);
+  });
+
+  it("herleest een same-key replay onder de leases als een andere resize de preflight inhaalt", async () => {
+    const demand = occurrence("occurrence-partition-late-replay", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-partition-late-replay";
+    entities.Personnel.records.push({ id: personnelId, name: "Replay beveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-late-replay-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_date: "2026-08-17",
+      start_time: "06:30",
+      end_date: "2026-08-17",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    };
+    const resizeContext = context("partition-late-replay-resize");
+    const originalCoordinatorFilter = entities.PlanningMutationCoordinator.filter.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let releaseDelayedRequest;
+    let markDelayedRequestAtLease;
+    const delayedRequestAtLease = new Promise(resolve => { markDelayedRequestAtLease = resolve; });
+    const delayedRequestReleased = new Promise(resolve => { releaseDelayedRequest = resolve; });
+    let delayFirstCoordinatorRead = true;
+    let resizeAuditCountAtPause = -1;
+    entities.PlanningMutationCoordinator.filter = async (...args) => {
+      if (delayFirstCoordinatorRead) {
+        delayFirstCoordinatorRead = false;
+        resizeAuditCountAtPause = entities.PlanningAuditEvent.records.filter(item => (
+          item.action === "resize_task_shift_preserving_coverage"
+          && item.idempotency_key === resizeContext.idempotencyKey
+        )).length;
+        markDelayedRequestAtLease();
+        await delayedRequestReleased;
+      }
+      return originalCoordinatorFilter(...args);
+    };
+
+    const delayedRequest = backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      resizeContext,
+    );
+    await delayedRequestAtLease;
+    expect(resizeAuditCountAtPause).toBe(0);
+
+    let winningResult;
+    try {
+      winningResult = await backend.resizeTaskShiftPreservingCoverage(
+        base44,
+        user,
+        payload,
+        resizeContext,
+      );
+      expect(entities.PlanningAuditEvent.records.filter(item => (
+        item.action === "resize_task_shift_preserving_coverage"
+        && item.idempotency_key === resizeContext.idempotencyKey
+      ))).toHaveLength(1);
+    } finally {
+      releaseDelayedRequest();
+    }
+    const replayedResult = await delayedRequest;
+    const resizeAudits = entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+      && item.idempotency_key === resizeContext.idempotencyKey
+    ));
+    expect(replayedResult).toMatchObject({
+      idempotent: true,
+      audit_event_id: winningResult.audit_event_id,
+      companion_shift_ids: winningResult.companion_shift_ids,
+    });
+    expect(resizeAudits).toHaveLength(1);
+    const finalizedParticipantShifts = entities.PlanningShift.records.filter(item => (
+      item.metadata?.task_partition_mutation?.idempotency_key === resizeContext.idempotencyKey
+    ));
+    expect(finalizedParticipantShifts).toHaveLength(2);
+    expect(finalizedParticipantShifts.every(item => (
+      item.metadata.task_partition_mutation.phase === "completed"
+      && item.metadata.task_partition_mutation.audit_event_id === winningResult.audit_event_id
+    ))).toBe(true);
+  });
+
+  it("herstelt een echte 429 tijdens resize met exact dezelfde sleutel zonder dubbele companion", async () => {
+    const demand = occurrence("occurrence-partition-rate-limit", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-partition-rate-limit";
+    entities.Personnel.records.push({ id: personnelId, name: "Rate-limit beveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-rate-limit-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_date: "2026-08-17",
+      start_time: "06:30",
+      end_date: "2026-08-17",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    };
+    const originalShiftUpdate = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let rejectOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        rejectOnce
+        && query.id === composed.shift.id
+        && update.$set?.metadata?.task_partition_mutation?.action
+          === "resize_task_shift_preserving_coverage"
+      ) {
+        rejectOnce = false;
+        const error = new Error("rate limit exceeded");
+        error.status = 429;
+        throw error;
+      }
+      return originalShiftUpdate(query, update);
+    };
+    const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    const releaseAttemptsByCoordinator = new Map();
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      if (update.$set?.lease === null) {
+        const attempts = Number(releaseAttemptsByCoordinator.get(query.id) || 0) + 1;
+        releaseAttemptsByCoordinator.set(query.id, attempts);
+        if (attempts <= 2) {
+          const error = new Error("rate limit exceeded during lease release");
+          error.status = 429;
+          error.details = { retry_after_ms: 1 };
+          throw error;
+        }
+      }
+      return originalCoordinatorUpdate(query, update);
+    };
+    const resizeContext = context("partition-rate-limit-resize");
+    const retryDelays = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      retryDelays.push(Number(delay));
+      callback(...args);
+      return 0;
+    };
+
+    try {
+      await expect(backend.resizeTaskShiftPreservingCoverage(
+        base44,
+        user,
+        payload,
+        resizeContext,
+      )).rejects.toMatchObject({ status: 429, message: "rate limit exceeded" });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+    ))).toHaveLength(0);
+    expect(entities.PlanningMutationCoordinator.records.every(item => item.lease == null)).toBe(true);
+    expect(releaseAttemptsByCoordinator.size).toBe(4);
+    expect([...releaseAttemptsByCoordinator.values()]).toEqual([3, 3, 3, 3]);
+    expect(retryDelays).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+
+    const recovered = await backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      resizeContext,
+    );
+    expect(recovered.shift).toMatchObject({ start_time: "06:30", end_time: "15:30" });
+    expect(recovered.shifts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ start_time: "06:30", end_time: "15:30", status: "draft" }),
+      expect.objectContaining({ start_time: "15:30", end_time: "18:00", status: "draft" }),
+    ]));
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+      && item.idempotency_key === resizeContext.idempotencyKey
+    ))).toHaveLength(1);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 690, remaining_minutes: 0 });
+  });
+
+  it("blijft fail-closed met cleanupdetails als een 429-window alle releasepogingen uitput", async () => {
+    const demand = occurrence("occurrence-partition-release-exhausted", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-partition-release-exhausted";
+    entities.Personnel.records.push({ id: personnelId, name: "Cleanup beveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-release-exhausted-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_date: "2026-08-17",
+      start_time: "06:30",
+      end_date: "2026-08-17",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    };
+    const originalShiftUpdate = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let rejectBusinessWrite = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        rejectBusinessWrite
+        && query.id === composed.shift.id
+        && update.$set?.metadata?.task_partition_mutation?.action
+          === "resize_task_shift_preserving_coverage"
+      ) {
+        rejectBusinessWrite = false;
+        const error = new Error("rate limit exceeded during business write");
+        error.status = 429;
+        throw error;
+      }
+      return originalShiftUpdate(query, update);
+    };
+    const releaseAttemptsByCoordinator = new Map();
+    const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      if (update.$set?.lease !== null) {
+        return originalCoordinatorUpdate(query, update);
+      }
+      const attempts = Number(releaseAttemptsByCoordinator.get(query.id) || 0) + 1;
+      releaseAttemptsByCoordinator.set(query.id, attempts);
+      const error = new Error("rate limit exceeded during lease release");
+      error.status = 429;
+      error.details = { retry_after_ms: 1 };
+      throw error;
+    };
+
+    let exhaustedError;
+    try {
+      await backend.resizeTaskShiftPreservingCoverage(
+        base44,
+        user,
+        payload,
+        context("partition-release-exhausted-resize"),
+      );
+    } catch (error) {
+      exhaustedError = error;
+    }
+    expect(exhaustedError).toMatchObject({
+      status: 429,
+      message: "rate limit exceeded during business write",
+      details: {
+        lease_release_exhausted: true,
+        retry_after: expect.stringMatching(/Z$/),
+        retry_after_ms: expect.any(Number),
+        lease_release_errors: expect.arrayContaining([
+          expect.objectContaining({
+            entity: "PlanningMutationCoordinator",
+            status: 429,
+            rate_limited: true,
+            attempts: 6,
+            retry_after_ms: 1,
+          }),
+        ]),
+      },
+    });
+    expect(exhaustedError.details.retry_after_ms).toBeGreaterThan(100_000);
+    expect(Date.parse(exhaustedError.details.retry_after)).toBeGreaterThan(Date.now() + 100_000);
+    expect(releaseAttemptsByCoordinator.size).toBe(4);
+    expect([...releaseAttemptsByCoordinator.values()]).toEqual([6, 6, 6, 6]);
+    expect(entities.PlanningMutationCoordinator.records.filter(item => item.lease != null)).toHaveLength(4);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+    ))).toHaveLength(0);
   });
 
   it.each([

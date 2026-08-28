@@ -98,6 +98,35 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     expect(prefetchSource).toContain("openShiftMerge.candidate.shift");
   });
 
+  it("geeft planningwrites voorrang op bulk-prefetch maar laat de exacte dragcontrole urgent door", () => {
+    const requestSource = between("const requestEligibilityPrefetch", "const requestUrgentEligibilityCandidates");
+    const queuedWriteSource = between("const runQueuedIntentMutation", "const queuedEffectiveSnapshot");
+    const backgroundEffect = between(
+      "const generation = eligibilityBackgroundPrefetchGenerationRef.current + 1",
+      "const candidates = useMemo",
+    );
+
+    expect(requestSource).toContain('priority = "background"');
+    expect(requestSource).toContain("planningMutationQueue.current.getSnapshot().isIdle");
+    expect(requestSource).toContain("!planningResizeGestureActiveRef.current");
+    expect(requestSource).toContain("hasCurrentBackgroundBatch()");
+    expect(requestSource).toContain("trackBackgroundBatch(request)");
+    expect(requestSource).toContain('if (priority === "background") await worker()');
+    expect(source).toContain('priority: "urgent"');
+    expect(source).toContain('window.addEventListener("pointerdown", handlePointerDown, true)');
+    expect(backgroundEffect).toContain("if (!planningQueueState.isIdle || planningResizeGestureActive) return undefined");
+    expect(backgroundEffect.indexOf("if (!planningQueueState.isIdle || planningResizeGestureActive) return undefined")).toBeLessThan(
+      backgroundEffect.indexOf("setEligibilityServerDecisions([])"),
+    );
+    expect(backgroundEffect).toContain('priority: "background"');
+    expect(backgroundEffect).toContain("planningQueueState.isIdle,");
+    expect(backgroundEffect).toContain("planningResizeGestureActive,");
+    expect(queuedWriteSource).toContain("waitForCurrentBackgroundBatch()");
+    expect(queuedWriteSource.indexOf("waitForCurrentBackgroundBatch()")).toBeLessThan(
+      queuedWriteSource.indexOf("invokePlanningApi(request)"),
+    );
+  });
+
   it("toont een medewerker alleen groen wanneer ook de servervoorcontrole actueel is", () => {
     const candidateSource = between("const candidates = useMemo", "const handleActionMutationError");
     const employeePanel = fs.readFileSync(

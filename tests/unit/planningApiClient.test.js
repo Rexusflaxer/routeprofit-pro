@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-function planningError(status, message) {
+function planningError(status, message, retryAfter = null, details = null) {
   return Object.assign(new Error(`Request failed with status code ${status}`), {
     response: {
       status,
-      data: { error: message },
+      data: { error: message, ...(details ? { details } : {}) },
+      headers: retryAfter == null ? {} : { "retry-after": retryAfter },
     },
   });
 }
@@ -27,6 +28,7 @@ describe("planningApiClient functieversieherstel", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it("probeert een onbekende actie uit een vastgezette preview met exact hetzelfde request via de nieuwste functies", async () => {
@@ -135,5 +137,93 @@ describe("planningApiClient functieversieherstel", () => {
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invokeLatest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["1", 1_000],
+    ["Wed, 01 Jan 2025 00:00:02 GMT", 2_000],
+  ])("herhaalt een interactieve 429 na Retry-After %s met exact hetzelfde request", async (retryAfter, expectedDelay) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-01-01T00:00:00.000Z"));
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke
+      .mockRejectedValueOnce(planningError(429, "Rate limit exceeded", retryAfter))
+      .mockResolvedValueOnce({ data: { ok: true, shift: { id: "shift-1", revision: 2 } } });
+
+    const pending = invokePlanningApi({
+      action: "resize_task_shift_preserving_coverage",
+      shift_id: "shift-1",
+      idempotency_key: "planning-resize-retry-key",
+    });
+    await vi.advanceTimersByTimeAsync(expectedDelay - 1);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(pending).resolves.toMatchObject({ ok: true, shift: { id: "shift-1", revision: 2 } });
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1][1]).toBe(invoke.mock.calls[0][1]);
+  });
+
+  it("houdt optimistische writes vast tijdens begrensde backoff en meldt pas de definitieve 429", async () => {
+    vi.useFakeTimers();
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValue(planningError(429, "Rate limit exceeded"));
+
+    const pending = invokePlanningApi({
+      action: "resize_task_shift_preserving_coverage",
+      shift_id: "shift-1",
+      idempotency_key: "planning-resize-exhausted-key",
+    });
+    const rejection = expect(pending).rejects.toMatchObject({
+      status: 429,
+      message: "Rate limit exceeded",
+    });
+    await vi.advanceTimersByTimeAsync(449);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_701);
+
+    await rejection;
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke.mock.calls[1][1]).toBe(invoke.mock.calls[0][1]);
+    expect(invoke.mock.calls[2][1]).toBe(invoke.mock.calls[0][1]);
+  });
+
+  it("herstelt ook een opgeslagen write waarvan alleen de rate-limited lease-cleanup uitliep", async () => {
+    vi.useFakeTimers();
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke
+      .mockRejectedValueOnce(planningError(503, "Planningactie mislukt", "1", {
+        lease_release_exhausted: true,
+        retry_after: "2025-01-01T00:00:01.000Z",
+      }))
+      .mockResolvedValueOnce({ data: { ok: true, idempotent: true, shift: { id: "shift-1", revision: 2 } } });
+
+    const pending = invokePlanningApi({
+      action: "resize_task_shift_preserving_coverage",
+      shift_id: "shift-1",
+      idempotency_key: "planning-resize-cleanup-retry-key",
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(pending).resolves.toMatchObject({ ok: true, idempotent: true });
+    expect(invoke.mock.calls[1][1]).toBe(invoke.mock.calls[0][1]);
+  });
+
+  it.each([
+    ["prefetch_assignment_eligibility"],
+    ["bootstrap_range"],
+  ])("herhaalt een rate-limited lage-prioriteitsactie %s niet agressief", async action => {
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValueOnce(planningError(429, "Rate limit exceeded", "1"));
+
+    await expect(invokePlanningApi({
+      action,
+      basis_token: "basis-1",
+      candidates: [],
+    })).rejects.toMatchObject({ status: 429 });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

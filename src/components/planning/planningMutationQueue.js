@@ -101,6 +101,46 @@ function createBeforeUnloadProtection(target) {
 }
 
 /**
+ * Single-flight gate for low-priority eligibility batches.
+ *
+ * A planning mutation may start optimistically while one background request is
+ * already on the wire. The write waits for that exact request to settle; once
+ * the queue is non-idle the background worker can stop before launching a
+ * second batch. Background failures never block the authoritative write.
+ */
+export function createPlanningBackgroundRequestGate() {
+  let currentBatch = null;
+
+  const clear = batch => {
+    if (currentBatch === batch) currentBatch = null;
+  };
+
+  return Object.freeze({
+    hasCurrentBackgroundBatch() {
+      return Boolean(currentBatch);
+    },
+    trackBackgroundBatch(promise) {
+      const batch = Promise.resolve(promise);
+      currentBatch = batch;
+      void batch.then(
+        () => clear(batch),
+        () => clear(batch),
+      );
+      return batch;
+    },
+    async waitForCurrentBackgroundBatch() {
+      const batch = currentBatch;
+      if (!batch) return;
+      try {
+        await batch;
+      } catch {
+        // Eligibility warming is best-effort and must not reject the write.
+      }
+    },
+  });
+}
+
+/**
  * Small React-independent command scheduler for planning mutations.
  *
  * The UI applies an optimistic intent before enqueueing it. Commands that
@@ -183,6 +223,12 @@ export function createPlanningMutationQueue({ maxParallel = 4, beforeUnloadTarge
       id: entry.id,
       aliases: Object.freeze([...entry.aliases]),
       status,
+      // Keep the final local identity map with the terminal result. A gesture
+      // may start on an optimistic record and only enqueue after its parent
+      // ACK has already left the active queue; that child can still rebase to
+      // the authoritative ids/revisions without another network round-trip.
+      intent: entry.intent,
+      originalIntent: entry.originalIntent,
       result,
       error,
       dependencyId,
@@ -430,6 +476,7 @@ export function createPlanningMutationQueue({ maxParallel = 4, beforeUnloadTarge
           resourceKeys: normalizeResourceKeys(resourceKeys),
           dependsOn: normalizedDependencies,
           coalesceKey: normalizedCoalesceKey,
+          originalIntent: intent,
           intent,
           execute,
           onSuccess,

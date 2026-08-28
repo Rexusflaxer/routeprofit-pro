@@ -1050,6 +1050,17 @@ function taskLaneSegmentInterval(entry) {
   };
 }
 
+function taskLaneServiceContinuityKey({ shift, segment, startTime, endTime }) {
+  return [
+    "task-service",
+    segment?.task_occurrence_id || shift?.source_id || "unknown",
+    segment?.start_date || shift?.service_date || "",
+    segment?.end_date || shift?.end_date || segment?.start_date || shift?.service_date || "",
+    startTime || segment?.start_time || shift?.start_time || "",
+    endTime || segment?.end_time || shift?.end_time || "",
+  ].map(value => encodeURIComponent(String(value))).join(":");
+}
+
 function TaskCoverageLane({
   occurrence,
   planningState,
@@ -1087,13 +1098,27 @@ function TaskCoverageLane({
 }) {
   const laneRef = useRef(null);
   const demand = getTaskTimelineDemand(occurrence, serviceDate);
-  const baseServices = serviceEntries.map(entry => ({
-    ...entry,
-    kind: "service",
-    segment: entry.projections[0]?.segment,
-    elementId: `planning-service-${occurrence.id}-${serviceDate}-${entry.projections[0]?.segment?.id || entry.shift.id}`,
-    ...taskLaneSegmentInterval(entry),
-  })).filter(item => item.segment?.id && item.startMinute != null && item.endMinute > item.startMinute);
+  const baseServices = serviceEntries.map(entry => {
+    const segment = entry.projections[0]?.segment;
+    const interval = taskLaneSegmentInterval(entry);
+    const continuityKey = taskLaneServiceContinuityKey({
+      shift: entry.shift,
+      segment,
+      startTime: interval.startTime,
+      endTime: interval.endTime,
+    });
+    return {
+      ...entry,
+      ...interval,
+      kind: "service",
+      segment,
+      continuityKey,
+      // The backend replaces optimistic ids with authoritative ids on ACK.
+      // Time/task identity stays stable, so an in-flight pointer gesture keeps
+      // the same DOM node and window listeners throughout that replacement.
+      elementId: `planning-service-${continuityKey}`,
+    };
+  }).filter(item => item.segment?.id && item.startMinute != null && item.endMinute > item.startMinute);
   const boundaries = [];
 
   baseServices.forEach((service, index) => {
@@ -1103,7 +1128,7 @@ function TaskCoverageLane({
     const continuesAfter = Boolean(service.projections.at(-1)?.slice?.continuesAfter);
     if (!continuesBefore && (!previous || previous.endMinute !== service.startMinute)) {
       boundaries.push({
-        id: `${service.segment.id}:start`,
+        id: `${service.continuityKey}:start`,
         kind: "open-service",
         minute: service.startMinute,
         minMinute: previous ? previous.endMinute : demand?.startMinute,
@@ -1116,7 +1141,7 @@ function TaskCoverageLane({
     if (continuesAfter) return;
     if (next?.startMinute === service.endMinute) {
       boundaries.push({
-        id: `${service.segment.id}:end|${next.segment.id}:start`,
+        id: `${service.continuityKey}:end|${next.continuityKey}:start`,
         kind: "service-service",
         minute: service.endMinute,
         minMinute: service.startMinute + 5,
@@ -1128,7 +1153,7 @@ function TaskCoverageLane({
       return;
     }
     boundaries.push({
-      id: `${service.segment.id}:end`,
+      id: `${service.continuityKey}:end`,
       kind: "service-open",
       minute: service.endMinute,
       minMinute: service.startMinute + 5,
@@ -1316,7 +1341,7 @@ function TaskCoverageLane({
           const interval = intervalFor(service);
           return (
             <MatrixShiftBlock
-              key={service.shift.id}
+              key={service.continuityKey}
               shift={service.shift}
               projections={service.projections}
               assignments={assignmentsByShift.get(String(service.shift.id)) || []}
