@@ -69,11 +69,12 @@ function selectedShiftTiming(shift) {
   };
 }
 
-const CandidateCard = React.memo(function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, qualifications, passes, disabled = false }) {
+const CandidateCard = React.memo(function CandidateCard({ candidate, index, selectedShift, shiftTiming, onAssign, onPrefetch, qualifications, passes, disabled = false }) {
   const [expanded, setExpanded] = useState(false);
   const name = personnelName(candidate.personnel);
   const critical = Number(candidate.criticalCount || 0);
   const warnings = Number(candidate.warningCount || 0);
+  const eligibilityReady = candidate.eligibilityStatus === "ready";
   const assignedToSelectedShift = candidate.assignedToSelectedShift === true;
   const scheduledHours = Number(candidate.scheduledMinutes || 0) / 60;
   const contractHours = Number(candidate.contractMinutes || 0) / 60;
@@ -84,7 +85,14 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
+          style={{
+            ...provided.draggableProps.style,
+            contentVisibility: snapshot.isDragging ? "visible" : "auto",
+            containIntrinsicSize: "76px",
+          }}
           aria-busy={disabled ? "true" : "false"}
+          onPointerEnter={() => selectedShift && onPrefetch?.(candidate)}
+          onFocusCapture={() => selectedShift && onPrefetch?.(candidate)}
           className={cn(
             "group rounded-md border border-border bg-card p-2 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition-all",
             snapshot.isDragging && "z-50 border-primary shadow-xl ring-2 ring-primary/20",
@@ -142,9 +150,13 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
                   <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
                     <AlertTriangle className="h-2.5 w-2.5" /> {warnings}
                   </span>
+                ) : selectedShift && !eligibilityReady ? (
+                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+                    <AlertTriangle className="h-2.5 w-2.5" /> controle voorbereiden
+                  </span>
                 ) : selectedShift ? (
                   <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
-                    <CheckCircle2 className="h-2.5 w-2.5" /> passend
+                    <CheckCircle2 className="h-2.5 w-2.5" /> voorcontrole actueel
                   </span>
                 ) : null}
               </div>
@@ -164,9 +176,12 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
                 <Button
                   variant={shiftTiming.crossesCalendarDay ? "outline" : "ghost"}
                   size={shiftTiming.crossesCalendarDay ? "sm" : "icon"}
-                  disabled={disabled}
+                  disabled={disabled || !eligibilityReady}
                   className={cn("h-7 text-primary", shiftTiming.crossesCalendarDay ? "gap-1 px-2 text-[9px]" : "w-7")}
-                  onClick={() => onAssign(candidate)}
+                  onClick={() => {
+                    onPrefetch?.(candidate);
+                    onAssign(candidate);
+                  }}
                   aria-label={`${name} ${shiftTiming.crossesCalendarDay ? "op de volledige dienst inplannen" : "inplannen"} op ${selectedShift.name}; ${shiftTiming.label}`}
                 >
                   <UserRoundPlus className="h-3.5 w-3.5" />
@@ -205,6 +220,7 @@ export default function PlanningEmployeePanel({
   selectedShift,
   candidates,
   onAssign,
+  onPrefetchCandidate,
   onCloseShift,
   personnelCount,
   qualifications,
@@ -328,6 +344,7 @@ export default function PlanningEmployeePanel({
                 selectedShift={selectedShift}
                 shiftTiming={shiftTiming}
                 onAssign={onAssign}
+                onPrefetch={onPrefetchCandidate}
                 qualifications={qualificationsByPersonnel.get(String(candidate.personnel.id)) || []}
                 passes={passesByPersonnel.get(String(candidate.personnel.id)) || []}
                 disabled={selectedShiftPending || (

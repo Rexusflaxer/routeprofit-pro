@@ -46,6 +46,7 @@ const SHIFT_COPY_FIELDS = [
   'required_security_role_status',
   'required_qualification_types',
   'required_qualification_groups',
+  'required_security_pass_types',
   'contract_assignment_policy',
   'performs_security_work',
   'security_work_percentage',
@@ -398,6 +399,24 @@ async function assertNoForeignPendingSingleTaskOccurrenceMutation(
     occurrenceIds: [occurrence.id],
     serviceDate: occurrence.service_date || null,
   });
+  const copyMarker = occurrence?.metadata?.copy_task_occurrence_mutation;
+  if (copyMarker && (
+    copyMarker.phase !== 'completed'
+    || !compact(copyMarker.audit_event_id)
+  )) {
+    const ownedByThisExactCopy = (
+      copyMarker.idempotency_key === context.idempotencyKey
+      && copyMarker.actor_user_id === (user.id || null)
+      && copyMarker.request_hash === requestHash
+    );
+    if (!ownedByThisExactCopy) {
+      throw new ApiError(409, 'Een eerdere taakkopie moet eerst worden hersteld', {
+        code: 'COPY_TASK_OCCURRENCE_RECOVERY_PENDING',
+        task_occurrence_id: occurrence.id,
+        pending_idempotency_key: copyMarker.idempotency_key || null,
+      });
+    }
+  }
   const marker = occurrence?.metadata?.single_task_occurrence_mutation;
   if (!marker || marker.phase !== 'state_written_audit_pending') return;
   const ownedByThisExactMutation = (
@@ -446,30 +465,53 @@ async function assertNoForeignPendingMutation(
     }
   }
   const marker = shift?.metadata?.planning_mutation;
-  if (!marker || marker.phase !== 'state_written_audit_pending') return;
-  const ownedByThisExactMutation = (
-    marker.idempotency_key === context.idempotencyKey
-    && marker.action === expectedAction
-    && marker.actor_user_id === (user.id || null)
-    && marker.request_hash === requestHash
-  );
-  if (ownedByThisExactMutation) return;
-  const audits = await base44.asServiceRole.entities.PlanningAuditEvent.filter(
-    { idempotency_key: marker.idempotency_key },
-    '-occurred_at',
-    20,
-  );
-  const completed = audits.some((event: LooseRecord) => (
-    event.action === marker.action
-    && event.actor_user_id === marker.actor_user_id
-    && event.metadata?.request_hash === marker.request_hash
-  ));
-  if (!completed) {
-    throw new ApiError(409, 'Een eerdere planningactie op deze dienst moet eerst worden hersteld', {
-      shift_id: shift.id,
-      pending_action: marker.action,
-      pending_idempotency_key: marker.idempotency_key,
-    });
+  if (marker?.phase === 'state_written_audit_pending') {
+    const ownedByThisExactMutation = (
+      marker.idempotency_key === context.idempotencyKey
+      && marker.action === expectedAction
+      && marker.actor_user_id === (user.id || null)
+      && marker.request_hash === requestHash
+    );
+    if (!ownedByThisExactMutation) {
+      const audits = await base44.asServiceRole.entities.PlanningAuditEvent.filter(
+        { idempotency_key: marker.idempotency_key },
+        '-occurred_at',
+        20,
+      );
+      const completed = audits.some((event: LooseRecord) => (
+        event.action === marker.action
+        && event.actor_user_id === marker.actor_user_id
+        && event.metadata?.request_hash === marker.request_hash
+      ));
+      if (!completed) {
+        throw new ApiError(409, 'Een eerdere planningactie op deze dienst moet eerst worden hersteld', {
+          shift_id: shift.id,
+          pending_action: marker.action,
+          pending_idempotency_key: marker.idempotency_key,
+        });
+      }
+    }
+  }
+
+  const partitionMarker = shift?.metadata?.task_partition_mutation;
+  if (partitionMarker && (
+    partitionMarker.phase !== 'completed'
+    || !compact(partitionMarker.audit_event_id)
+  )) {
+    const ownedByThisExactPartitionMutation = (
+      partitionMarker.idempotency_key === context.idempotencyKey
+      && partitionMarker.action === expectedAction
+      && partitionMarker.actor_user_id === (user.id || null)
+      && partitionMarker.request_hash === requestHash
+    );
+    if (!ownedByThisExactPartitionMutation) {
+      throw new ApiError(409, 'Een eerdere wijziging van deze taakdienst moet eerst worden hersteld', {
+        code: 'TASK_PARTITION_RECOVERY_PENDING',
+        shift_id: shift.id,
+        pending_action: partitionMarker.action || null,
+        pending_idempotency_key: partitionMarker.idempotency_key || null,
+      });
+    }
   }
 }
 
@@ -1131,10 +1173,10 @@ async function mutateIdempotencyClaim(
 ) {
   const claimId = await sha256(`${user.id || 'anonymous'}:${context.idempotencyKey}`);
   const registryShard = claimId.slice(0, 2);
-  // One transition release deliberately keeps the legacy v2 document as the
-  // first fence. That makes old v2-only and current dual writers mutually
-  // exclusive during rollout. The v3 shard is always second, so partial state
-  // is deterministic and can be resumed idempotently by the same request.
+  // Keep the legacy v2 fence until an authenticated Base44 publish has proven
+  // that every live writer uses the dual protocol. GitHub/main alone is not a
+  // deployment boundary, and an old v2-only worker must remain mutually
+  // exclusive with this release during rollout.
   const registries = [
     {
       coordinatorKey: LEGACY_IDEMPOTENCY_REGISTRY_KEY,
@@ -1158,9 +1200,6 @@ async function mutateIdempotencyClaim(
     ));
   }
   if (status === 'pending' && results.at(-1)?.alreadyOwned) {
-    // A complete dual claim belongs to an invocation that can still be live.
-    // Only the worker that creates the v3 half may proceed. A retry may repair
-    // a legacy-only partial claim, but never take over both active halves.
     throw new ApiError(409, 'Deze compose_and_assign-opdracht wordt al verwerkt', {
       registry_key: results.at(-1)?.registryKey || null,
     });
@@ -1565,6 +1604,194 @@ function replayResult(event: LooseRecord) {
     audit_event_id: event.id,
     undoable: event.undoable === true,
     undo_token: event.undoable === true ? (event.undo_token || null) : null,
+  };
+}
+
+async function currentReplayRecordMap(
+  base44: LooseRecord,
+  entityName: string,
+  snapshots: LooseRecord[],
+  label: string,
+) {
+  const ids = uniqueStrings(snapshots.map(item => item?.id));
+  const records = await Promise.all(
+    ids.map(id => requireRecord(base44, entityName, id, label)),
+  );
+  return new Map(records.map(item => [String(item.id), item]));
+}
+
+function currentReplayRecord(
+  snapshot: LooseRecord | null | undefined,
+  recordsById: Map<string, LooseRecord>,
+) {
+  if (!snapshot?.id) return snapshot;
+  return recordsById.get(String(snapshot.id)) || snapshot;
+}
+
+function currentReplayTombstoneIds(
+  ids: unknown,
+  recordsById: Map<string, LooseRecord>,
+  tombstoneStatuses: string[],
+) {
+  const statuses = new Set(tombstoneStatuses);
+  return uniqueStrings(ids).filter(id => (
+    statuses.has(String(recordsById.get(String(id))?.status || ''))
+  ));
+}
+
+async function replayTaskPartitionMutation(
+  base44: LooseRecord,
+  event: LooseRecord,
+) {
+  const result = replayResult(event);
+  const shiftSnapshots = [
+    ...normalizeArray<LooseRecord>(result.shifts),
+    result.shift,
+    ...uniqueStrings(result.removed_shift_ids).map(id => ({ id })),
+  ].filter(Boolean);
+  const segmentSnapshots = [
+    ...normalizeArray<LooseRecord>(result.segments),
+    result.segment,
+    ...uniqueStrings(result.removed_segment_ids).map(id => ({ id })),
+  ].filter(Boolean);
+  const assignmentSnapshots = [
+    ...normalizeArray<LooseRecord>(result.assignments),
+    result.assignment,
+    ...uniqueStrings(result.removed_assignment_ids).map(id => ({ id })),
+  ].filter(Boolean);
+  const occurrenceSnapshots = [
+    ...normalizeArray<LooseRecord>(result.task_occurrences),
+    result.task_occurrence,
+  ].filter(Boolean);
+  const [
+    currentShiftsById,
+    currentAuditedSegmentsById,
+    currentAssignmentsById,
+    currentOccurrencesById,
+  ] = await Promise.all([
+    currentReplayRecordMap(
+      base44,
+      'PlanningShift',
+      shiftSnapshots,
+      'Taakdienst uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'PlanningShiftTaskSegment',
+      segmentSnapshots,
+      'Taakdeel uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'PlanningAssignment',
+      assignmentSnapshots,
+      'Toewijzing uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrenceSnapshots,
+      'Taakuitvoering uit idempotent antwoord',
+    ),
+  ]);
+  const participantShiftIds = uniqueStrings(shiftSnapshots.map(item => item.id));
+  const currentParticipantSegments = (await filterRecordsByValues(
+    base44.asServiceRole.entities.PlanningShiftTaskSegment,
+    'shift_id',
+    participantShiftIds,
+    'created_date',
+  )).sort(coordinatorOrder);
+  const currentSegmentsById = new Map([
+    ...currentAuditedSegmentsById,
+    ...currentParticipantSegments.map(item => [String(item.id), item] as [string, LooseRecord]),
+  ]);
+  return {
+    ...result,
+    ...(result.shift ? { shift: currentReplayRecord(result.shift, currentShiftsById) } : {}),
+    shifts: normalizeArray<LooseRecord>(result.shifts)
+      .map(item => currentReplayRecord(item, currentShiftsById)),
+    ...(result.segment ? { segment: currentReplayRecord(result.segment, currentSegmentsById) } : {}),
+    segments: currentParticipantSegments,
+    ...(result.assignment ? { assignment: currentReplayRecord(result.assignment, currentAssignmentsById) } : {}),
+    assignments: normalizeArray<LooseRecord>(result.assignments)
+      .map(item => currentReplayRecord(item, currentAssignmentsById)),
+    ...(result.task_occurrence ? {
+      task_occurrence: currentReplayRecord(result.task_occurrence, currentOccurrencesById),
+    } : {}),
+    task_occurrences: normalizeArray<LooseRecord>(result.task_occurrences)
+      .map(item => currentReplayRecord(item, currentOccurrencesById)),
+    removed_shift_ids: currentReplayTombstoneIds(
+      result.removed_shift_ids,
+      currentShiftsById,
+      ['cancelled', 'removed'],
+    ),
+    removed_segment_ids: currentReplayTombstoneIds(
+      result.removed_segment_ids,
+      currentSegmentsById,
+      ['removed'],
+    ),
+    removed_assignment_ids: currentReplayTombstoneIds(
+      result.removed_assignment_ids,
+      currentAssignmentsById,
+      ['removed'],
+    ),
+  };
+}
+
+async function replayCopyTaskOccurrenceMutation(
+  base44: LooseRecord,
+  event: LooseRecord,
+) {
+  const result = replayResult(event);
+  const occurrenceSnapshots = [
+    ...normalizeArray<LooseRecord>(result.task_occurrences),
+    result.task_occurrence,
+  ].filter(Boolean);
+  const [
+    currentDefinitionsById,
+    currentSeriesById,
+    currentScheduleRevisionsById,
+    currentOccurrencesById,
+  ] = await Promise.all([
+    currentReplayRecordMap(
+      base44,
+      'ObjectTaskDefinition',
+      [result.definition].filter(Boolean),
+      'Objecttaakdefinitie uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'ObjectTaskScheduleSeries',
+      [result.series].filter(Boolean),
+      'Taakreeks uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'ObjectTaskScheduleRevision',
+      [result.schedule_revision].filter(Boolean),
+      'Taakroosterrevisie uit idempotent antwoord',
+    ),
+    currentReplayRecordMap(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrenceSnapshots,
+      'Taakuitvoering uit idempotent antwoord',
+    ),
+  ]);
+  return {
+    ...result,
+    ...(result.definition ? {
+      definition: currentReplayRecord(result.definition, currentDefinitionsById),
+    } : {}),
+    ...(result.series ? { series: currentReplayRecord(result.series, currentSeriesById) } : {}),
+    ...(result.schedule_revision ? {
+      schedule_revision: currentReplayRecord(result.schedule_revision, currentScheduleRevisionsById),
+    } : {}),
+    ...(result.task_occurrence ? {
+      task_occurrence: currentReplayRecord(result.task_occurrence, currentOccurrencesById),
+    } : {}),
+    task_occurrences: normalizeArray<LooseRecord>(result.task_occurrences)
+      .map(item => currentReplayRecord(item, currentOccurrencesById)),
   };
 }
 
@@ -2910,6 +3137,7 @@ function serviceContextFromShift(shift: LooseRecord, personnelId?: string) {
     security_role_status: shift.required_security_role_status || null,
     required_qualification_types: shift.required_qualification_types || [],
     required_qualification_groups: shift.required_qualification_groups || [],
+    required_security_pass_types: shift.required_security_pass_types || [],
     performs_security_work: shift.performs_security_work ?? null,
     security_work_percentage: shift.security_work_percentage ?? null,
     works_event_or_hospitality_security: shift.works_event_or_hospitality_security ?? null,
@@ -2963,6 +3191,73 @@ function restrictionMatches(restriction: LooseRecord, shift: LooseRecord) {
     .some(value => value === label || value.includes(label) || label.includes(value));
 }
 
+function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: LooseRecord[]) {
+  if (
+    shift.requires_security_pass === false
+    || shift.security_pass_required === false
+    || shift.performs_security_work === false
+  ) return [];
+  const requiredTypes = uniqueStrings(shift.required_security_pass_types)
+    .map(normalizeToken)
+    .filter(Boolean);
+  if (!requiredTypes.length) return [];
+  const companyId = compact(shift.company_id);
+  const coveredDates = planningIntervalDates(shift);
+  const scopedPasses = securityPasses.filter(pass => (
+    !compact(pass.company_id)
+    || !companyId
+    || String(pass.company_id) === String(companyId)
+  ));
+  const warnings: LooseRecord[] = [];
+  for (const requiredType of requiredTypes) {
+    const matching = scopedPasses.filter(pass => normalizeToken(pass.pass_type) === requiredType);
+    if (!matching.length) {
+      warnings.push(warning(
+        'security_pass_missing',
+        'critical',
+        `Beveiligingspas ${requiredType.replaceAll('_', ' ')} ontbreekt voor deze dienst.`,
+        'personnel_security_pass',
+        { required_pass_type: requiredType, company_id: companyId || null },
+      ));
+      continue;
+    }
+    const validActive = matching.some(pass => (
+      String(pass.status || '').toLowerCase() === 'active'
+      && coveredDates.every(serviceDate => dateInRange(
+        serviceDate,
+        pass.valid_from || '0000-01-01',
+        pass.valid_until || '9999-12-31',
+      ))
+    ));
+    if (validActive) continue;
+    const firstDate = coveredDates[0] || shift.service_date;
+    const lastDate = coveredDates.at(-1) || firstDate;
+    const allExpired = matching.every(pass => (
+      String(pass.status || '').toLowerCase() === 'expired'
+      || (compact(pass.valid_until) && String(pass.valid_until).slice(0, 10) < firstDate)
+    ));
+    const allFuture = matching.every(pass => (
+      compact(pass.valid_from) && String(pass.valid_from).slice(0, 10) > lastDate
+    ));
+    warnings.push(warning(
+      allExpired
+        ? 'security_pass_expired'
+        : allFuture
+          ? 'security_pass_not_yet_valid'
+          : 'security_pass_inactive',
+      'critical',
+      allExpired
+        ? `Beveiligingspas ${requiredType.replaceAll('_', ' ')} is verlopen.`
+        : allFuture
+          ? `Beveiligingspas ${requiredType.replaceAll('_', ' ')} is nog niet geldig.`
+          : `Beveiligingspas ${requiredType.replaceAll('_', ' ')} is niet actief voor de volledige dienst.`,
+      'personnel_security_pass',
+      { required_pass_type: requiredType, company_id: companyId || null },
+    ));
+  }
+  return warnings;
+}
+
 async function evaluateAssignmentWarnings(
   base44: LooseRecord,
   shift: LooseRecord,
@@ -2970,6 +3265,7 @@ async function evaluateAssignmentWarnings(
   currentAssignmentId: string | null,
   suppliedWarnings: LooseRecord[],
   ignoredShiftIds: string[] = [],
+  prefetched: LooseRecord | null = null,
 ) {
   const warnings: LooseRecord[] = [...suppliedWarnings];
   const coveredDates = planningIntervalDates(shift);
@@ -2991,7 +3287,7 @@ async function evaluateAssignmentWarnings(
   const routingResultsPromise = Promise.all(coveredDates.map(async serviceDate => {
     const dateWarnings: LooseRecord[] = [];
     try {
-      const response = await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', {
+      const routingPayload = {
         personnel_id: personnel.id,
         company_id: shift.company_id || null,
         operating_company_id: shift.company_id || null,
@@ -3009,7 +3305,10 @@ async function evaluateAssignmentWarnings(
         run_schedule_validation: false,
         final_validation: false,
         planning_interactive_fast_path: true,
-      });
+      };
+      const response = prefetched?.routingDecisionForDate
+        ? await prefetched.routingDecisionForDate(serviceDate, routingPayload)
+        : await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', routingPayload);
       const decision = response?.data || response || null;
       const dateCode = serviceDate.replaceAll('-', '_');
       normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
@@ -3054,22 +3353,34 @@ async function evaluateAssignmentWarnings(
   const ignoredShiftIdSet = new Set(uniqueStrings(ignoredShiftIds));
   const firstCoveredDate = coveredDates[0] || asDate(shift.service_date, 'service_date');
   const lastCoveredDate = coveredDates.at(-1) || firstCoveredDate;
-  const overlapCandidateDates = dateKeysBetween(addDateDays(firstCoveredDate, -1), lastCoveredDate);
-  const [candidateShifts, absences, restrictions] = await Promise.all([
-    filterAllRecords(base44.asServiceRole.entities.PlanningShift, {
-      service_date: { $in: overlapCandidateDates },
-    }),
-    filterAllRecords(base44.asServiceRole.entities.PersonnelAbsence, { personnel_id: personnel.id }),
-    filterAllRecords(base44.asServiceRole.entities.PersonnelRestriction, { personnel_id: personnel.id }),
-  ]);
-  const relevantCandidateShifts = candidateShifts.filter((candidate: LooseRecord) => (
+  const overlapCandidateDates = dateKeysBetween(
+    addDateDays(firstCoveredDate, -1),
+    addDateDays(lastCoveredDate, 1),
+  );
+  const [candidateShifts, absences, restrictions, securityPasses] = prefetched
+    ? [
+        normalizeArray<LooseRecord>(prefetched.candidateShifts),
+        normalizeArray<LooseRecord>(prefetched.absences),
+        normalizeArray<LooseRecord>(prefetched.restrictions),
+        normalizeArray<LooseRecord>(prefetched.securityPasses),
+      ]
+    : await Promise.all([
+        filterAllRecords(base44.asServiceRole.entities.PlanningShift, {
+          service_date: { $in: overlapCandidateDates },
+        }),
+        filterAllRecords(base44.asServiceRole.entities.PersonnelAbsence, { personnel_id: personnel.id }),
+        filterAllRecords(base44.asServiceRole.entities.PersonnelRestriction, { personnel_id: personnel.id }),
+        filterAllRecords(base44.asServiceRole.entities.PersonnelSecurityPass, { personnel_id: personnel.id }),
+      ]);
+  const consideredCandidateShifts = candidateShifts.filter((candidate: LooseRecord) => (
     candidate.status !== 'cancelled'
     && !ignoredShiftIdSet.has(String(candidate.id))
-    && intervalsOverlap(shift, candidate)
   ));
-  const personnelAssignments: LooseRecord[] = [];
-  const candidateShiftIds = uniqueStrings(relevantCandidateShifts.map((item: LooseRecord) => item.id));
-  for (let index = 0; index < candidateShiftIds.length; index += 200) {
+  const personnelAssignments: LooseRecord[] = prefetched
+    ? normalizeArray<LooseRecord>(prefetched.personnelAssignments)
+    : [];
+  const candidateShiftIds = uniqueStrings(consideredCandidateShifts.map((item: LooseRecord) => item.id));
+  for (let index = 0; !prefetched && index < candidateShiftIds.length; index += 200) {
     personnelAssignments.push(...await filterAllRecords(
       base44.asServiceRole.entities.PlanningAssignment,
       {
@@ -3084,9 +3395,10 @@ async function evaluateAssignmentWarnings(
       && assignment.status !== 'removed'
     ))
     .map((assignment: LooseRecord) => String(assignment.shift_id)));
-  const overlapping = relevantCandidateShifts.filter((other: LooseRecord) => (
+  const assignedCandidateShifts = consideredCandidateShifts.filter((other: LooseRecord) => (
     assignedShiftIds.has(String(other.id))
   ));
+  const overlapping = assignedCandidateShifts.filter((other: LooseRecord) => intervalsOverlap(shift, other));
   if (overlapping.length) {
     warnings.push(warning(
       'shift_overlap',
@@ -3096,6 +3408,32 @@ async function evaluateAssignmentWarnings(
       { overlapping_shift_ids: overlapping.map(item => item.id) },
     ));
   }
+
+  const targetInterval = shiftInterval(shift);
+  const insufficientRestGaps = targetInterval
+    ? assignedCandidateShifts
+        .map(candidate => ({ candidate, interval: shiftInterval(candidate) }))
+        .filter(item => item.interval && !intervalsOverlap(shift, item.candidate))
+        .map(item => {
+          const interval = item.interval as { start: number; end: number };
+          if (interval.end <= targetInterval.start) return targetInterval.start - interval.end;
+          if (targetInterval.end <= interval.start) return interval.start - targetInterval.end;
+          return null;
+        })
+        .filter((gap): gap is number => gap != null && gap >= 0 && gap < 11 * 60)
+    : [];
+  if (insufficientRestGaps.length) {
+    const shortestGap = Math.min(...insufficientRestGaps);
+    warnings.push(warning(
+      'insufficient_rest',
+      'warning',
+      `De medewerker heeft slechts ${Math.floor(shortestGap / 60)}u ${String(shortestGap % 60).padStart(2, '0')}m rust; minimaal 11 uur is vereist.`,
+      'planning',
+      { shortest_rest_minutes: shortestGap, minimum_rest_minutes: 11 * 60 },
+    ));
+  }
+
+  warnings.push(...assignmentSecurityPassWarnings(shift, securityPasses));
 
   for (const absence of absences) {
     if (absence.status === 'rejected' || absence.status === 'closed') continue;
@@ -3161,6 +3499,529 @@ async function evaluateAssignmentWarnings(
     has_critical_warnings: snapshot.some(item => item.severity === 'critical'),
     contract_routing_snapshot: routingSnapshot,
     personnel_contract_id: personnelContractId,
+    validation_complete: routingResults.every(item => item.resolved),
+  };
+}
+
+const ELIGIBILITY_PREFETCH_MAX_CANDIDATES = 48;
+const ELIGIBILITY_PREFETCH_MAX_PERSONNEL = 20;
+const ELIGIBILITY_PREFETCH_MAX_SOURCES = 28;
+const ELIGIBILITY_PREFETCH_MAX_DATES = 14;
+const ELIGIBILITY_PREFETCH_TTL_MS = 90_000;
+const ELIGIBILITY_PREFETCH_ROUTING_CONCURRENCY = 6;
+
+function eligibilityPrefetchText(value: unknown, field: string, maximum = 512) {
+  const result = compact(value);
+  if (!result) throw new ApiError(400, `${field} is verplicht`);
+  if (result.length > maximum) throw new ApiError(400, `${field} is te lang`);
+  return result;
+}
+
+function createAsyncLimiter(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const advance = () => {
+    if (active >= limit) return;
+    const next = waiting.shift();
+    if (next) next();
+  };
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve));
+    active += 1;
+    try {
+      return await operation();
+    } finally {
+      active -= 1;
+      advance();
+    }
+  };
+}
+
+function eligibilitySourceRevision(record: LooseRecord | null | undefined) {
+  return record ? revisionOf(record) : null;
+}
+
+function eligibilityFingerprintRecord(record: LooseRecord | null | undefined) {
+  if (!record) return null;
+  return pick(record, [
+    'id',
+    'revision',
+    'version',
+    'updated_date',
+    'status',
+    'is_active',
+    'available_for_planning',
+    'planning_available',
+    'personnel_id',
+    'shift_id',
+    'slot_index',
+    'service_date',
+    'end_date',
+    'start_date',
+    'start_time',
+    'end_time',
+    'start_date',
+    'end_date',
+    'absence_type',
+    'pass_type',
+    'valid_from',
+    'valid_until',
+    'may_work',
+    'scope_type',
+    'scope_id',
+    'scope_label',
+    'company_id',
+    'object_id',
+    'route_id',
+    'cao_key',
+    'required_count',
+    'required_qualification_types',
+    'required_qualification_groups',
+    'required_security_pass_types',
+    'performs_security_work',
+    'lifecycle_status',
+    'window_start_time',
+    'window_end_time',
+  ]);
+}
+
+function eligibilityOccurrenceShift(
+  occurrence: LooseRecord,
+  object: LooseRecord,
+  candidate: LooseRecord,
+) {
+  if (occurrence.lifecycle_status !== 'active') {
+    throw new ApiError(409, 'Taakuitvoering is niet meer actief');
+  }
+  const hasCustomWindow = candidate.start_time != null || candidate.end_time != null
+    || candidate.service_date != null || candidate.end_date != null;
+  if (hasCustomWindow && (!candidate.start_time || !candidate.end_time)) {
+    throw new ApiError(400, 'start_time en end_time zijn samen verplicht voor een taakdeel');
+  }
+  const segment = normalizedCompositionSegment({
+    start_date: candidate.service_date || occurrence.service_date,
+    end_date: candidate.end_date || (hasCustomWindow ? null : occurrence.end_date),
+    start_time: candidate.start_time || occurrence.window_start_time,
+    end_time: candidate.end_time || occurrence.window_end_time,
+  }, occurrence);
+  const companyId = object.default_operating_company_id || occurrence.company_id || null;
+  return {
+    id: `eligibility-occurrence:${occurrence.id}`,
+    source_key: occurrence.source_key || `eligibility-occurrence:${occurrence.id}`,
+    source_type: 'task',
+    source_id: occurrence.object_task_definition_id || null,
+    company_id: companyId,
+    customer_id: occurrence.customer_id || null,
+    customer_ids: uniqueStrings([occurrence.customer_id]),
+    object_id: occurrence.object_id || null,
+    object_ids: uniqueStrings([occurrence.object_id]),
+    route_id: null,
+    task_id: null,
+    task_occurrence_ids: [occurrence.id],
+    task_segment_count: 1,
+    customer_name_snapshot: occurrence.customer_name_snapshot || null,
+    object_name_snapshot: occurrence.object_name_snapshot || object.name || null,
+    service_name_snapshot: occurrence.task_name_snapshot || 'Taak',
+    service_date: segment.start_date,
+    end_date: segment.end_date === segment.start_date ? null : segment.end_date,
+    start_time: segment.start_time,
+    end_time: segment.end_time,
+    timezone: occurrence.timezone || 'Europe/Amsterdam',
+    duration_minutes: segment.duration_minutes,
+    required_count: 1,
+    cao_key: object.cao_key || null,
+    service_function_type: object.default_service_function_type || null,
+    required_cao_function_group: object.default_cao_function_group || null,
+    required_cao_function_level: object.default_cao_function_level || null,
+    required_security_role_status: object.default_security_role_status || null,
+    required_qualification_types: uniqueStrings(object.default_required_qualification_types),
+    required_qualification_groups: uniqueStrings(object.default_required_qualification_groups),
+    required_security_pass_types: uniqueStrings(object.default_required_security_pass_types),
+    contract_assignment_policy: object.contract_assignment_policy || 'allow_manual_review',
+    performs_security_work: object.default_performs_security_work ?? null,
+    security_work_percentage: object.default_security_work_percentage ?? null,
+    works_event_or_hospitality_security: object.default_works_event_or_hospitality_security ?? null,
+    event_hospitality_cao_applies: object.default_event_hospitality_cao_applies ?? null,
+    works_airport_schiphol: object.default_works_airport_schiphol ?? null,
+    works_cash_value_logistics: object.default_works_cash_value_logistics ?? null,
+    customer_billable: object.default_customer_billable ?? null,
+    counts_toward_required_staffing: object.default_counts_toward_required_staffing ?? null,
+    service_context_snapshot: {
+      eligibility_prefetch: true,
+      occurrence_revision: revisionOf(occurrence),
+      segment_contexts: [{
+        task_occurrence_id: occurrence.id,
+        customer_id: occurrence.customer_id || null,
+        object_id: occurrence.object_id || null,
+        customer_name: occurrence.customer_name_snapshot || null,
+        object_name: occurrence.object_name_snapshot || object.name || null,
+      }],
+    },
+    status: 'draft',
+    revision: revisionOf(occurrence),
+  };
+}
+
+function eligibilityExistingShift(source: LooseRecord, candidate: LooseRecord) {
+  const hasCustomWindow = candidate.start_time != null || candidate.end_time != null
+    || candidate.service_date != null || candidate.end_date != null;
+  if (!hasCustomWindow) return source;
+  if (!candidate.start_time || !candidate.end_time) {
+    throw new ApiError(400, 'start_time en end_time zijn samen verplicht voor een dienstcontrole');
+  }
+  const serviceDate = asDate(candidate.service_date || source.service_date, 'service_date');
+  const startTime = asTime(candidate.start_time, 'start_time');
+  const endTime = asTime(candidate.end_time, 'end_time');
+  let endDate = candidate.end_date
+    ? asDate(candidate.end_date, 'end_date')
+    : serviceDate;
+  const startMinutes = parseClockMinutes(startTime) as number;
+  const endMinutes = parseClockMinutes(endTime) as number;
+  if (!candidate.end_date && endMinutes <= startMinutes) endDate = addDateDays(serviceDate, 1);
+  const interval = intervalFromParts(serviceDate, startTime, endDate, endTime);
+  if (!interval) throw new ApiError(400, 'De vooraf te controleren dienst moet een positieve duur hebben');
+  if (interval.duration > MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES) {
+    throw new ApiError(409, 'De vooraf te controleren dienst mag niet langer dan 12 uur duren');
+  }
+  return {
+    ...source,
+    service_date: serviceDate,
+    end_date: endDate === serviceDate ? null : endDate,
+    start_time: startTime,
+    end_time: endTime,
+    duration_minutes: interval.duration,
+  };
+}
+
+async function prefetchAssignmentEligibility(
+  base44: LooseRecord,
+  body: LooseRecord,
+) {
+  const basisToken = eligibilityPrefetchText(body.basis_token, 'basis_token');
+  if (!Array.isArray(body.candidates) || body.candidates.length === 0) {
+    throw new ApiError(400, 'candidates moet minimaal één combinatie bevatten');
+  }
+  if (body.candidates.length > ELIGIBILITY_PREFETCH_MAX_CANDIDATES) {
+    throw new ApiError(413, `Maximaal ${ELIGIBILITY_PREFETCH_MAX_CANDIDATES} controles per batch`);
+  }
+  const candidateByKey = new Map<string, LooseRecord>();
+  for (const rawCandidate of body.candidates) {
+    if (!rawCandidate || typeof rawCandidate !== 'object') {
+      throw new ApiError(400, 'Iedere candidate moet een object zijn');
+    }
+    const candidateKey = eligibilityPrefetchText(rawCandidate.candidate_key, 'candidate_key');
+    const personnelId = eligibilityPrefetchText(rawCandidate.personnel_id, 'personnel_id', 160);
+    const sourceKind = compact(rawCandidate.source_kind);
+    if (!['shift', 'occurrence'].includes(sourceKind)) {
+      throw new ApiError(400, 'source_kind moet shift of occurrence zijn');
+    }
+    const sourceId = eligibilityPrefetchText(rawCandidate.source_id, 'source_id', 160);
+    const expectedSourceRevision = positiveInteger(
+      rawCandidate.expected_source_revision,
+      'expected_source_revision',
+    );
+    const normalized = {
+      candidate_key: candidateKey,
+      personnel_id: personnelId,
+      source_kind: sourceKind,
+      source_id: sourceId,
+      expected_source_revision: expectedSourceRevision,
+      service_date: rawCandidate.service_date || null,
+      end_date: rawCandidate.end_date || null,
+      start_time: rawCandidate.start_time || null,
+      end_time: rawCandidate.end_time || null,
+      exclude_assignment_id: compact(rawCandidate.exclude_assignment_id) || null,
+    };
+    const existing = candidateByKey.get(candidateKey);
+    if (existing && stableStringify(existing) !== stableStringify(normalized)) {
+      throw new ApiError(400, 'candidate_key wordt voor verschillende controles hergebruikt');
+    }
+    candidateByKey.set(candidateKey, normalized);
+  }
+  const candidates = [...candidateByKey.values()];
+  const personnelIds = uniqueStrings(candidates.map(item => item.personnel_id));
+  const sourceIds = uniqueStrings(candidates.map(item => `${item.source_kind}:${item.source_id}`));
+  if (personnelIds.length > ELIGIBILITY_PREFETCH_MAX_PERSONNEL) {
+    throw new ApiError(413, `Maximaal ${ELIGIBILITY_PREFETCH_MAX_PERSONNEL} medewerkers per batch`);
+  }
+  if (sourceIds.length > ELIGIBILITY_PREFETCH_MAX_SOURCES) {
+    throw new ApiError(413, `Maximaal ${ELIGIBILITY_PREFETCH_MAX_SOURCES} bronnen per batch`);
+  }
+
+  const shiftIds = uniqueStrings(candidates.filter(item => item.source_kind === 'shift').map(item => item.source_id));
+  const occurrenceIds = uniqueStrings(candidates.filter(item => item.source_kind === 'occurrence').map(item => item.source_id));
+  const excludedAssignmentIds = uniqueStrings(candidates.map(item => item.exclude_assignment_id));
+  const [personnelRecords, sourceShifts, occurrences, excludedAssignments] = await Promise.all([
+    filterRecordsByValues(base44.asServiceRole.entities.Personnel, 'id', personnelIds),
+    filterRecordsByValues(base44.asServiceRole.entities.PlanningShift, 'id', shiftIds),
+    filterRecordsByValues(base44.asServiceRole.entities.PlanningTaskOccurrence, 'id', occurrenceIds),
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PlanningAssignment,
+      'id',
+      excludedAssignmentIds,
+    ),
+  ]);
+  const personnelById = new Map(personnelRecords.map(item => [String(item.id), item]));
+  const shiftById = new Map(sourceShifts.map(item => [String(item.id), item]));
+  const occurrenceById = new Map(occurrences.map(item => [String(item.id), item]));
+  const excludedAssignmentById = new Map(excludedAssignments.map(item => [String(item.id), item]));
+  const occurrenceObjectIds = uniqueStrings(occurrences.map(item => item.object_id));
+  const objects = await filterRecordsByValues(
+    base44.asServiceRole.entities.SurveillanceObject,
+    'id',
+    occurrenceObjectIds,
+  );
+  const objectById = new Map(objects.map(item => [String(item.id), item]));
+
+  const resolvedCandidates = await Promise.all(candidates.map(async candidate => {
+    const source = candidate.source_kind === 'shift'
+      ? shiftById.get(candidate.source_id) || null
+      : occurrenceById.get(candidate.source_id) || null;
+    const personnel = personnelById.get(candidate.personnel_id) || null;
+    if (!source || !personnel) return { candidate, source, personnel, shift: null, error: 'source_or_personnel_missing' };
+    if (eligibilitySourceRevision(source) !== candidate.expected_source_revision) {
+      return { candidate, source, personnel, shift: null, error: 'source_revision_stale' };
+    }
+    if (candidate.source_kind === 'shift') {
+      if (source.status === 'cancelled') {
+        return { candidate, source, personnel, shift: null, error: 'source_inactive' };
+      }
+      try {
+        return {
+          candidate,
+          source,
+          personnel,
+          shift: eligibilityExistingShift(source, candidate),
+          error: null,
+        };
+      } catch (error) {
+        return {
+          candidate,
+          source,
+          personnel,
+          shift: null,
+          error: Number((error as any)?.status) === 409 ? 'invalid_shift_window' : 'invalid_slice',
+        };
+      }
+    }
+    const object = objectById.get(String(source.object_id)) || null;
+    if (!object) return { candidate, source, personnel, shift: null, error: 'object_missing' };
+    try {
+      return {
+        candidate,
+        source,
+        personnel,
+        shift: eligibilityOccurrenceShift(source, object, candidate),
+        object,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        candidate,
+        source,
+        personnel,
+        shift: null,
+        error: Number((error as any)?.status) === 409 ? 'source_inactive_or_slice_stale' : 'invalid_slice',
+      };
+    }
+  }));
+
+  const coveredDateSet = new Set<string>();
+  for (const item of resolvedCandidates) {
+    if (!item.shift) continue;
+    for (const date of planningIntervalDates(item.shift)) {
+      coveredDateSet.add(date);
+      coveredDateSet.add(addDateDays(date, -1));
+      coveredDateSet.add(addDateDays(date, 1));
+    }
+  }
+  if (coveredDateSet.size > ELIGIBILITY_PREFETCH_MAX_DATES) {
+    throw new ApiError(413, `Maximaal ${ELIGIBILITY_PREFETCH_MAX_DATES} kalenderdagen per batch`);
+  }
+  const coveredDates = [...coveredDateSet].sort();
+  const [candidateShifts, absences, restrictions, securityPasses] = await Promise.all([
+    coveredDates.length
+      ? filterAllRecords(base44.asServiceRole.entities.PlanningShift, { service_date: { $in: coveredDates } })
+      : Promise.resolve([]),
+    filterRecordsByValues(base44.asServiceRole.entities.PersonnelAbsence, 'personnel_id', personnelIds),
+    filterRecordsByValues(base44.asServiceRole.entities.PersonnelRestriction, 'personnel_id', personnelIds),
+    filterRecordsByValues(base44.asServiceRole.entities.PersonnelSecurityPass, 'personnel_id', personnelIds),
+  ]);
+  const candidateShiftIds = uniqueStrings(candidateShifts.map(item => item.id));
+  const personnelAssignments = candidateShiftIds.length
+    ? await filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, {
+        personnel_id: { $in: personnelIds },
+        shift_id: { $in: candidateShiftIds },
+      })
+    : [];
+
+  const limiter = createAsyncLimiter(ELIGIBILITY_PREFETCH_ROUTING_CONCURRENCY);
+  const routingPromises = new Map<string, Promise<unknown>>();
+  const routingDecisionFor = (personnelId: string) => (serviceDate: string, payload: LooseRecord) => {
+    const key = `${personnelId}:${serviceDate}:${stableStringify(payload)}`;
+    let pending = routingPromises.get(key);
+    if (!pending) {
+      pending = limiter(() => base44.asServiceRole.functions.invoke(
+        'resolveCaoPlanningAssignmentDecision',
+        payload,
+      ));
+      routingPromises.set(key, pending);
+    }
+    return pending;
+  };
+  const evaluatedAt = nowIso();
+  const expiresAt = new Date(Date.parse(evaluatedAt) + ELIGIBILITY_PREFETCH_TTL_MS).toISOString();
+  const results = await Promise.all(resolvedCandidates.map(async item => {
+    const { candidate, source, personnel, shift, error } = item;
+    const sourceDescriptor = {
+      kind: candidate.source_kind,
+      id: candidate.source_id,
+      revision: eligibilitySourceRevision(source),
+    };
+    if (error) {
+      const stale = error.includes('stale');
+      const snapshot = [warning(
+        `eligibility_${error}`,
+        stale ? 'warning' : 'critical',
+        stale
+          ? 'Deze taak of dienst is intussen gewijzigd; de voorafcontrole wordt vernieuwd.'
+          : 'Deze taak, dienst of medewerker kan niet veilig vooraf worden gecontroleerd.',
+        'planningApi',
+      )];
+      const sourceFingerprint = await sha256(stableStringify({ source: eligibilityFingerprintRecord(source), error }));
+      return {
+        candidate_key: candidate.candidate_key,
+        personnel_id: candidate.personnel_id,
+        source: sourceDescriptor,
+        status: stale ? 'stale' : 'unavailable',
+        basis_token: basisToken,
+        warning_snapshot: snapshot,
+        warning_codes: snapshot.map(entry => entry.code),
+        has_critical_warnings: snapshot.some(entry => entry.severity === 'critical'),
+        evaluated_at: evaluatedAt,
+        expires_at: expiresAt,
+        source_revision_fingerprint: sourceFingerprint,
+      };
+    }
+    if (!shift || !personnel) {
+      throw new ApiError(500, 'Voorafcontrole mist een gevalideerde dienst of medewerker');
+    }
+    const excludedAssignmentId = compact(candidate.exclude_assignment_id) || null;
+    const excludedAssignment = excludedAssignmentId
+      ? excludedAssignmentById.get(excludedAssignmentId) || null
+      : null;
+    if (excludedAssignmentId) {
+      const excludedShift = excludedAssignment
+        ? candidateShifts.find(record => String(record.id) === String(excludedAssignment.shift_id)) || null
+        : null;
+      const validExclusion = excludedAssignment
+        && excludedAssignment.status !== 'removed'
+        && String(excludedAssignment.personnel_id) === String(candidate.personnel_id)
+        && excludedShift
+        && excludedShift.status !== 'cancelled'
+        && intervalsOverlap(shift, excludedShift);
+      if (!validExclusion) {
+        const snapshot = [warning(
+          'eligibility_invalid_exclude_assignment',
+          'critical',
+          'De uit te zonderen bestaande toewijzing hoort niet bij deze medewerker en dienstcontrole.',
+          'planningApi',
+          { exclude_assignment_id: excludedAssignmentId },
+        )];
+        const sourceFingerprint = await sha256(stableStringify({
+          source: eligibilityFingerprintRecord(source),
+          candidate_shift: eligibilityFingerprintRecord(shift),
+          exclude_assignment_id: excludedAssignmentId,
+          excluded_assignment: eligibilityFingerprintRecord(excludedAssignment),
+          error: 'invalid_exclude_assignment',
+        }));
+        return {
+          candidate_key: candidate.candidate_key,
+          personnel_id: candidate.personnel_id,
+          source: sourceDescriptor,
+          status: 'unavailable',
+          basis_token: basisToken,
+          warning_snapshot: snapshot,
+          warning_codes: snapshot.map(entry => entry.code),
+          has_critical_warnings: true,
+          evaluated_at: evaluatedAt,
+          expires_at: expiresAt,
+          source_revision_fingerprint: sourceFingerprint,
+        };
+      }
+    }
+    const personnelAbsences = absences.filter(record => String(record.personnel_id) === candidate.personnel_id);
+    const personnelRestrictions = restrictions.filter(record => String(record.personnel_id) === candidate.personnel_id);
+    const personnelSecurityPasses = securityPasses.filter(record => (
+      String(record.personnel_id) === candidate.personnel_id
+    ));
+    const assignments = personnelAssignments.filter(record => String(record.personnel_id) === candidate.personnel_id);
+    const eligibility = await evaluateAssignmentWarnings(
+      base44,
+      shift,
+      personnel,
+      excludedAssignmentId,
+      [],
+      [],
+      {
+        candidateShifts,
+        personnelAssignments: assignments,
+        absences: personnelAbsences,
+        restrictions: personnelRestrictions,
+        securityPasses: personnelSecurityPasses,
+        routingDecisionForDate: routingDecisionFor(candidate.personnel_id),
+      },
+    );
+    const dependencyAssignments = assignments.filter(record => (
+      record.status !== 'removed'
+      && String(record.id) !== String(excludedAssignmentId || '')
+    ));
+    const dependencyShiftIds = new Set(dependencyAssignments.map(record => String(record.shift_id)));
+    const relevantShifts = candidateShifts.filter(record => (
+      record.status !== 'cancelled' && dependencyShiftIds.has(String(record.id))
+    ));
+    const relevantShiftIds = new Set(relevantShifts.map(record => String(record.id)));
+    const relevantAssignments = dependencyAssignments.filter(record => (
+      relevantShiftIds.has(String(record.shift_id))
+    ));
+    const sourceFingerprint = await sha256(stableStringify({
+      source: eligibilityFingerprintRecord(source),
+      candidate_shift: eligibilityFingerprintRecord(shift),
+      personnel: eligibilityFingerprintRecord(personnel),
+      overlapping_shifts: relevantShifts.map(eligibilityFingerprintRecord).sort((a, b) => String(a?.id).localeCompare(String(b?.id))),
+      assignments: relevantAssignments.map(eligibilityFingerprintRecord).sort((a, b) => String(a?.id).localeCompare(String(b?.id))),
+      absences: personnelAbsences.map(eligibilityFingerprintRecord).sort((a, b) => String(a?.id).localeCompare(String(b?.id))),
+      restrictions: personnelRestrictions.map(eligibilityFingerprintRecord).sort((a, b) => String(a?.id).localeCompare(String(b?.id))),
+      security_passes: personnelSecurityPasses.map(eligibilityFingerprintRecord).sort((a, b) => String(a?.id).localeCompare(String(b?.id))),
+      contract_routing_snapshot: eligibility.contract_routing_snapshot,
+      exclude_assignment_id: excludedAssignmentId,
+      excluded_assignment: eligibilityFingerprintRecord(excludedAssignment),
+    }));
+    return {
+      candidate_key: candidate.candidate_key,
+      personnel_id: candidate.personnel_id,
+      source: sourceDescriptor,
+      status: eligibility.validation_complete ? 'ready' : 'unavailable',
+      basis_token: basisToken,
+      warning_snapshot: eligibility.warning_snapshot,
+      warning_codes: eligibility.warning_codes,
+      has_critical_warnings: eligibility.has_critical_warnings,
+      evaluated_at: evaluatedAt,
+      expires_at: expiresAt,
+      source_revision_fingerprint: sourceFingerprint,
+    };
+  }));
+  const sourceRevisionFingerprint = await sha256(stableStringify(results
+    .map(item => ({ candidate_key: item.candidate_key, fingerprint: item.source_revision_fingerprint }))
+    .sort((a, b) => a.candidate_key.localeCompare(b.candidate_key))));
+  return {
+    ok: true,
+    action: 'prefetch_assignment_eligibility',
+    basis_token: basisToken,
+    evaluated_at: evaluatedAt,
+    expires_at: expiresAt,
+    source_revision_fingerprint: sourceRevisionFingerprint,
+    results,
   };
 }
 
@@ -7039,6 +7900,44 @@ async function bootstrapRange(
       listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
     ]);
   }
+  const copyTaskOccurrenceRecoveryReports = await recoverPendingCopyTaskOccurrences(
+    base44,
+    user,
+    objectTaskScheduleSeries,
+    periodStart,
+    periodEnd,
+  );
+  if (copyTaskOccurrenceRecoveryReports.some(item => item.status === 'completed')) {
+    [
+      objectTaskScheduleSeries,
+      objectTaskScheduleRevisions,
+      existingOccurrences,
+    ] = await Promise.all([
+      listAllRecords(base44.asServiceRole.entities.ObjectTaskScheduleSeries, 'created_date'),
+      listAllRecords(base44.asServiceRole.entities.ObjectTaskScheduleRevision, '-revision_number'),
+      listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+    ]);
+  }
+  const taskPartitionRecoveryReports = await recoverPendingTaskPartitionMutations(
+    base44,
+    user,
+    existingShifts,
+    periodStart,
+    periodEnd,
+  );
+  if (taskPartitionRecoveryReports.some(item => item.status === 'completed')) {
+    [
+      existingShifts,
+      existingAssignments,
+      existingOccurrences,
+      existingTaskSegments,
+    ] = await Promise.all([
+      listAllRecords(base44.asServiceRole.entities.PlanningShift),
+      listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
+      listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+      listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
+    ]);
+  }
   const repairedSingleTaskOccurrenceIds: string[] = [];
   for (const occurrence of existingOccurrences.filter((item: LooseRecord) => (
     item.service_date <= periodEnd
@@ -7254,6 +8153,10 @@ async function bootstrapRange(
             ...sourceContext.tasks.flatMap(item => item.required_qualification_groups || []),
             ...sourceContext.objects.flatMap(item => item.default_required_qualification_groups || []),
           ]);
+          const requiredSecurityPassTypes = uniqueStrings([
+            ...sourceContext.tasks.flatMap(item => item.required_security_pass_types || []),
+            ...sourceContext.objects.flatMap(item => item.default_required_security_pass_types || []),
+          ]);
           await renewPlanningResourceLeases(base44, user, leases);
           const createdShift: LooseRecord = await base44.asServiceRole.entities.PlanningShift.create({
             source_key: sourceKey,
@@ -7290,6 +8193,7 @@ async function bootstrapRange(
             required_security_role_status: task?.required_security_role_status || object?.default_security_role_status || null,
             required_qualification_types: requiredQualificationTypes,
             required_qualification_groups: requiredQualificationGroups,
+            required_security_pass_types: requiredSecurityPassTypes,
             contract_assignment_policy: task?.contract_assignment_policy
               || object?.contract_assignment_policy
               || 'allow_manual_review',
@@ -7846,6 +8750,12 @@ async function bootstrapRange(
     object_task_series_impact_recovery: seriesImpactRecoveryReports,
     pending_shared_boundary_occurrence_ids: pendingSharedBoundaryRepairs.map(item => item.task_occurrence_id),
     pending_shared_boundary_repairs: pendingSharedBoundaryRepairs,
+    task_partition_recovery: taskPartitionRecoveryReports,
+    pending_task_partition_operations: taskPartitionRecoveryReports
+      .filter(item => item.status !== 'completed'),
+    copy_task_occurrence_recovery: copyTaskOccurrenceRecoveryReports,
+    pending_copy_task_occurrence_operations: copyTaskOccurrenceRecoveryReports
+      .filter(item => item.status !== 'completed'),
   };
   await appendAudit(base44, user, {
     action: 'bootstrap_range',
@@ -8794,6 +9704,7 @@ async function composeShift(
     required_security_role_status: consistentValue(objects.map(item => item.default_security_role_status)),
     required_qualification_types: uniqueStrings(objects.flatMap(item => item.default_required_qualification_types || [])),
     required_qualification_groups: uniqueStrings(objects.flatMap(item => item.default_required_qualification_groups || [])),
+    required_security_pass_types: uniqueStrings(objects.flatMap(item => item.default_required_security_pass_types || [])),
     contract_assignment_policy: objectsWithoutOperatingCompany.length === 0
       && strictPolicies.length === objects.length
       && strictPolicies.every(item => item === 'strict_contract_match')
@@ -10883,6 +11794,2544 @@ async function repairSharedTaskBoundary(
   );
 }
 
+const RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION = 'resize_task_shift_preserving_coverage';
+const VACATE_TASK_SHIFT_PARTITION_ACTION = 'vacate_task_shift_partition';
+const ASSIGN_AND_MERGE_TASK_SHIFT_PARTITION_ACTION = 'assign_and_merge_task_shift_partition';
+const COPY_TASK_OCCURRENCE_ACTION = 'copy_task_occurrence';
+
+function assertExpectedRecordRevision(
+  record: LooseRecord,
+  supplied: unknown,
+  field: string,
+  entity: string,
+) {
+  const expected = positiveInteger(supplied, field);
+  if (revisionOf(record) !== expected) {
+    throw new ApiError(409, 'Planning is intussen gewijzigd', {
+      entity,
+      id: record.id,
+      expected_revision: expected,
+      current_revision: revisionOf(record),
+    });
+  }
+}
+
+function assertExpectedAssignmentRevisions(assignments: LooseRecord[], supplied: unknown) {
+  const expected = supplied && typeof supplied === 'object' ? supplied as LooseRecord : {};
+  const activeAssignments = assignments.filter(item => item.status !== 'removed');
+  const activeIds = new Set(activeAssignments.map(item => String(item.id)));
+  const missingIds = activeAssignments
+    .map(item => String(item.id))
+    .filter(id => !Object.prototype.hasOwnProperty.call(expected, id));
+  const unknownIds = Object.keys(expected).filter(id => !activeIds.has(String(id)));
+  if (missingIds.length || unknownIds.length) {
+    throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw', {
+      missing_assignment_ids: missingIds,
+      unknown_assignment_ids: unknownIds,
+    });
+  }
+  for (const assignment of activeAssignments) {
+    assertExpectedRecordRevision(
+      assignment,
+      expected[assignment.id],
+      `expected_assignment_revisions.${assignment.id}`,
+      'PlanningAssignment',
+    );
+  }
+}
+
+function taskPartitionMarker(
+  shift: LooseRecord,
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const marker = shift?.metadata?.task_partition_mutation;
+  if (!marker || marker.idempotency_key !== context.idempotencyKey) return null;
+  if (
+    marker.action !== action
+    || marker.request_hash !== requestHash
+    || marker.actor_user_id !== (user.id || null)
+  ) {
+    throw new ApiError(409, `idempotency_key hoort bij een andere ${action}-opdracht`);
+  }
+  return marker;
+}
+
+function taskPartitionOperationFields(
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+  body: LooseRecord,
+) {
+  return {
+    operation_id: `${action}:${context.idempotencyKey}`,
+    action,
+    idempotency_key: context.idempotencyKey,
+    correlation_id: context.correlationId,
+    actor_user_id: user.id || null,
+    request_hash: requestHash,
+    request_payload: mutationRequestPayload(body),
+  };
+}
+
+function taskPartitionMarkerIsCommitted(marker: LooseRecord | null | undefined, auditEventId?: string | null) {
+  return Boolean(
+    marker?.phase === 'completed'
+    && compact(marker.audit_event_id)
+    && (!auditEventId || String(marker.audit_event_id) === String(auditEventId)),
+  );
+}
+
+async function taskPartitionOperationIsCommitted(
+  base44: LooseRecord,
+  marker: LooseRecord | null | undefined,
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+  auditEventId: string,
+) {
+  if (!marker) return false;
+  const participantShiftIds = uniqueStrings(marker.participant_shift_ids);
+  if (!participantShiftIds.length) return false;
+  const participants = await filterRecordsByValues(
+    base44.asServiceRole.entities.PlanningShift,
+    'id',
+    participantShiftIds,
+  );
+  if (participants.length !== participantShiftIds.length) return false;
+  return participants.every(participant => {
+    const participantMarker = participant?.metadata?.task_partition_mutation;
+    return participantMarker?.action === action
+      && participantMarker?.idempotency_key === context.idempotencyKey
+      && participantMarker?.request_hash === requestHash
+      && participantMarker?.actor_user_id === (user.id || null)
+      && taskPartitionMarkerIsCommitted(participantMarker, auditEventId);
+  });
+}
+
+async function finalizeTaskPartitionMarkers(
+  base44: LooseRecord,
+  user: LooseRecord,
+  leases: LooseRecord[],
+  shiftIds: unknown,
+  action: string,
+  context: ReturnType<typeof mutationContext>,
+  requestHash: string,
+  auditEventId: string,
+) {
+  const finalized: LooseRecord[] = [];
+  for (const shiftId of uniqueStrings(shiftIds)) {
+    let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Taakdienst');
+    const marker = taskPartitionMarker(shift, action, context, user, requestHash);
+    if (!marker) {
+      throw new ApiError(409, 'De duurzame herstelmarkering van de taakdienst ontbreekt', {
+        code: 'TASK_PARTITION_RECOVERY_MARKER_MISSING',
+        shift_id: shift.id,
+      });
+    }
+    if (taskPartitionMarkerIsCommitted(marker, auditEventId)) {
+      finalized.push(shift);
+      continue;
+    }
+    if (marker.audit_event_id && String(marker.audit_event_id) !== String(auditEventId)) {
+      throw new ApiError(409, 'De taakdienst verwijst naar een andere auditregistratie', {
+        code: 'TASK_PARTITION_AUDIT_MISMATCH',
+        shift_id: shift.id,
+      });
+    }
+    await renewPlanningResourceLeases(base44, user, leases);
+    shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+      metadata: taskPartitionMetadata(shift, {
+        ...marker,
+        phase: 'completed',
+        audit_event_id: auditEventId,
+        completed_at: marker.completed_at || nowIso(),
+        updated_at: nowIso(),
+      }),
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+    });
+    finalized.push(shift);
+  }
+  return finalized;
+}
+
+async function recoverPendingTaskPartitionMutations(
+  base44: LooseRecord,
+  user: LooseRecord,
+  shifts: LooseRecord[],
+  periodStart: string,
+  periodEnd: string,
+) {
+  const pendingByOperation = new Map<string, LooseRecord>();
+  for (const shift of shifts) {
+    if (shift.service_date > periodEnd || (shift.end_date || shift.service_date) < periodStart) continue;
+    const marker = shift.metadata?.task_partition_mutation;
+    if (!marker || taskPartitionMarkerIsCommitted(marker)) continue;
+    const operationId = compact(marker.operation_id)
+      || `${compact(marker.action)}:${compact(marker.idempotency_key)}`;
+    if (!operationId || pendingByOperation.has(operationId)) continue;
+    pendingByOperation.set(operationId, marker);
+  }
+
+  const reports: LooseRecord[] = [];
+  for (const [operationId, marker] of [...pendingByOperation.entries()].sort(([left], [right]) => (
+    left.localeCompare(right)
+  ))) {
+    if (marker.actor_user_id !== (user.id || null)) {
+      reports.push({
+        operation_id: operationId,
+        action: marker.action || null,
+        status: 'blocked_actor',
+        actor_user_id: marker.actor_user_id || null,
+      });
+      continue;
+    }
+    if (
+      ![
+        RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION,
+        VACATE_TASK_SHIFT_PARTITION_ACTION,
+        ASSIGN_AND_MERGE_TASK_SHIFT_PARTITION_ACTION,
+      ].includes(marker.action)
+      || !marker.idempotency_key
+      || !marker.request_hash
+      || !marker.request_payload
+    ) {
+      reports.push({
+        operation_id: operationId,
+        action: marker.action || null,
+        status: 'blocked_invalid_marker',
+      });
+      continue;
+    }
+    const recoveryBody = {
+      action: marker.action,
+      ...marker.request_payload,
+      idempotency_key: marker.idempotency_key,
+      correlation_id: marker.correlation_id || marker.idempotency_key,
+    };
+    const recoveryContext = {
+      idempotencyKey: marker.idempotency_key,
+      correlationId: marker.correlation_id || marker.idempotency_key,
+    };
+    try {
+      const result = marker.action === RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION
+        ? await resizeTaskShiftPreservingCoverage(base44, user, recoveryBody, recoveryContext)
+        : marker.action === VACATE_TASK_SHIFT_PARTITION_ACTION
+          ? await vacateTaskShiftPartition(base44, user, recoveryBody, recoveryContext)
+          : await assignAndMergeTaskShiftPartition(base44, user, recoveryBody, recoveryContext);
+      reports.push({
+        operation_id: operationId,
+        action: marker.action,
+        status: 'completed',
+        audit_event_id: result.audit_event_id || null,
+      });
+    } catch (error) {
+      if (Number((error as any)?.status) !== 409) throw error;
+      reports.push({
+        operation_id: operationId,
+        action: marker.action,
+        status: 'blocked_conflict',
+        code: (error as any)?.details?.code || null,
+        message: (error as Error)?.message || String(error),
+      });
+    }
+  }
+  return reports;
+}
+
+function assertDraftSingleTaskShift(shift: LooseRecord, label = 'dienst') {
+  if (shift.source_type !== 'task') {
+    throw new ApiError(409, `Alleen een ${label} uit objecttaken kan als taakdeel worden gewijzigd`);
+  }
+  if (
+    shift.status !== 'draft'
+    || Number(shift.published_revision || 0) > 0
+    || shift.last_published_correlation_id
+  ) {
+    throw new ApiError(409, `Alleen een ongepubliceerde concept${label} kan als taakdeel worden gewijzigd`, {
+      code: 'TASK_PARTITION_DRAFT_REQUIRED',
+      shift_id: shift.id,
+    });
+  }
+  if (uniqueStrings(shift.task_occurrence_ids).length !== 1 || Number(shift.task_segment_count || 0) !== 1) {
+    throw new ApiError(409, 'Een samengestelde of meervoudige taakdienst wordt hier niet automatisch gewijzigd', {
+      code: 'TASK_PARTITION_SINGLE_TASK_REQUIRED',
+      shift_id: shift.id,
+    });
+  }
+}
+
+function shiftIntervalPatch(interval: { start: number; end: number }) {
+  const start = minuteParts(interval.start);
+  const end = minuteParts(interval.end);
+  return {
+    service_date: start.date,
+    end_date: end.date === start.date ? null : end.date,
+    start_time: start.time,
+    end_time: end.time,
+    duration_minutes: interval.end - interval.start,
+  };
+}
+
+function segmentIntervalPatch(interval: { start: number; end: number }) {
+  const start = minuteParts(interval.start);
+  const end = minuteParts(interval.end);
+  return {
+    start_date: start.date,
+    end_date: end.date,
+    start_time: start.time,
+    end_time: end.time,
+    duration_minutes: interval.end - interval.start,
+  };
+}
+
+function sameInterval(
+  record: LooseRecord,
+  interval: { start: number; end: number },
+  kind: 'shift' | 'segment',
+) {
+  const current = kind === 'shift' ? shiftInterval(record) : segmentInterval(record);
+  return Boolean(current && current.start === interval.start && current.end === interval.end);
+}
+
+function taskPartitionMetadata(
+  record: LooseRecord,
+  marker: LooseRecord,
+) {
+  return {
+    ...(record.metadata || {}),
+    task_partition_mutation: marker,
+  };
+}
+
+function deterministicCompanionSourceKey(originalShiftId: string, idempotencyKey: string, side: string) {
+  return `task-partition:${originalShiftId}:${idempotencyKey}:${side}`;
+}
+
+async function resizeTaskShiftPreservingCoverage(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  const action = RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION;
+  requireMutationIdempotency(context, action);
+  const requestHash = await mutationRequestHash(action, body);
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, action);
+  }
+
+  const shiftId = requireId(body, 'shift_id');
+  const segmentId = requireId(body, 'segment_id');
+  const initialShift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+  const initialSegment = await requireRecord(base44, 'PlanningShiftTaskSegment', segmentId, 'Taakdeel');
+  if (String(initialSegment.shift_id) !== String(initialShift.id)) {
+    throw new ApiError(409, 'Taakdeel hoort niet bij deze dienst');
+  }
+  const initialMarker = taskPartitionMarker(initialShift, action, context, user, requestHash);
+  if (replay && (
+    !initialMarker
+    || await taskPartitionOperationIsCommitted(
+      base44,
+      initialMarker,
+      action,
+      context,
+      user,
+      requestHash,
+      replay.id,
+    )
+  )) {
+    return replayTaskPartitionMutation(base44, replay);
+  }
+  if (!initialMarker) assertDraftSingleTaskShift(initialShift);
+  const occurrenceId = compact(initialMarker?.task_occurrence_id || initialSegment.task_occurrence_id);
+  if (!occurrenceId) throw new ApiError(409, 'Taakdeel heeft geen taakuitvoering');
+  const initialOccurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+  const initialAssignments = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningAssignment,
+    { shift_id: shiftId },
+  );
+
+  const requestedSegment = normalizedCompositionSegment({
+    start_date: body.start_date || initialSegment.start_date,
+    start_time: body.start_time,
+    ...(body.end_date ? { end_date: body.end_date } : {}),
+    end_time: body.end_time,
+  }, initialOccurrence);
+  const requestedInterval = requestedSegment._interval;
+  const originalInterval = initialMarker?.original_interval || segmentInterval(initialSegment);
+  if (!originalInterval) throw new ApiError(409, 'Het bestaande taakdeel heeft een ongeldig tijdvenster');
+  if (
+    requestedInterval.start < Number(originalInterval.start)
+    || requestedInterval.end > Number(originalInterval.end)
+    || requestedInterval.start === Number(originalInterval.start)
+      && requestedInterval.end === Number(originalInterval.end)
+  ) {
+    throw new ApiError(409, 'De nieuwe diensttijd moet een echt kleiner deel van de bestaande taakdienst zijn', {
+      code: 'TASK_PARTITION_SHRINK_REQUIRED',
+    });
+  }
+  const freedIntervals = [
+    requestedInterval.start > Number(originalInterval.start)
+      ? { side: 'before', start: Number(originalInterval.start), end: requestedInterval.start }
+      : null,
+    requestedInterval.end < Number(originalInterval.end)
+      ? { side: 'after', start: requestedInterval.end, end: Number(originalInterval.end) }
+      : null,
+  ].filter(Boolean) as Array<{ side: string; start: number; end: number }>;
+  if (!freedIntervals.length) throw new ApiError(409, 'Er komt geen open dienstdeel vrij');
+  const companionSourceKeys = freedIntervals.map(item => (
+    deterministicCompanionSourceKey(shiftId, String(context.idempotencyKey), item.side)
+  ));
+  const operationFields = taskPartitionOperationFields(action, context, user, requestHash, body);
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('shift_composition', shiftId),
+    resourceCoordinatorDescriptor('task_occurrence', occurrenceId),
+    ...companionSourceKeys.map(key => resourceCoordinatorDescriptor('shift_composition', `source:${key}`)),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    initialAssignments.filter(item => item.status !== 'removed').map(item => item.personnel_id),
+    [initialShift, { ...initialShift, ...shiftIntervalPatch(requestedInterval) }],
+  ));
+
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    let shift = await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst');
+    let segment = await requireRecord(base44, 'PlanningShiftTaskSegment', segmentId, 'Taakdeel');
+    let occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+    let marker = taskPartitionMarker(shift, action, context, user, requestHash);
+    const recovering = Boolean(marker);
+    await assertNoForeignPendingMutation(base44, shift, context, action, user, requestHash);
+    if (!recovering) {
+      assertDraftSingleTaskShift(shift);
+      if (segment.status === 'removed' || String(segment.shift_id) !== String(shift.id)) {
+        throw new ApiError(409, 'Het taakdeel is intussen gewijzigd; laad het rooster opnieuw');
+      }
+      const activeShiftSegments = (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShiftTaskSegment,
+        { shift_id: shift.id },
+      )).filter(item => item.status !== 'removed');
+      if (activeShiftSegments.length !== 1 || String(activeShiftSegments[0].id) !== String(segment.id)) {
+        throw new ApiError(409, 'De dienst bevat intussen meerdere taakdelen; laad het rooster opnieuw');
+      }
+      assertExpectedRecordRevision(shift, body.expected_shift_revision, 'expected_shift_revision', 'PlanningShift');
+      assertExpectedRecordRevision(segment, body.expected_segment_revision, 'expected_segment_revision', 'PlanningShiftTaskSegment');
+      assertExpectedRecordRevision(occurrence, body.expected_occurrence_revision, 'expected_occurrence_revision', 'PlanningTaskOccurrence');
+    }
+    let assignments = await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: shift.id },
+    );
+    if (!recovering) assertExpectedAssignmentRevisions(assignments, body.expected_assignment_revisions);
+
+    const anticipatedShift = { ...shift, ...shiftIntervalPatch(requestedInterval), status: 'draft' };
+    const eligibilityByAssignment = new Map<string, LooseRecord>();
+    for (const assignment of assignments.filter(item => item.status !== 'removed')) {
+      const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+      const suppliedWarnings = normalizeArray(assignment.warning_snapshot)
+        .filter((item: LooseRecord) => item.source === 'planner');
+      eligibilityByAssignment.set(String(assignment.id), await evaluateAssignmentWarnings(
+        base44,
+        anticipatedShift,
+        personnel,
+        assignment.id,
+        suppliedWarnings,
+      ));
+    }
+
+    const beforeState = recovering ? null : { shift, segment, assignments, occurrence };
+    const preparedCompanions: Array<{
+      shift: LooseRecord;
+      segment: LooseRecord;
+      interval: { side: string; start: number; end: number };
+    }> = [];
+    for (const freed of freedIntervals) {
+      const sourceKey = deterministicCompanionSourceKey(shift.id, String(context.idempotencyKey), freed.side);
+      let companion = (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShift,
+        { source_key: sourceKey },
+        'created_date',
+      )).sort(coordinatorOrder)[0] || null;
+      if (companion && (
+        companion.metadata?.task_partition_origin?.request_hash !== requestHash
+        || String(companion.metadata?.task_partition_origin?.original_shift_id || '') !== String(shift.id)
+      )) {
+        throw new ApiError(409, 'De herstelde open dienst hoort bij een andere resize-opdracht');
+      }
+      if (!companion) {
+        await renewPlanningResourceLeases(base44, user, leases);
+        companion = await base44.asServiceRole.entities.PlanningShift.create({
+          ...pick(shift, SHIFT_COPY_FIELDS),
+          ...shiftIntervalPatch(freed),
+          source_key: sourceKey,
+          source_type: 'task',
+          source_id: shift.source_id || occurrence.object_task_definition_id || null,
+          source_shift_id: shift.id,
+          task_occurrence_ids: [occurrence.id],
+          task_segment_count: 1,
+          status: 'cancelled',
+          revision: 1,
+          published_revision: 0,
+          last_published_correlation_id: null,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            task_partition_origin: {
+              action,
+              original_shift_id: shift.id,
+              original_segment_id: segment.id,
+              side: freed.side,
+              idempotency_key: context.idempotencyKey,
+              correlation_id: context.correlationId,
+              actor_user_id: user.id || null,
+              request_hash: requestHash,
+            },
+            task_partition_mutation: {
+              ...operationFields,
+              phase: 'prepared',
+              task_occurrence_id: occurrence.id,
+              original_shift_id: shift.id,
+              original_segment_id: segment.id,
+              participant_shift_ids: [shift.id],
+              participant_segment_ids: [segment.id],
+              started_at: nowIso(),
+            },
+          },
+        });
+      }
+      if (!companion) throw new ApiError(503, 'Open companion-dienst kon niet duurzaam worden voorbereid');
+      let companionSegments = await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShiftTaskSegment,
+        { shift_id: companion.id },
+      );
+      let companionSegment = companionSegments.find(item => (
+        item.metadata?.task_partition_origin?.request_hash === requestHash
+        && item.metadata?.task_partition_origin?.side === freed.side
+      )) || null;
+      if (!companionSegment) {
+        await renewPlanningResourceLeases(base44, user, leases);
+        const createdCompanionSegment: LooseRecord = await base44.asServiceRole.entities.PlanningShiftTaskSegment.create({
+          ...pick(segment, [
+            'task_occurrence_id', 'object_task_definition_id', 'timezone', 'company_id',
+            'customer_id', 'object_id', 'task_type', 'task_name_snapshot',
+            'customer_name_snapshot', 'object_name_snapshot', 'instructions_snapshot',
+          ]),
+          ...segmentIntervalPatch(freed),
+          shift_id: companion.id,
+          sequence_index: 0,
+          status: 'draft',
+          revision: 1,
+          published_revision: 0,
+          last_published_correlation_id: null,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            task_partition_origin: {
+              action,
+              original_shift_id: shift.id,
+              original_segment_id: segment.id,
+              side: freed.side,
+              idempotency_key: context.idempotencyKey,
+              correlation_id: context.correlationId,
+              actor_user_id: user.id || null,
+              request_hash: requestHash,
+            },
+          },
+        });
+        companionSegment = createdCompanionSegment;
+        companionSegments = [...companionSegments, createdCompanionSegment];
+      }
+      if (!companionSegment) throw new ApiError(503, 'Open companion-taakdeel kon niet duurzaam worden voorbereid');
+      const unexpectedActiveSegments = companionSegments.filter(item => (
+        item.status !== 'removed' && String(item.id) !== String(companionSegment.id)
+      ));
+      if (unexpectedActiveSegments.length) {
+        throw new ApiError(409, 'De open companion-dienst bevat onverwachte extra taakdelen');
+      }
+      const companionAssignments = (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningAssignment,
+        { shift_id: companion.id },
+      )).filter(item => item.status !== 'removed');
+      if (companionAssignments.length) {
+        throw new ApiError(409, 'De open companion-dienst is intussen bezet; laad het rooster opnieuw');
+      }
+      preparedCompanions.push({ shift: companion, segment: companionSegment, interval: freed });
+    }
+
+    marker = marker || {
+      ...operationFields,
+      phase: 'original_pending',
+      task_occurrence_id: occurrence.id,
+      original_segment_id: segment.id,
+      original_interval: { start: Number(originalInterval.start), end: Number(originalInterval.end) },
+      target_interval: { start: requestedInterval.start, end: requestedInterval.end },
+      participant_shift_ids: [shift.id, ...preparedCompanions.map(item => item.shift.id)],
+      participant_segment_ids: [segment.id, ...preparedCompanions.map(item => item.segment.id)],
+      companion_shift_ids: preparedCompanions.map(item => item.shift.id),
+      companion_segment_ids: preparedCompanions.map(item => item.segment.id),
+      started_at: nowIso(),
+    };
+    if (!taskPartitionMarker(shift, action, context, user, requestHash) || !sameInterval(shift, requestedInterval, 'shift')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+        ...shiftIntervalPatch(requestedInterval),
+        status: 'draft',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: taskPartitionMetadata(shift, { ...marker, phase: 'original_pending', updated_at: nowIso() }),
+      });
+    }
+    if (!sameInterval(segment, requestedInterval, 'segment')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      segment = await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
+        ...segmentIntervalPatch(requestedInterval),
+        status: 'draft',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(segment.metadata || {}),
+          task_partition_resize: {
+            idempotency_key: context.idempotencyKey,
+            request_hash: requestHash,
+            original_interval: marker.original_interval,
+            target_interval: marker.target_interval,
+          },
+        },
+      });
+    }
+    const updatedAssignments: LooseRecord[] = [];
+    for (const assignment of assignments.filter(item => item.status !== 'removed')) {
+      const eligibility = eligibilityByAssignment.get(String(assignment.id)) as LooseRecord;
+      const alreadyValidated = assignment.metadata?.task_partition_resize_request_hash === requestHash
+        && sameInterval(shift, requestedInterval, 'shift');
+      if (alreadyValidated) {
+        updatedAssignments.push(assignment);
+        continue;
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      updatedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+        status: 'draft',
+        personnel_contract_id: eligibility.personnel_contract_id,
+        warning_codes: eligibility.warning_codes,
+        warning_snapshot: eligibility.warning_snapshot,
+        has_critical_warnings: eligibility.has_critical_warnings,
+        contract_routing_snapshot: eligibility.contract_routing_snapshot,
+        metadata: {
+          ...(assignment.metadata || {}),
+          task_partition_resize_request_hash: requestHash,
+          task_partition_resize_shift_revision: revisionOf(shift),
+          task_partition_resize_validated_at: nowIso(),
+        },
+      }));
+    }
+
+    const completedCompanions: Array<{ shift: LooseRecord; segment: LooseRecord }> = [];
+    for (const prepared of preparedCompanions) {
+      let companion = await requireRecord(base44, 'PlanningShift', prepared.shift.id, 'Open companion-dienst');
+      const companionSegment = await requireRecord(
+        base44,
+        'PlanningShiftTaskSegment',
+        prepared.segment.id,
+        'Open companion-taakdeel',
+      );
+      if (!sameInterval(companionSegment, prepared.interval, 'segment')) {
+        throw new ApiError(409, 'De open companion-dienst wijkt af van de vrijgekomen taakdekking');
+      }
+      if (
+        companion.status !== 'draft'
+        || companion.metadata?.task_partition_mutation?.phase !== 'state_written_audit_pending'
+      ) {
+        await renewPlanningResourceLeases(base44, user, leases);
+        companion = await casUpdate(base44, 'PlanningShift', companion, revisionOf(companion), {
+          ...shiftIntervalPatch(prepared.interval),
+          status: 'draft',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: taskPartitionMetadata(companion, {
+            ...(companion.metadata?.task_partition_mutation || marker),
+            ...marker,
+            action,
+            phase: 'state_written_audit_pending',
+            idempotency_key: context.idempotencyKey,
+            correlation_id: context.correlationId,
+            actor_user_id: user.id || null,
+            request_hash: requestHash,
+            state_written_at: nowIso(),
+          }),
+        });
+      }
+      completedCompanions.push({ shift: companion, segment: companionSegment });
+    }
+
+    if (occurrence.metadata?.last_task_partition_resize_request_hash !== requestHash) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(occurrence.metadata || {}),
+          last_task_partition_resize_idempotency_key: context.idempotencyKey,
+          last_task_partition_resize_request_hash: requestHash,
+          last_task_partition_resize_shift_ids: [shift.id, ...completedCompanions.map(item => item.shift.id)],
+          last_task_partition_resize_completed_at: nowIso(),
+        },
+      });
+    }
+    if (shift.metadata?.task_partition_mutation?.phase !== 'state_written_audit_pending') {
+      await renewPlanningResourceLeases(base44, user, leases);
+      shift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
+        metadata: taskPartitionMetadata(shift, {
+          ...(shift.metadata?.task_partition_mutation || marker),
+          phase: 'state_written_audit_pending',
+          state_written_at: nowIso(),
+        }),
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      });
+    }
+    const shifts = [shift, ...completedCompanions.map(item => item.shift)];
+    const segments = [segment, ...completedCompanions.map(item => item.segment)];
+    const pendingResult = {
+      shift,
+      shifts,
+      segment,
+      segments,
+      assignments: updatedAssignments,
+      task_occurrences: [occurrence],
+      companion_shift_ids: completedCompanions.map(item => item.shift.id),
+      companion_segment_ids: completedCompanions.map(item => item.segment.id),
+      removed_shift_ids: [],
+      removed_segment_ids: [],
+      removed_assignment_ids: [],
+    };
+    let audit = replay || await findReplay(base44, action, context.idempotencyKey);
+    if (audit) {
+      assertReplayFingerprint(audit, user, requestHash, action);
+    } else {
+      await renewPlanningResourceLeases(base44, user, leases);
+      audit = await appendAudit(base44, user, {
+        action,
+        resource_type: 'PlanningShift',
+        resource_id: shift.id,
+        shift_id: shift.id,
+        before_state: beforeState,
+        after_state: pendingResult,
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: {
+          request_hash: requestHash,
+          recovered_completed_state: recovering,
+          preserved_coverage_interval: marker.original_interval,
+        },
+      });
+    }
+    const finalizedShifts = await finalizeTaskPartitionMarkers(
+      base44,
+      user,
+      leases,
+      shifts.map(item => item.id),
+      action,
+      context,
+      requestHash,
+      audit.id,
+    );
+    const finalizedShiftById = new Map(finalizedShifts.map(item => [String(item.id), item]));
+    shift = finalizedShiftById.get(String(shift.id)) || shift;
+    const finalCompanionShifts = completedCompanions.map(item => (
+      finalizedShiftById.get(String(item.shift.id)) || item.shift
+    ));
+    const result = {
+      ...pendingResult,
+      shift,
+      shifts: [shift, ...finalCompanionShifts],
+    };
+    return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  });
+}
+
+const TASK_PARTITION_COMPATIBILITY_FIELDS = [
+  'source_type', 'source_id', 'company_id', 'customer_id', 'customer_ids',
+  'object_id', 'object_ids', 'route_id', 'task_id', 'customer_contract_line_id',
+  'customer_name_snapshot', 'object_name_snapshot', 'route_name_snapshot',
+  'service_name_snapshot', 'timezone',
+  'required_count', 'cao_key', 'service_function_type',
+  'required_cao_function_group', 'required_cao_function_level',
+  'required_security_role_status', 'required_qualification_types',
+  'required_qualification_groups', 'required_security_pass_types',
+  'contract_assignment_policy',
+  'performs_security_work', 'security_work_percentage',
+  'works_event_or_hospitality_security', 'event_hospitality_cao_applies',
+  'works_airport_schiphol', 'works_cash_value_logistics',
+  'customer_billable', 'counts_toward_required_staffing',
+  'service_context_snapshot',
+] as const;
+
+function taskPartitionShiftsCompatible(left: LooseRecord, right: LooseRecord, occurrenceId: string) {
+  return uniqueStrings(left.task_occurrence_ids).length === 1
+    && uniqueStrings(right.task_occurrence_ids).length === 1
+    && String(uniqueStrings(left.task_occurrence_ids)[0]) === String(occurrenceId)
+    && String(uniqueStrings(right.task_occurrence_ids)[0]) === String(occurrenceId)
+    && TASK_PARTITION_COMPATIBILITY_FIELDS.every(field => (
+      stableStringify(left[field] ?? null) === stableStringify(right[field] ?? null)
+    ));
+}
+
+async function loadTaskPartitionNeighborhood(
+  base44: LooseRecord,
+  targetShift: LooseRecord,
+  targetSegment: LooseRecord,
+  occurrenceId: string,
+) {
+  const occurrenceSegments = (await filterAllRecords(
+    base44.asServiceRole.entities.PlanningShiftTaskSegment,
+    { task_occurrence_id: occurrenceId },
+  )).filter(item => item.status !== 'removed');
+  const parentIds = uniqueStrings(occurrenceSegments.map(item => item.shift_id));
+  const parents = await filterRecordsByValues(base44.asServiceRole.entities.PlanningShift, 'id', parentIds);
+  const parentById = new Map(parents.map(item => [String(item.id), item]));
+  const activeSegments = occurrenceSegments.filter(item => (
+    shiftAllowsActiveTaskSegments(parentById.get(String(item.shift_id)))
+  ));
+  const targetInterval = segmentInterval(targetSegment);
+  if (!targetInterval) throw new ApiError(409, 'De geselecteerde dienst heeft een ongeldig tijdvenster');
+  const exact = activeSegments.filter(item => {
+    if (String(item.id) === String(targetSegment.id)) return false;
+    const interval = segmentInterval(item);
+    return Boolean(interval && (
+      interval.end === targetInterval.start || interval.start === targetInterval.end
+    ));
+  });
+  const candidates: Array<LooseRecord & { side: 'left' | 'right'; interval: LooseRecord }> = [];
+  for (const segment of exact) {
+    const shift = parentById.get(String(segment.shift_id));
+    const interval = segmentInterval(segment);
+    if (!shift || !interval) continue;
+    const shiftSegments = activeSegments.filter(item => String(item.shift_id) === String(shift.id));
+    const assignments = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: shift.id },
+    )).filter(item => item.status !== 'removed');
+    const compatible = shift.status === 'draft'
+      && Number(shift.published_revision || 0) === 0
+      && !shift.last_published_correlation_id
+      && shiftSegments.length === 1
+      && Number(shift.task_segment_count || 0) === 1
+      && taskPartitionShiftsCompatible(targetShift, shift, occurrenceId)
+      && assignments.length === 0;
+    if (!compatible) {
+      throw new ApiError(409, 'Een aansluitende dienst is gepubliceerd, bezet of niet compatibel en wordt niet automatisch samengevoegd', {
+        code: 'TASK_PARTITION_ADJACENT_INCOMPATIBLE',
+        target_shift_id: targetShift.id,
+        adjacent_shift_id: shift.id,
+      });
+    }
+    candidates.push({
+      shift,
+      segment,
+      assignments,
+      interval,
+      side: interval.end === targetInterval.start ? 'left' : 'right',
+    });
+  }
+  const left = candidates.filter(item => item.side === 'left');
+  const right = candidates.filter(item => item.side === 'right');
+  if (left.length > 1 || right.length > 1) {
+    throw new ApiError(409, 'Meerdere aansluitende taakdiensten maken automatisch samenvoegen onveilig', {
+      code: 'TASK_PARTITION_AMBIGUOUS_ADJACENCY',
+    });
+  }
+  if (!left.length && !right.length) {
+    throw new ApiError(409, 'Er is geen exact aansluitende open conceptdienst om mee samen te voegen', {
+      code: 'TASK_PARTITION_OPEN_COMPANION_REQUIRED',
+    });
+  }
+  return { targetInterval, left: left[0] || null, right: right[0] || null };
+}
+
+async function vacateTaskShiftPartition(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  const action = VACATE_TASK_SHIFT_PARTITION_ACTION;
+  requireMutationIdempotency(context, action);
+  const requestHash = await mutationRequestHash(action, body);
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, action);
+  }
+  const targetShiftId = requireId(body, 'shift_id');
+  const targetSegmentId = requireId(body, 'segment_id');
+  const initialTargetShift = await requireRecord(base44, 'PlanningShift', targetShiftId, 'Dienst');
+  const initialTargetSegment = await requireRecord(
+    base44,
+    'PlanningShiftTaskSegment',
+    targetSegmentId,
+    'Taakdeel',
+  );
+  if (String(initialTargetSegment.shift_id) !== String(initialTargetShift.id)) {
+    throw new ApiError(409, 'Taakdeel hoort niet bij deze dienst');
+  }
+  const initialMarker = taskPartitionMarker(initialTargetShift, action, context, user, requestHash);
+  if (replay && (
+    !initialMarker
+    || await taskPartitionOperationIsCommitted(
+      base44,
+      initialMarker,
+      action,
+      context,
+      user,
+      requestHash,
+      replay.id,
+    )
+  )) {
+    return replayTaskPartitionMutation(base44, replay);
+  }
+  if (!initialMarker) assertDraftSingleTaskShift(initialTargetShift);
+  const occurrenceId = compact(initialMarker?.task_occurrence_id || initialTargetSegment.task_occurrence_id);
+  const initialOccurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+  const initialAssignments = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningAssignment,
+    { shift_id: targetShiftId },
+  );
+  const initialNeighborhood = initialMarker
+    ? null
+    : await loadTaskPartitionNeighborhood(
+        base44,
+        initialTargetShift,
+        initialTargetSegment,
+        occurrenceId,
+      );
+  const participantShiftIds = uniqueStrings(initialMarker?.participant_shift_ids || [
+    targetShiftId,
+    initialNeighborhood?.left?.shift.id,
+    initialNeighborhood?.right?.shift.id,
+  ]);
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('task_occurrence', occurrenceId),
+    ...participantShiftIds.map(id => resourceCoordinatorDescriptor('shift_composition', id)),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    initialAssignments.filter(item => item.status !== 'removed').map(item => item.personnel_id),
+    [initialTargetShift],
+  ));
+  const operationFields = taskPartitionOperationFields(action, context, user, requestHash, body);
+
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    let targetShift = await requireRecord(base44, 'PlanningShift', targetShiftId, 'Dienst');
+    const targetSegment = await requireRecord(
+      base44,
+      'PlanningShiftTaskSegment',
+      targetSegmentId,
+      'Taakdeel',
+    );
+    let occurrence = await requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering');
+    let marker = taskPartitionMarker(targetShift, action, context, user, requestHash);
+    const recovering = Boolean(marker);
+    if (!recovering) {
+      assertDraftSingleTaskShift(targetShift);
+      if (targetSegment.status === 'removed') throw new ApiError(409, 'Het taakdeel is intussen verwijderd');
+      assertExpectedRecordRevision(targetShift, body.expected_shift_revision, 'expected_shift_revision', 'PlanningShift');
+      assertExpectedRecordRevision(targetSegment, body.expected_segment_revision, 'expected_segment_revision', 'PlanningShiftTaskSegment');
+      assertExpectedRecordRevision(occurrence, body.expected_occurrence_revision, 'expected_occurrence_revision', 'PlanningTaskOccurrence');
+    }
+    let targetAssignments = await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: targetShift.id },
+    );
+    if (!recovering) assertExpectedAssignmentRevisions(targetAssignments, body.expected_assignment_revisions);
+
+    let survivorShift: LooseRecord;
+    let survivorSegment: LooseRecord;
+    let absorbedShiftIds: string[];
+    let absorbedSegmentIds: string[];
+    let unionInterval: { start: number; end: number };
+    if (marker) {
+      survivorShift = await requireRecord(base44, 'PlanningShift', marker.survivor_shift_id, 'Overblijvende open dienst');
+      survivorSegment = await requireRecord(base44, 'PlanningShiftTaskSegment', marker.survivor_segment_id, 'Overblijvend taakdeel');
+      absorbedShiftIds = uniqueStrings(marker.absorbed_shift_ids);
+      absorbedSegmentIds = uniqueStrings(marker.absorbed_segment_ids);
+      unionInterval = {
+        start: Number(marker.union_interval?.start),
+        end: Number(marker.union_interval?.end),
+      };
+      if (!(unionInterval.end > unionInterval.start)) {
+        throw new ApiError(409, 'De herstelstaat van de open dienst is ongeldig');
+      }
+    } else {
+      const neighborhood = await loadTaskPartitionNeighborhood(
+        base44,
+        targetShift,
+        targetSegment,
+        occurrenceId,
+      );
+      const expectedNeighborShiftRevisions = body.expected_neighbor_shift_revisions || {};
+      const expectedNeighborSegmentRevisions = body.expected_neighbor_segment_revisions || {};
+      for (const neighbor of [neighborhood.left, neighborhood.right].filter(Boolean) as LooseRecord[]) {
+        assertExpectedRecordRevision(
+          neighbor.shift,
+          expectedNeighborShiftRevisions[neighbor.shift.id],
+          `expected_neighbor_shift_revisions.${neighbor.shift.id}`,
+          'PlanningShift',
+        );
+        assertExpectedRecordRevision(
+          neighbor.segment,
+          expectedNeighborSegmentRevisions[neighbor.segment.id],
+          `expected_neighbor_segment_revisions.${neighbor.segment.id}`,
+          'PlanningShiftTaskSegment',
+        );
+      }
+      survivorShift = neighborhood.left?.shift || targetShift;
+      survivorSegment = neighborhood.left?.segment || targetSegment;
+      const participants = [
+        { shift: targetShift, segment: targetSegment, interval: neighborhood.targetInterval },
+        neighborhood.left,
+        neighborhood.right,
+      ].filter(Boolean) as LooseRecord[];
+      absorbedShiftIds = participants
+        .filter(item => String(item.shift.id) !== String(survivorShift.id))
+        .map(item => item.shift.id);
+      absorbedSegmentIds = participants
+        .filter(item => String(item.segment.id) !== String(survivorSegment.id))
+        .map(item => item.segment.id);
+      unionInterval = {
+        start: Math.min(...participants.map(item => Number(item.interval.start))),
+        end: Math.max(...participants.map(item => Number(item.interval.end))),
+      };
+      marker = {
+        ...operationFields,
+        phase: 'coalesce_pending',
+        task_occurrence_id: occurrence.id,
+        target_shift_id: targetShift.id,
+        target_segment_id: targetSegment.id,
+        survivor_shift_id: survivorShift.id,
+        survivor_segment_id: survivorSegment.id,
+        participant_shift_ids: participants.map(item => item.shift.id),
+        participant_segment_ids: participants.map(item => item.segment.id),
+        absorbed_shift_ids: absorbedShiftIds,
+        absorbed_segment_ids: absorbedSegmentIds,
+        union_interval: unionInterval,
+        started_at: nowIso(),
+      };
+    }
+    const participantShifts = await Promise.all(
+      uniqueStrings(marker.participant_shift_ids).map(id => requireRecord(base44, 'PlanningShift', id, 'Taakdienst')),
+    );
+    for (const participant of participantShifts) {
+      await assertNoForeignPendingMutation(base44, participant, context, action, user, requestHash);
+      const existing = taskPartitionMarker(participant, action, context, user, requestHash);
+      if (!existing || !['state_written_audit_pending', 'coalesce_pending'].includes(existing.phase)) {
+        await renewPlanningResourceLeases(base44, user, leases);
+        const updated = await casUpdate(base44, 'PlanningShift', participant, revisionOf(participant), {
+          metadata: taskPartitionMetadata(participant, { ...marker, phase: 'coalesce_pending', updated_at: nowIso() }),
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+        if (String(updated.id) === String(targetShift.id)) targetShift = updated;
+        if (String(updated.id) === String(survivorShift.id)) survivorShift = updated;
+      }
+    }
+    const beforeState = recovering ? null : {
+      shifts: participantShifts,
+      segments: await Promise.all(uniqueStrings(marker.participant_segment_ids).map(id => (
+        requireRecord(base44, 'PlanningShiftTaskSegment', id, 'Taakdeel')
+      ))),
+      assignments: targetAssignments,
+      occurrence,
+    };
+
+    const removedAssignments: LooseRecord[] = [];
+    for (const assignment of targetAssignments.filter(item => item.status !== 'removed')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      removedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+        status: 'removed',
+        removed_by_user_id: user.id || null,
+        removed_at: nowIso(),
+        metadata: {
+          ...(assignment.metadata || {}),
+          vacated_by_task_partition_key: context.idempotencyKey,
+          vacated_by_task_partition_request_hash: requestHash,
+        },
+      }));
+    }
+    removedAssignments.push(...targetAssignments.filter(item => (
+      item.status === 'removed'
+      && item.metadata?.vacated_by_task_partition_request_hash === requestHash
+    )));
+
+    const removedSegments: LooseRecord[] = [];
+    const cancelledShifts: LooseRecord[] = [];
+    for (const absorbedShiftId of absorbedShiftIds) {
+      let absorbedShift = await requireRecord(base44, 'PlanningShift', absorbedShiftId, 'Samen te voegen dienst');
+      const activeAssignments = (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningAssignment,
+        { shift_id: absorbedShift.id },
+      )).filter(item => item.status !== 'removed');
+      if (activeAssignments.length) {
+        throw new ApiError(409, 'Een samen te voegen companion-dienst is intussen bezet; laad het rooster opnieuw');
+      }
+      if (absorbedShift.status !== 'cancelled') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        absorbedShift = await casUpdate(base44, 'PlanningShift', absorbedShift, revisionOf(absorbedShift), {
+          status: 'cancelled',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: taskPartitionMetadata(absorbedShift, {
+            ...marker,
+            phase: 'coalesce_pending',
+            absorbed_into_shift_id: survivorShift.id,
+            updated_at: nowIso(),
+          }),
+        });
+      }
+      cancelledShifts.push(absorbedShift);
+    }
+    for (const absorbedSegmentId of absorbedSegmentIds) {
+      let absorbedSegment = await requireRecord(
+        base44,
+        'PlanningShiftTaskSegment',
+        absorbedSegmentId,
+        'Samen te voegen taakdeel',
+      );
+      if (absorbedSegment.status !== 'removed') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        absorbedSegment = await casUpdate(
+          base44,
+          'PlanningShiftTaskSegment',
+          absorbedSegment,
+          revisionOf(absorbedSegment),
+          {
+            status: 'removed',
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(absorbedSegment.metadata || {}),
+              absorbed_into_segment_id: survivorSegment.id,
+              vacate_partition_request_hash: requestHash,
+            },
+          },
+        );
+      }
+      removedSegments.push(absorbedSegment);
+    }
+
+    survivorSegment = await requireRecord(
+      base44,
+      'PlanningShiftTaskSegment',
+      survivorSegment.id,
+      'Overblijvend taakdeel',
+    );
+    if (survivorSegment.status === 'removed') {
+      throw new ApiError(409, 'Het overblijvende taakdeel is intussen verwijderd');
+    }
+    if (!sameInterval(survivorSegment, unionInterval, 'segment')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      survivorSegment = await casUpdate(
+        base44,
+        'PlanningShiftTaskSegment',
+        survivorSegment,
+        revisionOf(survivorSegment),
+        {
+          ...segmentIntervalPatch(unionInterval),
+          status: 'draft',
+          sequence_index: 0,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(survivorSegment.metadata || {}),
+            coalesced_task_partition_request_hash: requestHash,
+            absorbed_segment_ids: absorbedSegmentIds,
+          },
+        },
+      );
+    }
+    survivorShift = await requireRecord(base44, 'PlanningShift', survivorShift.id, 'Overblijvende open dienst');
+    if (!sameInterval(survivorShift, unionInterval, 'shift') || survivorShift.status !== 'draft') {
+      await renewPlanningResourceLeases(base44, user, leases);
+      survivorShift = await casUpdate(base44, 'PlanningShift', survivorShift, revisionOf(survivorShift), {
+        ...shiftIntervalPatch(unionInterval),
+        task_occurrence_ids: [occurrence.id],
+        task_segment_count: 1,
+        status: 'draft',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: taskPartitionMetadata(survivorShift, {
+          ...marker,
+          phase: 'coalesce_pending',
+          absorbed_shift_ids: absorbedShiftIds,
+          updated_at: nowIso(),
+        }),
+      });
+    }
+    const survivorAssignments = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningAssignment,
+      { shift_id: survivorShift.id },
+    )).filter(item => item.status !== 'removed');
+    if (survivorAssignments.length) {
+      throw new ApiError(409, 'De samengevoegde dienst is intussen opnieuw bezet; laad het rooster opnieuw');
+    }
+
+    if (occurrence.metadata?.last_task_partition_vacate_request_hash !== requestHash) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(occurrence.metadata || {}),
+          last_task_partition_vacate_idempotency_key: context.idempotencyKey,
+          last_task_partition_vacate_request_hash: requestHash,
+          last_task_partition_vacate_survivor_shift_id: survivorShift.id,
+          last_task_partition_vacate_completed_at: nowIso(),
+        },
+      });
+    }
+    const completedShifts: LooseRecord[] = [];
+    for (const participantId of uniqueStrings(marker.participant_shift_ids)) {
+      let participant = await requireRecord(base44, 'PlanningShift', participantId, 'Taakdienst');
+      if (participant.metadata?.task_partition_mutation?.phase !== 'state_written_audit_pending') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        participant = await casUpdate(base44, 'PlanningShift', participant, revisionOf(participant), {
+          metadata: taskPartitionMetadata(participant, {
+            ...(participant.metadata?.task_partition_mutation || marker),
+            phase: 'state_written_audit_pending',
+            survivor_shift_id: survivorShift.id,
+            state_written_at: nowIso(),
+          }),
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+      }
+      completedShifts.push(participant);
+      if (String(participant.id) === String(survivorShift.id)) survivorShift = participant;
+    }
+    const uniqueRemovedAssignments = uniqueRecords(removedAssignments, item => String(item.id));
+    const pendingResult = {
+      shift: survivorShift,
+      shifts: [
+        survivorShift,
+        ...completedShifts.filter(item => String(item.id) !== String(survivorShift.id)),
+      ],
+      segment: survivorSegment,
+      segments: [survivorSegment, ...removedSegments],
+      assignments: uniqueRemovedAssignments,
+      task_occurrences: [occurrence],
+      survivor_shift_id: survivorShift.id,
+      survivor_segment_id: survivorSegment.id,
+      removed_shift_ids: absorbedShiftIds,
+      removed_segment_ids: absorbedSegmentIds,
+      removed_assignment_ids: uniqueRemovedAssignments.map(item => item.id),
+    };
+    let audit = replay || await findReplay(base44, action, context.idempotencyKey);
+    if (audit) {
+      assertReplayFingerprint(audit, user, requestHash, action);
+    } else {
+      await renewPlanningResourceLeases(base44, user, leases);
+      audit = await appendAudit(base44, user, {
+        action,
+        resource_type: 'PlanningShift',
+        resource_id: survivorShift.id,
+        shift_id: survivorShift.id,
+        before_state: beforeState,
+        after_state: pendingResult,
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: { request_hash: requestHash, recovered_completed_state: recovering },
+      });
+    }
+    const finalizedShifts = await finalizeTaskPartitionMarkers(
+      base44,
+      user,
+      leases,
+      uniqueStrings(marker.participant_shift_ids),
+      action,
+      context,
+      requestHash,
+      audit.id,
+    );
+    const finalizedById = new Map(finalizedShifts.map(item => [String(item.id), item]));
+    survivorShift = finalizedById.get(String(survivorShift.id)) || survivorShift;
+    const result = {
+      ...pendingResult,
+      shift: survivorShift,
+      shifts: [
+        survivorShift,
+        ...finalizedShifts.filter(item => String(item.id) !== String(survivorShift.id)),
+      ],
+    };
+    return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  });
+}
+
+function assertUnpublishedTaskPartitionSegment(segment: LooseRecord, label: string) {
+  if (
+    segment.status !== 'draft'
+    || Number(segment.published_revision || 0) > 0
+    || segment.last_published_correlation_id
+  ) {
+    throw new ApiError(409, `Alleen een ongepubliceerd concepttaakdeel kan als ${label} worden samengevoegd`, {
+      code: 'TASK_PARTITION_DRAFT_REQUIRED',
+      segment_id: segment.id,
+    });
+  }
+}
+
+function assertTaskPartitionAssignmentMergeInterval(
+  targetShift: LooseRecord,
+  targetSegment: LooseRecord,
+  survivorShift: LooseRecord,
+  survivorSegment: LooseRecord,
+) {
+  const targetInterval = segmentInterval(targetSegment);
+  const survivorInterval = segmentInterval(survivorSegment);
+  if (!targetInterval || !survivorInterval) {
+    throw new ApiError(409, 'Een van de taakdelen heeft een ongeldig tijdvenster');
+  }
+  if (
+    !sameInterval(targetShift, targetInterval, 'shift')
+    || !sameInterval(survivorShift, survivorInterval, 'shift')
+  ) {
+    throw new ApiError(409, 'De diensttijd en taakdeeltijd lopen niet gelijk; automatisch samenvoegen is onveilig', {
+      code: 'TASK_PARTITION_INTERVAL_MISMATCH',
+    });
+  }
+  if (targetInterval.end !== survivorInterval.start && survivorInterval.end !== targetInterval.start) {
+    throw new ApiError(409, 'De open dienst sluit niet exact aan op de bezette dienst', {
+      code: 'TASK_PARTITION_EXACT_ADJACENCY_REQUIRED',
+    });
+  }
+  const unionInterval = {
+    start: Math.min(targetInterval.start, survivorInterval.start),
+    end: Math.max(targetInterval.end, survivorInterval.end),
+  };
+  if (unionInterval.end - unionInterval.start > MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES) {
+    throw new ApiError(409, 'De samengevoegde dienst mag niet langer dan 12 uur duren', {
+      code: 'TASK_PARTITION_MAX_ASSIGNED_DURATION_EXCEEDED',
+      maximum_duration_minutes: MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES,
+      requested_duration_minutes: unionInterval.end - unionInterval.start,
+    });
+  }
+  return unionInterval;
+}
+
+async function assignAndMergeTaskShiftPartition(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  const action = ASSIGN_AND_MERGE_TASK_SHIFT_PARTITION_ACTION;
+  requireMutationIdempotency(context, action);
+  const requestHash = await mutationRequestHash(action, body);
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, action);
+  }
+
+  const targetShiftId = requireId(body, 'target_shift_id');
+  const targetSegmentId = requireId(body, 'target_segment_id');
+  const adjacentShiftId = requireId(body, 'adjacent_shift_id');
+  const adjacentSegmentId = requireId(body, 'adjacent_segment_id');
+  const adjacentAssignmentId = requireId(body, 'adjacent_assignment_id');
+  const personnelId = requireId(body, 'personnel_id');
+  if (String(targetShiftId) === String(adjacentShiftId)) {
+    throw new ApiError(400, 'De open en bezette dienst moeten verschillende diensten zijn');
+  }
+
+  const [initialTargetShift, initialTargetSegment, initialAdjacentShift, initialAdjacentSegment] = await Promise.all([
+    requireRecord(base44, 'PlanningShift', targetShiftId, 'Open dienst'),
+    requireRecord(base44, 'PlanningShiftTaskSegment', targetSegmentId, 'Open taakdeel'),
+    requireRecord(base44, 'PlanningShift', adjacentShiftId, 'Aansluitende bezette dienst'),
+    requireRecord(base44, 'PlanningShiftTaskSegment', adjacentSegmentId, 'Aansluitend bezet taakdeel'),
+  ]);
+  if (
+    String(initialTargetSegment.shift_id) !== String(initialTargetShift.id)
+    || String(initialAdjacentSegment.shift_id) !== String(initialAdjacentShift.id)
+  ) {
+    throw new ApiError(409, 'Een taakdeel hoort niet bij de opgegeven dienst');
+  }
+  const initialMarker = taskPartitionMarker(initialTargetShift, action, context, user, requestHash);
+  if (replay && (
+    !initialMarker
+    || await taskPartitionOperationIsCommitted(
+      base44,
+      initialMarker,
+      action,
+      context,
+      user,
+      requestHash,
+      replay.id,
+    )
+  )) {
+    return replayTaskPartitionMutation(base44, replay);
+  }
+  const occurrenceId = compact(
+    initialMarker?.task_occurrence_id
+    || initialTargetSegment.task_occurrence_id,
+  );
+  if (!occurrenceId) throw new ApiError(409, 'De open dienst heeft geen taakuitvoering');
+  const initialUnion = initialMarker?.union_interval || assertTaskPartitionAssignmentMergeInterval(
+    initialTargetShift,
+    initialTargetSegment,
+    initialAdjacentShift,
+    initialAdjacentSegment,
+  );
+  const initialUnionStart = Number(initialUnion?.start);
+  const initialUnionEnd = Number(initialUnion?.end);
+  if (
+    !Number.isFinite(initialUnionStart)
+    || !Number.isFinite(initialUnionEnd)
+    || initialUnionEnd <= initialUnionStart
+    || initialUnionEnd - initialUnionStart > MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES
+  ) {
+    throw new ApiError(409, 'De herstelstaat bevat een ongeldige samengevoegde diensttijd');
+  }
+  const anticipatedInitialSurvivor = {
+    ...initialAdjacentShift,
+    ...shiftIntervalPatch({ start: initialUnionStart, end: initialUnionEnd }),
+  };
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('task_occurrence', occurrenceId),
+    resourceCoordinatorDescriptor('shift_composition', targetShiftId),
+    resourceCoordinatorDescriptor('shift_composition', adjacentShiftId),
+  ]);
+  descriptors.push(...await personnelDayDescriptors(
+    [personnelId],
+    [initialTargetShift, initialAdjacentShift, anticipatedInitialSurvivor],
+  ));
+  const operationFields = taskPartitionOperationFields(action, context, user, requestHash, body);
+
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    let [targetShift, targetSegment, survivorShift, survivorSegment, assignment, occurrence] = await Promise.all([
+      requireRecord(base44, 'PlanningShift', targetShiftId, 'Open dienst'),
+      requireRecord(base44, 'PlanningShiftTaskSegment', targetSegmentId, 'Open taakdeel'),
+      requireRecord(base44, 'PlanningShift', adjacentShiftId, 'Aansluitende bezette dienst'),
+      requireRecord(base44, 'PlanningShiftTaskSegment', adjacentSegmentId, 'Aansluitend bezet taakdeel'),
+      requireRecord(base44, 'PlanningAssignment', adjacentAssignmentId, 'Bestaande toewijzing'),
+      requireRecord(base44, 'PlanningTaskOccurrence', occurrenceId, 'Taakuitvoering'),
+    ]);
+    let marker = taskPartitionMarker(targetShift, action, context, user, requestHash);
+    const recovering = Boolean(marker);
+    await assertNoForeignPendingMutation(base44, targetShift, context, action, user, requestHash);
+    await assertNoForeignPendingMutation(base44, survivorShift, context, action, user, requestHash);
+
+    if (!recovering) {
+      assertDraftSingleTaskShift(targetShift, 'open dienst');
+      assertDraftSingleTaskShift(survivorShift, 'bezette dienst');
+      assertUnpublishedTaskPartitionSegment(targetSegment, 'open taakdeel');
+      assertUnpublishedTaskPartitionSegment(survivorSegment, 'bezet taakdeel');
+      assertExpectedRecordRevision(
+        targetShift,
+        body.expected_target_shift_revision,
+        'expected_target_shift_revision',
+        'PlanningShift',
+      );
+      assertExpectedRecordRevision(
+        targetSegment,
+        body.expected_target_segment_revision,
+        'expected_target_segment_revision',
+        'PlanningShiftTaskSegment',
+      );
+      assertExpectedRecordRevision(
+        survivorShift,
+        body.expected_adjacent_shift_revision,
+        'expected_adjacent_shift_revision',
+        'PlanningShift',
+      );
+      assertExpectedRecordRevision(
+        survivorSegment,
+        body.expected_adjacent_segment_revision,
+        'expected_adjacent_segment_revision',
+        'PlanningShiftTaskSegment',
+      );
+      assertExpectedRecordRevision(
+        assignment,
+        body.expected_adjacent_assignment_revision,
+        'expected_adjacent_assignment_revision',
+        'PlanningAssignment',
+      );
+      assertExpectedRecordRevision(
+        occurrence,
+        body.expected_occurrence_revision,
+        'expected_occurrence_revision',
+        'PlanningTaskOccurrence',
+      );
+    } else if (
+      String(marker.target_shift_id) !== String(targetShift.id)
+      || String(marker.target_segment_id) !== String(targetSegment.id)
+      || String(marker.survivor_shift_id) !== String(survivorShift.id)
+      || String(marker.survivor_segment_id) !== String(survivorSegment.id)
+      || String(marker.assignment_id) !== String(assignment.id)
+      || String(marker.personnel_id) !== String(personnelId)
+      || String(marker.task_occurrence_id) !== String(occurrence.id)
+    ) {
+      throw new ApiError(409, 'De herstelstaat hoort niet bij deze open-diensttoewijzing');
+    }
+
+    if (occurrence.lifecycle_status !== 'active') {
+      throw new ApiError(409, 'Alleen een actuele taakuitvoering kan worden bezet');
+    }
+    if (
+      String(targetSegment.shift_id) !== String(targetShift.id)
+      || String(survivorSegment.shift_id) !== String(survivorShift.id)
+      || String(targetSegment.task_occurrence_id) !== String(occurrence.id)
+      || String(survivorSegment.task_occurrence_id) !== String(occurrence.id)
+      || uniqueStrings(targetShift.task_occurrence_ids).length !== 1
+      || uniqueStrings(survivorShift.task_occurrence_ids).length !== 1
+      || String(uniqueStrings(targetShift.task_occurrence_ids)[0]) !== String(occurrence.id)
+      || String(uniqueStrings(survivorShift.task_occurrence_ids)[0]) !== String(occurrence.id)
+    ) {
+      throw new ApiError(409, 'De open en bezette dienst horen niet bij exact dezelfde taakuitvoering', {
+        code: 'TASK_PARTITION_SAME_OCCURRENCE_REQUIRED',
+      });
+    }
+    if (Number(targetShift.required_count || 1) !== 1 || Number(survivorShift.required_count || 1) !== 1) {
+      throw new ApiError(409, 'Alleen taakdiensten met precies één gevraagde medewerker worden automatisch samengevoegd', {
+        code: 'TASK_PARTITION_REQUIRED_COUNT_ONE',
+      });
+    }
+    if (!taskPartitionShiftsCompatible(targetShift, survivorShift, occurrence.id)) {
+      throw new ApiError(409, 'De open en bezette dienst hebben verschillende dienstvoorwaarden', {
+        code: 'TASK_PARTITION_ADJACENT_INCOMPATIBLE',
+      });
+    }
+    if (
+      Number(targetShift.published_revision || 0) > 0
+      || targetShift.last_published_correlation_id
+      || Number(survivorShift.published_revision || 0) > 0
+      || survivorShift.last_published_correlation_id
+      || Number(targetSegment.published_revision || 0) > 0
+      || targetSegment.last_published_correlation_id
+      || Number(survivorSegment.published_revision || 0) > 0
+      || survivorSegment.last_published_correlation_id
+    ) {
+      throw new ApiError(409, 'Een gepubliceerd taakdeel wordt niet automatisch samengevoegd', {
+        code: 'TASK_PARTITION_DRAFT_REQUIRED',
+      });
+    }
+    if (survivorShift.status !== 'draft' || survivorSegment.status !== 'draft') {
+      throw new ApiError(409, 'De bezette dienst is niet langer een actief concept');
+    }
+    if (!recovering && (
+      targetShift.metadata?.task_partition_origin?.action !== RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION
+      || targetSegment.metadata?.task_partition_origin?.action !== RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION
+      || String(targetShift.metadata?.task_partition_origin?.original_shift_id || '') !== String(survivorShift.id)
+      || String(targetSegment.metadata?.task_partition_origin?.original_shift_id || '') !== String(survivorShift.id)
+    )) {
+      throw new ApiError(409, 'Alleen een echte open companion-dienst uit een taakresize kan zo worden bezet', {
+        code: 'TASK_PARTITION_COMPANION_REQUIRED',
+      });
+    }
+
+    const [targetSegments, survivorSegments, targetAssignments, survivorAssignments] = await Promise.all([
+      filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: targetShift.id }),
+      filterAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, { shift_id: survivorShift.id }),
+      filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: targetShift.id }),
+      filterAllRecords(base44.asServiceRole.entities.PlanningAssignment, { shift_id: survivorShift.id }),
+    ]);
+    const activeTargetSegments = targetSegments.filter(item => item.status !== 'removed');
+    const activeSurvivorSegments = survivorSegments.filter(item => item.status !== 'removed');
+    const activeTargetAssignments = targetAssignments.filter(item => item.status !== 'removed');
+    const activeSurvivorAssignments = survivorAssignments.filter(item => item.status !== 'removed');
+    if (
+      activeTargetAssignments.length !== 0
+      || activeSurvivorAssignments.length !== 1
+      || String(activeSurvivorAssignments[0]?.id || '') !== String(assignment.id)
+      || String(assignment.shift_id) !== String(survivorShift.id)
+      || String(assignment.personnel_id) !== String(personnelId)
+      || Number(assignment.slot_index) !== 0
+      || assignment.status !== 'draft'
+      || Number(assignment.published_revision || 0) > 0
+      || assignment.last_published_correlation_id
+    ) {
+      throw new ApiError(409, 'De open of bezette dienstbezetting is intussen gewijzigd; laad het rooster opnieuw', {
+        code: 'TASK_PARTITION_ASSIGNMENT_STATE_CHANGED',
+      });
+    }
+    if (
+      activeSurvivorSegments.length !== 1
+      || String(activeSurvivorSegments[0].id) !== String(survivorSegment.id)
+      || (!recovering && (
+        activeTargetSegments.length !== 1
+        || String(activeTargetSegments[0].id) !== String(targetSegment.id)
+      ))
+      || (recovering && activeTargetSegments.some(item => String(item.id) !== String(targetSegment.id)))
+    ) {
+      throw new ApiError(409, 'Een taakdienst bevat intussen meerdere taakdelen; automatisch samenvoegen is onveilig', {
+        code: 'TASK_PARTITION_SINGLE_TASK_REQUIRED',
+      });
+    }
+
+    let unionInterval: { start: number; end: number };
+    if (marker) {
+      unionInterval = {
+        start: Number(marker.union_interval?.start),
+        end: Number(marker.union_interval?.end),
+      };
+      if (
+        !Number.isFinite(unionInterval.start)
+        || !Number.isFinite(unionInterval.end)
+        || unionInterval.end <= unionInterval.start
+        || unionInterval.end - unionInterval.start > MAX_COMPOSE_AND_ASSIGN_SHIFT_MINUTES
+      ) {
+        throw new ApiError(409, 'De herstelstaat bevat een ongeldige samengevoegde diensttijd');
+      }
+      const survivorCurrentInterval = segmentInterval(survivorSegment);
+      const targetOriginalInterval = segmentInterval(targetSegment);
+      if (
+        !survivorCurrentInterval
+        || !targetOriginalInterval
+        || survivorCurrentInterval.start < unionInterval.start
+        || survivorCurrentInterval.end > unionInterval.end
+        || targetOriginalInterval.start < unionInterval.start
+        || targetOriginalInterval.end > unionInterval.end
+      ) {
+        throw new ApiError(409, 'De taakdienst wijkt af van de opgeslagen samenvoegopdracht');
+      }
+    } else {
+      unionInterval = assertTaskPartitionAssignmentMergeInterval(
+        targetShift,
+        targetSegment,
+        survivorShift,
+        survivorSegment,
+      );
+    }
+
+    if (!recovering) {
+      const occurrenceSegments = (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShiftTaskSegment,
+        { task_occurrence_id: occurrence.id },
+      )).filter(item => item.status !== 'removed');
+      const occurrenceShiftIds = uniqueStrings(occurrenceSegments.map(item => item.shift_id));
+      const occurrenceShifts = await filterRecordsByValues(
+        base44.asServiceRole.entities.PlanningShift,
+        'id',
+        occurrenceShiftIds,
+      );
+      const occurrenceShiftById = new Map(occurrenceShifts.map(item => [String(item.id), item]));
+      const overlappingForeignSegments = occurrenceSegments.filter(item => {
+        if ([String(targetSegment.id), String(survivorSegment.id)].includes(String(item.id))) return false;
+        if (!shiftAllowsActiveTaskSegments(occurrenceShiftById.get(String(item.shift_id)))) return false;
+        const interval = segmentInterval(item);
+        return Boolean(interval && interval.start < unionInterval.end && unionInterval.start < interval.end);
+      });
+      if (overlappingForeignSegments.length) {
+        throw new ApiError(409, 'Een ander taakdeel overlapt de samen te voegen diensttijd', {
+          code: 'TASK_PARTITION_OVERLAPPING_COVERAGE',
+          segment_ids: overlappingForeignSegments.map(item => item.id),
+        });
+      }
+    }
+
+    const plannerWarnings = dedupeWarnings([
+      ...normalizeArray<LooseRecord>(assignment.warning_snapshot)
+        .filter(item => item.source === 'planner'),
+      ...normalizeSuppliedWarnings(body),
+    ]);
+    const anticipatedSurvivor = {
+      ...survivorShift,
+      ...shiftIntervalPatch(unionInterval),
+      status: 'draft',
+    };
+    let eligibility: LooseRecord | null = null;
+    const assignmentAlreadyValidated = (
+      assignment.metadata?.task_partition_assign_merge_request_hash === requestHash
+      && sameInterval(survivorShift, unionInterval, 'shift')
+    );
+    if (!assignmentAlreadyValidated) {
+      const personnel = await requireRecord(base44, 'Personnel', personnelId, 'Medewerker');
+      eligibility = await evaluateAssignmentWarnings(
+        base44,
+        anticipatedSurvivor,
+        personnel,
+        assignment.id,
+        plannerWarnings,
+        [targetShift.id],
+      );
+    }
+
+    const beforeState = recovering ? null : {
+      shifts: [targetShift, survivorShift],
+      segments: [targetSegment, survivorSegment],
+      assignments: [assignment],
+      occurrence,
+    };
+    marker = marker || {
+      ...operationFields,
+      phase: 'assign_merge_pending',
+      task_occurrence_id: occurrence.id,
+      target_shift_id: targetShift.id,
+      target_segment_id: targetSegment.id,
+      survivor_shift_id: survivorShift.id,
+      survivor_segment_id: survivorSegment.id,
+      assignment_id: assignment.id,
+      personnel_id: personnelId,
+      participant_shift_ids: [targetShift.id, survivorShift.id],
+      participant_segment_ids: [targetSegment.id, survivorSegment.id],
+      absorbed_shift_ids: [targetShift.id],
+      absorbed_segment_ids: [targetSegment.id],
+      union_interval: unionInterval,
+      started_at: nowIso(),
+    };
+
+    for (const participantId of [targetShift.id, survivorShift.id]) {
+      let participant = String(participantId) === String(targetShift.id) ? targetShift : survivorShift;
+      const existing = taskPartitionMarker(participant, action, context, user, requestHash);
+      if (!existing) {
+        await renewPlanningResourceLeases(base44, user, leases);
+        participant = await casUpdate(base44, 'PlanningShift', participant, revisionOf(participant), {
+          metadata: taskPartitionMetadata(participant, {
+            ...marker,
+            phase: 'assign_merge_pending',
+            updated_at: nowIso(),
+          }),
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+      }
+      if (String(participant.id) === String(targetShift.id)) targetShift = participant;
+      else survivorShift = participant;
+    }
+
+    if (targetShift.status !== 'cancelled') {
+      if (targetShift.status !== 'draft') {
+        throw new ApiError(409, 'De open companion-dienst is intussen gewijzigd');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      targetShift = await casUpdate(base44, 'PlanningShift', targetShift, revisionOf(targetShift), {
+        status: 'cancelled',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: taskPartitionMetadata(targetShift, {
+          ...marker,
+          phase: 'assign_merge_pending',
+          absorbed_into_shift_id: survivorShift.id,
+          updated_at: nowIso(),
+        }),
+      });
+    }
+    if (targetSegment.status !== 'removed') {
+      await renewPlanningResourceLeases(base44, user, leases);
+      targetSegment = await casUpdate(
+        base44,
+        'PlanningShiftTaskSegment',
+        targetSegment,
+        revisionOf(targetSegment),
+        {
+          status: 'removed',
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(targetSegment.metadata || {}),
+            absorbed_into_segment_id: survivorSegment.id,
+            task_partition_assign_merge_request_hash: requestHash,
+          },
+        },
+      );
+    }
+    if (!sameInterval(survivorSegment, unionInterval, 'segment')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      survivorSegment = await casUpdate(
+        base44,
+        'PlanningShiftTaskSegment',
+        survivorSegment,
+        revisionOf(survivorSegment),
+        {
+          ...segmentIntervalPatch(unionInterval),
+          status: 'draft',
+          sequence_index: 0,
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(survivorSegment.metadata || {}),
+            absorbed_segment_ids: [targetSegment.id],
+            task_partition_assign_merge_request_hash: requestHash,
+          },
+        },
+      );
+    }
+    if (!sameInterval(survivorShift, unionInterval, 'shift')) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      survivorShift = await casUpdate(base44, 'PlanningShift', survivorShift, revisionOf(survivorShift), {
+        ...shiftIntervalPatch(unionInterval),
+        source_type: 'task',
+        task_occurrence_ids: [occurrence.id],
+        task_segment_count: 1,
+        status: 'draft',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: taskPartitionMetadata(survivorShift, {
+          ...marker,
+          phase: 'assign_merge_pending',
+          absorbed_shift_ids: [targetShift.id],
+          updated_at: nowIso(),
+        }),
+      });
+    }
+    if (!assignmentAlreadyValidated) {
+      if (!eligibility) throw new ApiError(500, 'Medewerkercontrole voor de samengevoegde dienst ontbreekt');
+      await renewPlanningResourceLeases(base44, user, leases);
+      assignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
+        status: 'draft',
+        personnel_contract_id: eligibility.personnel_contract_id,
+        warning_codes: eligibility.warning_codes,
+        warning_snapshot: eligibility.warning_snapshot,
+        has_critical_warnings: eligibility.has_critical_warnings,
+        contract_routing_snapshot: eligibility.contract_routing_snapshot,
+        metadata: {
+          ...(assignment.metadata || {}),
+          task_partition_assign_merge_idempotency_key: context.idempotencyKey,
+          task_partition_assign_merge_request_hash: requestHash,
+          task_partition_assign_merge_survivor_shift_id: survivorShift.id,
+          final_assignment_validation_at: nowIso(),
+        },
+      });
+    }
+
+    if (occurrence.metadata?.last_task_partition_assign_merge_request_hash !== requestHash) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      occurrence = await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, revisionOf(occurrence), {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(occurrence.metadata || {}),
+          last_task_partition_assign_merge_idempotency_key: context.idempotencyKey,
+          last_task_partition_assign_merge_request_hash: requestHash,
+          last_task_partition_assign_merge_survivor_shift_id: survivorShift.id,
+          last_task_partition_assign_merge_assignment_id: assignment.id,
+          last_task_partition_assign_merge_completed_at: nowIso(),
+        },
+      });
+    }
+
+    const completedShifts: LooseRecord[] = [];
+    for (const participantId of [targetShift.id, survivorShift.id]) {
+      let participant = await requireRecord(base44, 'PlanningShift', participantId, 'Taakdienst');
+      const participantMarker = taskPartitionMarker(participant, action, context, user, requestHash);
+      if (!participantMarker) {
+        throw new ApiError(409, 'De duurzame herstelmarkering van de samengevoegde taakdienst ontbreekt');
+      }
+      if (participantMarker.phase !== 'state_written_audit_pending') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        participant = await casUpdate(base44, 'PlanningShift', participant, revisionOf(participant), {
+          metadata: taskPartitionMetadata(participant, {
+            ...participantMarker,
+            phase: 'state_written_audit_pending',
+            survivor_shift_id: survivorShift.id,
+            state_written_at: nowIso(),
+          }),
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+        });
+      }
+      completedShifts.push(participant);
+      if (String(participant.id) === String(targetShift.id)) targetShift = participant;
+      if (String(participant.id) === String(survivorShift.id)) survivorShift = participant;
+    }
+    assignment = await requireRecord(base44, 'PlanningAssignment', assignment.id, 'Toewijzing');
+    survivorSegment = await requireRecord(
+      base44,
+      'PlanningShiftTaskSegment',
+      survivorSegment.id,
+      'Overblijvend taakdeel',
+    );
+    targetSegment = await requireRecord(
+      base44,
+      'PlanningShiftTaskSegment',
+      targetSegment.id,
+      'Verwijderd open taakdeel',
+    );
+    const pendingResult = {
+      shift: survivorShift,
+      shifts: [
+        survivorShift,
+        ...completedShifts.filter(item => String(item.id) !== String(survivorShift.id)),
+      ],
+      segment: survivorSegment,
+      segments: [survivorSegment, targetSegment],
+      assignment,
+      assignments: [assignment],
+      task_occurrences: [occurrence],
+      survivor_shift_id: survivorShift.id,
+      survivor_segment_id: survivorSegment.id,
+      removed_shift_ids: [targetShift.id],
+      removed_segment_ids: [targetSegment.id],
+      removed_assignment_ids: [],
+    };
+    let audit = replay || await findReplay(base44, action, context.idempotencyKey);
+    if (audit) {
+      assertReplayFingerprint(audit, user, requestHash, action);
+    } else {
+      await renewPlanningResourceLeases(base44, user, leases);
+      audit = await appendAudit(base44, user, {
+        action,
+        resource_type: 'PlanningAssignment',
+        resource_id: assignment.id,
+        shift_id: survivorShift.id,
+        assignment_id: assignment.id,
+        before_state: beforeState,
+        after_state: pendingResult,
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: {
+          request_hash: requestHash,
+          recovered_completed_state: recovering,
+          absorbed_shift_id: targetShift.id,
+          absorbed_segment_id: targetSegment.id,
+        },
+      });
+    }
+    const finalizedShifts = await finalizeTaskPartitionMarkers(
+      base44,
+      user,
+      leases,
+      [targetShift.id, survivorShift.id],
+      action,
+      context,
+      requestHash,
+      audit.id,
+    );
+    const finalizedById = new Map(finalizedShifts.map(item => [String(item.id), item]));
+    targetShift = finalizedById.get(String(targetShift.id)) || targetShift;
+    survivorShift = finalizedById.get(String(survivorShift.id)) || survivorShift;
+    const result = {
+      ...pendingResult,
+      shift: survivorShift,
+      shifts: [survivorShift, targetShift],
+    };
+    return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  });
+}
+
+function copyTaskOccurrenceMarker(
+  record: LooseRecord | null | undefined,
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+) {
+  const marker = record?.metadata?.copy_task_occurrence_mutation;
+  if (!marker || marker.idempotency_key !== context.idempotencyKey) return null;
+  if (
+    marker.action !== COPY_TASK_OCCURRENCE_ACTION
+    || marker.actor_user_id !== (user.id || null)
+    || marker.request_hash !== requestHash
+  ) {
+    throw new ApiError(409, 'idempotency_key hoort bij een andere copy_task_occurrence-opdracht');
+  }
+  return marker;
+}
+
+function copyTaskOccurrenceMarkerFields(
+  context: ReturnType<typeof mutationContext>,
+  user: LooseRecord,
+  requestHash: string,
+  body: LooseRecord,
+  copyIdentity: string,
+) {
+  return {
+    operation_id: `${COPY_TASK_OCCURRENCE_ACTION}:${context.idempotencyKey}`,
+    action: COPY_TASK_OCCURRENCE_ACTION,
+    phase: 'prepared',
+    idempotency_key: context.idempotencyKey,
+    correlation_id: context.correlationId,
+    actor_user_id: user.id || null,
+    actor_snapshot: {
+      id: user.id || null,
+      name: actorName(user),
+      email: compact(user.email) || null,
+    },
+    request_hash: requestHash,
+    request_payload: mutationRequestPayload(body),
+    copy_identity: copyIdentity,
+    source_occurrence_id: requireId(body, 'source_occurrence_id'),
+    target_service_date: asDate(body.target_service_date, 'target_service_date'),
+    started_at: nowIso(),
+  };
+}
+
+function copyTaskOccurrenceMarkerIsCommitted(
+  marker: LooseRecord | null | undefined,
+  auditEventId?: string | null,
+) {
+  return Boolean(
+    marker?.phase === 'completed'
+    && compact(marker.audit_event_id)
+    && (!auditEventId || String(marker.audit_event_id) === String(auditEventId)),
+  );
+}
+
+async function recoverPendingCopyTaskOccurrences(
+  base44: LooseRecord,
+  user: LooseRecord,
+  seriesRecords: LooseRecord[],
+  periodStart: string,
+  periodEnd: string,
+) {
+  const pending = seriesRecords
+    .map(series => series.metadata?.copy_task_occurrence_mutation)
+    .filter(marker => (
+      marker
+      && !copyTaskOccurrenceMarkerIsCommitted(marker)
+      && marker.target_service_date >= periodStart
+      && marker.target_service_date <= periodEnd
+    ));
+  const markers = uniqueRecords(pending, marker => (
+    compact(marker.operation_id) || `${marker.action}:${marker.idempotency_key}`
+  )).sort((left, right) => String(left.operation_id || '').localeCompare(String(right.operation_id || '')));
+  const reports: LooseRecord[] = [];
+  for (const marker of markers) {
+    const operationId = compact(marker.operation_id)
+      || `${compact(marker.action)}:${compact(marker.idempotency_key)}`;
+    if (marker.actor_user_id !== (user.id || null)) {
+      reports.push({ operation_id: operationId, status: 'blocked_actor' });
+      continue;
+    }
+    if (
+      marker.action !== COPY_TASK_OCCURRENCE_ACTION
+      || !marker.idempotency_key
+      || !marker.request_hash
+      || !marker.request_payload
+    ) {
+      reports.push({ operation_id: operationId, status: 'blocked_invalid_marker' });
+      continue;
+    }
+    try {
+      const result = await copyTaskOccurrence(
+        base44,
+        user,
+        {
+          action: COPY_TASK_OCCURRENCE_ACTION,
+          ...marker.request_payload,
+          idempotency_key: marker.idempotency_key,
+          correlation_id: marker.correlation_id || marker.idempotency_key,
+        },
+        {
+          idempotencyKey: marker.idempotency_key,
+          correlationId: marker.correlation_id || marker.idempotency_key,
+        },
+      );
+      reports.push({
+        operation_id: operationId,
+        status: 'completed',
+        audit_event_id: result.audit_event_id || null,
+      });
+    } catch (error) {
+      if (Number((error as any)?.status) !== 409) throw error;
+      reports.push({
+        operation_id: operationId,
+        status: 'blocked_conflict',
+        code: (error as any)?.details?.code || null,
+        message: (error as Error)?.message || String(error),
+      });
+    }
+  }
+  return reports;
+}
+
+async function copyTaskOccurrence(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+) {
+  const action = COPY_TASK_OCCURRENCE_ACTION;
+  requireMutationIdempotency(context, action);
+  const requestHash = await mutationRequestHash(action, body);
+  const replay = await findReplay(base44, action, context.idempotencyKey);
+  if (replay) {
+    assertReplayFingerprint(replay, user, requestHash, action);
+  }
+  const sourceOccurrenceId = requireId(body, 'source_occurrence_id');
+  const targetServiceDate = asDate(body.target_service_date, 'target_service_date');
+  const initialSource = await requireRecord(
+    base44,
+    'PlanningTaskOccurrence',
+    sourceOccurrenceId,
+    'Bron-taakuitvoering',
+  );
+  const expectedSourceRevision = positiveInteger(
+    body.expected_source_occurrence_revision,
+    'expected_source_occurrence_revision',
+  );
+  const definitionId = compact(initialSource.object_task_definition_id);
+  if (!definitionId) throw new ApiError(409, 'De bron-taakuitvoering heeft geen actuele objecttaakdefinitie');
+  const copyIdentity = `${sourceOccurrenceId}:${targetServiceDate}`;
+  const copyFingerprint = await sha256(stableStringify({
+    source_occurrence_id: sourceOccurrenceId,
+    target_service_date: targetServiceDate,
+  }));
+  const seriesStorageKey = await deterministicTaskStorageKey(`copy-task-occurrence:${copyIdentity}:series`);
+  const revisionStorageKey = await deterministicTaskStorageKey(`copy-task-occurrence:${copyIdentity}:revision:1`);
+  const initialSeries = (await filterAllRecords(
+    base44.asServiceRole.entities.ObjectTaskScheduleSeries,
+    { creation_idempotency_key: seriesStorageKey },
+    'created_date',
+  )).sort(coordinatorOrder)[0] || null;
+  const initialCopyMarker = copyTaskOccurrenceMarker(initialSeries, context, user, requestHash);
+  if (replay && (!initialCopyMarker || copyTaskOccurrenceMarkerIsCommitted(initialCopyMarker, replay.id))) {
+    return replayCopyTaskOccurrenceMutation(base44, replay);
+  }
+  if (!initialCopyMarker && initialSource.lifecycle_status !== 'active') {
+    throw new ApiError(409, 'Alleen een actuele taakuitvoering kan worden gekopieerd');
+  }
+  const initialTargetOccurrence = initialSeries
+    ? (await filterAllRecords(
+        base44.asServiceRole.entities.PlanningTaskOccurrence,
+        { object_task_schedule_series_id: initialSeries.id },
+        'created_date',
+      )).filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null
+    : null;
+  const descriptors: LooseRecord[] = await Promise.all([
+    resourceCoordinatorDescriptor('task_occurrence', sourceOccurrenceId),
+    resourceCoordinatorDescriptor('object_task_definition', definitionId),
+    resourceCoordinatorDescriptor('copy_task_occurrence', copyIdentity),
+  ]);
+  if (initialSeries) {
+    descriptors.push(await resourceCoordinatorDescriptor('object_task_series', initialSeries.id));
+  }
+  if (initialTargetOccurrence) {
+    descriptors.push(await resourceCoordinatorDescriptor('task_occurrence', initialTargetOccurrence.id));
+  }
+  const operationFields = copyTaskOccurrenceMarkerFields(
+    context,
+    user,
+    requestHash,
+    body,
+    copyIdentity,
+  );
+  return withPlanningResourceLeases(base44, user, context, requestHash, descriptors, async leases => {
+    const source = await requireRecord(
+      base44,
+      'PlanningTaskOccurrence',
+      sourceOccurrenceId,
+      'Bron-taakuitvoering',
+    );
+    let series = (await filterAllRecords(
+      base44.asServiceRole.entities.ObjectTaskScheduleSeries,
+      { creation_idempotency_key: seriesStorageKey },
+      'created_date',
+    )).sort(coordinatorOrder)[0] || null;
+    const lockedMarker = copyTaskOccurrenceMarker(series, context, user, requestHash);
+    const recovering = Boolean(lockedMarker);
+    if (source.lifecycle_status !== 'active' && !recovering) {
+      throw new ApiError(409, 'De bron-taakuitvoering is intussen vervangen; laad het rooster opnieuw');
+    }
+    if (!recovering) {
+      assertExpectedRecordRevision(
+        source,
+        expectedSourceRevision,
+        'expected_source_occurrence_revision',
+        'PlanningTaskOccurrence',
+      );
+    }
+    const definition = await requireRecord(base44, 'ObjectTaskDefinition', definitionId, 'Objecttaak');
+    if (definition.status === 'archived') {
+      throw new ApiError(409, 'Een taak uit een gearchiveerde blauwdruk kan niet worden gekopieerd');
+    }
+    if (
+      String(definition.object_id) !== String(source.object_id)
+      || String(definition.customer_id) !== String(source.customer_id)
+    ) {
+      throw new ApiError(409, 'De actuele objecttaakdefinitie hoort niet meer bij deze taakuitvoering');
+    }
+    if (!recovering) {
+      assertFutureSchedule(targetServiceDate, source.window_start_time, amsterdamServerClock());
+    }
+    const targetWindow = normalizedPeriodInterval(
+      targetServiceDate,
+      source.window_start_time,
+      source.window_end_time,
+    );
+    if (!targetWindow?.interval) throw new ApiError(409, 'Het gekopieerde taakvenster is ongeldig');
+    const requiredMinutes = definition.execution_mode === 'continuous'
+      ? targetWindow.interval.duration
+      : positiveInteger(definition.duration_minutes, 'ObjectTaskDefinition.duration_minutes');
+    if (requiredMinutes > targetWindow.interval.duration) {
+      throw new ApiError(409, 'De actuele taakduur past niet meer binnen het gekopieerde taakvenster');
+    }
+    const block = {
+      effective_from: targetServiceDate,
+      recurrence_anchor_date: targetServiceDate,
+      recurrence_type: 'one_time',
+      recurrence_interval: 1,
+      weekday: isoWeekday(targetServiceDate),
+      start_time: source.window_start_time,
+      end_time: source.window_end_time,
+      recurrence_end_date: targetServiceDate,
+      required_minutes: requiredMinutes,
+    };
+    if (series && (
+      series.creation_request_fingerprint !== copyFingerprint
+      || String(series.metadata?.copy_task_occurrence?.source_occurrence_id || '') !== String(source.id)
+      || series.metadata?.copy_task_occurrence?.target_service_date !== targetServiceDate
+    )) {
+      throw new ApiError(409, 'De deterministische kopie hoort bij een andere bron of doeldatum');
+    }
+    const foreignSeriesMarker = series?.metadata?.copy_task_occurrence_mutation;
+    if (
+      foreignSeriesMarker
+      && !copyTaskOccurrenceMarkerIsCommitted(foreignSeriesMarker)
+      && !lockedMarker
+    ) {
+      throw new ApiError(409, 'Een eerdere taakkopie voor deze bron en doeldatum moet eerst worden hersteld', {
+        code: 'COPY_TASK_OCCURRENCE_RECOVERY_PENDING',
+        pending_idempotency_key: foreignSeriesMarker.idempotency_key || null,
+      });
+    }
+    if (!series) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      series = await base44.asServiceRole.entities.ObjectTaskScheduleSeries.create({
+        series_key: `ots-copy-${(await sha256(copyIdentity)).slice(0, 24)}`,
+        customer_id: definition.customer_id,
+        object_id: definition.object_id,
+        object_task_definition_id: definition.id,
+        current_revision_id: null,
+        current_revision_number: 0,
+        status: 'active',
+        timezone: 'Europe/Amsterdam',
+        creation_idempotency_key: seriesStorageKey,
+        creation_request_fingerprint: copyFingerprint,
+        creation_actor_user_id: user.id || null,
+        version: 1,
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          schedule_kind: 'planning_copy',
+          standalone_one_time: true,
+          copy_task_occurrence: {
+            source_occurrence_id: source.id,
+            target_service_date: targetServiceDate,
+            copy_identity: copyIdentity,
+            created_by_idempotency_key: context.idempotencyKey,
+          },
+          copy_task_occurrence_mutation: operationFields,
+        },
+      });
+    } else if (!lockedMarker) {
+      await renewPlanningResourceLeases(base44, user, leases);
+      series = await casVersionUpdate(base44, 'ObjectTaskScheduleSeries', series, versionOf(series), {
+        metadata: {
+          ...(series.metadata || {}),
+          copy_task_occurrence_mutation: operationFields,
+        },
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      });
+    }
+    let scheduleRevision = (await filterAllRecords(
+      base44.asServiceRole.entities.ObjectTaskScheduleRevision,
+      { creation_idempotency_key: revisionStorageKey },
+      'created_date',
+    )).sort(coordinatorOrder)[0] || null;
+    if (scheduleRevision && (
+      scheduleRevision.creation_request_fingerprint !== copyFingerprint
+      || String(scheduleRevision.series_id) !== String(series.id)
+    )) {
+      throw new ApiError(409, 'De deterministische taakrevisie hoort bij een andere kopie');
+    }
+    if (!scheduleRevision) {
+      const taskSnapshot = {
+        task_type: definition.task_type,
+        custom_task_type: compact(definition.custom_task_type) || null,
+        execution_mode: definition.execution_mode,
+        duration_minutes: definition.execution_mode === 'time_window'
+          ? Number(definition.duration_minutes)
+          : null,
+        instructions: compact(definition.instructions) || null,
+        security_plan_id: definition.security_plan_id || null,
+        security_plan_revision_id: definition.security_plan_revision_id || null,
+      };
+      await renewPlanningResourceLeases(base44, user, leases);
+      scheduleRevision = await base44.asServiceRole.entities.ObjectTaskScheduleRevision.create(
+        await scheduleRevisionPayload(
+          user,
+          context,
+          copyFingerprint,
+          definition,
+          series,
+          block,
+          1,
+          null,
+          'schedule',
+          revisionStorageKey,
+          taskSnapshot,
+        ),
+      );
+    }
+    if (
+      String(series.current_revision_id || '') !== String(scheduleRevision.id)
+      || Number(series.current_revision_number || 0) !== 1
+      || series.status !== 'active'
+    ) {
+      if (series.current_revision_id && String(series.current_revision_id) !== String(scheduleRevision.id)) {
+        throw new ApiError(409, 'De gekopieerde taakreeks verwijst intussen naar een andere revisie');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      series = await casVersionUpdate(base44, 'ObjectTaskScheduleSeries', series, versionOf(series), {
+        current_revision_id: scheduleRevision.id,
+        current_revision_number: 1,
+        status: 'active',
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+      });
+    }
+    const blueprint = scheduleSeriesBlueprints(
+      definition,
+      [series],
+      [scheduleRevision],
+      targetServiceDate,
+      targetServiceDate,
+      [],
+    )[0] || null;
+    if (!blueprint) throw new ApiError(409, 'De eenmalige taakkopie kon niet worden gematerialiseerd');
+    const [object, customer] = await Promise.all([
+      requireRecord(base44, 'SurveillanceObject', definition.object_id, 'Object'),
+      requireRecord(base44, 'Customer', definition.customer_id, 'Klant'),
+    ]);
+    const occurrenceContext = await objectTaskOccurrenceContext(base44, definition, object, customer);
+    const desiredOccurrence: LooseRecord = {
+      ...blueprint,
+      ...occurrenceContext,
+      required_minutes: requiredMinutes,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: nowIso(),
+      metadata: {
+        bootstrap_source: 'copy_task_occurrence',
+        standalone_one_time: true,
+        copied_from_task_occurrence_id: source.id,
+        copy_identity: copyIdentity,
+        created_by_idempotency_key: context.idempotencyKey,
+        copy_task_occurrence_mutation: {
+          ...operationFields,
+          phase: 'state_written_audit_pending',
+          state_written_at: nowIso(),
+        },
+      },
+      supersedes_task_occurrence_id: null,
+      superseded_by_task_occurrence_id: null,
+      revision: 1,
+      published_revision: 0,
+      last_published_correlation_id: null,
+    };
+    let targetOccurrence = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningTaskOccurrence,
+      { source_key: blueprint.source_key },
+      'created_date',
+    )).filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null;
+    if (targetOccurrence) {
+      const ownedTargetMarker = copyTaskOccurrenceMarker(targetOccurrence, context, user, requestHash);
+      const foreignTargetMarker = targetOccurrence.metadata?.copy_task_occurrence_mutation;
+      if (
+        foreignTargetMarker
+        && !copyTaskOccurrenceMarkerIsCommitted(foreignTargetMarker)
+        && !ownedTargetMarker
+      ) {
+        throw new ApiError(409, 'De bestaande taakkopie wacht nog op herstel', {
+          code: 'COPY_TASK_OCCURRENCE_RECOVERY_PENDING',
+          task_occurrence_id: targetOccurrence.id,
+          pending_idempotency_key: foreignTargetMarker.idempotency_key || null,
+        });
+      }
+      const mismatchedFields = TASK_OCCURRENCE_COMPARABLE_FIELDS.filter(field => (
+        stableStringify(targetOccurrence[field] ?? null)
+          !== stableStringify(desiredOccurrence[field] ?? null)
+      ));
+      if (mismatchedFields.length && !ownedTargetMarker) {
+        throw new ApiError(409, 'De bestaande taakkopie wijkt af van de actuele deterministische kopie', {
+          task_occurrence_id: targetOccurrence.id,
+          mismatched_fields: mismatchedFields,
+        });
+      }
+      if (!ownedTargetMarker || ownedTargetMarker.phase !== 'state_written_audit_pending') {
+        await renewPlanningResourceLeases(base44, user, leases);
+        targetOccurrence = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          targetOccurrence,
+          revisionOf(targetOccurrence),
+          {
+            last_modified_by_user_id: user.id || null,
+            last_modified_at: nowIso(),
+            metadata: {
+              ...(targetOccurrence.metadata || {}),
+              copy_task_occurrence_mutation: {
+                ...operationFields,
+                phase: 'state_written_audit_pending',
+                state_written_at: nowIso(),
+              },
+            },
+          },
+        );
+      }
+    } else {
+      await renewPlanningResourceLeases(base44, user, leases);
+      targetOccurrence = await base44.asServiceRole.entities.PlanningTaskOccurrence.create(desiredOccurrence);
+    }
+    if (!targetOccurrence) throw new ApiError(503, 'De taakkopie kon niet duurzaam worden gematerialiseerd');
+    const targetSegments = (await filterAllRecords(
+      base44.asServiceRole.entities.PlanningShiftTaskSegment,
+      { task_occurrence_id: targetOccurrence.id },
+    )).filter(item => item.status !== 'removed');
+    if (targetSegments.length) {
+      throw new ApiError(409, 'De bestaande taakkopie is intussen ingepland en kan niet als lege nieuwe kopie worden teruggegeven', {
+        code: 'COPIED_TASK_OCCURRENCE_ALREADY_PLANNED',
+        task_occurrence_id: targetOccurrence.id,
+      });
+    }
+    const exceptions = (await filterAllRecords(
+      base44.asServiceRole.entities.ObjectTaskScheduleException,
+      { service_date: targetServiceDate },
+    )).filter(item => (
+      String(item.source_series_id || '') === String(series.id)
+      || String(item.alternative_series_id || '') === String(series.id)
+    ));
+    if (exceptions.length) {
+      throw new ApiError(409, 'Een standalone taakkopie mag geen taakuitzondering bevatten');
+    }
+    series = await requireRecord(base44, 'ObjectTaskScheduleSeries', series.id, 'Gekopieerde taakreeks');
+    const stateWrittenSeriesMarker = copyTaskOccurrenceMarker(series, context, user, requestHash);
+    if (!stateWrittenSeriesMarker) {
+      throw new ApiError(409, 'De duurzame herstelmarkering van de gekopieerde taakreeks ontbreekt', {
+        code: 'COPY_TASK_OCCURRENCE_RECOVERY_MARKER_MISSING',
+        series_id: series.id,
+      });
+    }
+    if (stateWrittenSeriesMarker.phase !== 'state_written_audit_pending') {
+      await renewPlanningResourceLeases(base44, user, leases);
+      series = await casVersionUpdate(base44, 'ObjectTaskScheduleSeries', series, versionOf(series), {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(series.metadata || {}),
+          copy_task_occurrence_mutation: {
+            ...stateWrittenSeriesMarker,
+            phase: 'state_written_audit_pending',
+            target_occurrence_id: targetOccurrence.id,
+            schedule_revision_id: scheduleRevision.id,
+            state_written_at: nowIso(),
+          },
+        },
+      });
+    }
+    const pendingResult = {
+      definition,
+      series,
+      schedule_revision: scheduleRevision,
+      task_occurrence: targetOccurrence,
+      task_occurrences: [targetOccurrence],
+      shifts: [],
+      segments: [],
+      assignments: [],
+      exceptions: [],
+      deduplicated: targetOccurrence.metadata?.created_by_idempotency_key !== context.idempotencyKey,
+    };
+    let audit = replay || await findReplay(base44, action, context.idempotencyKey);
+    if (audit) {
+      assertReplayFingerprint(audit, user, requestHash, action);
+    } else {
+      await renewPlanningResourceLeases(base44, user, leases);
+      audit = await appendAudit(base44, user, {
+        action,
+        resource_type: 'PlanningTaskOccurrence',
+        resource_id: targetOccurrence.id,
+        before_state: null,
+        after_state: pendingResult,
+        correlation_id: context.correlationId,
+        idempotency_key: context.idempotencyKey,
+        undoable: false,
+        metadata: {
+          request_hash: requestHash,
+          source_occurrence_id: source.id,
+          target_service_date: targetServiceDate,
+          copy_identity: copyIdentity,
+        },
+      });
+    }
+
+    targetOccurrence = await requireRecord(
+      base44,
+      'PlanningTaskOccurrence',
+      targetOccurrence.id,
+      'Taakkopie',
+    );
+    const targetMarker = copyTaskOccurrenceMarker(targetOccurrence, context, user, requestHash);
+    if (!targetMarker) {
+      throw new ApiError(409, 'De duurzame herstelmarkering van de taakkopie ontbreekt', {
+        code: 'COPY_TASK_OCCURRENCE_RECOVERY_MARKER_MISSING',
+        task_occurrence_id: targetOccurrence.id,
+      });
+    }
+    if (!copyTaskOccurrenceMarkerIsCommitted(targetMarker, audit.id)) {
+      if (targetMarker.audit_event_id && String(targetMarker.audit_event_id) !== String(audit.id)) {
+        throw new ApiError(409, 'De taakkopie verwijst naar een andere auditregistratie');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      targetOccurrence = await casUpdate(
+        base44,
+        'PlanningTaskOccurrence',
+        targetOccurrence,
+        revisionOf(targetOccurrence),
+        {
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(targetOccurrence.metadata || {}),
+            copy_task_occurrence_mutation: {
+              ...targetMarker,
+              phase: 'completed',
+              audit_event_id: audit.id,
+              completed_at: nowIso(),
+            },
+          },
+        },
+      );
+    }
+
+    series = await requireRecord(base44, 'ObjectTaskScheduleSeries', series.id, 'Gekopieerde taakreeks');
+    const seriesMarker = copyTaskOccurrenceMarker(series, context, user, requestHash);
+    if (!seriesMarker) {
+      throw new ApiError(409, 'De duurzame herstelmarkering van de gekopieerde taakreeks ontbreekt', {
+        code: 'COPY_TASK_OCCURRENCE_RECOVERY_MARKER_MISSING',
+        series_id: series.id,
+      });
+    }
+    if (!copyTaskOccurrenceMarkerIsCommitted(seriesMarker, audit.id)) {
+      if (seriesMarker.audit_event_id && String(seriesMarker.audit_event_id) !== String(audit.id)) {
+        throw new ApiError(409, 'De gekopieerde taakreeks verwijst naar een andere auditregistratie');
+      }
+      await renewPlanningResourceLeases(base44, user, leases);
+      series = await casVersionUpdate(base44, 'ObjectTaskScheduleSeries', series, versionOf(series), {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(series.metadata || {}),
+          copy_task_occurrence_mutation: {
+            ...seriesMarker,
+            phase: 'completed',
+            audit_event_id: audit.id,
+            completed_at: nowIso(),
+          },
+        },
+      });
+    }
+    const result = {
+      ...pendingResult,
+      series,
+      task_occurrence: targetOccurrence,
+      task_occurrences: [targetOccurrence],
+    };
+    return { ok: true, ...result, audit_event_id: audit.id, undoable: false, undo_token: null };
+  });
+}
+
 async function composeAndAssign(
   base44: LooseRecord,
   user: LooseRecord,
@@ -12497,6 +15946,7 @@ function publicationShiftSnapshot(shift: LooseRecord) {
       required_security_role_status: shift.required_security_role_status || null,
       required_qualification_types: shift.required_qualification_types || [],
       required_qualification_groups: shift.required_qualification_groups || [],
+      required_security_pass_types: shift.required_security_pass_types || [],
     },
     status: shift.status,
     revision: revisionOf(shift),
@@ -13683,6 +17133,7 @@ export {
   amsterdamServerClock,
   asDate,
   asTime,
+  assignAndMergeTaskShiftPartition,
   assertFutureSchedule,
   assignPersonnel,
   bootstrapRange,
@@ -13692,6 +17143,7 @@ export {
   composeShift,
   createObjectTask,
   coordinatorOrder,
+  copyTaskOccurrence,
   copyShift,
   dedupeWarnings,
   detectLegacySingleTaskMigrations,
@@ -13704,6 +17156,7 @@ export {
   occurrenceCoverage,
   listObjectTasks,
   planningIntervalDates,
+  prefetchAssignmentEligibility,
   publishPlanning,
   publicationAssignmentSnapshot,
   publicationOccurrenceSnapshot,
@@ -13714,6 +17167,7 @@ export {
   repairSharedTaskBoundary,
   mutateObjectTaskSeries,
   resizeSharedTaskBoundary,
+  resizeTaskShiftPreservingCoverage,
   renewPlanningResourceLeases,
   restoreAssignment,
   revisionOf,
@@ -13722,6 +17176,7 @@ export {
   stableStringify,
   unassignPersonnel,
   undoPlanning,
+  vacateTaskShiftPartition,
 };
 
 Deno.serve(async (req) => {
@@ -13735,6 +17190,9 @@ Deno.serve(async (req) => {
     const action = compact(body.action);
     const context = mutationContext(body);
 
+    if (action === 'prefetch_assignment_eligibility') {
+      return json(await prefetchAssignmentEligibility(base44, body));
+    }
     if (action === 'list_object_tasks') return json(await listObjectTasks(base44, body, user));
     if (action === 'repair_object_task_series_impact') {
       const seriesId = requireId(body, 'series_id');
@@ -13764,6 +17222,18 @@ Deno.serve(async (req) => {
     }
     if (action === 'compose_shift' || action === 'update_shift_composition') {
       return json(await composeShift(base44, user, body, context), action === 'compose_shift' ? 201 : 200);
+    }
+    if (action === RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION) {
+      return json(await resizeTaskShiftPreservingCoverage(base44, user, body, context));
+    }
+    if (action === VACATE_TASK_SHIFT_PARTITION_ACTION) {
+      return json(await vacateTaskShiftPartition(base44, user, body, context));
+    }
+    if (action === ASSIGN_AND_MERGE_TASK_SHIFT_PARTITION_ACTION) {
+      return json(await assignAndMergeTaskShiftPartition(base44, user, body, context));
+    }
+    if (action === COPY_TASK_OCCURRENCE_ACTION) {
+      return json(await copyTaskOccurrence(base44, user, body, context), 201);
     }
     if (action === SHARED_TASK_BOUNDARY_ACTION) {
       return json(await resizeSharedTaskBoundary(base44, user, body, context));

@@ -207,6 +207,20 @@
       },
       "default": []
     },
+    "required_security_pass_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "grey",
+          "green",
+          "temporary",
+          "other"
+        ]
+      },
+      "default": [],
+      "description": "Beveiligingspastypes die voor deze dienst verplicht zijn."
+    },
     "contract_assignment_policy": {
       "type": "string",
       "enum": [

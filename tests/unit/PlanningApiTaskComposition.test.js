@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
+import { QueryClient } from "@tanstack/react-query";
 import { beforeAll, describe, expect, it } from "vitest";
+import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const source = fs.readFileSync(path.join(root, "base44/functions/planningApi/entry.ts"), "utf8");
@@ -120,6 +122,7 @@ function setup(occurrences) {
     Personnel: entity([], "personnel"),
     PersonnelAbsence: entity([], "absence"),
     PersonnelRestriction: entity([], "restriction"),
+    PersonnelSecurityPass: entity([], "security-pass"),
   };
   return {
     base44: { asServiceRole: { entities, functions: { invoke: async () => ({}) } } },
@@ -154,6 +157,83 @@ function instrumentBackendCalls(base44, entities) {
 const user = { id: "admin-1", role: "admin", name: "Planner" };
 const context = key => ({ idempotencyKey: key, correlationId: key });
 
+async function prepareAssignedTaskPartition({
+  key,
+  startTime = "06:30",
+  endTime = "18:00",
+  splitTime = "15:30",
+}) {
+  const startMinutes = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3));
+  const endMinutes = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3));
+  const requiredMinutes = endMinutes > startMinutes
+    ? endMinutes - startMinutes
+    : 24 * 60 - startMinutes + endMinutes;
+  const demand = occurrence(`occurrence-${key}`, "object-1", startTime, endTime, requiredMinutes);
+  if (endMinutes <= startMinutes) demand.end_date = "2026-08-18";
+  const { base44, entities } = setup([demand]);
+  const personnelId = `personnel-${key}`;
+  entities.Personnel.records.push({ id: personnelId, name: "Dagbeveiliger", status: "active" });
+  const composed = await backend.composeAndAssign(base44, user, {
+    personnel_id: personnelId,
+    segments: [{
+      task_occurrence_id: demand.id,
+      start_date: demand.service_date,
+      start_time: demand.window_start_time,
+      end_date: demand.end_date,
+      end_time: demand.window_end_time,
+    }],
+    expected_occurrence_revisions: { [demand.id]: demand.revision },
+  }, context(`${key}-compose`));
+  const beforeResizeOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+  const splitDate = endMinutes <= startMinutes && splitTime < startTime
+    ? "2026-08-18"
+    : demand.service_date;
+  const resized = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+    shift_id: composed.shift.id,
+    segment_id: composed.segments[0].id,
+    start_date: demand.service_date,
+    start_time: demand.window_start_time,
+    end_date: splitDate,
+    end_time: splitTime,
+    expected_shift_revision: composed.shift.revision,
+    expected_segment_revision: composed.segments[0].revision,
+    expected_occurrence_revision: beforeResizeOccurrence.revision,
+    expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+  }, context(`${key}-resize`));
+  const adjacentShift = resized.shift;
+  const adjacentSegment = resized.segment;
+  const adjacentAssignment = resized.assignments[0];
+  const targetShift = resized.shifts.find(item => item.id !== adjacentShift.id);
+  const targetSegment = resized.segments.find(item => item.shift_id === targetShift.id);
+  const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+  const payload = {
+    target_shift_id: targetShift.id,
+    target_segment_id: targetSegment.id,
+    adjacent_shift_id: adjacentShift.id,
+    adjacent_segment_id: adjacentSegment.id,
+    adjacent_assignment_id: adjacentAssignment.id,
+    personnel_id: personnelId,
+    expected_target_shift_revision: targetShift.revision,
+    expected_target_segment_revision: targetSegment.revision,
+    expected_adjacent_shift_revision: adjacentShift.revision,
+    expected_adjacent_segment_revision: adjacentSegment.revision,
+    expected_adjacent_assignment_revision: adjacentAssignment.revision,
+    expected_occurrence_revision: currentOccurrence.revision,
+  };
+  return {
+    base44,
+    entities,
+    demand,
+    personnelId,
+    targetShift,
+    targetSegment,
+    adjacentShift,
+    adjacentSegment,
+    adjacentAssignment,
+    payload,
+  };
+}
+
 async function idempotencyClaimId(key) {
   const digest = await globalThis.crypto.subtle.digest(
     "SHA-256",
@@ -167,18 +247,6 @@ async function idempotencyClaimId(key) {
 
 async function idempotencyRegistryKey(key) {
   return `idempotency_registry:v3:${(await idempotencyClaimId(key)).slice(0, 2)}`;
-}
-
-async function simulateLegacyV2PendingClaim(entityClient, claimId, requestHash) {
-  const [registry] = await entityClient.filter({ coordinator_key: "idempotency_registry:v2" });
-  const existing = registry?.metadata?.claims?.[claimId];
-  if (existing?.request_hash && existing.request_hash !== requestHash) {
-    throw Object.assign(new Error("legacy idempotency_key hoort bij een andere opdracht"), { status: 409 });
-  }
-  if (existing?.status === "pending" && Date.parse(existing.expires_at || "") > Date.now()) {
-    throw Object.assign(new Error("legacy compose_and_assign wordt al verwerkt"), { status: 409 });
-  }
-  throw new Error("Gesimuleerde legacy writer trof onverwacht geen actieve v2-claim");
 }
 
 async function createWeeklyObjectTask({
@@ -2118,13 +2186,19 @@ describe("planningApi losse taakuitzonderingen vanuit Planning", () => {
 });
 
 describe("planning coverage-entiteiten", () => {
-  it("staat de auditactie voor een losse taakafwijking toe", () => {
+  it("staat alle duurzame taak- en partitieauditacties toe", () => {
     const schema = JSON.parse(fs.readFileSync(
       path.join(root, "base44/entities/PlanningAuditEvent.jsonc"),
       "utf8",
     ));
 
-    expect(schema.properties.action.enum).toContain("change_single_task_occurrence");
+    expect(schema.properties.action.enum).toEqual(expect.arrayContaining([
+      "change_single_task_occurrence",
+      "resize_task_shift_preserving_coverage",
+      "vacate_task_shift_partition",
+      "assign_and_merge_task_shift_partition",
+      "copy_task_occurrence",
+    ]));
   });
 
   it("staan alleen service-role writes toe en geven admins uitsluitend leesrechten", () => {
@@ -2247,7 +2321,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(20);
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
-    expect(calls.total()).toBeLessThanOrEqual(77);
+    expect(calls.total()).toBeLessThanOrEqual(85);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -2256,6 +2330,60 @@ describe("planningApi dienstsamenstelling", () => {
         undoable: false,
       }),
     ]);
+  });
+
+  it("legt beveiligingspas- en 11-uurs-rustwaarschuwingen vast bij de finale servertoewijzing", async () => {
+    const demand = occurrence("occurrence-final-authority", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-final-authority";
+    entities.Personnel.records.push({ id: personnelId, name: "Finale Beveiliger", status: "active" });
+    const object = entities.SurveillanceObject.records.find(item => item.id === "object-1");
+    object.default_required_security_pass_types = ["green"];
+    entities.PersonnelSecurityPass.records.push({
+      id: "security-pass-final-authority",
+      personnel_id: personnelId,
+      company_id: "company-1",
+      pass_type: "green",
+      status: "expired",
+      valid_until: "2026-08-15",
+    });
+    entities.PlanningShift.records.push({
+      id: "shift-before-final-authority",
+      source_key: "manual-before-final-authority",
+      source_type: "manual",
+      service_date: "2026-08-16",
+      start_time: "21:00",
+      end_time: "23:00",
+      status: "published",
+      revision: 1,
+      published_revision: 1,
+      required_count: 1,
+    });
+    entities.PlanningAssignment.records.push({
+      id: "assignment-before-final-authority",
+      shift_id: "shift-before-final-authority",
+      slot_index: 0,
+      personnel_id: personnelId,
+      status: "published",
+      revision: 1,
+      published_revision: 1,
+    });
+
+    const result = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-final-server-authority"));
+
+    expect(result.assignment.warning_codes).toEqual(expect.arrayContaining([
+      "security_pass_expired",
+      "insufficient_rest",
+    ]));
+    expect(result.assignment.has_critical_warnings).toBe(true);
+    expect(result.assignment.warning_snapshot).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "security_pass_expired", severity: "critical" }),
+      expect.objectContaining({ code: "insufficient_rest", severity: "warning" }),
+    ]));
   });
 
   it("staat exact twaalf uur automatisch toe, maar weigert twaalf uur en vijf minuten zonder neveneffecten", async () => {
@@ -2434,7 +2562,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(calls.count("PlanningAssignment.create")).toBe(1);
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
     expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
-    expect(calls.total()).toBeLessThanOrEqual(36);
+    expect(calls.total()).toBeLessThanOrEqual(37);
     expect(assignmentValidationSawProvisionalWrite).toBe(true);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
@@ -2577,7 +2705,7 @@ describe("planningApi dienstsamenstelling", () => {
       "historical-shift-99",
     ]));
     expect(shiftQueries).toContainEqual({
-      service_date: { $in: ["2026-08-16", "2026-08-17"] },
+      service_date: { $in: ["2026-08-16", "2026-08-17", "2026-08-18"] },
     });
   });
 
@@ -2902,12 +3030,13 @@ describe("planningApi dienstsamenstelling", () => {
     expect(registry.metadata.claims).toEqual({});
   });
 
-  it("blokkeert current op een actieve legacy-v2-claim voordat de v3-shard wordt geraakt", async () => {
+  it("respecteert tijdens de rollout een actieve legacy-v2-fence en schrijft geen businessrecords", async () => {
     const demand = occurrence("occurrence-legacy-v2-pending", "object-1", "08:00", "12:00", 240);
     const { base44, entities } = setup([demand]);
     entities.Personnel.records.push({ id: "personnel-legacy-v2-pending", name: "Legacy Beveiliger", status: "active" });
     const mutationKey = "compose-legacy-v2-pending";
     const claimId = await idempotencyClaimId(mutationKey);
+    const registryKey = await idempotencyRegistryKey(mutationKey);
     entities.PlanningMutationCoordinator.records.push({
       id: "coordinator-legacy-v2-pending",
       coordinator_key: "idempotency_registry:v2",
@@ -2929,118 +3058,62 @@ describe("planningApi dienstsamenstelling", () => {
       },
     });
 
+    const legacyBefore = structuredClone(entities.PlanningMutationCoordinator.records[0]);
     await expect(backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-legacy-v2-pending",
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
     }, context(mutationKey))).rejects.toMatchObject({ status: 409 });
 
+    expect(entities.PlanningMutationCoordinator.records.find(
+      item => item.coordinator_key === "idempotency_registry:v2",
+    )).toEqual(legacyBefore);
     expect(entities.PlanningMutationCoordinator.records.some(
-      item => item.coordinator_key.startsWith("idempotency_registry:v3:"),
+      item => item.coordinator_key === registryKey,
     )).toBe(false);
     expect(entities.PlanningShift.records).toEqual([]);
     expect(entities.PlanningAssignment.records).toEqual([]);
   });
 
-  it("herstelt idempotent een partial dual-claim met alleen de current v2-helft", async () => {
-    const demand = occurrence("occurrence-partial-dual-claim", "object-1", "08:00", "12:00", 240);
+  it("blokkeert een actieve v3-claim zonder businessrecords aan te maken", async () => {
+    const demand = occurrence("occurrence-active-v3-claim", "object-1", "08:00", "12:00", 240);
     const { base44, entities } = setup([demand]);
-    entities.Personnel.records.push({ id: "personnel-partial-dual-claim", name: "Herstel Beveiliger", status: "active" });
-    const mutationKey = "compose-partial-dual-claim";
+    entities.Personnel.records.push({ id: "personnel-active-v3-claim", name: "V3 Beveiliger", status: "active" });
+    const mutationKey = "compose-active-v3-claim";
     const claimId = await idempotencyClaimId(mutationKey);
-    const originalCoordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
-      entities.PlanningMutationCoordinator,
-    );
-    let failV3ClaimOnce = true;
-    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
-      const coordinator = entities.PlanningMutationCoordinator.records.find(item => item.id === query.id);
-      if (
-        failV3ClaimOnce
-        && coordinator?.coordinator_key.startsWith("idempotency_registry:v3:")
-        && update.$set?.metadata?.claims?.[claimId]?.status === "pending"
-      ) {
-        failV3ClaimOnce = false;
-        throw new Error("gesimuleerde uitval tussen v2 en v3");
-      }
-      return originalCoordinatorUpdateMany(query, update);
-    };
-    const payload = {
-      personnel_id: "personnel-partial-dual-claim",
-      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
-      expected_occurrence_revisions: { [demand.id]: 1 },
-    };
-    const mutationContext = context(mutationKey);
-
-    await expect(backend.composeAndAssign(base44, user, payload, mutationContext))
-      .rejects.toThrow("gesimuleerde uitval tussen v2 en v3");
-    const legacyClaim = entities.PlanningMutationCoordinator.records
-      .find(item => item.coordinator_key === "idempotency_registry:v2")
-      ?.metadata?.claims?.[claimId];
-    expect(legacyClaim).toMatchObject({
-      status: "pending",
-      claim_protocol: "dual_v2_v3_transition",
+    const registryKey = await idempotencyRegistryKey(mutationKey);
+    entities.PlanningMutationCoordinator.records.push({
+      id: "coordinator-active-v3-claim",
+      coordinator_key: registryKey,
+      resource_type: "idempotency_registry",
+      resource_id: `compose_and_assign:${registryKey.split(":").at(-1)}`,
+      lease: null,
+      revision: 1,
+      created_date: "2026-08-11T08:00:00.000Z",
+      metadata: {
+        claims: {
+          [claimId]: {
+            idempotency_key: mutationKey,
+            actor_user_id: user.id,
+            request_hash: "active-current-writer",
+            status: "pending",
+            claim_protocol: "v3_sharded",
+            expires_at: "2099-08-17T12:00:00.000Z",
+          },
+        },
+      },
     });
-    expect(entities.PlanningShift.records).toEqual([]);
 
-    const recovered = await backend.composeAndAssign(base44, user, payload, mutationContext);
-
-    expect(recovered.assignment.personnel_id).toBe("personnel-partial-dual-claim");
-    const shardKey = await idempotencyRegistryKey(mutationKey);
-    for (const registry of entities.PlanningMutationCoordinator.records.filter(
-      item => item.coordinator_key === "idempotency_registry:v2"
-        || item.coordinator_key === shardKey,
-    )) {
-      expect(registry.metadata?.claims || {}).toEqual({});
-    }
-  });
-
-  it("laat een gesimuleerde oude writer niet passeren nadat current de v2-helft heeft geclaimd", async () => {
-    const demand = occurrence("occurrence-current-v2-fences-old", "object-1", "08:00", "12:00", 240);
-    const { base44, entities } = setup([demand]);
-    entities.Personnel.records.push({ id: "personnel-current-v2-fences-old", name: "Current Beveiliger", status: "active" });
-    const mutationKey = "compose-current-v2-fences-old";
-    const claimId = await idempotencyClaimId(mutationKey);
-    const originalCoordinatorUpdateMany = entities.PlanningMutationCoordinator.updateMany.bind(
-      entities.PlanningMutationCoordinator,
-    );
-    let oldWriterAttempted = false;
-    let oldWriterBlocked = false;
-    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
-      const result = await originalCoordinatorUpdateMany(query, update);
-      const coordinator = entities.PlanningMutationCoordinator.records.find(item => item.id === query.id);
-      const currentClaim = coordinator?.metadata?.claims?.[claimId];
-      if (
-        !oldWriterAttempted
-        && coordinator?.coordinator_key === "idempotency_registry:v2"
-        && currentClaim?.status === "pending"
-        && currentClaim?.claim_protocol === "dual_v2_v3_transition"
-      ) {
-        oldWriterAttempted = true;
-        try {
-          await simulateLegacyV2PendingClaim(
-            entities.PlanningMutationCoordinator,
-            claimId,
-            currentClaim.request_hash,
-          );
-        } catch (error) {
-          oldWriterBlocked = error?.status === 409;
-        }
-      }
-      return result;
-    };
-
-    const result = await backend.composeAndAssign(base44, user, {
-      personnel_id: "personnel-current-v2-fences-old",
+    await expect(backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-active-v3-claim",
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "12:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
-    }, context(mutationKey));
-
-    expect(result.assignment.personnel_id).toBe("personnel-current-v2-fences-old");
-    expect(oldWriterAttempted).toBe(true);
-    expect(oldWriterBlocked).toBe(true);
+    }, context(mutationKey))).rejects.toMatchObject({ status: 409 });
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
   });
 
-  it("behoudt v3-shards naast exact één tijdelijke globale v2-rolloutfence", async () => {
+  it("claimt tijdens rollout zowel de globale v2-fence als onafhankelijke v3-shards", async () => {
     const morning = occurrence("occurrence-registry-shard-morning", "object-1", "08:00", "12:00", 240);
     const afternoon = occurrence("occurrence-registry-shard-afternoon", "object-1", "12:00", "16:00", 240);
     const { base44, entities } = setup([morning, afternoon]);
@@ -3072,10 +3145,12 @@ describe("planningApi dienstsamenstelling", () => {
         await idempotencyRegistryKey(firstKey),
         await idempotencyRegistryKey(secondKey),
       ].sort());
-    expect(entities.PlanningMutationCoordinator.records).toContainEqual(expect.objectContaining({
-      coordinator_key: "idempotency_registry:v2",
-      metadata: expect.objectContaining({ claims: {} }),
-    }));
+    expect(entities.PlanningMutationCoordinator.records.some(
+      item => item.coordinator_key === "idempotency_registry:v2",
+    )).toBe(true);
+    expect(entities.PlanningMutationCoordinator.records.find(
+      item => item.coordinator_key === "idempotency_registry:v2",
+    )?.metadata?.claims).toEqual({});
   });
 
   it("geeft eerder verkregen occurrence-reserveringen vrij als een latere reservation-CAS faalt", async () => {
@@ -4731,6 +4806,1348 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShift.records).toHaveLength(1);
     expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition"))
       .toHaveLength(1);
+  });
+
+  it("verkleint een bezette taakdienst, materialiseert een open dienst en replayt finalized revisies", async () => {
+    const demand = occurrence("occurrence-partition-resize", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-partition-resize", name: "Dagbeveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-partition-resize",
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-resize-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_date: "2026-08-17",
+      start_time: "06:30",
+      end_date: "2026-08-17",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    };
+
+    const result = await backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      context("partition-resize-end"),
+    );
+
+    expect(result.shift).toMatchObject({ start_time: "06:30", end_time: "15:30", status: "draft" });
+    expect(result.shifts).toHaveLength(2);
+    expect(result.segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ start_time: "06:30", end_time: "15:30", status: "draft" }),
+      expect.objectContaining({ start_time: "15:30", end_time: "18:00", status: "draft" }),
+    ]));
+    const companionShiftId = result.companion_shift_ids[0];
+    expect(entities.PlanningAssignment.records.filter(
+      item => item.shift_id === companionShiftId && item.status !== "removed",
+    )).toEqual([]);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 690, remaining_minutes: 0 });
+    expect(validationCalls).toBe(1);
+
+    const shiftCount = entities.PlanningShift.records.length;
+    const segmentCount = entities.PlanningShiftTaskSegment.records.length;
+    const auditCount = entities.PlanningAuditEvent.records.length;
+    const replay = await backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      context("partition-resize-end"),
+    );
+    expect(replay.idempotent).toBe(true);
+    expect(replay.companion_shift_ids).toEqual(result.companion_shift_ids);
+    expect(replay.shift).toEqual(await entities.PlanningShift.get(replay.shift.id));
+    expect(replay.shifts).toEqual(await Promise.all(
+      replay.shifts.map(item => entities.PlanningShift.get(item.id)),
+    ));
+    expect(replay.segment).toEqual(await entities.PlanningShiftTaskSegment.get(replay.segment.id));
+    expect(replay.segments).toEqual(await Promise.all(
+      replay.segments.map(item => entities.PlanningShiftTaskSegment.get(item.id)),
+    ));
+    expect(replay.assignments).toEqual(await Promise.all(
+      replay.assignments.map(item => entities.PlanningAssignment.get(item.id)),
+    ));
+    expect(replay.task_occurrences).toEqual(await Promise.all(
+      replay.task_occurrences.map(item => entities.PlanningTaskOccurrence.get(item.id)),
+    ));
+    expect(replay.shifts.every(item => (
+      item.metadata?.task_partition_mutation?.phase === "completed"
+      && item.metadata?.task_partition_mutation?.audit_event_id === replay.audit_event_id
+    ))).toBe(true);
+    expect(entities.PlanningShift.records).toHaveLength(shiftCount);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(segmentCount);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCount);
+  });
+
+  it.each([
+    {
+      label: "begintijd",
+      demand: occurrence("occurrence-partition-start", "object-1", "06:00", "18:00", 720),
+      target: { start_date: "2026-08-17", start_time: "09:00", end_date: "2026-08-17", end_time: "18:00" },
+      expectedCompanion: { start_date: "2026-08-17", start_time: "06:00", end_date: "2026-08-17", end_time: "09:00" },
+    },
+    {
+      label: "nachtdienst",
+      demand: {
+        ...occurrence("occurrence-partition-night", "object-1", "22:00", "06:00", 480),
+        end_date: "2026-08-18",
+      },
+      target: { start_date: "2026-08-18", start_time: "00:00", end_date: "2026-08-18", end_time: "06:00" },
+      expectedCompanion: { start_date: "2026-08-17", start_time: "22:00", end_date: "2026-08-18", end_time: "00:00" },
+    },
+  ])("behoudt dekking bij resize van $label", async ({ demand, target, expectedCompanion }) => {
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: demand.id,
+        start_date: demand.service_date,
+        start_time: demand.window_start_time,
+        end_date: demand.end_date,
+        end_time: demand.window_end_time,
+      }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context(`partition-${demand.id}-compose`));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const result = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      ...target,
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: {},
+    }, context(`partition-${demand.id}-resize`));
+
+    expect(result.segments).toContainEqual(expect.objectContaining(expectedCompanion));
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: demand.required_minutes });
+  });
+
+  it("herstelt na een late resize-auditfout zonder dubbele companionrecords", async () => {
+    const demand = occurrence("occurrence-partition-recovery", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-recovery-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "10:00",
+      end_time: "14:00",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: {},
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failOnce && data.action === "resize_task_shift_preserving_coverage") {
+        failOnce = false;
+        throw new Error("tijdelijke partition-auditfout");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      context("partition-recovery-resize"),
+    )).rejects.toThrow("tijdelijke partition-auditfout");
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+
+    const recovered = await backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      context("partition-recovery-resize"),
+    );
+    expect(recovered.shifts).toHaveLength(2);
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records.filter(
+      item => item.action === "resize_task_shift_preserving_coverage",
+    )).toHaveLength(1);
+  });
+
+  it("finaliseert een geaudite resize na final-markercrash automatisch bij bootstrap", async () => {
+    const demand = occurrence("occurrence-partition-bootstrap-recovery", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-bootstrap-recovery-compose"));
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "10:00",
+      end_time: "14:00",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      expected_assignment_revisions: {},
+    };
+    const originalShiftUpdateMany = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let failFinalMarkerOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        failFinalMarkerOnce
+        && update?.$set?.metadata?.task_partition_mutation?.phase === "completed"
+      ) {
+        failFinalMarkerOnce = false;
+        throw new Error("simulated partition final-marker failure");
+      }
+      return originalShiftUpdateMany(query, update);
+    };
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(
+      base44,
+      user,
+      payload,
+      context("partition-bootstrap-recovery-resize"),
+    )).rejects.toThrow("simulated partition final-marker failure");
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+      && item.idempotency_key === "partition-bootstrap-recovery-resize"
+    ));
+    expect(audit).toBeTruthy();
+    expect(entities.PlanningShift.records.some(item => (
+      item.metadata?.task_partition_mutation?.phase !== "completed"
+    ))).toBe(true);
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-17",
+      period_end: "2026-08-17",
+    }, context("partition-bootstrap-recovery-open"));
+
+    expect(bootstrap.task_partition_recovery).toEqual([
+      expect.objectContaining({
+        action: "resize_task_shift_preserving_coverage",
+        status: "completed",
+        audit_event_id: audit.id,
+      }),
+    ]);
+    const participants = entities.PlanningShift.records.filter(item => (
+      item.metadata?.task_partition_mutation?.idempotency_key === "partition-bootstrap-recovery-resize"
+    ));
+    expect(participants).toHaveLength(2);
+    expect(participants.every(item => (
+      item.metadata.task_partition_mutation.phase === "completed"
+      && item.metadata.task_partition_mutation.audit_event_id === audit.id
+    ))).toBe(true);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+    ))).toHaveLength(1);
+  });
+
+  it("weigert een stale partition-resize zonder companionrecords of businesswrites", async () => {
+    const demand = occurrence("occurrence-partition-stale", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-stale-compose"));
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const before = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "10:00",
+      end_time: "14:00",
+      expected_shift_revision: composed.shift.revision + 1,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: {},
+    }, context("partition-stale-resize"))).rejects.toMatchObject({ status: 409 });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(before);
+  });
+
+  it("behandelt een ontbrekende actieve assignmentrevision als stale bezettingsset", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-resize-missing-assignment-fence" });
+    const currentOccurrence = await fixture.entities.PlanningTaskOccurrence.get(fixture.demand.id);
+    const before = structuredClone({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+      occurrences: fixture.entities.PlanningTaskOccurrence.records,
+    });
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(fixture.base44, user, {
+      shift_id: fixture.adjacentShift.id,
+      segment_id: fixture.adjacentSegment.id,
+      start_time: "06:30",
+      end_time: "14:30",
+      expected_shift_revision: fixture.adjacentShift.revision,
+      expected_segment_revision: fixture.adjacentSegment.revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: {},
+    }, context("partition-resize-missing-assignment-fence-action"))).rejects.toMatchObject({
+      status: 409,
+      details: { missing_assignment_ids: [fixture.adjacentAssignment.id] },
+    });
+    expect({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+      occurrences: fixture.entities.PlanningTaskOccurrence.records,
+    }).toEqual(before);
+  });
+
+  it("vacate coalescet naar één open dienst en replayt na verloren response finalized revisies", async () => {
+    const demand = occurrence("occurrence-partition-vacate", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-partition-vacate", name: "Dagbeveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-partition-vacate",
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-vacate-compose"));
+    const beforeResizeOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const resized = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "06:30",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: beforeResizeOccurrence.revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    }, context("partition-vacate-resize"));
+    const targetShift = resized.shift;
+    const targetSegment = resized.segment;
+    const targetAssignment = resized.assignments[0];
+    const companionShift = resized.shifts.find(item => item.id !== targetShift.id);
+    const companionSegment = resized.segments.find(item => item.shift_id === companionShift.id);
+    const beforeVacateOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const vacatePayload = {
+      shift_id: targetShift.id,
+      segment_id: targetSegment.id,
+      expected_shift_revision: targetShift.revision,
+      expected_segment_revision: targetSegment.revision,
+      expected_occurrence_revision: beforeVacateOccurrence.revision,
+      expected_assignment_revisions: { [targetAssignment.id]: targetAssignment.revision },
+      expected_neighbor_shift_revisions: { [companionShift.id]: companionShift.revision },
+      expected_neighbor_segment_revisions: { [companionSegment.id]: companionSegment.revision },
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failVacateAuditOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failVacateAuditOnce && data.action === "vacate_task_shift_partition") {
+        failVacateAuditOnce = false;
+        throw new Error("tijdelijke vacate-auditfout");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.vacateTaskShiftPartition(
+      base44,
+      user,
+      vacatePayload,
+      context("partition-vacate-coalesce"),
+    )).rejects.toThrow("tijdelijke vacate-auditfout");
+    const shiftCountAfterFailure = entities.PlanningShift.records.length;
+    const segmentCountAfterFailure = entities.PlanningShiftTaskSegment.records.length;
+    const result = await backend.vacateTaskShiftPartition(
+      base44,
+      user,
+      vacatePayload,
+      context("partition-vacate-coalesce"),
+    );
+
+    expect(result.shift).toMatchObject({ start_time: "06:30", end_time: "18:00", status: "draft" });
+    expect(result.removed_shift_ids).toEqual([companionShift.id]);
+    expect(result.removed_segment_ids).toEqual([companionSegment.id]);
+    expect(result.removed_assignment_ids).toEqual([targetAssignment.id]);
+    expect((await entities.PlanningAssignment.get(targetAssignment.id)).status).toBe("removed");
+    expect((await entities.PlanningShift.get(companionShift.id)).status).toBe("cancelled");
+    expect(entities.PlanningAssignment.records.filter(
+      item => item.shift_id === result.shift.id && item.status !== "removed",
+    )).toEqual([]);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 690 });
+    const auditCount = entities.PlanningAuditEvent.records.length;
+    const replay = await backend.vacateTaskShiftPartition(
+      base44,
+      user,
+      vacatePayload,
+      context("partition-vacate-coalesce"),
+    );
+    expect(replay.idempotent).toBe(true);
+    expect(replay.survivor_shift_id).toBe(result.survivor_shift_id);
+    expect(replay.removed_shift_ids).toEqual(result.removed_shift_ids);
+    expect(replay.removed_segment_ids).toEqual(result.removed_segment_ids);
+    expect(replay.removed_assignment_ids).toEqual(result.removed_assignment_ids);
+    expect(replay.shift).toEqual(await entities.PlanningShift.get(replay.shift.id));
+    expect(replay.shifts).toEqual(await Promise.all(
+      replay.shifts.map(item => entities.PlanningShift.get(item.id)),
+    ));
+    expect(replay.segment).toEqual(await entities.PlanningShiftTaskSegment.get(replay.segment.id));
+    expect(replay.segments).toEqual(await Promise.all(
+      replay.segments.map(item => entities.PlanningShiftTaskSegment.get(item.id)),
+    ));
+    expect(replay.assignments).toEqual(await Promise.all(
+      replay.assignments.map(item => entities.PlanningAssignment.get(item.id)),
+    ));
+    expect(replay.task_occurrences).toEqual(await Promise.all(
+      replay.task_occurrences.map(item => entities.PlanningTaskOccurrence.get(item.id)),
+    ));
+    expect(replay.shifts.every(item => (
+      item.metadata?.task_partition_mutation?.phase === "completed"
+      && item.metadata?.task_partition_mutation?.audit_event_id === replay.audit_event_id
+    ))).toBe(true);
+    expect(entities.PlanningShift.records).toHaveLength(shiftCountAfterFailure);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(segmentCountAfterFailure);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCount);
+
+    const reassigned = await backend.assignPersonnel(base44, user, {
+      shift_id: replay.shift.id,
+      personnel_id: "personnel-partition-vacate",
+      slot_index: 0,
+      expected_shift_revision: replay.shift.revision,
+    }, context("partition-vacate-reassign"));
+    expect(reassigned.assignment).toMatchObject({
+      id: targetAssignment.id,
+      status: "draft",
+      personnel_id: "personnel-partition-vacate",
+    });
+    const auditCountAfterReassign = entities.PlanningAuditEvent.records.length;
+    const lateReplay = await backend.vacateTaskShiftPartition(
+      base44,
+      user,
+      vacatePayload,
+      context("partition-vacate-coalesce"),
+    );
+    expect(lateReplay.assignments).toEqual([reassigned.assignment]);
+    expect(lateReplay.removed_assignment_ids).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCountAfterReassign);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const assignmentKey = ["planning-assignments", "2026-08-17", "2026-08-17"];
+    queryClient.setQueryData(assignmentKey, [reassigned.assignment]);
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart: "2026-08-17",
+      periodEnd: "2026-08-17",
+      result: lateReplay,
+    });
+    expect(queryClient.getQueryData(assignmentKey)).toEqual([reassigned.assignment]);
+    expect((await entities.PlanningAssignment.get(targetAssignment.id)).status).toBe("draft");
+  });
+
+  it("vacate faalt gesloten bij een incompatibele aansluitende companion", async () => {
+    const demand = occurrence("occurrence-partition-incompatible", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const composed = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-incompatible-compose"));
+    const beforeResizeOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const resized = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "10:00",
+      end_time: "14:00",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: beforeResizeOccurrence.revision,
+      expected_assignment_revisions: {},
+    }, context("partition-incompatible-resize"));
+    const companion = entities.PlanningShift.records.find(item => item.id === resized.companion_shift_ids[0]);
+    companion.required_count = 2;
+    const before = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+
+    await expect(backend.vacateTaskShiftPartition(base44, user, {
+      shift_id: resized.shift.id,
+      segment_id: resized.segment.id,
+      expected_shift_revision: resized.shift.revision,
+      expected_segment_revision: resized.segment.revision,
+      expected_occurrence_revision: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      expected_assignment_revisions: {},
+      expected_neighbor_shift_revisions: { [companion.id]: companion.revision },
+      expected_neighbor_segment_revisions: {},
+    }, context("partition-incompatible-vacate"))).rejects.toMatchObject({
+      status: 409,
+      details: { code: "TASK_PARTITION_ADJACENT_INCOMPATIBLE" },
+    });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(before);
+  });
+
+  it("finaliseert een geaudite vacate na final-markercrash automatisch bij bootstrap", async () => {
+    const demand = occurrence("occurrence-partition-vacate-bootstrap", "object-1", "06:30", "18:00", 690);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-partition-vacate-bootstrap";
+    entities.Personnel.records.push({ id: personnelId, name: "Dagbeveiliger", status: "active" });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:30", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-vacate-bootstrap-compose"));
+    const resized = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "06:30",
+      end_time: "15:30",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    }, context("partition-vacate-bootstrap-resize"));
+    const targetShift = resized.shift;
+    const targetSegment = resized.segment;
+    const targetAssignment = resized.assignments[0];
+    const companionShift = resized.shifts.find(item => item.id !== targetShift.id);
+    const companionSegment = resized.segments.find(item => item.shift_id === companionShift.id);
+    const payload = {
+      shift_id: targetShift.id,
+      segment_id: targetSegment.id,
+      expected_shift_revision: targetShift.revision,
+      expected_segment_revision: targetSegment.revision,
+      expected_occurrence_revision: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      expected_assignment_revisions: { [targetAssignment.id]: targetAssignment.revision },
+      expected_neighbor_shift_revisions: { [companionShift.id]: companionShift.revision },
+      expected_neighbor_segment_revisions: { [companionSegment.id]: companionSegment.revision },
+    };
+    const originalShiftUpdateMany = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let failFinalMarkerOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        failFinalMarkerOnce
+        && update?.$set?.metadata?.task_partition_mutation?.action === "vacate_task_shift_partition"
+        && update.$set.metadata.task_partition_mutation.phase === "completed"
+      ) {
+        failFinalMarkerOnce = false;
+        throw new Error("simulated vacate final-marker failure");
+      }
+      return originalShiftUpdateMany(query, update);
+    };
+
+    await expect(backend.vacateTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-vacate-bootstrap-action"),
+    )).rejects.toThrow("simulated vacate final-marker failure");
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "vacate_task_shift_partition"
+      && item.idempotency_key === "partition-vacate-bootstrap-action"
+    ));
+    expect(audit).toBeTruthy();
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-17",
+      period_end: "2026-08-17",
+    }, context("partition-vacate-bootstrap-open"));
+
+    expect(bootstrap.task_partition_recovery).toEqual([
+      expect.objectContaining({
+        action: "vacate_task_shift_partition",
+        status: "completed",
+        audit_event_id: audit.id,
+      }),
+    ]);
+    const participants = entities.PlanningShift.records.filter(item => (
+      item.metadata?.task_partition_mutation?.idempotency_key === "partition-vacate-bootstrap-action"
+    ));
+    expect(participants).toHaveLength(2);
+    expect(participants.every(item => (
+      item.metadata.task_partition_mutation.phase === "completed"
+      && item.metadata.task_partition_mutation.audit_event_id === audit.id
+    ))).toBe(true);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "vacate_task_shift_partition"
+    ))).toHaveLength(1);
+  });
+
+  it("voegt dezelfde medewerker atomair samen en replayt na verloren response finalized revisies", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge" });
+    const {
+      base44,
+      entities,
+      demand,
+      targetShift,
+      targetSegment,
+      adjacentShift,
+      adjacentAssignment,
+      payload,
+    } = fixture;
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const assignmentCountBefore = entities.PlanningAssignment.records.length;
+
+    const result = await backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-action"),
+    );
+
+    expect(result.shift).toMatchObject({
+      id: adjacentShift.id,
+      start_time: "06:30",
+      end_time: "18:00",
+      status: "draft",
+      required_count: 1,
+    });
+    expect(result.assignment).toMatchObject({
+      id: adjacentAssignment.id,
+      shift_id: adjacentShift.id,
+      personnel_id: fixture.personnelId,
+      slot_index: 0,
+      status: "draft",
+    });
+    expect(result.shifts).toHaveLength(2);
+    expect(result.segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ shift_id: adjacentShift.id, start_time: "06:30", end_time: "18:00", status: "draft" }),
+      expect.objectContaining({ id: targetSegment.id, status: "removed" }),
+    ]));
+    expect(result.removed_shift_ids).toEqual([targetShift.id]);
+    expect(result.removed_segment_ids).toEqual([targetSegment.id]);
+    expect(result.removed_assignment_ids).toEqual([]);
+    expect((await entities.PlanningShift.get(targetShift.id)).status).toBe("cancelled");
+    expect((await entities.PlanningShiftTaskSegment.get(targetSegment.id)).status).toBe("removed");
+    expect(entities.PlanningAssignment.records).toHaveLength(assignmentCountBefore);
+    expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed"))
+      .toEqual([expect.objectContaining({ id: adjacentAssignment.id, shift_id: adjacentShift.id })]);
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 690, remaining_minutes: 0 });
+    expect(validationCalls).toBe(1);
+
+    const auditCount = entities.PlanningAuditEvent.records.length;
+    const shiftSnapshot = structuredClone(entities.PlanningShift.records);
+    const assignmentSnapshot = structuredClone(entities.PlanningAssignment.records);
+    const replay = await backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-action"),
+    );
+    expect(replay.idempotent).toBe(true);
+    expect(replay.survivor_shift_id).toBe(adjacentShift.id);
+    expect(replay.shift).toEqual(await entities.PlanningShift.get(replay.shift.id));
+    expect(replay.shifts).toEqual(await Promise.all(
+      replay.shifts.map(item => entities.PlanningShift.get(item.id)),
+    ));
+    expect(replay.segment).toEqual(await entities.PlanningShiftTaskSegment.get(replay.segment.id));
+    expect(replay.segments).toEqual(await Promise.all(
+      replay.segments.map(item => entities.PlanningShiftTaskSegment.get(item.id)),
+    ));
+    expect(replay.assignment).toEqual(await entities.PlanningAssignment.get(replay.assignment.id));
+    expect(replay.assignments).toEqual(await Promise.all(
+      replay.assignments.map(item => entities.PlanningAssignment.get(item.id)),
+    ));
+    expect(replay.task_occurrences).toEqual(await Promise.all(
+      replay.task_occurrences.map(item => entities.PlanningTaskOccurrence.get(item.id)),
+    ));
+    expect(replay.shifts.every(item => (
+      item.metadata?.task_partition_mutation?.phase === "completed"
+      && item.metadata?.task_partition_mutation?.audit_event_id === replay.audit_event_id
+    ))).toBe(true);
+    expect(entities.PlanningShift.records).toEqual(shiftSnapshot);
+    expect(entities.PlanningAssignment.records).toEqual(assignmentSnapshot);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCount);
+    expect(validationCalls).toBe(1);
+
+    const occurrenceBeforeLaterComposition = await entities.PlanningTaskOccurrence.get(demand.id);
+    const recomposed = await backend.composeShift(base44, user, {
+      shift_id: replay.shift.id,
+      expected_shift_revision: replay.shift.revision,
+      expected_occurrence_revisions: {
+        [demand.id]: occurrenceBeforeLaterComposition.revision,
+      },
+      segments: [
+        {
+          task_occurrence_id: demand.id,
+          start_date: "2026-08-17",
+          start_time: "06:30",
+          end_date: "2026-08-17",
+          end_time: "12:00",
+        },
+        {
+          task_occurrence_id: demand.id,
+          start_date: "2026-08-17",
+          start_time: "12:00",
+          end_date: "2026-08-17",
+          end_time: "18:00",
+        },
+      ],
+    }, context("partition-assign-merge-later-composition"));
+    expect(recomposed.segments).toHaveLength(2);
+    const participantShiftIds = new Set(replay.shifts.map(item => String(item.id)));
+    const currentParticipantSegments = entities.PlanningShiftTaskSegment.records.filter(item => (
+      participantShiftIds.has(String(item.shift_id))
+    ));
+    const currentActiveSegmentIds = currentParticipantSegments
+      .filter(item => item.status !== "removed")
+      .map(item => String(item.id))
+      .sort();
+    expect(currentActiveSegmentIds).toHaveLength(2);
+    const auditCountAfterComposition = entities.PlanningAuditEvent.records.length;
+    const lateReplay = await backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-action"),
+    );
+    expect(new Set(lateReplay.segments.map(item => String(item.id))))
+      .toEqual(new Set(currentParticipantSegments.map(item => String(item.id))));
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCountAfterComposition);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const segmentKey = ["planning-task-segments", "2026-08-17", "2026-08-17"];
+    queryClient.setQueryData(segmentKey, structuredClone(currentParticipantSegments));
+    applyPlanningMutationResultToCache(queryClient, {
+      periodStart: "2026-08-17",
+      periodEnd: "2026-08-17",
+      result: lateReplay,
+      replaceShiftSegments: true,
+    });
+    const cachedActiveSegmentIds = queryClient.getQueryData(segmentKey)
+      .filter(item => item.status !== "removed")
+      .map(item => String(item.id))
+      .sort();
+    expect(cachedActiveSegmentIds).toEqual(currentActiveSegmentIds);
+  });
+
+  it("herstelt assign-and-merge na een late auditfout zonder tweede validatie of dubbel record", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-recovery" });
+    const { base44, entities, targetShift, adjacentShift, adjacentAssignment, payload } = fixture;
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failOnce && data.action === "assign_and_merge_task_shift_partition") {
+        failOnce = false;
+        throw new Error("tijdelijke assign-merge-auditfout");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-recovery-action"),
+    )).rejects.toThrow("tijdelijke assign-merge-auditfout");
+    expect((await entities.PlanningShift.get(targetShift.id)).status).toBe("cancelled");
+    expect((await entities.PlanningShift.get(adjacentShift.id))).toMatchObject({
+      start_time: "06:30",
+      end_time: "18:00",
+      status: "draft",
+    });
+    expect(validationCalls).toBe(1);
+    const recordCounts = {
+      shifts: entities.PlanningShift.records.length,
+      segments: entities.PlanningShiftTaskSegment.records.length,
+      assignments: entities.PlanningAssignment.records.length,
+    };
+
+    const recovered = await backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-recovery-action"),
+    );
+    expect(recovered.assignment.id).toBe(adjacentAssignment.id);
+    expect(recovered.survivor_shift_id).toBe(adjacentShift.id);
+    expect({
+      shifts: entities.PlanningShift.records.length,
+      segments: entities.PlanningShiftTaskSegment.records.length,
+      assignments: entities.PlanningAssignment.records.length,
+    }).toEqual(recordCounts);
+    expect(validationCalls).toBe(1);
+    expect(entities.PlanningAuditEvent.records.filter(
+      item => item.action === "assign_and_merge_task_shift_partition",
+    )).toHaveLength(1);
+  });
+
+  it("finaliseert een geaudite assign-and-merge na final-markercrash automatisch bij bootstrap", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-bootstrap" });
+    const { base44, entities, payload } = fixture;
+    const originalShiftUpdateMany = entities.PlanningShift.updateMany.bind(entities.PlanningShift);
+    let failFinalMarkerOnce = true;
+    entities.PlanningShift.updateMany = async (query, update) => {
+      if (
+        failFinalMarkerOnce
+        && update?.$set?.metadata?.task_partition_mutation?.action === "assign_and_merge_task_shift_partition"
+        && update.$set.metadata.task_partition_mutation.phase === "completed"
+      ) {
+        failFinalMarkerOnce = false;
+        throw new Error("simulated assign-and-merge final-marker failure");
+      }
+      return originalShiftUpdateMany(query, update);
+    };
+
+    await expect(backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-bootstrap-action"),
+    )).rejects.toThrow("simulated assign-and-merge final-marker failure");
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "assign_and_merge_task_shift_partition"
+      && item.idempotency_key === "partition-assign-merge-bootstrap-action"
+    ));
+    expect(audit).toBeTruthy();
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2026-08-17",
+      period_end: "2026-08-17",
+    }, context("partition-assign-merge-bootstrap-open"));
+
+    expect(bootstrap.task_partition_recovery).toEqual([
+      expect.objectContaining({
+        action: "assign_and_merge_task_shift_partition",
+        status: "completed",
+        audit_event_id: audit.id,
+      }),
+    ]);
+    const participants = entities.PlanningShift.records.filter(item => (
+      item.metadata?.task_partition_mutation?.idempotency_key === "partition-assign-merge-bootstrap-action"
+    ));
+    expect(participants).toHaveLength(2);
+    expect(participants.every(item => (
+      item.metadata.task_partition_mutation.phase === "completed"
+      && item.metadata.task_partition_mutation.audit_event_id === audit.id
+    ))).toBe(true);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "assign_and_merge_task_shift_partition"
+    ))).toHaveLength(1);
+  });
+
+  it("vervolgt assign-and-merge na een fout tussen het annuleren en verwijderen zonder dekkingsverlies", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-partial" });
+    const { base44, entities, demand, targetShift, targetSegment, adjacentShift, payload } = fixture;
+    const originalSegmentUpdate = entities.PlanningShiftTaskSegment.updateMany.bind(
+      entities.PlanningShiftTaskSegment,
+    );
+    let failRemovalOnce = true;
+    entities.PlanningShiftTaskSegment.updateMany = async (query, update) => {
+      if (
+        failRemovalOnce
+        && query.id === targetSegment.id
+        && update.$set?.status === "removed"
+      ) {
+        failRemovalOnce = false;
+        throw new Error("tijdelijke segmentwritefout");
+      }
+      return originalSegmentUpdate(query, update);
+    };
+
+    await expect(backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-partial-action"),
+    )).rejects.toThrow("tijdelijke segmentwritefout");
+    expect((await entities.PlanningShift.get(targetShift.id))).toMatchObject({
+      status: "cancelled",
+      metadata: { task_partition_mutation: { phase: "assign_merge_pending" } },
+    });
+    expect((await entities.PlanningShiftTaskSegment.get(targetSegment.id)).status).toBe("draft");
+
+    const recovered = await backend.assignAndMergeTaskShiftPartition(
+      base44,
+      user,
+      payload,
+      context("partition-assign-merge-partial-action"),
+    );
+    expect(recovered.shift).toMatchObject({ id: adjacentShift.id, start_time: "06:30", end_time: "18:00" });
+    expect((await entities.PlanningShiftTaskSegment.get(targetSegment.id)).status).toBe("removed");
+    expect(backend.occurrenceCoverage(
+      demand,
+      entities.PlanningShiftTaskSegment.records,
+      entities.PlanningShift.records,
+    )).toMatchObject({ coverage_status: "full", allocated_minutes: 690 });
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(2);
+    expect(entities.PlanningAssignment.records).toHaveLength(1);
+  });
+
+  it("voegt een open nachtdienstdeel over de kalendergrens terug bij dezelfde medewerker", async () => {
+    const fixture = await prepareAssignedTaskPartition({
+      key: "partition-assign-merge-night",
+      startTime: "22:00",
+      endTime: "06:00",
+      splitTime: "02:00",
+    });
+    let validationCalls = 0;
+    fixture.base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+
+    const result = await backend.assignAndMergeTaskShiftPartition(
+      fixture.base44,
+      user,
+      fixture.payload,
+      context("partition-assign-merge-night-action"),
+    );
+
+    expect(result.shift).toMatchObject({
+      service_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+      duration_minutes: 480,
+    });
+    expect(result.segment).toMatchObject({
+      start_date: "2026-08-17",
+      end_date: "2026-08-18",
+      start_time: "22:00",
+      end_time: "06:00",
+    });
+    expect(validationCalls).toBe(2);
+    expect(fixture.entities.PlanningMutationCoordinator.records
+      .filter(item => item.resource_type === "personnel_day")
+      .map(item => item.resource_id)
+      .sort()).toEqual([
+      `${fixture.personnelId}:2026-08-17`,
+      `${fixture.personnelId}:2026-08-18`,
+    ]);
+  });
+
+  it("weigert stale assign-and-merge revisies vóór businesswrites en medewerkercontrole", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-stale" });
+    const { base44, entities, payload } = fixture;
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const before = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+      audits: entities.PlanningAuditEvent.records,
+    });
+
+    await expect(backend.assignAndMergeTaskShiftPartition(base44, user, {
+      ...payload,
+      expected_target_shift_revision: payload.expected_target_shift_revision + 1,
+    }, context("partition-assign-merge-stale-action"))).rejects.toMatchObject({ status: 409 });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+      audits: entities.PlanningAuditEvent.records,
+    }).toEqual(before);
+    expect(validationCalls).toBe(0);
+  });
+
+  it.each([
+    {
+      label: "gepubliceerde companion",
+      mutate: fixture => { fixture.entities.PlanningShift.records.find(item => item.id === fixture.targetShift.id).published_revision = 1; },
+      code: "TASK_PARTITION_DRAFT_REQUIRED",
+    },
+    {
+      label: "required_count groter dan een",
+      mutate: fixture => { fixture.entities.PlanningShift.records.find(item => item.id === fixture.targetShift.id).required_count = 2; },
+      code: "TASK_PARTITION_REQUIRED_COUNT_ONE",
+    },
+    {
+      label: "meervoudige taakdienst",
+      mutate: fixture => { fixture.entities.PlanningShift.records.find(item => item.id === fixture.targetShift.id).task_segment_count = 2; },
+      code: "TASK_PARTITION_SINGLE_TASK_REQUIRED",
+    },
+    {
+      label: "intussen bezette companion",
+      mutate: fixture => {
+        fixture.entities.PlanningAssignment.records.push({
+          id: `assignment-occupied-${fixture.targetShift.id}`,
+          shift_id: fixture.targetShift.id,
+          slot_index: 0,
+          personnel_id: "personnel-other",
+          status: "draft",
+          revision: 1,
+          published_revision: 0,
+        });
+      },
+      code: "TASK_PARTITION_ASSIGNMENT_STATE_CHANGED",
+    },
+  ])("faalt gesloten bij $label", async ({ mutate, code }) => {
+    const fixture = await prepareAssignedTaskPartition({ key: `partition-assign-merge-${code}` });
+    mutate(fixture);
+    let validationCalls = 0;
+    fixture.base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {};
+    };
+    const before = structuredClone({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+      occurrences: fixture.entities.PlanningTaskOccurrence.records,
+    });
+
+    await expect(backend.assignAndMergeTaskShiftPartition(
+      fixture.base44,
+      user,
+      fixture.payload,
+      context(`partition-assign-merge-fail-${code}`),
+    )).rejects.toMatchObject({ status: 409, details: { code } });
+    expect({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+      occurrences: fixture.entities.PlanningTaskOccurrence.records,
+    }).toEqual(before);
+    expect(validationCalls).toBe(0);
+  });
+
+  it("weigert een samengevoegde bezetting langer dan twaalf uur", async () => {
+    const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-max-duration" });
+    const targetShift = fixture.entities.PlanningShift.records.find(item => item.id === fixture.targetShift.id);
+    const targetSegment = fixture.entities.PlanningShiftTaskSegment.records.find(item => item.id === fixture.targetSegment.id);
+    Object.assign(targetShift, { end_time: "20:30", duration_minutes: 300 });
+    Object.assign(targetSegment, { end_time: "20:30", duration_minutes: 300 });
+    const before = structuredClone({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+    });
+
+    await expect(backend.assignAndMergeTaskShiftPartition(
+      fixture.base44,
+      user,
+      fixture.payload,
+      context("partition-assign-merge-max-duration-action"),
+    )).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "TASK_PARTITION_MAX_ASSIGNED_DURATION_EXCEEDED",
+        maximum_duration_minutes: 720,
+      },
+    });
+    expect({
+      shifts: fixture.entities.PlanningShift.records,
+      segments: fixture.entities.PlanningShiftTaskSegment.records,
+      assignments: fixture.entities.PlanningAssignment.records,
+    }).toEqual(before);
+  });
+
+  it("kopieert deterministisch en replayt na verloren response de finalized reeks en occurrence", async () => {
+    const source = {
+      ...occurrence("occurrence-copy-night", "object-1", "22:00", "06:00", 480),
+      end_date: "2026-08-18",
+      object_task_definition_id: "definition-copy-night",
+    };
+    const { base44, entities } = setup([source]);
+    entities.ObjectTaskDefinition.records.push({
+      id: "definition-copy-night",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_type: "reception",
+      execution_mode: "continuous",
+      instructions: "Actuele nachtinstructie",
+      status: "active",
+      version: 7,
+    });
+    const payload = {
+      source_occurrence_id: source.id,
+      expected_source_occurrence_revision: 1,
+      target_service_date: "2099-08-24",
+    };
+
+    const first = await backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-task-occurrence-first"),
+    );
+    const replay = await backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-task-occurrence-first"),
+    );
+
+    expect(first.task_occurrence).toMatchObject({
+      service_date: "2099-08-24",
+      end_date: "2099-08-25",
+      window_start_time: "22:00",
+      window_end_time: "06:00",
+      required_minutes: 480,
+      definition_version: 7,
+      lifecycle_status: "active",
+    });
+    expect(first.schedule_revision).toMatchObject({
+      recurrence_type: "one_time",
+      effective_from: "2099-08-24",
+      recurrence_end_date: "2099-08-24",
+    });
+    expect(first.shifts).toEqual([]);
+    expect(first.segments).toEqual([]);
+    expect(first.assignments).toEqual([]);
+    expect(first.exceptions).toEqual([]);
+    expect(replay).toMatchObject({ idempotent: true, audit_event_id: first.audit_event_id });
+    expect(replay.definition).toEqual(await entities.ObjectTaskDefinition.get(first.definition.id));
+    expect(replay.series).toEqual(await entities.ObjectTaskScheduleSeries.get(first.series.id));
+    expect(replay.schedule_revision).toEqual(await entities.ObjectTaskScheduleRevision.get(first.schedule_revision.id));
+    expect(replay.task_occurrence).toEqual(await entities.PlanningTaskOccurrence.get(first.task_occurrence.id));
+    expect(replay.task_occurrences).toEqual([replay.task_occurrence]);
+    expect(replay.series.metadata?.copy_task_occurrence_mutation).toMatchObject({
+      phase: "completed",
+      audit_event_id: first.audit_event_id,
+    });
+    expect(replay.task_occurrence.metadata?.copy_task_occurrence_mutation).toMatchObject({
+      phase: "completed",
+      audit_event_id: first.audit_event_id,
+    });
+    const second = await backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-task-occurrence-second"),
+    );
+    expect(second.task_occurrence.id).toBe(first.task_occurrence.id);
+    expect(second.series.id).toBe(first.series.id);
+    expect(second.deduplicated).toBe(true);
+    const auditCountAfterSecondCopy = entities.PlanningAuditEvent.records.length;
+    const lateFirstReplay = await backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-task-occurrence-first"),
+    );
+    expect(lateFirstReplay).toMatchObject({
+      idempotent: true,
+      audit_event_id: first.audit_event_id,
+    });
+    expect(lateFirstReplay.series).toEqual(await entities.ObjectTaskScheduleSeries.get(first.series.id));
+    expect(lateFirstReplay.task_occurrence).toEqual(
+      await entities.PlanningTaskOccurrence.get(first.task_occurrence.id),
+    );
+    expect(entities.PlanningAuditEvent.records).toHaveLength(auditCountAfterSecondCopy);
+    expect(entities.ObjectTaskScheduleSeries.records).toHaveLength(1);
+    expect(entities.ObjectTaskScheduleRevision.records).toHaveLength(1);
+    expect(entities.PlanningTaskOccurrence.records.filter(
+      item => item.metadata?.copy_identity === `${source.id}:2099-08-24`,
+    )).toHaveLength(1);
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
+    expect(entities.ObjectTaskScheduleException.records).toEqual([]);
+  });
+
+  it("herstelt een taakkopie na audituitval automatisch bij bootstrap", async () => {
+    const source = {
+      ...occurrence("occurrence-copy-audit-bootstrap", "object-1", "10:00", "18:00", 480),
+      object_task_definition_id: "definition-copy-audit-bootstrap",
+    };
+    const { base44, entities } = setup([source]);
+    entities.ObjectTaskDefinition.records.push({
+      id: "definition-copy-audit-bootstrap",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_type: "reception",
+      execution_mode: "continuous",
+      status: "active",
+      version: 1,
+    });
+    const payload = {
+      source_occurrence_id: source.id,
+      expected_source_occurrence_revision: 1,
+      target_service_date: "2099-08-24",
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failAuditOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failAuditOnce && data.action === "copy_task_occurrence") {
+        failAuditOnce = false;
+        throw new Error("simulated copy audit failure");
+      }
+      return originalAuditCreate(data);
+    };
+
+    await expect(backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-audit-bootstrap-action"),
+    )).rejects.toThrow("simulated copy audit failure");
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "copy_task_occurrence"
+    ))).toHaveLength(0);
+    expect(entities.ObjectTaskScheduleSeries.records[0].metadata.copy_task_occurrence_mutation)
+      .toMatchObject({ phase: "state_written_audit_pending" });
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("copy-audit-bootstrap-open"));
+
+    expect(bootstrap.copy_task_occurrence_recovery).toEqual([
+      expect.objectContaining({ status: "completed" }),
+    ]);
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "copy_task_occurrence"
+    ));
+    expect(audit).toBeTruthy();
+    expect(entities.ObjectTaskScheduleSeries.records[0].metadata.copy_task_occurrence_mutation)
+      .toMatchObject({ phase: "completed", audit_event_id: audit.id });
+    const copiedOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.metadata?.copy_identity === `${source.id}:2099-08-24`
+    ));
+    expect(copiedOccurrence.metadata.copy_task_occurrence_mutation)
+      .toMatchObject({ phase: "completed", audit_event_id: audit.id });
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "copy_task_occurrence"
+    ))).toHaveLength(1);
+  });
+
+  it("herstelt een geaudite taakkopie na series-final-markercrash automatisch bij bootstrap", async () => {
+    const source = {
+      ...occurrence("occurrence-copy-bootstrap-recovery", "object-1", "10:00", "18:00", 480),
+      object_task_definition_id: "definition-copy-bootstrap-recovery",
+    };
+    const { base44, entities } = setup([source]);
+    entities.ObjectTaskDefinition.records.push({
+      id: "definition-copy-bootstrap-recovery",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_type: "reception",
+      execution_mode: "continuous",
+      status: "active",
+      version: 1,
+    });
+    const payload = {
+      source_occurrence_id: source.id,
+      expected_source_occurrence_revision: 1,
+      target_service_date: "2099-08-24",
+    };
+    const originalSeriesUpdateMany = entities.ObjectTaskScheduleSeries.updateMany
+      .bind(entities.ObjectTaskScheduleSeries);
+    let failFinalMarkerOnce = true;
+    entities.ObjectTaskScheduleSeries.updateMany = async (query, update) => {
+      if (
+        failFinalMarkerOnce
+        && update?.$set?.metadata?.copy_task_occurrence_mutation?.phase === "completed"
+      ) {
+        failFinalMarkerOnce = false;
+        throw new Error("simulated copy series final-marker failure");
+      }
+      return originalSeriesUpdateMany(query, update);
+    };
+
+    await expect(backend.copyTaskOccurrence(
+      base44,
+      user,
+      payload,
+      context("copy-bootstrap-recovery-action"),
+    )).rejects.toThrow("simulated copy series final-marker failure");
+    const audit = entities.PlanningAuditEvent.records.find(item => (
+      item.action === "copy_task_occurrence"
+      && item.idempotency_key === "copy-bootstrap-recovery-action"
+    ));
+    expect(audit).toBeTruthy();
+    const pendingSeries = entities.ObjectTaskScheduleSeries.records[0];
+    expect(pendingSeries.metadata.copy_task_occurrence_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      idempotency_key: "copy-bootstrap-recovery-action",
+    });
+
+    const bootstrap = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("copy-bootstrap-recovery-open"));
+
+    expect(bootstrap.copy_task_occurrence_recovery).toEqual([
+      expect.objectContaining({ status: "completed", audit_event_id: audit.id }),
+    ]);
+    const recoveredSeries = await entities.ObjectTaskScheduleSeries.get(pendingSeries.id);
+    expect(recoveredSeries.metadata.copy_task_occurrence_mutation).toMatchObject({
+      phase: "completed",
+      audit_event_id: audit.id,
+    });
+    const copiedOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.metadata?.copy_identity === `${source.id}:2099-08-24`
+    ));
+    expect(copiedOccurrence.metadata.copy_task_occurrence_mutation).toMatchObject({
+      phase: "completed",
+      audit_event_id: audit.id,
+    });
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "copy_task_occurrence"
+    ))).toHaveLength(1);
+  });
+
+  it("weigert een occurrence-kopie met stale bronrevision vóór writes", async () => {
+    const source = {
+      ...occurrence("occurrence-copy-stale", "object-1", "10:00", "18:00", 480),
+      object_task_definition_id: "definition-copy-stale",
+    };
+    const { base44, entities } = setup([source]);
+    entities.ObjectTaskDefinition.records.push({
+      id: "definition-copy-stale",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_type: "reception",
+      execution_mode: "continuous",
+      status: "active",
+      version: 1,
+    });
+
+    await expect(backend.copyTaskOccurrence(base44, user, {
+      source_occurrence_id: source.id,
+      expected_source_occurrence_revision: 2,
+      target_service_date: "2099-08-24",
+    }, context("copy-task-occurrence-stale"))).rejects.toMatchObject({ status: 409 });
+    expect(entities.ObjectTaskScheduleSeries.records).toEqual([]);
+    expect(entities.ObjectTaskScheduleRevision.records).toEqual([]);
+    expect(entities.PlanningTaskOccurrence.records).toEqual([source]);
   });
 });
 

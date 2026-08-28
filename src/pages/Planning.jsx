@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext } from "@hello-pangea/dnd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -39,12 +39,23 @@ import { invokePlanningApi } from "@/components/planning/planningApiClient";
 import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 import { createPlanningRefreshScheduler } from "@/components/planning/planningRefreshScheduler";
 import {
+  buildDependentPlanningDeleteIntent,
+  buildDependentPlanningResizeIntent,
+  buildDependentPlanningUnassignIntent,
   buildEffectivePlanningPlan,
   buildPlanningPublicationSnapshot,
+  planningOriginIntentId,
+  planningRecordReference,
   rebaseDependentPlanningIntent,
   readPlanningRangeSnapshot,
+  resolveOpenShiftSamePersonnelMerge,
+  resolvePlanningAssignmentTarget,
+  resolvePlanningOccurrenceTarget,
+  resolvePlanningSegmentTarget,
+  resolvePlanningShiftTarget,
   resolveQueuedOccurrenceMutation,
   resolveQueuedShiftAssignment,
+  withPlanningOptimisticIntentIdentity,
 } from "@/components/planning/planningEffectivePlan";
 import {
   getPlanningMutationQueue,
@@ -60,6 +71,19 @@ import {
   createPlanningMutationIntentRegistry,
   createPlanningMutationKey,
 } from "@/components/planning/planningMutationIntent";
+import {
+  buildCopyTaskOccurrencePayload,
+  buildOptimisticCopiedTaskOccurrence,
+  planningTaskCopyReference,
+  reconcileOptimisticTaskCopy,
+} from "@/components/planning/planningTaskCopyDomain";
+import {
+  batchPlanningEligibilityCandidates,
+  buildOccurrenceEligibilityShift,
+  buildPlanningEligibilityObjectShiftContext,
+  buildPlanningEligibilityPrefetchCandidate,
+  createPlanningEligibilityIndex,
+} from "@/components/planning/planningEligibilityIndex";
 import {
   addDays,
   buildCandidateRanking,
@@ -84,10 +108,7 @@ import {
   taskCoverageSummary,
   toDateKey,
 } from "@/components/planning/planningDomain";
-import {
-  buildTimelineResizeCompositionPayload,
-  getSuggestedTaskTimelineAllocation,
-} from "@/components/planning/planningTimelineDomain";
+import { getSuggestedTaskTimelineAllocation } from "@/components/planning/planningTimelineDomain";
 import {
   CAO_PB_PLANNING_PERIODS_2026,
   getAdjacentCaoPbPlanningPeriod,
@@ -100,6 +121,7 @@ import { OBJECT_TASK_TYPES } from "@/components/objects/objectTaskConfig";
 const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
 const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
+const PLANNING_ELIGIBILITY_MAX_AGE_MS = 120_000;
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 const compactDateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
@@ -111,6 +133,49 @@ function personnelName(personnel) {
       .filter(Boolean)
       .join(" ")
     || "Onbekende medewerker";
+}
+
+function resolveOccurrenceEligibilityProjection({
+  snapshot,
+  occurrence,
+  personnelItem,
+  serviceDate,
+  preferredSegment = null,
+  shiftContext = null,
+} = {}) {
+  if (!occurrence || !personnelItem || !serviceDate) return null;
+  const resolution = resolveQueuedOccurrenceMutation({
+    snapshot,
+    occurrenceId: occurrence.id,
+    personnelId: personnelItem.id,
+    personnelName: personnelName(personnelItem),
+    serviceDate,
+    preferredSegment,
+    assignmentSource: "eligibility_preview",
+    allowOptimisticAdjacent: true,
+  });
+  if (resolution.status !== "ready") return { resolution, shift: null, excludeAssignmentId: null };
+  const interval = resolution.kind === "merge"
+    ? resolution.adjacent.candidate.mergedSegment
+    : resolution.allocation.segment;
+  const shift = buildOccurrenceEligibilityShift({
+    occurrence: resolution.allocation.occurrence,
+    serviceDate: interval.start_date,
+    startTime: interval.start_time,
+    endTime: interval.end_time,
+    shiftContext,
+  });
+  if (!shift) return { resolution, shift: null, excludeAssignmentId: null };
+  return {
+    resolution,
+    shift: {
+      ...shift,
+      end_date: interval.end_date === interval.start_date ? null : interval.end_date,
+    },
+    excludeAssignmentId: resolution.kind === "merge"
+      ? resolution.adjacent.candidate.assignment.id
+      : null,
+  };
 }
 
 function normalizePlanningShift(shift) {
@@ -138,6 +203,70 @@ function normalizePlanningAssignment(assignment) {
 
 function activeAssignments(assignments) {
   return assignments.filter(item => item.status !== "removed");
+}
+
+function shortPlanningVersionToken(value) {
+  const input = String(value || "");
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193) >>> 0;
+    second = Math.imul(second ^ (code + index), 0x85ebca6b) >>> 0;
+  }
+  return `${input.length.toString(36)}-${first.toString(36)}-${second.toString(36)}`;
+}
+
+function adjacentOpenTaskServiceNeighbors({ snapshot, shift, segment }) {
+  const targetInterval = getShiftInterval({
+    service_date: segment?.start_date,
+    end_date: segment?.end_date,
+    start_time: segment?.start_time,
+    end_time: segment?.end_time,
+    overnight: false,
+  });
+  if (!targetInterval.valid || !segment?.task_occurrence_id) return [];
+  const assignmentsByShift = new Map();
+  activeAssignments(snapshot?.assignments || []).forEach(item => {
+    const key = String(item.planning_shift_id || item.shift_id);
+    assignmentsByShift.set(key, [...(assignmentsByShift.get(key) || []), item]);
+  });
+  const segmentsByShift = new Map();
+  (snapshot?.segments || []).filter(item => item.status !== "removed").forEach(item => {
+    const key = String(item.shift_id);
+    segmentsByShift.set(key, [...(segmentsByShift.get(key) || []), item]);
+  });
+  return (snapshot?.shifts || []).flatMap(candidateShift => {
+    if (
+      String(candidateShift.id) === String(shift?.id)
+      || candidateShift.status !== "draft"
+      || Number(candidateShift.published_revision || 0) > 0
+      || candidateShift.source_type !== "task"
+      || Number(candidateShift.required_count || 1) !== Number(shift?.required_count || 1)
+      || (assignmentsByShift.get(String(candidateShift.id)) || []).length > 0
+    ) return [];
+    const candidateSegments = segmentsByShift.get(String(candidateShift.id)) || [];
+    if (candidateSegments.length !== 1) return [];
+    const candidateSegment = candidateSegments[0];
+    if (String(candidateSegment.task_occurrence_id) !== String(segment.task_occurrence_id)) return [];
+    const candidateInterval = getShiftInterval({
+      service_date: candidateSegment.start_date,
+      end_date: candidateSegment.end_date,
+      start_time: candidateSegment.start_time,
+      end_time: candidateSegment.end_time,
+      overnight: false,
+    });
+    if (!candidateInterval.valid) return [];
+    const side = candidateInterval.end.getTime() === targetInterval.start.getTime()
+      ? "left"
+      : candidateInterval.start.getTime() === targetInterval.end.getTime()
+        ? "right"
+        : null;
+    return side ? [{ shift: candidateShift, segment: candidateSegment, side }] : [];
+  }).sort((left, right) => (
+    (left.side === "left" ? 0 : 1) - (right.side === "left" ? 0 : 1)
+    || String(left.shift.id).localeCompare(String(right.shift.id))
+  ));
 }
 
 function annotateSourceChangedShifts(shifts, sourceChangesByShift) {
@@ -307,12 +436,13 @@ function optimisticCompositionRecords({ key, occurrence, personnelItem = null, s
     warnings,
     _optimistic_pending: true,
   }) : null;
-  return {
+  return withPlanningOptimisticIntentIdentity({
     key,
     shifts: [shift],
     segments: [taskSegment],
     assignments: assignment ? [assignment] : [],
-  };
+    occurrences: [],
+  }, { originIntentId: key });
 }
 
 function optimisticQueuedOccurrenceRecords({ key, resolution, personnelItem, warnings = [] }) {
@@ -326,7 +456,7 @@ function optimisticQueuedOccurrenceRecords({ key, resolution, personnelItem, war
     });
   }
   const { shift, segment, mergedSegment, durationMinutes } = resolution.adjacent.candidate;
-  return {
+  return withPlanningOptimisticIntentIdentity({
     key,
     shifts: [{
       ...shift,
@@ -344,7 +474,8 @@ function optimisticQueuedOccurrenceRecords({ key, resolution, personnelItem, war
       _optimistic_pending: true,
     }],
     assignments: [],
-  };
+    occurrences: [],
+  }, { originIntentId: key });
 }
 
 function mutationMessage(error) {
@@ -409,6 +540,23 @@ async function filterEntityRecordsForShiftIds(entity, shiftIds, sort, additional
     batch.flat().forEach(record => records.set(String(record.id), record));
   }
   return [...records.values()];
+}
+
+async function filterEntityRecordsForPersonnelIds(entity, personnelIds, sort, additionalQuery = {}) {
+  const uniquePersonnelIds = [...new Set((personnelIds || []).map(String).filter(Boolean))];
+  if (uniquePersonnelIds.length === 0) return [];
+  const chunks = [];
+  for (let index = 0; index < uniquePersonnelIds.length; index += 200) {
+    chunks.push(uniquePersonnelIds.slice(index, index + 200));
+  }
+  const scoped = new Map();
+  for (let index = 0; index < chunks.length; index += 4) {
+    const batch = await Promise.all(chunks.slice(index, index + 4).map(ids => (
+      filterAllEntityRecords(entity, { ...additionalQuery, personnel_id: { $in: ids } }, sort)
+    )));
+    batch.flat().forEach(record => scoped.set(String(record.id), record));
+  }
+  return [...scoped.values()];
 }
 
 function planningExecutionSnapshotFromCache(queryClient, periodStart, periodEnd) {
@@ -481,6 +629,9 @@ export default function Planning() {
   const [liveMessage, setLiveMessage] = useState("");
   const [serviceClipboard, setServiceClipboard] = useState(null);
   const [taskClipboard, setTaskClipboard] = useState(null);
+  const [eligibilityServerDecisions, setEligibilityServerDecisions] = useState([]);
+  const [dragEligibilityPreview, setDragEligibilityPreview] = useState(null);
+  const [eligibilityFreshnessTick, setEligibilityFreshnessTick] = useState(0);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
   const lastBoundaryRecoveryKey = useRef("");
@@ -493,6 +644,9 @@ export default function Planning() {
   const pendingResourceKeysRef = useRef(new Set());
   const planningMutationQueue = useRef(sharedPlanningMutationQueue);
   const planningCommitFenceRef = useRef(null);
+  const eligibilityPrefetchGenerationRef = useRef(0);
+  const eligibilityPrewarmBasisRef = useRef("");
+  const eligibilityUrgentPrefetchKeysRef = useRef(new Set());
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
 
@@ -638,29 +792,63 @@ export default function Planning() {
     queryFn: () => listAllEntityRecords(base44.entities.Personnel),
     staleTime: 60_000,
   });
+  const eligibilityPersonnelIds = useMemo(
+    () => (personnelQuery.data || []).filter(isPlanningPersonnelActive).map(item => String(item.id)).sort(),
+    [personnelQuery.data],
+  );
+  const eligibilityPersonnelScopeKey = useMemo(
+    () => shortPlanningVersionToken(eligibilityPersonnelIds.join("|")),
+    [eligibilityPersonnelIds],
+  );
   const qualificationsQuery = useQuery({
-    queryKey: ["personnel-qualifications"],
-    queryFn: () => listAllEntityRecords(base44.entities.PersonnelQualification),
+    queryKey: ["personnel-qualifications", eligibilityPersonnelScopeKey],
+    queryFn: () => filterEntityRecordsForPersonnelIds(
+      base44.entities.PersonnelQualification,
+      eligibilityPersonnelIds,
+      "-updated_date",
+    ),
+    enabled: !personnelQuery.isLoading,
     staleTime: 60_000,
   });
   const absencesQuery = useQuery({
-    queryKey: ["personnel-absences"],
-    queryFn: () => listAllEntityRecords(base44.entities.PersonnelAbsence),
+    queryKey: ["personnel-absences", eligibilityPersonnelScopeKey, planningContextStart, planningContextEnd],
+    queryFn: () => filterEntityRecordsForPersonnelIds(
+      base44.entities.PersonnelAbsence,
+      eligibilityPersonnelIds,
+      "-start_date",
+      { status: { $in: ["requested", "approved", "active"] } },
+    ),
+    enabled: !personnelQuery.isLoading,
     staleTime: 30_000,
   });
   const passesQuery = useQuery({
-    queryKey: ["personnel-security-passes"],
-    queryFn: () => listAllEntityRecords(base44.entities.PersonnelSecurityPass),
+    queryKey: ["personnel-security-passes", eligibilityPersonnelScopeKey],
+    queryFn: () => filterEntityRecordsForPersonnelIds(
+      base44.entities.PersonnelSecurityPass,
+      eligibilityPersonnelIds,
+      "-updated_date",
+    ),
+    enabled: !personnelQuery.isLoading,
     staleTime: 60_000,
   });
   const restrictionsQuery = useQuery({
-    queryKey: ["personnel-restrictions"],
-    queryFn: () => listAllEntityRecords(base44.entities.PersonnelRestriction),
+    queryKey: ["personnel-restrictions", eligibilityPersonnelScopeKey],
+    queryFn: () => filterEntityRecordsForPersonnelIds(
+      base44.entities.PersonnelRestriction,
+      eligibilityPersonnelIds,
+      "-updated_date",
+    ),
+    enabled: !personnelQuery.isLoading,
     staleTime: 60_000,
   });
   const contractsQuery = useQuery({
-    queryKey: ["personnel-contracts"],
-    queryFn: () => listAllEntityRecords(base44.entities.PersonnelContract),
+    queryKey: ["personnel-contracts", eligibilityPersonnelScopeKey],
+    queryFn: () => filterEntityRecordsForPersonnelIds(
+      base44.entities.PersonnelContract,
+      eligibilityPersonnelIds,
+      "-updated_date",
+    ),
+    enabled: !personnelQuery.isLoading,
     staleTime: 60_000,
   });
   const objectsQuery = useQuery({
@@ -820,16 +1008,18 @@ export default function Planning() {
     () => effectivePlanningRecords.assignments.map(normalizePlanningAssignment),
     [effectivePlanningRecords.assignments],
   );
-  const taskOccurrences = effectivePlanningRecords.occurrences;
+  const authoritativeTaskOccurrences = effectivePlanningRecords.occurrences;
   const authoritativeTaskSegments = effectivePlanningRecords.segments;
   const interactivePlanningRecords = useMemo(() => buildEffectivePlanningPlan({
     shifts: authoritativeShifts,
     assignments: authoritativeAssignments,
     segments: authoritativeTaskSegments,
+    occurrences: authoritativeTaskOccurrences,
     intents: [...pendingMatrixChanges, ...(planningQueueState.intents || [])],
-  }), [authoritativeAssignments, authoritativeShifts, authoritativeTaskSegments, pendingMatrixChanges, planningQueueState.intents]);
+  }), [authoritativeAssignments, authoritativeShifts, authoritativeTaskOccurrences, authoritativeTaskSegments, pendingMatrixChanges, planningQueueState.intents]);
   const allShifts = interactivePlanningRecords.shifts;
   const assignments = interactivePlanningRecords.assignments;
+  const taskOccurrences = interactivePlanningRecords.occurrences;
   const taskSegments = useMemo(
     () => projectSegmentsToCurrentTaskOccurrences(interactivePlanningRecords.segments, taskOccurrences),
     [interactivePlanningRecords.segments, taskOccurrences],
@@ -874,10 +1064,14 @@ export default function Planning() {
     ...matrixPendingResourceKeys,
     ...queuedPlanningResourceKeys,
   ]), [matrixPendingResourceKeys, queuedPlanningResourceKeys]);
-  const runProtectedPlanningAction = (resourceKeys, action) => {
-    const blocked = (resourceKeys || []).filter(Boolean).some(key => protectedPlanningResourceKeys.has(String(key)));
+  const runProtectedPlanningAction = (resourceKeys, action, { allowQueued = false } = {}) => {
+    const blockingKeys = allowQueued ? matrixPendingResourceKeys : protectedPlanningResourceKeys;
+    const blocked = Boolean(planningCommitFenceRef.current)
+      || (resourceKeys || []).filter(Boolean).some(key => blockingKeys.has(String(key)));
     if (!blocked) return action();
-    const description = "Deze taak of dienst wordt nog gesynchroniseerd. Wacht tot de rustige synchronisatiestatus is verdwenen voordat u haar bewerkt of verwijdert.";
+    const description = allowQueued
+      ? "Deze taak of dienst wordt door een herstel- of publicatieactie vergrendeld. Probeer het opnieuw zodra die actie klaar is."
+      : "Deze taak of dienst wordt nog gesynchroniseerd. Wacht tot de rustige synchronisatiestatus is verdwenen voordat u haar bewerkt of verwijdert.";
     toast({ title: "Wijziging wordt nog verwerkt", description });
     setLiveMessage(description);
     return null;
@@ -1120,6 +1314,324 @@ export default function Planning() {
     contracts,
   }), [absences, allShifts, assignments, contracts, qualifications, restrictions, securityPasses]);
 
+  const eligibilityPlanningVersion = useMemo(() => shortPlanningVersionToken(
+    (planningQueueState.intents || []).map(intent => [
+      intent?.key,
+      ...(intent?.shifts || []).map(item => `${item.id}:${item.revision || 0}:${item.status}:${item.service_date}:${item.start_time}:${item.end_time}`),
+      ...(intent?.assignments || []).map(item => `${item.id}:${item.revision || 0}:${item.status}:${item.personnel_id}:${item.planning_shift_id || item.shift_id}`),
+      ...(intent?.occurrences || []).map(item => `${item.id}:${item.revision || 0}:${item.lifecycle_status}:${item.service_date}:${item.window_start_time}:${item.window_end_time}`),
+    ].join("~")).join("|"),
+  ), [planningQueueState.intents]);
+  const eligibilityDependencies = useMemo(() => {
+    const dependency = (query, suffix = "") => ({
+      status: query.status,
+      hasData: query.data !== undefined,
+      dataUpdatedAt: query.dataUpdatedAt,
+      error: query.error,
+      version: `${query.dataUpdatedAt || 0}${suffix ? `:${suffix}` : ""}`,
+    });
+    return {
+      personnel: dependency(personnelQuery),
+      shifts: dependency(shiftsQuery, eligibilityPlanningVersion),
+      assignments: dependency(assignmentsQuery, eligibilityPlanningVersion),
+      absences: dependency(absencesQuery),
+      qualifications: dependency(qualificationsQuery),
+      securityPasses: dependency(passesQuery),
+      restrictions: dependency(restrictionsQuery),
+      contracts: dependency(contractsQuery),
+      objects: dependency(objectsQuery),
+    };
+  }, [
+    absencesQuery,
+    assignmentsQuery,
+    contractsQuery,
+    eligibilityPlanningVersion,
+    passesQuery,
+    personnelQuery,
+    qualificationsQuery,
+    restrictionsQuery,
+    shiftsQuery,
+    objectsQuery,
+  ]);
+  const eligibilityIndex = useMemo(() => createPlanningEligibilityIndex({
+    personnel: activePersonnel,
+    shifts: allShifts,
+    assignments,
+    absences,
+    qualifications,
+    securityPasses,
+    restrictions,
+    contracts,
+    dependencies: eligibilityDependencies,
+    serverDecisions: eligibilityServerDecisions,
+    requireServerDecision: true,
+    maxAgeMs: PLANNING_ELIGIBILITY_MAX_AGE_MS,
+  }), [
+    absences,
+    activePersonnel,
+    allShifts,
+    assignments,
+    contracts,
+    eligibilityDependencies,
+    eligibilityFreshnessTick,
+    eligibilityServerDecisions,
+    qualifications,
+    restrictions,
+    securityPasses,
+  ]);
+
+  const eligibilityPlanningSnapshot = useMemo(() => ({
+    shifts: allShifts,
+    assignments,
+    segments: taskSegments,
+    occurrences: taskOccurrences,
+  }), [allShifts, assignments, taskOccurrences, taskSegments]);
+  const eligibilityPrefetchSources = useMemo(() => {
+    const openShiftSources = matrixShifts
+      .filter(shift => shift.status !== "cancelled")
+      .filter(shift => (
+        (assignmentsInRangeByShift.get(String(shift.id)) || []).length
+        < Math.max(1, Number(shift.required_count || 1))
+      ))
+      .map(shift => ({
+        kind: "shift",
+        id: shift.id,
+        revision: Number(shift.revision || 1),
+        serviceDate: shift.service_date,
+        endDate: shift.end_date || shift.service_date,
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        shift,
+      }));
+    const occurrenceSources = visibleTaskOccurrences.flatMap(occurrence => {
+      const serviceDate = occurrence.service_date;
+      const allocation = getSuggestedTaskTimelineAllocation({
+        occurrence,
+        serviceDate,
+        segments: taskSegments,
+        shifts: shiftsInRange,
+      });
+      if (!allocation?.segment) return [];
+      const object = objectsById.get(String(occurrence.object_id || ""));
+      const shiftContext = buildPlanningEligibilityObjectShiftContext({ object, occurrence });
+      const previewShift = buildOccurrenceEligibilityShift({
+        occurrence,
+        serviceDate,
+        startTime: allocation.segment.start_time,
+        endTime: allocation.segment.end_time,
+        shiftContext,
+      });
+      if (!previewShift) return [];
+      return [{
+        kind: "occurrence",
+        id: occurrence.id,
+        revision: Number(occurrence.revision || 1),
+        serviceDate: allocation.segment.start_date,
+        endDate: allocation.segment.end_date,
+        startTime: allocation.segment.start_time,
+        endTime: allocation.segment.end_time,
+        occurrence,
+        shiftContext,
+        shift: previewShift,
+        preferredSegment: allocation.segment,
+      }];
+    });
+    return [...openShiftSources, ...occurrenceSources]
+      .sort((left, right) => (
+        String(left.serviceDate).localeCompare(String(right.serviceDate))
+        || String(left.startTime).localeCompare(String(right.startTime))
+        || String(left.id).localeCompare(String(right.id))
+      ))
+      .slice(0, 16);
+  }, [
+    assignmentsInRangeByShift,
+    matrixShifts,
+    objectsById,
+    shiftsInRange,
+    taskSegments,
+    visibleTaskOccurrences,
+  ]);
+  const buildEligibilityPrefetchCandidates = useCallback(personnelItems => (
+    eligibilityPrefetchSources.flatMap(source => (personnelItems || []).flatMap(personnelItem => {
+      const occurrenceProjection = source.kind === "occurrence"
+        ? resolveOccurrenceEligibilityProjection({
+            snapshot: eligibilityPlanningSnapshot,
+            occurrence: source.occurrence,
+            personnelItem,
+            serviceDate: source.serviceDate,
+            preferredSegment: source.preferredSegment,
+            shiftContext: source.shiftContext,
+          })
+        : null;
+      const openShiftMerge = source.kind === "shift"
+        ? resolveOpenShiftSamePersonnelMerge({
+            snapshot: eligibilityPlanningSnapshot,
+            targetShift: source.shift,
+            personnelId: personnelItem.id,
+          })
+        : null;
+      const candidateShift = occurrenceProjection?.shift || (openShiftMerge?.status === "merge" ? {
+        ...openShiftMerge.candidate.shift,
+        service_date: openShiftMerge.candidate.mergedSegment.start_date,
+        end_date: openShiftMerge.candidate.mergedSegment.end_date,
+        start_time: openShiftMerge.candidate.mergedSegment.start_time,
+        end_time: openShiftMerge.candidate.mergedSegment.end_time,
+      } : source.kind === "shift" ? source.shift : null);
+      if (!candidateShift) return [];
+      const excludeAssignmentId = occurrenceProjection?.excludeAssignmentId
+        || (openShiftMerge?.status === "merge" ? openShiftMerge.candidate.assignment.id : null);
+      const candidateSource = source.kind === "occurrence"
+        ? source.occurrence
+        : openShiftMerge?.status === "merge"
+          ? openShiftMerge.candidate.shift
+          : source.shift;
+      if (candidateSource?._optimistic_pending) return [];
+      const candidate = buildPlanningEligibilityPrefetchCandidate({
+        kind: source.kind,
+        source: candidateSource,
+        shift: candidateShift,
+        personnelId: personnelItem.id,
+        occurrenceId: source.kind === "occurrence" ? source.id : null,
+        excludeAssignmentId,
+      });
+      return candidate ? [candidate] : [];
+    }))
+  ), [eligibilityPlanningSnapshot, eligibilityPrefetchSources]);
+  const backgroundEligibilityCandidates = useMemo(
+    () => buildEligibilityPrefetchCandidates(activePersonnel.slice(0, 20)).slice(0, 320),
+    [activePersonnel, buildEligibilityPrefetchCandidates],
+  );
+  const requestEligibilityPrefetch = useCallback(async ({ candidates, basisToken, generation }) => {
+    if (!candidates.length) return;
+    const batches = batchPlanningEligibilityCandidates(candidates);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < batches.length) {
+        const batch = batches[cursor];
+        cursor += 1;
+        if (eligibilityPrefetchGenerationRef.current !== generation) return;
+        let results;
+        try {
+          const response = await invokePlanningApi({
+            action: "prefetch_assignment_eligibility",
+            basis_token: basisToken,
+            candidates: batch.map(({ _local, ...candidate }) => candidate),
+          });
+          results = (response?.results || []).map(item => ({
+            ...item,
+            basis_token: item.basis_token || response.basis_token,
+            expires_at: item.expires_at || response.expires_at,
+          }));
+        } catch {
+          const expiresAt = new Date(Date.now() + 15_000).toISOString();
+          results = batch.map(candidate => ({
+            candidate_key: candidate.candidate_key,
+            personnel_id: candidate.personnel_id,
+            status: "unavailable",
+            basis_token: basisToken,
+            expires_at: expiresAt,
+            warning_snapshot: [],
+          }));
+        }
+        if (eligibilityPrefetchGenerationRef.current !== generation) return;
+        setEligibilityServerDecisions(current => {
+          const byKey = new Map(current
+            .filter(item => item.basis_token === basisToken)
+            .map(item => [String(item.candidate_key), item]));
+          results.forEach(item => byKey.set(String(item.candidate_key), item));
+          return [...byKey.values()];
+        });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+  }, []);
+  const requestUrgentEligibilityCandidates = useCallback(candidates => {
+    const now = Date.now();
+    const known = new Set(eligibilityServerDecisions
+      .filter(item => (
+        item.basis_token === eligibilityIndex.basisToken
+        && Date.parse(item.expires_at || "") > now
+      ))
+      .map(item => String(item.candidate_key)));
+    const pending = eligibilityUrgentPrefetchKeysRef.current;
+    const requested = (candidates || []).filter(candidate => {
+      const requestKey = `${eligibilityIndex.basisToken}:${candidate?.candidate_key || ""}`;
+      return candidate?.candidate_key && !known.has(String(candidate.candidate_key)) && !pending.has(requestKey);
+    });
+    if (!requested.length) return;
+    const requestKeys = requested.map(candidate => `${eligibilityIndex.basisToken}:${candidate.candidate_key}`);
+    requestKeys.forEach(key => pending.add(key));
+    eligibilityIndex.prewarm(requested.map(item => item._local));
+    void requestEligibilityPrefetch({
+      candidates: requested,
+      basisToken: eligibilityIndex.basisToken,
+      generation: eligibilityPrefetchGenerationRef.current,
+    }).finally(() => requestKeys.forEach(key => pending.delete(key)));
+  }, [eligibilityIndex, eligibilityServerDecisions, requestEligibilityPrefetch]);
+  const refetchEligibilityDependencies = useCallback(() => Promise.allSettled([
+    queryClient.refetchQueries({ queryKey: ["personnel"], exact: true, type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["planning-shifts"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["planning-assignments"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["personnel-absences"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["personnel-qualifications"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["personnel-security-passes"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["personnel-restrictions"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["personnel-contracts"], type: "active" }),
+    queryClient.refetchQueries({ queryKey: ["objects"], exact: true, type: "active" }),
+  ]), [queryClient]);
+  useEffect(() => {
+    const now = Date.now();
+    const remoteDeadlines = eligibilityServerDecisions
+      .filter(item => item.basis_token === eligibilityIndex.basisToken)
+      .map(item => Date.parse(item.expires_at || ""))
+      .filter(Number.isFinite);
+    const dependencyDeadlines = Object.values(eligibilityDependencies)
+      .map(item => Number(item?.dataUpdatedAt || 0) + PLANNING_ELIGIBILITY_MAX_AGE_MS)
+      .filter(value => Number.isFinite(value) && value > PLANNING_ELIGIBILITY_MAX_AGE_MS);
+    const nextRemoteExpiry = remoteDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
+    const nextDependencyExpiry = dependencyDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
+    const nextExpiry = [nextRemoteExpiry, nextDependencyExpiry]
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right)[0];
+    if (!nextExpiry) return undefined;
+    const handle = window.setTimeout(() => {
+      setEligibilityFreshnessTick(value => value + 1);
+      if (nextDependencyExpiry && nextDependencyExpiry <= nextExpiry) {
+        void refetchEligibilityDependencies();
+      }
+    }, Math.min(2_147_000_000, Math.max(1, nextExpiry - Date.now() + 1)));
+    return () => window.clearTimeout(handle);
+  }, [eligibilityDependencies, eligibilityIndex.basisToken, eligibilityServerDecisions, refetchEligibilityDependencies]);
+  useEffect(() => {
+    if (!dragEligibilityPreview?.eligibilityCandidate) return;
+    requestUrgentEligibilityCandidates([dragEligibilityPreview.eligibilityCandidate]);
+  }, [dragEligibilityPreview?.eligibilityCandidate, eligibilityFreshnessTick, eligibilityIndex.basisToken, requestUrgentEligibilityCandidates]);
+  useEffect(() => {
+    if (eligibilityPrewarmBasisRef.current === eligibilityIndex.basisToken) return;
+    eligibilityPrewarmBasisRef.current = eligibilityIndex.basisToken;
+    eligibilityIndex.prewarm(backgroundEligibilityCandidates.map(item => item._local));
+  }, [backgroundEligibilityCandidates, eligibilityIndex]);
+  useEffect(() => {
+    const generation = eligibilityPrefetchGenerationRef.current + 1;
+    eligibilityPrefetchGenerationRef.current = generation;
+    setEligibilityServerDecisions([]);
+    if (!backgroundEligibilityCandidates.length) return undefined;
+    const schedule = typeof window.requestIdleCallback === "function"
+      ? callback => window.requestIdleCallback(callback, { timeout: 500 })
+      : callback => window.setTimeout(callback, 200);
+    const cancel = typeof window.cancelIdleCallback === "function"
+      ? handle => window.cancelIdleCallback(handle)
+      : handle => window.clearTimeout(handle);
+    const handle = schedule(() => {
+      void requestEligibilityPrefetch({
+        candidates: backgroundEligibilityCandidates,
+        basisToken: eligibilityIndex.basisToken,
+        generation,
+      });
+    });
+    return () => cancel(handle);
+  }, [backgroundEligibilityCandidates, eligibilityIndex.basisToken, requestEligibilityPrefetch]);
+
   const candidates = useMemo(() => {
     const ranked = buildCandidateRanking({
       shift: selectedShift,
@@ -1132,11 +1644,54 @@ export default function Planning() {
         .filter(item => String(item.planning_shift_id) === String(selectedShift.id))
         .map(item => String(item.personnel_id)),
     );
-    return ranked.map(candidate => ({
-      ...candidate,
-      assignedToSelectedShift: assignedPersonnelIds.has(String(candidate.personnel.id)),
-    }));
-  }, [activePersonnel, assignments, selectedShift, warningContext]);
+    return ranked.map(candidate => {
+      const adjacentMerge = resolveOpenShiftSamePersonnelMerge({
+        snapshot: eligibilityPlanningSnapshot,
+        targetShift: selectedShift,
+        personnelId: candidate.personnel.id,
+      });
+      const eligibilityShift = adjacentMerge.status === "merge" ? {
+        ...adjacentMerge.candidate.shift,
+        service_date: adjacentMerge.candidate.mergedSegment.start_date,
+        end_date: adjacentMerge.candidate.mergedSegment.end_date,
+        start_time: adjacentMerge.candidate.mergedSegment.start_time,
+        end_time: adjacentMerge.candidate.mergedSegment.end_time,
+      } : selectedShift;
+      const eligibilityVerdict = eligibilityIndex.queryShift({
+        personnelId: candidate.personnel.id,
+        shift: eligibilityShift,
+        excludeAssignmentId: adjacentMerge.status === "merge"
+          ? adjacentMerge.candidate.assignment.id
+          : null,
+      });
+      const candidateWarnings = eligibilityVerdict.warnings || [];
+      const eligibilityCandidate = buildPlanningEligibilityPrefetchCandidate({
+        kind: "shift",
+        source: adjacentMerge.status === "merge" ? adjacentMerge.candidate.shift : selectedShift,
+        shift: eligibilityShift,
+        personnelId: candidate.personnel.id,
+        excludeAssignmentId: adjacentMerge.status === "merge"
+          ? adjacentMerge.candidate.assignment.id
+          : null,
+      });
+      return {
+        ...candidate,
+        warnings: candidateWarnings,
+        criticalCount: candidateWarnings.filter(item => item.severity === "critical").length,
+        warningCount: candidateWarnings.filter(item => item.severity !== "critical").length,
+        eligibilityStatus: eligibilityVerdict.status,
+        eligibilityNotices: eligibilityVerdict.notices,
+        eligibilityCandidate,
+        assignedToSelectedShift: assignedPersonnelIds.has(String(candidate.personnel.id)),
+      };
+    });
+  }, [activePersonnel, assignments, eligibilityFreshnessTick, eligibilityIndex, eligibilityPlanningSnapshot, selectedShift, warningContext]);
+  useEffect(() => {
+    if (!selectedShift) return;
+    requestUrgentEligibilityCandidates(
+      candidates.slice(0, 20).map(candidate => candidate.eligibilityCandidate).filter(Boolean),
+    );
+  }, [candidates, requestUrgentEligibilityCandidates, selectedShift]);
 
   const handleActionMutationError = (error, variables) => {
     if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") return;
@@ -1177,6 +1732,7 @@ export default function Planning() {
       shifts: authoritative.shifts,
       assignments: authoritative.assignments,
       segments: authoritative.segments,
+      occurrences: authoritative.occurrences,
       intents: planningMutationQueue.current.getSnapshot().intents,
     });
     return { ...authoritative, ...projected };
@@ -1268,8 +1824,9 @@ export default function Planning() {
   const executeAssignment = async (shift, personnelItem, requestedSlotIndex = null, candidateWarnings = null) => {
     if (!shift || !personnelItem) return;
     if (planningCommitFenceRef.current) return null;
+    const initialSnapshot = queuedEffectiveSnapshot();
     const initialTarget = resolveQueuedShiftAssignment({
-      snapshot: queuedEffectiveSnapshot(),
+      snapshot: initialSnapshot,
       shiftId: shift.id,
       personnelId: personnelItem.id,
       requestedSlotIndex,
@@ -1283,47 +1840,144 @@ export default function Planning() {
       setLiveMessage(error.message);
       return;
     }
+    const initialMerge = resolveOpenShiftSamePersonnelMerge({
+      snapshot: initialSnapshot,
+      targetShift: initialTarget.shift,
+      personnelId: personnelItem.id,
+    });
     const slotIndex = initialTarget.slotIndex;
+    const warningShift = initialMerge.status === "merge" ? {
+      ...initialMerge.candidate.shift,
+      service_date: initialMerge.candidate.mergedSegment.start_date,
+      end_date: initialMerge.candidate.mergedSegment.end_date,
+      start_time: initialMerge.candidate.mergedSegment.start_time,
+      end_time: initialMerge.candidate.mergedSegment.end_time,
+    } : initialTarget.shift;
     const warnings = candidateWarnings || getAssignmentWarnings({
-      shift: initialTarget.shift,
+      shift: warningShift,
       personnel: personnelItem,
       ...warningContext,
     });
     const name = personnelName(personnelItem);
     const executionRange = Object.freeze({ periodStart, periodEnd });
     const pendingKey = createPlanningMutationKey("planning-assign");
-    const optimisticIntent = {
-      key: pendingKey,
-      shifts: [],
-      segments: [],
-      assignments: [normalizePlanningAssignment({
-        id: `pending-assignment-${pendingKey}`,
-        planning_shift_id: initialTarget.shift.id,
-        shift_id: initialTarget.shift.id,
-        personnel_id: personnelItem.id,
-        personnel_name: name,
-        slot_index: slotIndex,
-        status: "draft",
-        warnings,
-        _optimistic_pending: true,
-      })],
-    };
+    const mergeCandidate = initialMerge.status === "merge" ? initialMerge.candidate : null;
+    const parentIntentIds = [...new Set([
+      planningOriginIntentId(initialTarget.shift),
+      planningOriginIntentId(initialMerge.targetSegment),
+      planningOriginIntentId(mergeCandidate?.shift),
+      planningOriginIntentId(mergeCandidate?.segment),
+      planningOriginIntentId(mergeCandidate?.assignment),
+    ].filter(id => id && planningMutationQueue.current.has(id)))];
+    const optimisticIntent = initialMerge.status === "merge"
+      ? withPlanningOptimisticIntentIdentity({
+          ...buildDependentPlanningDeleteIntent({
+            key: pendingKey,
+            originIntentId: pendingKey,
+            shift: initialTarget.shift,
+            segments: [initialMerge.targetSegment],
+            assignments: [],
+            survivorShift: mergeCandidate.shift,
+            survivorSegment: mergeCandidate.segment,
+          }),
+          key: pendingKey,
+          kind: "assign_and_merge_task_shift_partition",
+          shift_id: initialTarget.shift.id,
+          segment_id: initialMerge.targetSegment.id,
+          task_occurrence_id: initialMerge.targetSegment.task_occurrence_id,
+          assignments: [normalizePlanningAssignment({
+            ...mergeCandidate.assignment,
+            warnings,
+            warning_snapshot: warnings,
+            _optimistic_pending: true,
+          })],
+        }, { originIntentId: pendingKey })
+      : withPlanningOptimisticIntentIdentity({
+          key: pendingKey,
+          kind: "assign",
+          shift_id: initialTarget.shift.id,
+          shifts: [initialTarget.shift],
+          segments: [],
+          assignments: [normalizePlanningAssignment({
+            id: `pending-assignment-${pendingKey}`,
+            planning_shift_id: initialTarget.shift.id,
+            shift_id: initialTarget.shift.id,
+            personnel_id: personnelItem.id,
+            personnel_name: name,
+            slot_index: slotIndex,
+            status: "draft",
+            warnings,
+            _optimistic_pending: true,
+          })],
+          occurrences: [],
+        }, { originIntentId: pendingKey });
     let executedRequest = null;
     const operation = planningMutationQueue.current.enqueue({
       id: pendingKey,
+      dependsOn: parentIntentIds,
       resourceKeys: [
         `shift:${initialTarget.shift.id}`,
-        ...personnelDayQueueResourceKeys(personnelItem.id, initialTarget.shift),
+        ...(mergeCandidate ? [`shift:${mergeCandidate.shift.id}`] : []),
+        ...(initialMerge.targetSegment ? [`occurrence:${initialMerge.targetSegment.task_occurrence_id}`] : []),
+        ...personnelDayQueueResourceKeys(personnelItem.id, warningShift),
       ],
       intent: optimisticIntent,
-      execute: () => {
+      execute: ({ intent }) => {
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const shiftTarget = resolvePlanningShiftTarget(snapshot, { id: intent.shift_id });
+        if (shiftTarget.status !== "ready") throw queuedPlanningRebaseError(shiftTarget.reason);
+        if (intent.kind === "assign_and_merge_task_shift_partition") {
+          const currentMerge = resolveOpenShiftSamePersonnelMerge({
+            snapshot,
+            targetShift: shiftTarget.record,
+            personnelId: personnelItem.id,
+          });
+          if (currentMerge.status !== "merge") {
+            throw queuedPlanningRebaseError(currentMerge.reason || "adjacent_merge_no_longer_available");
+          }
+          const currentOccurrence = resolvePlanningOccurrenceTarget(snapshot, {
+            id: currentMerge.targetSegment.task_occurrence_id,
+          });
+          if (currentOccurrence.status !== "ready") throw queuedPlanningRebaseError(currentOccurrence.reason);
+          const candidate = currentMerge.candidate;
+          const mergedShift = {
+            ...candidate.shift,
+            service_date: candidate.mergedSegment.start_date,
+            end_date: candidate.mergedSegment.end_date,
+            start_time: candidate.mergedSegment.start_time,
+            end_time: candidate.mergedSegment.end_time,
+          };
+          const currentWarnings = getAssignmentWarnings({
+            shift: mergedShift,
+            personnel: personnelItem,
+            ...warningContext,
+            excludeAssignmentId: candidate.assignment.id,
+          });
+          executedRequest = {
+            action: "assign_and_merge_task_shift_partition",
+            target_shift_id: shiftTarget.record.id,
+            target_segment_id: currentMerge.targetSegment.id,
+            adjacent_shift_id: candidate.shift.id,
+            adjacent_segment_id: candidate.segment.id,
+            adjacent_assignment_id: candidate.assignment.id,
+            personnel_id: personnelItem.id,
+            warning_snapshot: currentWarnings,
+            expected_target_shift_revision: Number(shiftTarget.record.revision || 1),
+            expected_target_segment_revision: Number(currentMerge.targetSegment.revision || 1),
+            expected_adjacent_shift_revision: Number(candidate.shift.revision || 1),
+            expected_adjacent_segment_revision: Number(candidate.segment.revision || 1),
+            expected_adjacent_assignment_revision: Number(candidate.assignment.revision || 1),
+            expected_occurrence_revision: Number(currentOccurrence.record.revision || 1),
+          };
+          return runQueuedIntentMutation(pendingKey, executedRequest);
+        }
         const target = resolveQueuedShiftAssignment({
-          snapshot: planningExecutionSnapshotFromCache(
-            queryClient,
-            executionRange.periodStart,
-            executionRange.periodEnd,
-          ),
-          shiftId: initialTarget.shift.id,
+          snapshot,
+          shiftId: shiftTarget.record.id,
           personnelId: personnelItem.id,
           requestedSlotIndex: slotIndex,
         });
@@ -1345,9 +1999,16 @@ export default function Planning() {
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
       onSuccess: result => {
-        reconcilePlanningResultForRange(result, executionRange);
+        reconcilePlanningResultForRange(result, executionRange, {
+          replaceShiftSegments: optimisticIntent.kind === "assign_and_merge_task_shift_partition",
+        });
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, optimisticIntent, result)
+        ));
         refreshPlanningInBackground();
-        const description = `${name} is eenmalig ingepland op ${initialTarget.shift.name}.`;
+        const description = optimisticIntent.kind === "assign_and_merge_task_shift_partition"
+          ? `${name} blijft als één aaneengesloten dienst ingepland; het open restant is samengevoegd.`
+          : `${name} is eenmalig ingepland op ${initialTarget.shift.name}.`;
         rememberUndo(result, description);
         setLiveMessage(description);
         setSelectedShiftId(null);
@@ -1361,36 +2022,91 @@ export default function Planning() {
     return operation;
   };
 
-  const handleCandidateAssign = candidate => executeAssignment(
-    selectedShift,
-    candidate.personnel,
-    null,
-    candidate.warnings,
-  );
+  const handleCandidateAssign = candidate => {
+    if (candidate?.eligibilityStatus !== "ready") {
+      if (candidate?.eligibilityCandidate) {
+        requestUrgentEligibilityCandidates([candidate.eligibilityCandidate]);
+      }
+      const description = "De volledige CAO- en inzetcontrole is nog niet actueel. De medewerker is nog niet ingepland.";
+      toast({ title: "Voorcontrole nog niet actueel", description });
+      setLiveMessage(description);
+      return Promise.resolve(null);
+    }
+    return executeAssignment(
+      selectedShift,
+      candidate.personnel,
+      null,
+      candidate.warnings,
+    );
+  };
 
   const handleUnassign = async (shift, assignment) => {
-    const releasePendingResources = acquirePendingResources([
-      `shift:${shift.id}`,
-      `personnel:${assignment.personnel_id}`,
-    ]);
-    if (!releasePendingResources) return;
-    try {
-      const result = await runIntentMutation("unassign", "planning-unassign", {
+    if (!shift || !assignment || planningCommitFenceRef.current) return null;
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const pendingKey = createPlanningMutationKey("planning-unassign");
+    const parentIntentId = planningOriginIntentId(assignment) || planningOriginIntentId(shift);
+    const relatedSegments = (activeTaskSegmentsByShift.get(String(shift.id)) || []);
+    const occurrenceIds = [...new Set(relatedSegments.map(item => String(item.task_occurrence_id)))];
+    const optimisticIntent = {
+      ...buildDependentPlanningUnassignIntent({
+        key: pendingKey,
+        originIntentId: pendingKey,
+        shift,
+        assignment,
+      }),
+      shift_id: shift.id,
+      assignment_id: assignment.id,
+    };
+    let executionIntent = optimisticIntent;
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: parentIntentId && planningMutationQueue.current.has(parentIntentId) ? [parentIntentId] : [],
+      resourceKeys: [
+        `shift:${shift.id}`,
+        ...occurrenceIds.map(id => `occurrence:${id}`),
+        ...personnelDayQueueResourceKeys(assignment.personnel_id, shift),
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        executionIntent = intent;
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const currentShift = resolvePlanningShiftTarget(snapshot, { id: intent.shift_id });
+        const currentAssignment = resolvePlanningAssignmentTarget(snapshot, { id: intent.assignment_id });
+        const blocked = [currentShift, currentAssignment].find(target => target.status !== "ready");
+        if (blocked) throw queuedPlanningRebaseError(blocked.reason);
+        executedRequest = {
+          action: "unassign",
+          shift_id: currentShift.record.id,
+          slot_index: Number(currentAssignment.record.slot_index || 0),
+          assignment_id: currentAssignment.record.id,
+          expected_shift_revision: Number(currentShift.record.revision || 1),
+        };
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: result => {
+        reconcilePlanningResultForRange(result, executionRange);
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, executionIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name || "de dienst"}; de dienst blijft openstaan.`;
+        rememberUndo(result, description);
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
         action: "unassign",
         shift_id: shift.id,
-        slot_index: Number(assignment.slot_index || 0),
         assignment_id: assignment.id,
-        expected_shift_revision: Number(shift.revision || 1),
-      });
-      reconcilePlanningResult(result);
-      refreshPlanningInBackground();
-      const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name}.`;
-      rememberUndo(result, description);
-      setLiveMessage(description);
-      return result;
-    } finally {
-      releasePendingResources();
-    }
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
+    });
+    void operation.catch(() => undefined);
+    return { accepted: true, operation };
   };
 
   const handleUndo = async (item = undoStack[0]) => {
@@ -1429,7 +2145,7 @@ export default function Planning() {
     return result;
   };
 
-  const composeAndAssignOccurrenceSlice = async ({ occurrence, personnelItem, serviceDate, startTime, endTime }) => {
+  const composeAndAssignOccurrenceSlice = async ({ occurrence, personnelItem, serviceDate, startTime, endTime, candidateWarnings = null }) => {
     if (!occurrence || !personnelItem) return;
     if (planningCommitFenceRef.current) return null;
     const preferredSegment = occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, endTime);
@@ -1457,7 +2173,7 @@ export default function Planning() {
       resolution: initialResolution,
       personnelItem,
     });
-    const immediateWarnings = getAssignmentWarnings({
+    const immediateWarnings = candidateWarnings || getAssignmentWarnings({
       shift: optimisticRecords.shifts[0],
       personnel: personnelItem,
       ...warningContext,
@@ -1576,23 +2292,6 @@ export default function Planning() {
     setLiveMessage(description);
   };
 
-  const reconcileTaskDefinitionVersion = result => {
-    const definitionId = result?.definition?.id;
-    const definitionVersion = Number(result?.definition?.version || 0);
-    if (!definitionId || definitionVersion < 1) return;
-    const occurrenceUpdates = taskOccurrences
-      .filter(item => String(item.object_task_definition_id) === String(definitionId))
-      .map(item => ({ id: item.id, definition_version: definitionVersion }));
-    if (occurrenceUpdates.length > 0) {
-      reconcilePlanningResult({ task_occurrences: occurrenceUpdates });
-    }
-    setTaskClipboard(current => (
-      current && String(current.object_task_definition_id) === String(definitionId)
-        ? { ...current, definition_version: definitionVersion }
-        : current
-    ));
-  };
-
   const deleteTaskOccurrence = async request => {
     const occurrence = request?.occurrence;
     if (!occurrence) return;
@@ -1644,30 +2343,85 @@ export default function Planning() {
 
   const pasteTaskToDate = async ({ task, objectId, serviceDate }) => {
     if (!task || String(task.object_id) !== String(objectId)) return;
-    const releasePendingResources = acquirePendingResources([`task-date:${objectId}:${serviceDate}`]);
-    if (!releasePendingResources) return;
-    try {
-      const result = await runIntentMutation(`paste-task:${task.id}:${serviceDate}`, "planning-paste-task", {
-        action: "add_object_task_series",
-        object_id: task.object_id,
-        customer_id: task.customer_id,
-        task_definition_id: task.object_task_definition_id,
-        expected_version: Number(task.definition_version || 1),
-        schedule_block: {
-          service_date: serviceDate,
-          start_time: task.window_start_time,
-          end_time: task.window_end_time,
-          repeat_weekly: false,
-        },
-      });
-      reconcileTaskDefinitionVersion(result);
-      materializeTaskSchedulesInBackground();
-      const description = `${task.task_name_snapshot || "Taak"} is op ${serviceDate} geplaatst zonder diensten of medewerkers.`;
-      toast({ title: "Taak geplakt", description });
-      setLiveMessage(description);
-    } finally {
-      releasePendingResources();
-    }
+    if (planningCommitFenceRef.current) return null;
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const pendingKey = createPlanningMutationKey("planning-copy-task-occurrence");
+    const optimisticOccurrence = buildOptimisticCopiedTaskOccurrence({
+      occurrence: task,
+      targetServiceDate: serviceDate,
+    });
+    const reference = planningTaskCopyReference({
+      sourceOccurrenceId: task.id,
+      targetServiceDate: serviceDate,
+    });
+    const originIntentId = planningOriginIntentId(task);
+    const optimisticIntent = withPlanningOptimisticIntentIdentity({
+      key: pendingKey,
+      kind: "copy_task_occurrence",
+      task_occurrence_id: task.id,
+      sourceOccurrence: {
+        id: task.id,
+        ref: planningRecordReference(task, "occurrence"),
+      },
+      shifts: [],
+      assignments: [],
+      segments: [],
+      occurrences: [optimisticOccurrence],
+    }, { originIntentId: pendingKey });
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: originIntentId && planningMutationQueue.current.has(originIntentId) ? [originIntentId] : [],
+      resourceKeys: [
+        `occurrence:${task.id}`,
+        `occurrence:${optimisticOccurrence.id}`,
+        `task-copy:${reference}`,
+        `task-date:${objectId}:${serviceDate}`,
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const sourceTarget = resolvePlanningOccurrenceTarget(snapshot, {
+          id: intent.task_occurrence_id,
+          ref: intent.sourceOccurrence?.ref,
+        });
+        if (sourceTarget.status !== "ready") throw queuedPlanningRebaseError(sourceTarget.reason);
+        executedRequest = buildCopyTaskOccurrencePayload({
+          occurrence: sourceTarget.record,
+          targetServiceDate: serviceDate,
+        });
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: result => {
+        const validation = reconcileOptimisticTaskCopy({
+          occurrences: queuedEffectiveSnapshot().occurrences,
+          optimisticOccurrence,
+          result,
+        });
+        if (!validation.reconciled) {
+          throw new Error("De server heeft de gekopieerde taak niet autoritatief teruggegeven.");
+        }
+        reconcilePlanningResultForRange(result, executionRange);
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, optimisticIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const description = `${task.task_name_snapshot || "Taak"} is op ${serviceDate} geplaatst zonder diensten of medewerkers.`;
+        toast({ title: "Taak geplakt", description });
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
+        action: "copy_task_occurrence",
+        source_occurrence_id: task.id,
+        target_service_date: serviceDate,
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
+    });
+    return operation;
   };
 
   const copyServiceToClipboard = clipboard => {
@@ -1718,7 +2472,7 @@ export default function Planning() {
     }
   };
 
-  const resizeTimelineTaskSegment = async ({ shift, segment, startDate, endDate, startTime, endTime, notification = null }) => {
+  const resizeTimelineTaskSegment = ({ shift, segment, startDate, endDate, startTime, endTime, notification = null }) => {
     if (!shift || !segment) return;
     const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
@@ -1731,37 +2485,107 @@ export default function Planning() {
       setLiveMessage(description);
       return;
     }
-    const payload = buildTimelineResizeCompositionPayload({
-      shift,
-      targetSegmentId: segment.id,
-      segments: activeSegments,
-      occurrences: occurrenceIds.map(id => occurrenceById.get(id)),
-      nextStartDate: startDate,
-      nextEndDate: endDate,
-      nextStartTime: startTime,
-      nextEndTime: endTime,
-    });
-    const releasePendingResources = acquirePendingResources([
-      `shift:${shift.id}`,
-      ...occurrenceIds.map(id => `occurrence:${id}`),
-    ]);
-    if (!releasePendingResources) return;
-    try {
-      const result = await runIntentMutation(`timeline-resize:${shift.id}:${segment.id}`, "timeline-resize", payload);
-      setStatusFilter("all");
-      reconcilePlanningResult(result, { replaceShiftSegments: true });
-      refreshPlanningInBackground();
-      const description = notification?.description
-        || `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen taakdeel staat direct weer open.`;
-      toast({ title: notification?.title || "Diensttijd aangepast", description });
+    if (activeSegments.length !== 1 || occurrenceIds.length !== 1) {
+      const description = "Alleen een enkel taakdeel kan rechtstreeks op de kaart worden gesplitst. Open de dienstinhoud voor een samengestelde dienst.";
+      toast({ variant: "destructive", title: "Dienst kan hier niet worden gesplitst", description });
       setLiveMessage(description);
-      return result;
-    } finally {
-      releasePendingResources();
+      return;
     }
+    const pendingKey = createPlanningMutationKey("timeline-preserve-resize");
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const shiftAssignments = activeAssignments(assignments).filter(item => (
+      String(item.planning_shift_id || item.shift_id) === String(shift.id)
+    ));
+    const parentIntentId = planningOriginIntentId(shift) || planningOriginIntentId(segment);
+    const optimisticIntent = {
+      ...buildDependentPlanningResizeIntent({
+        key: pendingKey,
+        originIntentId: pendingKey,
+        shift,
+        segment,
+        assignments: shiftAssignments,
+        nextStartDate: startDate,
+        nextEndDate: endDate,
+        nextStartTime: startTime,
+        nextEndTime: endTime,
+      }),
+      shift_id: shift.id,
+      segment_id: segment.id,
+      task_occurrence_id: occurrenceIds[0],
+    };
+    let executionIntent = optimisticIntent;
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: parentIntentId && planningMutationQueue.current.has(parentIntentId) ? [parentIntentId] : [],
+      coalesceKey: `resize:${planningRecordReference(shift, "shift")}:${planningRecordReference(segment, "segment")}`,
+      coalesceIntent: (_current, incoming) => incoming,
+      resourceKeys: [
+        `shift:${shift.id}`,
+        ...occurrenceIds.map(id => `occurrence:${id}`),
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        executionIntent = intent;
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const currentShift = resolvePlanningShiftTarget(snapshot, { id: intent.shift_id });
+        const currentSegment = resolvePlanningSegmentTarget(snapshot, { id: intent.segment_id });
+        const currentOccurrence = resolvePlanningOccurrenceTarget(snapshot, { id: intent.task_occurrence_id });
+        const requestedShift = resolvePlanningShiftTarget(intent, { ref: intent._planning_target_refs?.shift });
+        const requestedSegment = resolvePlanningSegmentTarget(intent, { ref: intent._planning_target_refs?.segment });
+        const blocked = [currentShift, currentSegment, currentOccurrence, requestedShift, requestedSegment]
+          .find(target => target.status !== "ready");
+        if (blocked) throw queuedPlanningRebaseError(blocked.reason);
+        const currentAssignments = activeAssignments(snapshot.assignments).filter(item => (
+          String(item.planning_shift_id || item.shift_id) === String(currentShift.record.id)
+        ));
+        executedRequest = {
+          action: "resize_task_shift_preserving_coverage",
+          shift_id: currentShift.record.id,
+          segment_id: currentSegment.record.id,
+          start_date: requestedSegment.record.start_date,
+          end_date: requestedSegment.record.end_date,
+          start_time: requestedSegment.record.start_time,
+          end_time: requestedSegment.record.end_time,
+          expected_shift_revision: Number(currentShift.record.revision || 1),
+          expected_segment_revision: Number(currentSegment.record.revision || 1),
+          expected_occurrence_revision: Number(currentOccurrence.record.revision || 1),
+          expected_assignment_revisions: Object.fromEntries(currentAssignments.map(item => [
+            item.id,
+            Number(item.revision || 1),
+          ])),
+        };
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: result => {
+        setStatusFilter("all");
+        reconcilePlanningResultForRange(result, executionRange);
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, executionIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const description = notification?.description
+          || `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen deel is een echte open dienst.`;
+        toast({ title: notification?.title || "Diensttijd aangepast", description });
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
+        action: "resize_task_shift_preserving_coverage",
+        shift_id: shift.id,
+        segment_id: segment.id,
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
+    });
+    void operation.catch(() => undefined);
+    setStatusFilter("all");
+    return { accepted: true, operation };
   };
 
-  const resizeTimelineSharedBoundary = async ({
+  const resizeTimelineSharedBoundary = ({
     occurrence,
     boundaryDate,
     boundaryTime,
@@ -1770,67 +2594,150 @@ export default function Planning() {
   }) => {
     if (!occurrence || !left?.shift || !left?.segment || !right?.shift || !right?.segment) return;
 
-    const currentOccurrence = taskOccurrences.find(item => String(item.id) === String(occurrence.id));
-    if (!currentOccurrence) {
+    const initialSnapshot = queuedEffectiveSnapshot();
+    const currentOccurrence = resolvePlanningOccurrenceTarget(initialSnapshot, { id: occurrence.id });
+    if (currentOccurrence.status !== "ready") {
       const description = "De gekoppelde klanttaak is niet meer geladen. Ververs de planning en probeer het opnieuw.";
       toast({ variant: "destructive", title: "Overdrachtsgrens kan niet worden aangepast", description });
       setLiveMessage(description);
       return;
     }
 
-    const affectedShiftIds = new Set([String(left.shift.id), String(right.shift.id)]);
-    const affectedAssignments = activeAssignments(assignments).filter(assignment => (
-      affectedShiftIds.has(String(assignment.planning_shift_id || assignment.shift_id))
-    ));
-    const releasePendingResources = acquirePendingResources([
-      `occurrence:${currentOccurrence.id}`,
-      `shift:${left.shift.id}`,
-      `shift:${right.shift.id}`,
-      ...affectedAssignments.map(assignment => `personnel:${assignment.personnel_id}`),
-    ]);
-    if (!releasePendingResources) return;
-
-    try {
-      const result = await runIntentMutation(
-        `timeline-boundary:${currentOccurrence.id}:${left.segment.id}:${right.segment.id}`,
-        "timeline-shared-boundary",
-        {
+    const pendingKey = createPlanningMutationKey("timeline-shared-boundary");
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const leftShift = {
+      ...left.shift,
+      end_date: boundaryDate,
+      end_time: boundaryTime,
+      _optimistic_pending: true,
+    };
+    const rightShift = {
+      ...right.shift,
+      service_date: boundaryDate,
+      start_date: boundaryDate,
+      start_time: boundaryTime,
+      _optimistic_pending: true,
+    };
+    const leftSegment = {
+      ...left.segment,
+      end_date: boundaryDate,
+      end_time: boundaryTime,
+      _optimistic_pending: true,
+    };
+    const rightSegment = {
+      ...right.segment,
+      start_date: boundaryDate,
+      start_time: boundaryTime,
+      _optimistic_pending: true,
+    };
+    const optimisticIntent = withPlanningOptimisticIntentIdentity({
+      key: pendingKey,
+      kind: "resize_shared_task_boundary",
+      task_occurrence_id: currentOccurrence.record.id,
+      left_shift_id: left.shift.id,
+      left_segment_id: left.segment.id,
+      right_shift_id: right.shift.id,
+      right_segment_id: right.segment.id,
+      boundary_date: boundaryDate,
+      boundary_time: boundaryTime,
+      shifts: [leftShift, rightShift],
+      segments: [leftSegment, rightSegment],
+      assignments: [],
+      occurrences: [],
+    }, { originIntentId: pendingKey });
+    const parentIntentIds = [...new Set([
+      planningOriginIntentId(left.shift),
+      planningOriginIntentId(left.segment),
+      planningOriginIntentId(right.shift),
+      planningOriginIntentId(right.segment),
+    ].filter(id => id && planningMutationQueue.current.has(id)))];
+    let executionIntent = optimisticIntent;
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: parentIntentIds,
+      coalesceKey: `shared-boundary:${planningRecordReference(occurrence, "occurrence")}:${planningRecordReference(left.segment, "segment")}:${planningRecordReference(right.segment, "segment")}`,
+      coalesceIntent: (_current, incoming) => incoming,
+      resourceKeys: [
+        `occurrence:${occurrence.id}`,
+        `shift:${left.shift.id}`,
+        `shift:${right.shift.id}`,
+        ...activeAssignments(initialSnapshot.assignments)
+          .filter(assignment => [String(left.shift.id), String(right.shift.id)].includes(String(assignment.planning_shift_id || assignment.shift_id)))
+          .flatMap(assignment => planningPersonnelDayResourceKeys(assignment.personnel_id, left.shift)),
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        executionIntent = intent;
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const targets = {
+          occurrence: resolvePlanningOccurrenceTarget(snapshot, { id: intent.task_occurrence_id }),
+          leftShift: resolvePlanningShiftTarget(snapshot, { id: intent.left_shift_id }),
+          leftSegment: resolvePlanningSegmentTarget(snapshot, { id: intent.left_segment_id }),
+          rightShift: resolvePlanningShiftTarget(snapshot, { id: intent.right_shift_id }),
+          rightSegment: resolvePlanningSegmentTarget(snapshot, { id: intent.right_segment_id }),
+        };
+        const blocked = Object.values(targets).find(target => target.status !== "ready");
+        if (blocked) throw queuedPlanningRebaseError(blocked.reason);
+        const shiftIds = new Set([String(targets.leftShift.record.id), String(targets.rightShift.record.id)]);
+        const affectedAssignments = activeAssignments(snapshot.assignments).filter(assignment => (
+          shiftIds.has(String(assignment.planning_shift_id || assignment.shift_id))
+        ));
+        executedRequest = {
           action: "resize_shared_task_boundary",
-          task_occurrence_id: currentOccurrence.id,
-          left_shift_id: left.shift.id,
-          left_segment_id: left.segment.id,
-          right_shift_id: right.shift.id,
-          right_segment_id: right.segment.id,
-          boundary_date: boundaryDate,
-          boundary_time: boundaryTime,
+          task_occurrence_id: targets.occurrence.record.id,
+          left_shift_id: targets.leftShift.record.id,
+          left_segment_id: targets.leftSegment.record.id,
+          right_shift_id: targets.rightShift.record.id,
+          right_segment_id: targets.rightSegment.record.id,
+          boundary_date: intent.boundary_date,
+          boundary_time: intent.boundary_time,
           expected_shift_revisions: {
-            [left.shift.id]: Number(left.shift.revision || 1),
-            [right.shift.id]: Number(right.shift.revision || 1),
+            [targets.leftShift.record.id]: Number(targets.leftShift.record.revision || 1),
+            [targets.rightShift.record.id]: Number(targets.rightShift.record.revision || 1),
           },
           expected_segment_revisions: {
-            [left.segment.id]: Number(left.segment.revision || 1),
-            [right.segment.id]: Number(right.segment.revision || 1),
+            [targets.leftSegment.record.id]: Number(targets.leftSegment.record.revision || 1),
+            [targets.rightSegment.record.id]: Number(targets.rightSegment.record.revision || 1),
           },
           expected_assignment_revisions: Object.fromEntries(affectedAssignments.map(assignment => [
             assignment.id,
             Number(assignment.revision || 1),
           ])),
-          expected_occurrence_revision: Number(currentOccurrence.revision || 1),
-        },
-      );
-      setStatusFilter("all");
-      reconcilePlanningResult(result, { replaceShiftSegments: true });
-      refreshPlanningInBackground();
-      const description = `De overdracht staat nu op ${boundaryTime}; beide aansluitende diensten zijn in één keer aangepast.`;
-      toast({ title: "Overdrachtsgrens aangepast", description });
-      setLiveMessage(description);
-      return result;
-    } finally {
-      releasePendingResources();
-    }
+          expected_occurrence_revision: Number(targets.occurrence.record.revision || 1),
+        };
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: result => {
+        setStatusFilter("all");
+        reconcilePlanningResultForRange(result, executionRange, { replaceShiftSegments: true });
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, executionIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const description = `De overdracht staat nu op ${boundaryTime}; beide aansluitende diensten zijn in één keer aangepast.`;
+        toast({ title: "Overdrachtsgrens aangepast", description });
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
+        action: "resize_shared_task_boundary",
+        task_occurrence_id: occurrence.id,
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, {
+        executionRange,
+        replaceShiftSegments: true,
+      }),
+    });
+    void operation.catch(() => undefined);
+    setStatusFilter("all");
+    return { accepted: true, operation };
   };
 
-  const composeAndAssignOccurrence = async (occurrence, personnelItem, serviceDate) => {
+  const composeAndAssignOccurrence = async (occurrence, personnelItem, serviceDate, candidateWarnings = null) => {
     if (!occurrence || !personnelItem) return;
     if (planningCommitFenceRef.current) return null;
     const state = getOccurrencePlanningState({
@@ -1900,7 +2807,7 @@ export default function Planning() {
       resolution: initialResolution,
       personnelItem,
     });
-    const immediateWarnings = getAssignmentWarnings({
+    const immediateWarnings = candidateWarnings || getAssignmentWarnings({
       shift: optimisticRecords.shifts[0],
       personnel: personnelItem,
       ...warningContext,
@@ -2003,10 +2910,152 @@ export default function Planning() {
     setLiveMessage(`Bezetting geopend voor ${openShift.name || "de gekoppelde dienst"}.`);
   };
 
-  const processPlanningDrop = result => {
+  const eligibilityShiftContextForOccurrence = occurrence => {
+    const object = objectsById.get(String(occurrence?.object_id || ""));
+    return buildPlanningEligibilityObjectShiftContext({ object, occurrence });
+  };
+
+  const resolveDropEligibilityPreview = drop => {
+    if (!drop?.personnelId) return null;
+    const personnelItem = activePersonnel.find(item => String(item.id) === String(drop.personnelId));
+    if (!personnelItem) return null;
+    if (drop.kind === "assign_personnel_to_shift") {
+      const shift = allShifts.find(item => String(item.id) === String(drop.shiftId));
+      if (!shift) return null;
+      const adjacentMerge = resolveOpenShiftSamePersonnelMerge({
+        snapshot: queuedEffectiveSnapshot(),
+        targetShift: shift,
+        personnelId: personnelItem.id,
+      });
+      const previewShift = adjacentMerge.status === "merge" ? {
+        ...adjacentMerge.candidate.shift,
+        service_date: adjacentMerge.candidate.mergedSegment.start_date,
+        end_date: adjacentMerge.candidate.mergedSegment.end_date,
+        start_time: adjacentMerge.candidate.mergedSegment.start_time,
+        end_time: adjacentMerge.candidate.mergedSegment.end_time,
+      } : shift;
+      const excludeAssignmentId = adjacentMerge.status === "merge"
+        ? adjacentMerge.candidate.assignment.id
+        : null;
+      const eligibilityCandidate = buildPlanningEligibilityPrefetchCandidate({
+        kind: "shift",
+        source: adjacentMerge.status === "merge" ? adjacentMerge.candidate.shift : shift,
+        shift: previewShift,
+        personnelId: personnelItem.id,
+        excludeAssignmentId,
+      });
+      return {
+        drop,
+        personnel: personnelItem,
+        targetLabel: previewShift.name || previewShift.service_name_snapshot || "Open dienst",
+        eligibilityCandidate,
+        verdict: eligibilityIndex.queryShift({
+          personnelId: personnelItem.id,
+          shift: previewShift,
+          excludeAssignmentId,
+        }),
+      };
+    }
+    if (!["compose_occurrence_slice_for_personnel", "compose_occurrence_for_personnel", "assign_task_to_employee_day"].includes(drop.kind)) {
+      return null;
+    }
+    const occurrence = taskOccurrencesInRange.find(item => String(item.id) === String(drop.occurrenceId));
+    if (!occurrence) return null;
+    const serviceDate = getSafeOccurrenceDropServiceDate(occurrence, drop.serviceDate || occurrence.service_date);
+    if (!serviceDate) return null;
+    let preferredSegment = null;
+    if (drop.startTime && drop.endTime) {
+      preferredSegment = occurrenceSegmentForTimelineSlice(
+        occurrence,
+        serviceDate,
+        drop.startTime,
+        drop.endTime,
+      );
+    } else {
+      const allocation = getSuggestedTaskTimelineAllocation({
+        occurrence,
+        serviceDate,
+        segments: taskSegments,
+        shifts: shiftsInRange,
+      });
+      preferredSegment = allocation?.segment || null;
+    }
+    if (!preferredSegment) return null;
+    const occurrenceProjection = resolveOccurrenceEligibilityProjection({
+      snapshot: queuedEffectiveSnapshot(),
+      occurrence,
+      personnelItem,
+      serviceDate,
+      preferredSegment,
+      shiftContext: eligibilityShiftContextForOccurrence(occurrence),
+    });
+    if (!occurrenceProjection?.shift) return null;
+    const eligibilityCandidate = buildPlanningEligibilityPrefetchCandidate({
+      kind: "occurrence",
+      source: occurrence,
+      shift: occurrenceProjection.shift,
+      personnelId: personnelItem.id,
+      occurrenceId: occurrence.id,
+      excludeAssignmentId: occurrenceProjection.excludeAssignmentId,
+    });
+    return {
+      drop,
+      personnel: personnelItem,
+      occurrence,
+      serviceDate,
+      targetLabel: occurrence.task_name_snapshot || "Open taak",
+      occurrenceResolution: occurrenceProjection.resolution,
+      eligibilityCandidate,
+      verdict: eligibilityIndex.queryShift({
+        personnelId: personnelItem.id,
+        shift: occurrenceProjection.shift,
+        excludeAssignmentId: occurrenceProjection.excludeAssignmentId,
+        kind: "occurrence",
+        occurrenceId: occurrence.id,
+      }),
+    };
+  };
+
+  const handleBeforeDragStart = start => {
+    const draggableId = String(start?.draggableId || "");
+    if (!draggableId.startsWith("personnel:")) return;
+    const personnelId = draggableId.slice("personnel:".length);
+    const personnelItem = activePersonnel.find(item => String(item.id) === personnelId);
+    if (!personnelItem) return;
+    requestUrgentEligibilityCandidates(buildEligibilityPrefetchCandidates([personnelItem]));
+  };
+
+  const handleDragUpdate = update => {
+    const drop = resolvePlanningDrop(update);
+    const preview = drop ? resolveDropEligibilityPreview(drop) : null;
+    setDragEligibilityPreview(preview);
+    if (preview?.eligibilityCandidate) {
+      requestUrgentEligibilityCandidates([preview.eligibilityCandidate]);
+    }
+  };
+
+  const requireCurrentEligibilityVerdict = preview => {
+    if (preview?.verdict?.status === "ready") return true;
+    if (preview?.eligibilityCandidate) {
+      requestUrgentEligibilityCandidates([preview.eligibilityCandidate]);
+    }
+    const description = preview?.verdict?.status === "stale"
+      ? "De brongegevens voor deze medewerker zijn gewijzigd. De medewerker is nog niet ingepland; de voorcontrole wordt nu vernieuwd."
+      : preview?.verdict?.status === "unavailable"
+        ? "De volledige CAO- en inzetcontrole is nog niet beschikbaar. De medewerker is daarom nog niet ingepland."
+        : "De volledige CAO- en inzetcontrole wordt nog voorbereid. De medewerker is nog niet ingepland; sleep opnieuw zodra de controle actueel is.";
+    toast({ title: "Voorcontrole nog niet actueel", description });
+    setLiveMessage(description);
+    return false;
+  };
+
+  const processPlanningDrop = (result, eligibilityPreview = null) => {
     if (!editing) return;
     const drop = resolvePlanningDrop(result);
     if (!drop) return;
+    const preview = eligibilityPreview || resolveDropEligibilityPreview(drop);
+    if (!requireCurrentEligibilityVerdict(preview)) return;
+    const candidateWarnings = preview?.verdict?.warnings || null;
 
     if (drop.kind === "compose_occurrence_slice_for_personnel") {
       const occurrence = taskOccurrencesInRange.find(item => String(item.id) === String(drop.occurrenceId));
@@ -2018,6 +3067,7 @@ export default function Planning() {
           serviceDate: drop.serviceDate,
           startTime: drop.startTime,
           endTime: drop.endTime,
+          candidateWarnings,
         }).catch(() => undefined);
       }
       return;
@@ -2038,7 +3088,7 @@ export default function Planning() {
           toast({ title: "Volledige nachtdienst bevestigen", description });
           return;
         }
-        executeAssignment(shift, personnelItem, drop.slotIndex).catch(() => undefined);
+        executeAssignment(shift, personnelItem, drop.slotIndex, candidateWarnings).catch(() => undefined);
       }
       return;
     }
@@ -2055,13 +3105,15 @@ export default function Planning() {
       setLiveMessage(description);
       return;
     }
-    composeAndAssignOccurrence(occurrence, personnelItem, dropServiceDate).catch(() => undefined);
+    composeAndAssignOccurrence(occurrence, personnelItem, dropServiceDate, candidateWarnings).catch(() => undefined);
   };
 
   const handleDragEnd = result => {
+    const preview = resolveDropEligibilityPreview(resolvePlanningDrop(result));
+    setDragEligibilityPreview(null);
     // Let the drag engine release its publisher and input lock before any
     // planning mutation changes or unmounts draggable/droppable elements.
-    window.setTimeout(() => processPlanningDrop(result), 0);
+    window.setTimeout(() => processPlanningDrop(result, preview), 0);
   };
 
   const handleShiftActionConfirm = async payload => {
@@ -2091,7 +3143,29 @@ export default function Planning() {
   const saveServiceEdit = async ({ shift, assignment, segments: requestSegments = [], startTime, endTime, personnelId }) => {
     let currentShift = shift;
     const timesChanged = startTime !== shift.start_time || endTime !== shift.end_time;
-    if (timesChanged && requestSegments.length) {
+    if (timesChanged && requestSegments.length === 1) {
+      const segment = requestSegments[0];
+      const startDate = segment.start_date || shift.service_date;
+      const endDate = toDateKey(addDays(startDate, endTime <= startTime ? 1 : 0));
+      resizeTimelineTaskSegment({
+        shift,
+        segment,
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+        notification: {
+          title: "Dienst bijgewerkt",
+          description: `${shift.name || "Dienst"} loopt nu van ${startTime} tot ${endTime}.`,
+        },
+      });
+    } else if (timesChanged && requestSegments.length) {
+      if (shift._optimistic_pending) {
+        const description = "Een samengestelde dienst kan pas na de eerste serversynchronisatie via Dienstinhoud worden aangepast.";
+        toast({ title: "Dienstinhoud wordt voorbereid", description });
+        setLiveMessage(description);
+        return;
+      }
       const ordered = [...requestSegments].sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
       const affectedIds = [...new Set(ordered.map(item => String(item.task_occurrence_id)))];
       const result = await runIntentMutation(`service-edit-time:${shift.id}`, "planning-service-edit-time", {
@@ -2128,12 +3202,11 @@ export default function Planning() {
     const currentPersonnelId = assignment?.personnel_id ? String(assignment.personnel_id) : null;
     if (currentPersonnelId !== personnelId) {
       if (assignment) {
-        const unassigned = await handleUnassign(currentShift, assignment);
-        currentShift = unassigned?.shift || currentShift;
+        await handleUnassign(currentShift, assignment);
       }
       if (personnelId) {
         const person = activePersonnel.find(item => String(item.id) === String(personnelId));
-        if (person) await executeAssignment(currentShift, person, Number(assignment?.slot_index || 0));
+        if (person) void executeAssignment(currentShift, person, Number(assignment?.slot_index || 0)).catch(() => undefined);
       }
     }
     refreshPlanningInBackground();
@@ -2163,26 +3236,154 @@ export default function Planning() {
   };
 
   const handleCancelTaskShift = async shift => {
-    const occurrenceIds = [...new Set((activeTaskSegmentsByShift.get(String(shift.id)) || [])
-      .map(segment => String(segment.task_occurrence_id)))];
-    const result = await runActionMutation.mutateAsync({
-      action: "cancel_task_shift",
-      idempotency_key: cancelTaskShift?.idempotencyKey,
-      shift_id: shift.id,
-      expected_shift_revision: Number(shift.revision || 1),
-      expected_occurrence_revisions: Object.fromEntries(occurrenceIds.map(id => [
-        id,
-        Number(taskOccurrences.find(occurrence => String(occurrence.id) === id)?.revision || 1),
-      ])),
+    if (!shift || planningCommitFenceRef.current) return null;
+    const snapshot = queuedEffectiveSnapshot();
+    const targetSegments = snapshot.segments.filter(item => (
+      item.status !== "removed" && String(item.shift_id) === String(shift.id)
+    ));
+    if (targetSegments.length !== 1) {
+      const description = "Deze samengestelde dienst kan alleen via Dienstinhoud veilig worden verwijderd.";
+      toast({ variant: "destructive", title: "Dienst niet rechtstreeks verwijderd", description });
+      setLiveMessage(description);
+      return null;
+    }
+    const targetSegment = targetSegments[0];
+    const occurrenceId = String(targetSegment.task_occurrence_id);
+    const targetAssignments = activeAssignments(snapshot.assignments).filter(item => (
+      String(item.planning_shift_id || item.shift_id) === String(shift.id)
+    ));
+    const initialNeighbors = adjacentOpenTaskServiceNeighbors({
+      snapshot,
+      shift,
+      segment: targetSegment,
     });
-    reconcilePlanningResult(result);
-    refreshPlanningInBackground();
-    const description = `${shift.name || "Dienst"} is verwijderd; ${result.removed_segment_ids?.length || occurrenceIds.length} taaksegmenten staan weer in de werkvoorraad.`;
-    toast({ title: "Dienst verwijderd", description });
+    const initialLeftNeighbor = initialNeighbors.find(item => item.side === "left") || null;
+    const initialRightNeighbor = initialNeighbors.find(item => item.side === "right") || null;
+    const initialSurvivor = initialLeftNeighbor || (initialRightNeighbor ? {
+      shift,
+      segment: targetSegment,
+      side: "target",
+    } : null);
+    const initialAbsorbedNeighbors = initialSurvivor
+      ? initialNeighbors.filter(item => String(item.shift.id) !== String(initialSurvivor.shift.id))
+      : [];
+    const pendingKey = cancelTaskShift?.idempotencyKey || createPlanningMutationKey("vacate-task-shift-partition");
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const parentIntentIds = [...new Set([
+      planningOriginIntentId(shift),
+      planningOriginIntentId(targetSegment),
+      ...initialNeighbors.flatMap(item => [
+        planningOriginIntentId(item.shift),
+        planningOriginIntentId(item.segment),
+      ]),
+    ].filter(id => id && planningMutationQueue.current.has(id)))];
+    const optimisticIntent = {
+      ...buildDependentPlanningDeleteIntent({
+        key: pendingKey,
+        originIntentId: pendingKey,
+        shift,
+        segments: targetSegments,
+        assignments: targetAssignments,
+        survivorShift: initialSurvivor?.shift || null,
+        survivorSegment: initialSurvivor?.segment || null,
+        absorbedShifts: initialAbsorbedNeighbors.map(item => item.shift),
+        absorbedSegments: initialAbsorbedNeighbors.map(item => item.segment),
+      }),
+      shift_id: shift.id,
+      segment_id: targetSegment.id,
+      task_occurrence_id: occurrenceId,
+    };
+    let executionIntent = optimisticIntent;
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: parentIntentIds,
+      resourceKeys: [
+        `shift:${shift.id}`,
+        `occurrence:${occurrenceId}`,
+        ...initialNeighbors.map(item => `shift:${item.shift.id}`),
+        ...targetAssignments.flatMap(item => personnelDayQueueResourceKeys(item.personnel_id, shift)),
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        executionIntent = intent;
+        const currentSnapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const currentShift = resolvePlanningShiftTarget(currentSnapshot, { id: intent.shift_id });
+        const currentSegment = resolvePlanningSegmentTarget(currentSnapshot, { id: intent.segment_id });
+        const currentOccurrence = resolvePlanningOccurrenceTarget(currentSnapshot, { id: intent.task_occurrence_id });
+        const blocked = [currentShift, currentSegment, currentOccurrence]
+          .find(target => target.status !== "ready");
+        if (blocked) throw queuedPlanningRebaseError(blocked.reason);
+        const currentAssignments = activeAssignments(currentSnapshot.assignments).filter(item => (
+          String(item.planning_shift_id || item.shift_id) === String(currentShift.record.id)
+        ));
+        const neighbors = adjacentOpenTaskServiceNeighbors({
+          snapshot: currentSnapshot,
+          shift: currentShift.record,
+          segment: currentSegment.record,
+        });
+        executedRequest = neighbors.length > 0 ? {
+          action: "vacate_task_shift_partition",
+          shift_id: currentShift.record.id,
+          segment_id: currentSegment.record.id,
+          expected_shift_revision: Number(currentShift.record.revision || 1),
+          expected_segment_revision: Number(currentSegment.record.revision || 1),
+          expected_occurrence_revision: Number(currentOccurrence.record.revision || 1),
+          expected_assignment_revisions: Object.fromEntries(currentAssignments.map(item => [
+            item.id,
+            Number(item.revision || 1),
+          ])),
+          expected_neighbor_shift_revisions: Object.fromEntries(neighbors.map(item => [
+            item.shift.id,
+            Number(item.shift.revision || 1),
+          ])),
+          expected_neighbor_segment_revisions: Object.fromEntries(neighbors.map(item => [
+            item.segment.id,
+            Number(item.segment.revision || 1),
+          ])),
+        } : {
+          action: "cancel_task_shift",
+          shift_id: currentShift.record.id,
+          expected_shift_revision: Number(currentShift.record.revision || 1),
+          expected_occurrence_revisions: {
+            [currentOccurrence.record.id]: Number(currentOccurrence.record.revision || 1),
+          },
+        };
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: result => {
+        reconcilePlanningResultForRange(result, executionRange);
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, executionIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const retainedOpenShift = (result.shifts || []).find(item => (
+          item.status !== "cancelled"
+          && !activeAssignments(result.assignments || []).some(assignment => (
+            String(assignment.planning_shift_id || assignment.shift_id) === String(item.id)
+          ))
+        ));
+        const description = retainedOpenShift
+          ? `${shift.name || "Dienst"} is verwijderd; de aansluitende open dienst bestrijkt nu ${retainedOpenShift.start_time}–${retainedOpenShift.end_time}.`
+          : `${shift.name || "Dienst"} is verwijderd; het taakdeel staat weer open.`;
+        toast({ title: "Dienst verwijderd", description });
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
+        action: initialSurvivor ? "vacate_task_shift_partition" : "cancel_task_shift",
+        shift_id: shift.id,
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
+    });
+    void operation.catch(() => undefined);
     setSelectedShiftId(null);
     setCancelTaskShift(null);
     setSidePanelMode("tasks");
-    setLiveMessage(description);
+    return { accepted: true, operation };
   };
 
   const planningStats = useMemo(() => {
@@ -2257,19 +3458,34 @@ export default function Planning() {
   const saveDraft = async () => {
     if (planningCommitFenceRef.current) return;
     const commitToken = Symbol("planning-draft-save");
+    const drainCheckpoint = planningMutationQueue.current.createDrainCheckpoint();
     setDraftSavePending(true);
     setLiveMessage("De laatste lokale roosterwijzigingen worden op de achtergrond afgerond.");
     try {
       await settlePlanningDropEnqueues();
       if (planningCommitFenceRef.current) return;
       planningCommitFenceRef.current = commitToken;
-      await planningMutationQueue.current.drain();
+      const drainReport = await planningMutationQueue.current.drain({
+        checkpoint: drainCheckpoint,
+        rejectOnFailure: true,
+      });
+      planningMutationQueue.current.acknowledgeDrain(drainReport);
       setEditing(false);
       setSavedDraftNotice(true);
       setSelectedShiftId(null);
       const description = "Het conceptrooster is opgeslagen. Je bekijkt nu weer het volledige rooster.";
       setLiveMessage(description);
       toast({ title: "Concept opgeslagen", description });
+    } catch (error) {
+      if (error?.report) planningMutationQueue.current.acknowledgeDrain(error.report);
+      const description = mutationMessage(error);
+      setLiveMessage(description);
+      toast({
+        variant: "destructive",
+        title: "Concept niet opgeslagen",
+        description,
+      });
+      throw error;
     } finally {
       if (planningCommitFenceRef.current === commitToken) planningCommitFenceRef.current = null;
       setDraftSavePending(false);
@@ -2289,12 +3505,23 @@ export default function Planning() {
         view,
         rangeLabel,
       };
+      const drainCheckpoint = planningMutationQueue.current.createDrainCheckpoint();
       await settlePlanningDropEnqueues();
       if (planningCommitFenceRef.current) {
         throw new Error("Een andere opslag- of publicatieactie wordt al afgerond.");
       }
       planningCommitFenceRef.current = commitToken;
-      await planningMutationQueue.current.drain();
+      let drainReport;
+      try {
+        drainReport = await planningMutationQueue.current.drain({
+          checkpoint: drainCheckpoint,
+          rejectOnFailure: true,
+        });
+      } catch (error) {
+        if (error?.report) planningMutationQueue.current.acknowledgeDrain(error.report);
+        throw error;
+      }
+      planningMutationQueue.current.acknowledgeDrain(drainReport);
       const postDrainSnapshot = planningExecutionSnapshotFromCache(
         queryClient,
         targetRange.periodStart,
@@ -2403,6 +3630,10 @@ export default function Planning() {
     personnelQuery.error,
   ].find(Boolean);
 
+  const liveDragEligibilityPreview = dragEligibilityPreview?.drop
+    ? resolveDropEligibilityPreview(dragEligibilityPreview.drop)
+    : dragEligibilityPreview;
+
   return (
     <div
       className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
@@ -2507,7 +3738,45 @@ export default function Planning() {
         </div>
       )}
 
-      <DragDropContext onDragEnd={handleDragEnd}>
+      {liveDragEligibilityPreview?.verdict && (() => {
+        const verdict = liveDragEligibilityPreview.verdict;
+        const messages = verdict.displayWarnings.slice(0, 2);
+        const critical = verdict.hasCritical;
+        const clear = verdict.isClear;
+        const tone = critical
+          ? "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-100"
+          : clear
+            ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
+            : "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100";
+        return (
+          <div
+            role="status"
+            aria-live="assertive"
+            data-planning-drag-eligibility={verdict.status}
+            className={`flex shrink-0 items-start gap-2 border-b px-3 py-2 text-[11px] ${tone}`}
+          >
+            {critical ? <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : clear ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+            <div className="min-w-0">
+              <strong>
+                {liveDragEligibilityPreview.personnel ? personnelName(liveDragEligibilityPreview.personnel) : "Medewerker"}
+                {" · "}
+                {liveDragEligibilityPreview.targetLabel}
+              </strong>
+              {clear ? (
+                <span> — Geen bekende inzetwaarschuwingen; de voorafcontrole is actueel.</span>
+              ) : (
+                <span> — {messages.map(item => item.title || item.detail || item.message).filter(Boolean).join(" · ")}</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <DragDropContext
+        onBeforeDragStart={handleBeforeDragStart}
+        onDragUpdate={handleDragUpdate}
+        onDragEnd={handleDragEnd}
+      >
         <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
           <ResizablePanel id="planning-board" order={1} defaultSize={editing ? 76 : 100} minSize={editing ? 56 : 100}>
             <PlanningBoard
@@ -2537,6 +3806,7 @@ export default function Planning() {
               onUnassign={(shift, assignment) => runProtectedPlanningAction(
                 [`shift:${shift.id}`],
                 () => handleUnassign(shift, assignment).catch(() => undefined),
+                { allowQueued: true },
               )}
               onMove={shift => runProtectedPlanningAction(
                 [`shift:${shift.id}`],
@@ -2549,6 +3819,7 @@ export default function Planning() {
               onEditService={payload => runProtectedPlanningAction(
                 [`shift:${payload.shift.id}`],
                 () => setServiceEditor(payload),
+                { allowQueued: true },
               )}
               onEditComposition={shift => runProtectedPlanningAction(
                 [`shift:${shift.id}`, ...(shift.task_occurrence_ids || []).map(id => `occurrence:${id}`)],
@@ -2560,6 +3831,7 @@ export default function Planning() {
                   shift,
                   idempotencyKey: createPlanningMutationKey("cancel-task-shift"),
                 }),
+                { allowQueued: true },
               )}
               onCreateOpenTaskSlice={payload => runProtectedPlanningAction(
                 [`occurrence:${payload.occurrence.id}`],
@@ -2581,11 +3853,13 @@ export default function Planning() {
               onDeleteService={shift => runProtectedPlanningAction(
                 [`shift:${shift.id}`, ...(shift.task_occurrence_ids || []).map(id => `occurrence:${id}`)],
                 () => setCancelTaskShift({ shift, idempotencyKey: createPlanningMutationKey("cancel-task-shift") }),
+                { allowQueued: true },
               )}
               taskClipboard={taskClipboard}
               onResizeTaskSegment={payload => runProtectedPlanningAction(
                 [`shift:${payload.shift.id}`, `occurrence:${payload.occurrence.id}`],
                 () => resizeTimelineTaskSegment(payload),
+                { allowQueued: true },
               )}
               onResizeTaskBoundary={payload => runProtectedPlanningAction(
                 [
@@ -2594,6 +3868,7 @@ export default function Planning() {
                   `shift:${payload.right.shift.id}`,
                 ],
                 () => resizeTimelineSharedBoundary(payload),
+                { allowQueued: true },
               )}
               mutationPending={publishMutation.isPending || draftSavePending}
               pendingResourceKeys={matrixPendingResourceKeys}
@@ -2643,6 +3918,11 @@ export default function Planning() {
                 selectedShift,
                 candidates,
                 onAssign: candidate => handleCandidateAssign(candidate).catch(() => undefined),
+                onPrefetchCandidate: candidate => {
+                  if (candidate?.eligibilityCandidate) {
+                    requestUrgentEligibilityCandidates([candidate.eligibilityCandidate]);
+                  }
+                },
                 onCloseShift: () => {
                   mutationIntents.current.clear("assign");
                   setSelectedShiftId(null);

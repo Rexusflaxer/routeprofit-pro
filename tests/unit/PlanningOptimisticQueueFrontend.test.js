@@ -48,7 +48,7 @@ describe("Planning queued optimistic frontend contract", () => {
     expect(assignmentSource).not.toContain("acquirePendingResources");
     expect(sliceSource).toContain("snapshot: planningExecutionSnapshotFromCache(");
     expect(matrixFunctionSource).toContain("snapshot: planningExecutionSnapshotFromCache(");
-    expect(assignmentSource).toContain("snapshot: planningExecutionSnapshotFromCache(");
+    expect(assignmentSource).toContain("const snapshot = planningExecutionSnapshotFromCache(");
     expect(sliceSource).toContain("const executionRange = Object.freeze({ periodStart, periodEnd })");
     expect(matrixFunctionSource).toContain("const executionRange = Object.freeze({ periodStart, periodEnd })");
     expect(assignmentSource).toContain("const executionRange = Object.freeze({ periodStart, periodEnd })");
@@ -57,13 +57,14 @@ describe("Planning queued optimistic frontend contract", () => {
   });
 
   it("reconcilet vóór rollback-cleanup en schermt opslaan/publiceren af tot de queue leeg is", () => {
+    const saveSource = between("const saveDraft", "const publishMutation");
     const publishSource = between("const publishMutation", "const changePeriod");
     expect(source).toContain("reconcilePlanningResultForRange(result, executionRange, { replaceShiftSegments })");
     expect(source).toContain("onCallbackError: context => recoverQueuedPlanningAfterCallbackError");
     expect(queueSource.indexOf("await safeCallback(entry.onSuccess, result)")).toBeLessThan(
       queueSource.indexOf("await safeCallback(entry.onSettled"),
     );
-    expect(source).toContain("await planningMutationQueue.current.drain()");
+    expect(source).toContain("await planningMutationQueue.current.drain({");
     expect(source).toContain("const saveDraft = async () =>");
     expect(source).toContain("await settlePlanningDropEnqueues()");
     expect(source).not.toContain("authoritativePlanningRef");
@@ -76,6 +77,21 @@ describe("Planning queued optimistic frontend contract", () => {
     expect(source).not.toContain("planningCommitFenceRef.current = true");
     expect(publishSource.indexOf("await settlePlanningDropEnqueues()")).toBeLessThan(
       publishSource.indexOf("planningCommitFenceRef.current = commitToken"),
+    );
+    expect(saveSource.indexOf("createDrainCheckpoint()")).toBeLessThan(
+      saveSource.indexOf("await settlePlanningDropEnqueues()"),
+    );
+    expect(saveSource).toContain("checkpoint: drainCheckpoint");
+    expect(saveSource).toContain("rejectOnFailure: true");
+    expect(saveSource.indexOf("rejectOnFailure: true")).toBeLessThan(saveSource.indexOf("setEditing(false)"));
+    expect(saveSource).toContain('title: "Concept niet opgeslagen"');
+    expect(publishSource.indexOf("createDrainCheckpoint()")).toBeLessThan(
+      publishSource.indexOf("await settlePlanningDropEnqueues()"),
+    );
+    expect(publishSource).toContain("checkpoint: drainCheckpoint");
+    expect(publishSource).toContain("rejectOnFailure: true");
+    expect(publishSource.indexOf("rejectOnFailure: true")).toBeLessThan(
+      publishSource.indexOf("return invokePlanningApi(request)"),
     );
     expect(source).toContain("getPlanningMutationQueue()");
     expect(source).not.toContain('window.addEventListener("beforeunload", warnBeforeUnload)');

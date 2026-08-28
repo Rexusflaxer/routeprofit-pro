@@ -57,13 +57,15 @@ describe("Planning taak-plak- en verwijderlatency", () => {
     expect(deleteSource).not.toContain("addDays(");
   });
 
-  it("laat plakken niet wachten en verzint geen occurrence vóór autoritatieve materialisatie", () => {
-    expect(pasteSource).toContain("const result = await runIntentMutation");
-    expect(pasteSource).toContain("reconcileTaskDefinitionVersion(result)");
-    expect(pasteSource).toContain("materializeTaskSchedulesInBackground()");
+  it("plakt één occurrence optimistisch via een occurrence-revisie en zonder globale definitie-CAS", () => {
+    expect(pasteSource).toContain("buildOptimisticCopiedTaskOccurrence");
+    expect(pasteSource).toContain("buildCopyTaskOccurrencePayload");
+    expect(pasteSource).toContain('kind: "copy_task_occurrence"');
+    expect(pasteSource).toContain("reconcileOptimisticTaskCopy");
+    expect(pasteSource).toContain("reconcilePlanningResultForRange(result, executionRange)");
+    expect(pasteSource).not.toContain("definition_version");
+    expect(pasteSource).not.toContain("materializeTaskSchedulesInBackground()");
     expect(pasteSource).not.toContain("await bootstrapMutation");
     expect(pasteSource).not.toContain("await refreshPlanning(");
-    expect(pasteSource).not.toContain("task_occurrences:");
-    expect(pasteSource).not.toContain("lifecycle_status:");
   });
 });
