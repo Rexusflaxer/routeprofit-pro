@@ -337,6 +337,20 @@
       "default": [],
       "description": "Default kwalificatiegroepen voor diensten op dit object, bijvoorbeeld base_security, advanced_security, ehbo_or_bhv of centralist_basic."
     },
+    "default_required_security_pass_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "grey",
+          "green",
+          "temporary",
+          "other"
+        ]
+      },
+      "default": [],
+      "description": "Default beveiligingspastypes die voor diensten op dit object verplicht zijn."
+    },
     "default_performs_security_work": {
       "type": [
         "boolean",

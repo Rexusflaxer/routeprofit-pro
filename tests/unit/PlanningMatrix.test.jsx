@@ -401,6 +401,121 @@ describe("Planning matrix", () => {
     });
   });
 
+  it("onderscheidt een echte open dienst van een nog ongevormd taakdeel", async () => {
+    const splitOccurrence = {
+      ...occurrence,
+      id: "occurrence-real-open-service",
+      window_start_time: "06:30",
+      window_end_time: "18:00",
+      required_minutes: 690,
+    };
+    const staffedShift = {
+      ...shift,
+      id: "shift-staffed-part",
+      source_type: "task",
+      start_time: "06:30",
+      end_time: "15:30",
+    };
+    const openShift = {
+      ...shift,
+      id: "shift-open-part",
+      source_type: "task",
+      start_time: "15:30",
+      end_time: "18:00",
+    };
+    const staffedSegment = {
+      id: "segment-staffed-part",
+      shift_id: staffedShift.id,
+      task_occurrence_id: splitOccurrence.id,
+      object_id: splitOccurrence.object_id,
+      start_date: splitOccurrence.service_date,
+      end_date: splitOccurrence.end_date,
+      start_time: "06:30",
+      end_time: "15:30",
+      status: "draft",
+    };
+    const openSegment = {
+      ...staffedSegment,
+      id: "segment-open-part",
+      shift_id: openShift.id,
+      start_time: "15:30",
+      end_time: "18:00",
+    };
+    const staffedAssignment = {
+      ...assignment,
+      id: "assignment-staffed-part",
+      planning_shift_id: staffedShift.id,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        occurrences: [splitOccurrence],
+        shifts: [staffedShift, openShift],
+        segments: [staffedSegment, openSegment],
+        assignments: [staffedAssignment],
+      })} />,
+    );
+
+    const openService = container.querySelector(`[data-shift-id="${openShift.id}"]`);
+    expect(openService).toHaveAttribute("data-planning-item-kind", "service");
+    expect(openService).toHaveAttribute("data-open-service", "true");
+    expect(openService).toHaveTextContent("Open dienst");
+    expect(openService).toHaveTextContent("15:30–18:00");
+    expect(container.querySelector(`[data-task-occurrence-id="${splitOccurrence.id}"]`)).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(openService);
+    expect(await screen.findByRole("menuitem", { name: "Dienst bewerken" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Dienst verwijderen" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "Taak bewerken" })).not.toBeInTheDocument();
+  });
+
+  it("laat een lokaal synchroniserende dienst direct verder bewerken en resizen", async () => {
+    const optimisticShift = {
+      ...shift,
+      id: "pending-shift-editable",
+      source_type: "task",
+      start_time: "08:00",
+      end_time: "16:00",
+      _optimistic_pending: true,
+    };
+    const optimisticSegment = {
+      id: "pending-segment-editable",
+      shift_id: optimisticShift.id,
+      task_occurrence_id: occurrence.id,
+      object_id: occurrence.object_id,
+      start_date: occurrence.service_date,
+      end_date: occurrence.end_date,
+      start_time: "08:00",
+      end_time: "16:00",
+      status: "draft",
+      _optimistic_pending: true,
+    };
+    const optimisticAssignment = {
+      ...assignment,
+      id: "pending-assignment-editable",
+      planning_shift_id: optimisticShift.id,
+      _optimistic_pending: true,
+    };
+    const { container } = renderInDragContext(
+      <PlanningBoard {...boardProps({
+        shifts: [optimisticShift],
+        segments: [optimisticSegment],
+        assignments: [optimisticAssignment],
+        queuedResourceKeys: new Set([
+          `shift:${optimisticShift.id}`,
+          `occurrence:${occurrence.id}`,
+        ]),
+      })} />,
+    );
+
+    const service = container.querySelector(`[data-shift-id="${optimisticShift.id}"]`);
+    const endHandle = screen.getByRole("slider", { name: /eindtijd van avonddienst aanpassen/i });
+    expect(endHandle).toBeEnabled();
+    fireEvent.contextMenu(service);
+    expect(await screen.findByRole("menuitem", { name: "Dienst bewerken" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Medewerker uitplannen" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Dienst verwijderen" })).toBeEnabled();
+  });
+
   it("geeft een korte brand- en sluitronde directe randgrepen zonder de exacte tijd te verliezen", () => {
     const shortOccurrence = {
       ...occurrence,
@@ -1660,6 +1775,7 @@ describe("Planning matrix-bediening", () => {
       scheduledMinutes: 0,
       contractMinutes: 2_400,
       warnings: [],
+      eligibilityStatus: "ready",
     };
     const onAssign = vi.fn();
 

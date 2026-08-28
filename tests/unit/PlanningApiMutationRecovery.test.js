@@ -150,6 +150,7 @@ function setup({ shifts = [], assignments = [], occurrences = [], segments = [] 
     Personnel: entity([{ id: "personnel-1", name: "Sam Beveiliger", status: "active" }], "personnel"),
     PersonnelAbsence: entity([], "absence"),
     PersonnelRestriction: entity([], "restriction"),
+    PersonnelSecurityPass: entity([], "security-pass"),
   };
   return {
     base44: { asServiceRole: { entities, functions: { invoke: async () => ({}) } } },

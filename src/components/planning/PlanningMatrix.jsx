@@ -257,7 +257,7 @@ function OpenTaskIntervalCard({
                 !embeddedInLane && "break-words",
                 embeddedInLane && "text-rose-700 dark:text-rose-300",
               )}>
-                {embeddedInLane ? "Open dienst" : occurrence.task_name_snapshot || "Open taak"}
+                {embeddedInLane ? "Open taak" : occurrence.task_name_snapshot || "Open taak"}
               </span>
               <span className={cn("mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground", embeddedInLane && "sr-only")}>
                 <Clock3 className="h-3 w-3 shrink-0" />
@@ -715,7 +715,6 @@ function MatrixShiftBlock({
   onDeleteService,
   onResizeTaskSegment,
   mutationPending,
-  actionPending = mutationPending,
   personnelById,
   editable = false,
   controlledInterval = null,
@@ -725,9 +724,14 @@ function MatrixShiftBlock({
   elementId,
   style,
 }) {
-  const controlsPending = mutationPending || actionPending;
+  // Queued service mutations are already ordered and rebased by the planning
+  // outbox. Only a hard server/recovery fence disables the service controls;
+  // `_optimistic_pending` remains a sync indicator, not an interaction lock.
+  const controlsPending = mutationPending;
   const requiredCount = Math.max(1, Number(shift.required_count || 1));
   const currentAssignments = activeAssignments(assignments);
+  const isOpenService = currentAssignments.length === 0;
+  const hasOpenSlots = currentAssignments.length < requiredCount;
   const assignmentsBySlot = mapAssignmentsToSlots(currentAssignments, requiredCount);
   const primaryAssignmentIdentity = assignmentsBySlot.get(0)
     ? assignmentIdentity(assignmentsBySlot.get(0), personnelById)
@@ -867,22 +871,24 @@ function MatrixShiftBlock({
       available={editable}
       detail={`${shift.name || shift.service_name_snapshot || "Dienst"} · ${displayedStartTime}–${displayedEndTime}`}
       items={[
-        { label: "Dienst bewerken", disabled: controlsPending || isPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: shift.start_time, endTime: shift.end_time }), Icon: Pencil },
-        { label: "Dienst kopiëren", disabled: !copiedAssignment || controlsPending || isPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
+        { label: "Dienst bewerken", disabled: controlsPending || isResizeSaving, onSelect: () => onEditService?.({ shift, assignment: editAssignment, segments: activeSegments, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Pencil },
+        { label: "Dienst kopiëren", disabled: !copiedAssignment || controlsPending || isResizeSaving, onSelect: () => onCopyService?.({ shift, personnelId: copiedAssignment.personnel_id, personnelName: copiedIdentity.name, startTime: displayedStartTime, endTime: displayedEndTime }), Icon: Copy },
         ...currentAssignments.map(assignment => ({
           label: currentAssignments.length === 1 ? "Medewerker uitplannen" : `${assignmentIdentity(assignment, personnelById).name} uitplannen`,
-          disabled: controlsPending || isPending,
+          disabled: controlsPending,
           onSelect: () => onUnassign?.(assignment),
           Icon: UserMinus,
         })),
-        { label: "Dienst verwijderen", disabled: controlsPending || isPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
+        { label: "Dienst verwijderen", disabled: controlsPending || shift.status === "published", onSelect: () => onDeleteService?.(shift), Icon: Trash2, destructive: true },
       ]}
     >
     <article className={cn(
       "group/service relative min-h-[84px] w-full overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] px-3 pb-3 pt-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[top,height,padding,filter,box-shadow,transform] duration-300 ease-out motion-reduce:transition-none hover:-translate-y-px hover:brightness-110 hover:shadow-[0_11px_28px_rgba(15,23,42,0.28),inset_0_1px_0_rgba(255,255,255,0.14)]",
       embeddedInLane && "absolute isolate z-[35] flex min-h-0 flex-col !rounded-none !border-0 !border-l !border-l-primary/35 !bg-[linear-gradient(145deg,hsl(var(--card))_0%,hsl(var(--accent))_100%)] px-3 pb-0 pt-2.5 !shadow-none backdrop-blur-xl hover:translate-y-0 hover:brightness-100",
       shift.status === "draft" && !embeddedInLane && "border-primary/60",
-      currentAssignments.length < requiredCount && !embeddedInLane && "border-amber-300/80",
+      hasOpenSlots && !isOpenService && !embeddedInLane && "border-amber-300/80",
+      isOpenService && "!border-rose-400/55 !bg-[radial-gradient(circle_at_18%_90%,rgba(244,63,94,0.32),transparent_44%),linear-gradient(145deg,#3F111D_0%,#5D1528_58%,#7F1D3A_100%)]",
+      embeddedInLane && isOpenService && "!border-l-[3px] !border-l-rose-500 !bg-[linear-gradient(145deg,rgba(255,241,242,0.96)_0%,rgba(255,228,230,0.88)_100%)] dark:!bg-[linear-gradient(145deg,rgba(76,5,25,0.94)_0%,rgba(55,7,28,0.9)_100%)]",
       isPending && "border-primary/70",
       selected && !embeddedInLane && "border-primary ring-2 ring-primary/35 ring-offset-1 ring-offset-background",
     )}
@@ -893,12 +899,13 @@ function MatrixShiftBlock({
       data-planning-start-minute={timeValue(displayedStartTime)}
       data-planning-width="full"
       data-segment-id={segmentProjections.length === 1 ? projectionSegment?.id : undefined}
+      data-open-service={isOpenService ? "true" : "false"}
       data-resize-saving={isResizeSaving ? "true" : "false"}
       data-editable={editable ? "true" : "false"}
       style={style}
     >
       <PlanningEmployeePortraitOverlay photoUrl={primaryAssignmentIdentity?.photoUrl} embedded={embeddedInLane} />
-      {embeddedInLane && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
+      {embeddedInLane && !isOpenService && <span className="sr-only">{displayedStartTime}–{displayedEndTime}</span>}
       {editable && !suppressDirectResize && canResizeDirectly && !firstProjection?.slice?.continuesBefore && (
         <ServiceCardResizeHandle
           edge="start"
@@ -910,12 +917,12 @@ function MatrixShiftBlock({
           onPreview={setResizePreview}
           onCommit={commitResize}
           onCancel={() => setResizePreview(null)}
-          disabled={controlsPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          disabled={controlsPending || resizeSaving || Boolean(committedResizePreview)}
           label={`Begintijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
       <div className="relative z-10 flex items-start gap-1">
-        <button type="button" disabled={controlsPending || isPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default", embeddedInLane && "sr-only")}>
+        <button type="button" disabled={controlsPending} onClick={onSelect} className={cn("min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default", embeddedInLane && "sr-only")}>
           <span className="flex min-w-0 items-center gap-1.5">
             {linkedObjectCount > 1 && <Layers3 className="h-3 w-3 shrink-0 text-primary" aria-label="Samengestelde dienst" />}
             <span className={cn(
@@ -923,7 +930,9 @@ function MatrixShiftBlock({
               embeddedInLane ? "text-[12px] leading-tight text-slate-900 dark:text-white" : "text-[10px]",
             )}>
               {embeddedInLane
-                ? occurrence?.task_name_snapshot || shift.name || shift.service_name_snapshot || "Dienst"
+                ? isOpenService
+                  ? "Open dienst"
+                  : occurrence?.task_name_snapshot || shift.name || shift.service_name_snapshot || "Dienst"
                 : shift.name || shift.service_name_snapshot || "Dienst"}
             </span>
             {isPending && <Cloud className="h-3 w-3 shrink-0 text-primary" aria-label="Lokaal verwerkt; synchroniseert op de achtergrond" />}
@@ -960,12 +969,19 @@ function MatrixShiftBlock({
 
       </div>
 
+      {embeddedInLane && isOpenService && (
+        <div className="relative z-10 order-1 flex items-center justify-between gap-2 text-rose-700 dark:text-rose-200">
+          <span className="text-[11px] font-semibold">Open dienst</span>
+          <span className="text-[9px] font-semibold tabular-nums">{displayedStartTime}–{displayedEndTime}</span>
+        </div>
+      )}
+
       {(requiredCount > 1 || embeddedInLane) && (
         <p className={cn(
           "compact-hide relative z-10 mt-1.5 text-[9px] font-medium text-white/60",
           embeddedInLane && "order-3 mt-1 text-[9px] text-slate-600 dark:text-white/75",
         )} data-planning-dimensions="time-staffing">
-          Bezetting {Math.min(currentAssignments.length, requiredCount)}/{requiredCount}
+          {isOpenService ? "Nog niet bezet" : `Bezetting ${Math.min(currentAssignments.length, requiredCount)}/${requiredCount}`}
         </p>
       )}
       <div className={cn("relative z-10 mt-1.5 space-y-1", embeddedInLane && "order-2 mt-1 flex min-h-0 flex-1 flex-col justify-start overflow-hidden")}>
@@ -980,7 +996,7 @@ function MatrixShiftBlock({
             serviceDate={serviceDate}
             onSelect={onSelect}
             onUnassign={onUnassign}
-            disabled={mutationPending || isPending}
+            disabled={mutationPending}
             editable={editable}
             compact={embeddedInLane}
             visualVariant={embeddedInLane ? "timeline" : "portrait"}
@@ -1010,7 +1026,7 @@ function MatrixShiftBlock({
           onPreview={setResizePreview}
           onCommit={commitResize}
           onCancel={() => setResizePreview(null)}
-          disabled={controlsPending || isPending || resizeSaving || Boolean(committedResizePreview)}
+          disabled={controlsPending || resizeSaving || Boolean(committedResizePreview)}
           label={`Eindtijd van ${shift.name || shift.service_name_snapshot || "dienst"} aanpassen`}
         />
       )}
@@ -1322,7 +1338,6 @@ function TaskCoverageLane({
               onDeleteService={onDeleteService}
               onResizeTaskSegment={onResizeTaskSegment}
               mutationPending={isLaneBusy}
-              actionPending={isLaneActionPending}
               editable={editable}
               controlledInterval={interval}
               embeddedInLane
@@ -1364,7 +1379,7 @@ function TaskCoverageLane({
             onPreview={minute => setActivePreview(previewForBoundary(boundary, minute))}
             onCommit={minute => commitBoundary(boundary, minute)}
             onCancel={() => setActivePreview(null)}
-            disabled={isLaneActionPending || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
+            disabled={isLaneBusy || (boundary.kind === "service-service" && !onResizeTaskBoundary)}
           />
         ))}
       </div>
@@ -1722,7 +1737,7 @@ function ObjectDayCell({
     <PlanningClipboardContextMenu
       mode="paste"
       label="Taak hier plakken"
-      available={editable && resource.kind === "object" && cellItems.length === 0}
+      available={editable && resource.kind === "object"}
       disabled={mutationPending || taskPastePending || !canPasteTask}
       detail={taskClipboard
         ? canPasteTask
@@ -1856,12 +1871,6 @@ function ObjectDayCell({
             onResizeTaskSegment={onResizeTaskSegment}
             editable={editable}
             mutationPending={shiftPending}
-            actionPending={shiftPending || isPlanningResourcePending(
-              queuedResourceKeys,
-              false,
-              `shift:${shift.id}`,
-              occurrenceContext ? `occurrence:${occurrenceContext.id}` : null,
-            )}
           />
         );
       })}
@@ -1883,7 +1892,6 @@ function EmployeeDayCell({
   onDeleteService,
   mutationPending,
   pendingResourceKeys,
-  queuedResourceKeys,
   editable,
 }) {
   const droppableId = `employee-day:${resource.id}:${dayKey}`;
@@ -1913,12 +1921,6 @@ function EmployeeDayCell({
           `shift:${shift.id}`,
           ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
         );
-        const placementActionPending = placementPending || isPlanningResourcePending(
-          queuedResourceKeys,
-          false,
-          `shift:${shift.id}`,
-          ...shiftSegments.map(segment => `occurrence:${segment.task_occurrence_id}`),
-        );
         return (
           <EmployeeAssignmentBlock
             key={`${shift.id}-${assignment.id || assignment.slot_index || 0}-${dayKey}`}
@@ -1932,7 +1934,7 @@ function EmployeeDayCell({
             onEditService={onEditService}
             onCopyService={onCopyService}
             onDeleteService={onDeleteService}
-            disabled={placementActionPending}
+            disabled={placementPending}
             editable={editable}
           />
         );
@@ -2204,7 +2206,6 @@ export default function PlanningMatrix({
         onDeleteService={onDeleteService}
         mutationPending={mutationPending}
         pendingResourceKeys={pendingResourceKeys}
-        queuedResourceKeys={queuedResourceKeys}
         editable={editable}
       />
     ) : (

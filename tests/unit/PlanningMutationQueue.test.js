@@ -174,6 +174,103 @@ describe("planning mutation queue", () => {
     expect(events).toEqual(["rollback:netwerkfout", "next-started", "next-reconciled"]);
   });
 
+  it("rapporteert failures en afhankelijke cancellations uit precies de gedraineerde batch", async () => {
+    const queue = createPlanningMutationQueue();
+    const checkpoint = queue.createDrainCheckpoint();
+    const failure = new Error("opslaan geweigerd");
+    const parent = queue.enqueue({
+      id: "batch-parent-fails",
+      resourceKeys: ["occurrence:batch"],
+      execute: () => Promise.reject(failure),
+    });
+    const child = queue.enqueue({
+      id: "batch-child-cancelled",
+      dependsOn: [parent.commandId],
+      resourceKeys: ["occurrence:batch"],
+      execute: vi.fn(),
+    });
+    const independent = queue.enqueue({
+      id: "batch-independent-succeeds",
+      resourceKeys: ["occurrence:other"],
+      execute: () => "opgeslagen",
+    });
+    const reportPromise = queue.drain({ checkpoint });
+
+    await Promise.allSettled([parent, child, independent]);
+    await expect(reportPromise).resolves.toMatchObject({
+      ok: false,
+      completedCount: 3,
+      succeeded: [{ id: "batch-independent-succeeds", status: "succeeded" }],
+      failures: [{ id: "batch-parent-fails", status: "failed", error: failure }],
+      cancellations: [{
+        id: "batch-child-cancelled",
+        status: "cancelled",
+        dependencyId: "batch-parent-fails",
+      }],
+    });
+    await expect(queue.drain({ checkpoint, rejectOnFailure: true })).rejects.toMatchObject({
+      name: "PlanningMutationDrainError",
+      code: "PLANNING_MUTATION_BATCH_FAILED",
+      report: expect.objectContaining({
+        ok: false,
+        failures: [expect.objectContaining({ id: "batch-parent-fails" })],
+        cancellations: [expect.objectContaining({ id: "batch-child-cancelled" })],
+      }),
+    });
+  });
+
+  it("onthoudt een snelle dropfout tussen commit-checkpoint en macrotask-drain", async () => {
+    const queue = createPlanningMutationQueue();
+    const checkpoint = queue.createDrainCheckpoint();
+    let operation = null;
+    globalThis.setTimeout(() => {
+      operation = queue.enqueue({
+        id: "same-frame-fast-failure",
+        resourceKeys: ["occurrence:same-frame-fast-failure"],
+        execute: () => Promise.reject(new Error("direct geweigerd")),
+      });
+      void operation.catch(() => undefined);
+    }, 0);
+
+    await settlePlanningDropEnqueues();
+    await vi.waitFor(() => expect(queue.getSnapshot().isIdle).toBe(true));
+    await expect(queue.drain({ checkpoint, rejectOnFailure: true })).rejects.toMatchObject({
+      code: "PLANNING_MUTATION_BATCH_FAILED",
+      report: expect.objectContaining({
+        failures: [expect.objectContaining({ id: "same-frame-fast-failure" })],
+      }),
+    });
+    await expect(operation).rejects.toThrow("direct geweigerd");
+  });
+
+  it("blokkeert een commit op een eerder afgehandelde maar nog niet bevestigde fout", async () => {
+    const queue = createPlanningMutationQueue();
+    const operation = queue.enqueue({
+      id: "failed-before-save-click",
+      resourceKeys: ["occurrence:failed-before-save-click"],
+      execute: () => Promise.reject(new Error("server weigerde de wijziging")),
+    });
+    await expect(operation).rejects.toThrow("server weigerde de wijziging");
+    expect(queue.getSnapshot().isIdle).toBe(true);
+
+    const checkpoint = queue.createDrainCheckpoint();
+    let report;
+    try {
+      await queue.drain({ checkpoint, rejectOnFailure: true });
+    } catch (error) {
+      report = error.report;
+    }
+    expect(report).toMatchObject({
+      ok: false,
+      failures: [expect.objectContaining({ id: "failed-before-save-click" })],
+    });
+    expect(queue.acknowledgeDrain(report)).toBe(true);
+    await expect(queue.drain({
+      checkpoint: queue.createDrainCheckpoint(),
+      rejectOnFailure: true,
+    })).resolves.toMatchObject({ ok: true, failures: [] });
+  });
+
   it("publiceert snapshots zonder mutabele resource-arrays naar subscribers", async () => {
     const queue = createPlanningMutationQueue();
     const snapshots = [];
@@ -355,6 +452,212 @@ describe("planning mutation queue", () => {
       shiftIds: ["shift-server-42"],
       expectedShiftRevisions: { "shift-server-42": 12 },
     });
+  });
+
+  it("start een afhankelijke actie pas na parent-reconcile met de actueel gerebased intent", async () => {
+    const queue = createPlanningMutationQueue();
+    const parentServer = deferred();
+    const executions = [];
+    const parent = queue.enqueue({
+      id: "compose-temp-shift",
+      resourceKeys: ["occurrence:one"],
+      intent: { shifts: [{ id: "pending-shift" }] },
+      execute: () => parentServer.promise,
+      onSuccess: result => {
+        queue.updateIntent("resize-temp-shift", current => ({
+          ...current,
+          shift_id: result.shift.id,
+          shifts: current.shifts.map(item => ({ ...item, id: result.shift.id })),
+        }));
+      },
+    });
+    const child = queue.enqueue({
+      id: "resize-temp-shift",
+      dependsOn: [parent.commandId],
+      resourceKeys: ["occurrence:one", "shift:pending-shift"],
+      intent: { shift_id: "pending-shift", shifts: [{ id: "pending-shift", end_time: "15:30" }] },
+      execute: context => {
+        executions.push(context);
+        return { resized: context.intent.shift_id };
+      },
+    });
+
+    await flushMicrotasks();
+    expect(executions).toEqual([]);
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 2, runningCount: 1, queuedCount: 1 });
+    parentServer.resolve({ shift: { id: "shift-server", revision: 2 } });
+
+    await expect(parent).resolves.toMatchObject({ shift: { id: "shift-server" } });
+    await expect(child).resolves.toEqual({ resized: "shift-server" });
+    expect(executions).toHaveLength(1);
+    expect(executions[0]).toMatchObject({
+      id: "resize-temp-shift",
+      dependsOn: ["compose-temp-shift"],
+      intent: {
+        shift_id: "shift-server",
+        shifts: [{ id: "shift-server", end_time: "15:30" }],
+      },
+    });
+    expect(executions[0].getDependencyState("compose-temp-shift")).toMatchObject({ status: "succeeded" });
+  });
+
+  it("annuleert afhankelijke children transitief na parent-fout zonder execute- of toastcallbacks", async () => {
+    const queue = createPlanningMutationQueue();
+    const failure = new Error("compose geweigerd");
+    const childExecute = vi.fn();
+    const childError = vi.fn();
+    const childSettled = vi.fn();
+    const grandchildExecute = vi.fn();
+    const parent = queue.enqueue({
+      id: "compose-fails",
+      resourceKeys: ["occurrence:one"],
+      execute: () => Promise.reject(failure),
+    });
+    const child = queue.enqueue({
+      id: "dependent-resize",
+      dependsOn: [parent.commandId],
+      resourceKeys: ["occurrence:one"],
+      execute: childExecute,
+      onError: childError,
+      onSettled: childSettled,
+    });
+    const grandchild = queue.enqueue({
+      id: "dependent-unassign",
+      dependsOn: [child.commandId],
+      resourceKeys: ["occurrence:one"],
+      execute: grandchildExecute,
+    });
+
+    const [parentState, childState, grandchildState] = await Promise.allSettled([parent, child, grandchild]);
+    await queue.drain();
+
+    expect(parentState).toMatchObject({ status: "rejected", reason: failure });
+    expect(childState).toMatchObject({
+      status: "rejected",
+      reason: expect.objectContaining({
+        name: "PlanningDependencyError",
+        code: "PLANNING_DEPENDENCY_FAILED",
+        silent: true,
+        dependencyId: "compose-fails",
+      }),
+    });
+    expect(grandchildState).toMatchObject({
+      status: "rejected",
+      reason: expect.objectContaining({
+        name: "PlanningDependencyError",
+        code: "PLANNING_DEPENDENCY_FAILED",
+        silent: true,
+      }),
+    });
+    expect(childExecute).not.toHaveBeenCalled();
+    expect(childError).not.toHaveBeenCalled();
+    expect(childSettled).not.toHaveBeenCalled();
+    expect(grandchildExecute).not.toHaveBeenCalled();
+    expect(queue.getTerminalState("compose-fails")).toMatchObject({ status: "failed" });
+    expect(queue.getTerminalState("dependent-resize")).toMatchObject({
+      status: "cancelled",
+      dependencyId: "compose-fails",
+    });
+    expect(queue.getTerminalState("dependent-unassign")).toMatchObject({ status: "cancelled" });
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 0, isIdle: true });
+  });
+
+  it("coalescet alleen queued resizes latest-wins en deelt één canonieke completion", async () => {
+    const queue = createPlanningMutationQueue();
+    const composeServer = deferred();
+    const firstResizeExecute = vi.fn();
+    const latestResizeExecute = vi.fn(context => ({ savedEnd: context.intent.end_time }));
+    const firstSuccess = vi.fn();
+    const latestSuccess = vi.fn();
+    const compose = queue.enqueue({
+      id: "compose",
+      resourceKeys: ["occurrence:one"],
+      execute: () => composeServer.promise,
+    });
+    const firstResize = queue.enqueue({
+      id: "resize-1",
+      dependsOn: [compose.commandId],
+      coalesceKey: "resize:pending-shift:bottom",
+      resourceKeys: ["occurrence:one", "shift:pending-shift"],
+      intent: { end_time: "16:00" },
+      execute: firstResizeExecute,
+      onSuccess: firstSuccess,
+    });
+    const latestResize = queue.enqueue({
+      id: "resize-2",
+      dependsOn: [compose.commandId],
+      coalesceKey: "resize:pending-shift:bottom",
+      resourceKeys: ["segment:pending-segment"],
+      intent: { end_time: "15:30" },
+      execute: latestResizeExecute,
+      onSuccess: latestSuccess,
+    });
+
+    expect(firstResize.commandId).toBe("resize-1");
+    expect(firstResize.coalesced).toBe(false);
+    expect(latestResize.commandId).toBe("resize-1");
+    expect(latestResize.requestedCommandId).toBe("resize-2");
+    expect(latestResize.coalesced).toBe(true);
+    expect(queue.has("resize-2")).toBe(true);
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 2, runningCount: 1, queuedCount: 1 });
+    expect(queue.getSnapshot().intents).toContainEqual({ end_time: "15:30" });
+    expect(queue.getSnapshot().resourceKeys).toEqual([
+      "occurrence:one",
+      "segment:pending-segment",
+      "shift:pending-shift",
+    ]);
+
+    composeServer.resolve("composed");
+    await expect(compose).resolves.toBe("composed");
+    await expect(firstResize).resolves.toEqual({ savedEnd: "15:30" });
+    await expect(latestResize).resolves.toEqual({ savedEnd: "15:30" });
+    expect(firstResizeExecute).not.toHaveBeenCalled();
+    expect(latestResizeExecute).toHaveBeenCalledTimes(1);
+    expect(firstSuccess).not.toHaveBeenCalled();
+    expect(latestSuccess).toHaveBeenCalledWith({ savedEnd: "15:30" });
+    expect(queue.getTerminalState("resize-2")).toMatchObject({
+      id: "resize-1",
+      status: "succeeded",
+      aliases: ["resize-1", "resize-2"],
+    });
+  });
+
+  it("houdt drain en beforeunload actief totdat ook het laatste dependency-child klaar is", async () => {
+    const listeners = new Map();
+    const target = {
+      addEventListener: vi.fn((name, handler) => listeners.set(name, handler)),
+      removeEventListener: vi.fn((name, handler) => {
+        if (listeners.get(name) === handler) listeners.delete(name);
+      }),
+    };
+    const queue = createPlanningMutationQueue({ beforeUnloadTarget: target });
+    const parentServer = deferred();
+    const childServer = deferred();
+    const parent = queue.enqueue({
+      id: "parent-save",
+      execute: () => parentServer.promise,
+    });
+    const child = queue.enqueue({
+      id: "child-save",
+      dependsOn: [parent.commandId],
+      execute: () => childServer.promise,
+    });
+    let drained = false;
+    const drain = queue.drain().then(() => { drained = true; });
+
+    expect(listeners.has("beforeunload")).toBe(true);
+    parentServer.resolve("parent-ok");
+    await parent;
+    await flushMicrotasks();
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 1, runningCount: 1 });
+    expect(listeners.has("beforeunload")).toBe(true);
+    expect(drained).toBe(false);
+
+    childServer.resolve("child-ok");
+    await child;
+    await drain;
+    expect(drained).toBe(true);
+    expect(listeners.has("beforeunload")).toBe(false);
   });
 
   it("gebruikt binnen de app steeds dezelfde modulequeue", () => {

@@ -63,6 +63,70 @@ Start die migratie achter een feature flag wanneer een geauthenticeerde producti
 - Base44-conflicten of time-outs komen in meer dan 0,5% van planningmutaties voor;
 - nieuwe planningregels vereisen echte multi-record transacties die de saga onredelijk complex maken.
 
+## Schaalpad voor 200–500 medewerkers
+
+De volledige medewerker × taak × tijd-matrix vooraf opslaan is nadrukkelijk niet
+het doel. Bij 500 medewerkers, honderden taakvensters en meerdere mogelijke
+start-/eindtijden groeit die projectie explosief en is een groot deel alweer
+verouderd zodra één dienst, afwezigheid of contract wijzigt.
+
+De schaalbare projectie bestaat uit twee niveaus:
+
+1. een blijvend, event-driven feitenoverzicht per medewerker en servicedag met
+   contract-/CAO-route, kwalificaties, beveiligingspassen, afwezigheid,
+   restricties, reeds geplande intervallen, rustgrenzen en urentotalen;
+2. een kleine contextberekening voor alleen de concrete dienst of het taakdeel
+   waarover de planner sleept.
+
+Het feitenoverzicht krijgt een dependency-hash. Een wijziging aan medewerker,
+contract, bedrijfstoewijzing, kwalificatie, pas, afwezigheid, restrictie,
+dienst, assignment of toepasselijke CAO-configuratie maakt alleen de betrokken
+medewerker-/dagrecords ongeldig. Een begrensde achtergrondworker bouwt die
+records opnieuw op; een nachtelijke herstelrun controleert gemiste events. De
+drag-preview leest uitsluitend lokale feiten en een reeds voorbereide
+dienstcontext. Ontbrekend of verouderd bewijs wordt nooit als groen getoond.
+
+De huidige release legt hiervoor de functionele grens vast: de client bouwt een
+memoized lokale index en `prefetch_assignment_eligibility` kan serverbeslissingen
+begrensd vooraf opwarmen. De volgende schaalstap is deze basisbewijzen duurzaam
+en event-driven materialiseren, niet steeds grotere combinatiematrices bij het
+openen laden. Dat kan eerst binnen Base44 met een dirty-queue plus worker. Een
+eigen PostgreSQL-planningservice is pas de betere keuze wanneer de hieronder
+genoemde productiegrenzen worden overschreden en zij de enige autoritatieve
+planningstore wordt.
+
+De overgangsrelease is bewust fail-closed: lokaal bekende waarschuwingen staan
+al tijdens het slepen in beeld, maar `checking`, `stale` of `unavailable` wordt
+nooit groen en leidt nog niet tot een assignmentwrite. De exacte combinatie
+wordt met voorrang opgewarmd en de planner kan pas definitief plaatsen wanneer
+het volledige bewijs actueel is. Dat voorkomt een waarschuwing die pas na de
+planning verschijnt, maar is nog niet de eindoplossing voor 500 medewerkers.
+
+Voor die eindsituatie materialiseren we geen medewerker × taak-matrix. De
+duurzame laag bestaat uit vier compacte facts: medewerkerprofiel, medewerker per
+CAO-periode, bedrijf/CAO en dienst/taakbron. Audit- en klant-events verhogen een
+generation en zetten alleen de geraakte facts dirty; een begrensde worker werkt
+ze bij en een nachtelijke hash-sweep herstelt gemiste events. De planner haalt
+facts gepagineerd op en voert de concrete tijdinterval-join lokaal uit. Hierdoor
+doet drag/hover nul netwerk zonder dat opslag kwadratisch groeit.
+
+Operationele Base44-grenzen sturen de uitvoering: deze repository bevat al meer
+functiedirectories dan de officieel genoemde limiet van 50 backendfuncties, dus
+de facts-worker moet in een bestaande/geconsolideerde functie landen. Entity
+automations zien bovendien geen bulkbewerkingen; planningaudit-events blijven
+de primaire invalidatiebron. De geplande herstelrun gebruikt minimaal vijf
+minuten interval en houdt per uitvoering ruim marge onder de gedocumenteerde
+automatiseringslimiet.
+
+Acceptatie voor de duurzame feitenindex:
+
+- drag-/hovercontrole doet nul netwerkaanvragen;
+- een bronwijziging is binnen 30 seconden verwerkt of zichtbaar als `stale`;
+- een herstart of gemist event wordt door de herstelrun ingehaald;
+- opslag/publicatie voert altijd nog een autoritatieve eindcontrole uit;
+- de hoeveelheid feiten groeit lineair met medewerker × actieve servicedag,
+  niet met medewerker × alle taak-/tijdcombinaties.
+
 ## Officiële technische bronnen
 
 - [Base44 backend functions](https://docs.base44.com/developers/backend/resources/backend-functions/overview)
