@@ -83,8 +83,17 @@ import {
   buildOccurrenceEligibilityShift,
   buildPlanningEligibilityObjectShiftContext,
   buildPlanningEligibilityPrefetchCandidate,
+  createPlanningEligibilityUrgentRequestGate,
   createPlanningEligibilityIndex,
+  mergePlanningEligibilityServerDecisions,
+  selectPlanningEligibilityRequestCandidates,
 } from "@/components/planning/planningEligibilityIndex";
+import {
+  createPendingPlanningEligibilityDrop,
+  planningEligibilityDependencyRetryDelay,
+  recordPendingPlanningEligibilityAttempt,
+  resolvePendingPlanningEligibilityDrop,
+} from "@/components/planning/planningEligibilityDropGate";
 import {
   addDays,
   buildCandidateRanking,
@@ -123,9 +132,26 @@ const VALID_VIEWS = new Set(["week", "period"]);
 const VALID_PERSPECTIVES = new Set(["object", "employee"]);
 const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const PLANNING_ELIGIBILITY_MAX_AGE_MS = 120_000;
+const PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS = 12_000;
+const PLANNING_ELIGIBILITY_HOVER_DELAY_MS = 80;
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 const compactDateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
+
+function boundedPlanningEligibilityPromise(promise, timeoutMs = PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS) {
+  let timer = null;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = globalThis.setTimeout(() => {
+      const error = /** @type {any} */ (new Error("De planningvoorcontrole reageerde niet op tijd."));
+      error.code = "PLANNING_ELIGIBILITY_TIMEOUT";
+      reject(error);
+    }, Math.max(1, Number(timeoutMs) || PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS));
+  });
+  return Promise.race([Promise.resolve(promise), timeout])
+    .finally(() => {
+      if (timer !== null) globalThis.clearTimeout(timer);
+    });
+}
 
 function personnelName(personnel) {
   return personnel?.name
@@ -216,6 +242,15 @@ function shortPlanningVersionToken(value) {
     second = Math.imul(second ^ (code + index), 0x85ebca6b) >>> 0;
   }
   return `${input.length.toString(36)}-${first.toString(36)}-${second.toString(36)}`;
+}
+
+function planningEligibilityRecordsVersion(source, project) {
+  const records = Array.isArray(source) ? source : [];
+  const serialized = records
+    .map(record => JSON.stringify(project(record)))
+    .sort()
+    .join("|");
+  return shortPlanningVersionToken(serialized);
 }
 
 function adjacentOpenTaskServiceNeighbors({ snapshot, shift, segment }) {
@@ -633,6 +668,10 @@ export default function Planning() {
   const [eligibilityServerDecisions, setEligibilityServerDecisions] = useState([]);
   const [dragEligibilityPreview, setDragEligibilityPreview] = useState(null);
   const [eligibilityFreshnessTick, setEligibilityFreshnessTick] = useState(0);
+  const [planningDragGestureActive, setPlanningDragGestureActive] = useState(false);
+  const [dragPersonnelOrder, setDragPersonnelOrder] = useState(null);
+  const [pendingEligibilityDrop, setPendingEligibilityDrop] = useState(null);
+  const [eligibilityDependencyRefreshActive, setEligibilityDependencyRefreshActive] = useState(false);
   const [planningResizeGestureActive, setPlanningResizeGestureActive] = useState(false);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
@@ -646,26 +685,149 @@ export default function Planning() {
   const pendingResourceKeysRef = useRef(new Set());
   const planningMutationQueue = useRef(sharedPlanningMutationQueue);
   const planningCommitFenceRef = useRef(null);
+  const planningDragGestureActiveRef = useRef(false);
+  const beginPlanningInteractionRef = useRef(null);
+  const finishPlanningInteractionRef = useRef(null);
+  const planningDragLifecycleRef = useRef({
+    active: false,
+    promise: Promise.resolve(),
+    resolve: null,
+    resumeRefresh: null,
+    refreshWasInFlight: false,
+    flushAfterRelease: false,
+    releaseEligibilityRefresh: null,
+    scheduler: null,
+  });
+  const pendingEligibilityDropRef = useRef(null);
+  const resolveDropEligibilityPreviewRef = useRef(null);
+  const processPlanningDropRef = useRef(null);
+  const requestUrgentEligibilityCandidatesRef = useRef(null);
   const planningResizeGestureActiveRef = useRef(false);
   const eligibilityBackgroundRequestGateRef = useRef(createPlanningBackgroundRequestGate());
   const eligibilityBackgroundPrefetchGenerationRef = useRef(0);
   const eligibilityPrewarmBasisRef = useRef("");
   const eligibilityUrgentPrefetchKeysRef = useRef(new Set());
+  const eligibilityUrgentRequestGateRef = useRef(null);
+  const eligibilityHeldDropRequestGateRef = useRef(null);
+  if (!eligibilityUrgentRequestGateRef.current) {
+    eligibilityUrgentRequestGateRef.current = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 2 });
+  }
+  if (!eligibilityHeldDropRequestGateRef.current) {
+    eligibilityHeldDropRequestGateRef.current = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 1 });
+  }
+  const eligibilityServerDecisionsRef = useRef([]);
+  const eligibilityIndexRef = useRef(null);
+  const eligibilityDependencyRefreshTokensRef = useRef(new Set());
+  const eligibilityDependencyRefreshActiveRef = useRef(false);
+  const eligibilityDependencyRefreshPromiseRef = useRef(null);
+  const eligibilityDependencyRefreshLastAttemptRef = useRef(0);
+  const eligibilityDependencyRefreshFailureCountRef = useRef(0);
   const lastWrittenSearchKey = useRef(null);
   const hydratingFromUrl = useRef(false);
+
+  const cancelHeldPlanningDrop = useCallback((description, { updateState = true } = {}) => {
+    if (!pendingEligibilityDropRef.current) return false;
+    pendingEligibilityDropRef.current = null;
+    if (updateState) setPendingEligibilityDrop(null);
+    const message = description
+      || "De vastgehouden sleepactie is geannuleerd omdat u de planning hebt verlaten of van periode bent gewisseld.";
+    toast({ title: "Sleepactie geannuleerd", description: message });
+    if (updateState) setLiveMessage(message);
+    return true;
+  }, [toast]);
+
+  const beginEligibilityDependencyRefresh = useCallback(() => {
+    const token = Symbol("planning-eligibility-refresh");
+    const tokens = eligibilityDependencyRefreshTokensRef.current;
+    tokens.add(token);
+    if (!eligibilityDependencyRefreshActiveRef.current) {
+      eligibilityDependencyRefreshActiveRef.current = true;
+      setEligibilityDependencyRefreshActive(true);
+    }
+    let released = false;
+    return () => {
+      if (released) return false;
+      released = true;
+      tokens.delete(token);
+      if (tokens.size === 0 && eligibilityDependencyRefreshActiveRef.current) {
+        eligibilityDependencyRefreshActiveRef.current = false;
+        setEligibilityDependencyRefreshActive(false);
+      }
+      return true;
+    };
+  }, []);
 
   useEffect(() => planningMutationQueue.current.subscribe(setPlanningQueueState), []);
 
   useEffect(() => {
+    if (!pendingEligibilityDrop) return undefined;
+    const protectPendingDrop = event => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", protectPendingDrop);
+    return () => window.removeEventListener("beforeunload", protectPendingDrop);
+  }, [pendingEligibilityDrop]);
+
+  useEffect(() => {
+    if (!pendingEligibilityDrop) return undefined;
+    const cancelBeforeInternalNavigation = event => {
+      if (
+        event.defaultPrevented
+        || event.button !== 0
+        || event.metaKey
+        || event.ctrlKey
+        || event.shiftKey
+        || event.altKey
+      ) return;
+      const anchor = event.target?.closest?.("a[href]");
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      let target;
+      try {
+        target = new URL(anchor.href, window.location.href);
+      } catch {
+        return;
+      }
+      if (target.origin !== window.location.origin) return;
+      const current = new URL(window.location.href);
+      if (
+        target.pathname === current.pathname
+        && target.search === current.search
+        && target.hash === current.hash
+      ) return;
+      cancelHeldPlanningDrop(
+        "De vastgehouden sleepactie is geannuleerd voordat u naar een andere pagina ging. Er is geen medewerker ingepland.",
+      );
+    };
+    document.addEventListener("click", cancelBeforeInternalNavigation, true);
+    return () => document.removeEventListener("click", cancelBeforeInternalNavigation, true);
+  }, [cancelHeldPlanningDrop, pendingEligibilityDrop]);
+
+  useEffect(() => {
+    let endTimer = null;
     const setActive = active => {
       if (planningResizeGestureActiveRef.current === active) return;
       planningResizeGestureActiveRef.current = active;
       setPlanningResizeGestureActive(active);
     };
     const handlePointerDown = event => {
-      if (event.target?.closest?.("[data-service-resize-edge]")) setActive(true);
+      if (!event.target?.closest?.("[data-service-resize-edge]")) return;
+      setActive(true);
+      beginPlanningInteractionRef.current?.();
     };
-    const handlePointerEnd = () => setActive(false);
+    const handlePointerEnd = () => {
+      if (!planningResizeGestureActiveRef.current) return;
+      if (endTimer !== null) window.clearTimeout(endTimer);
+      // Boundary handlers commit during the same pointer-up turn. Release the
+      // interaction gate one macrotask later so their optimistic command is in
+      // the queue before a paused consistency refresh may resume.
+      endTimer = window.setTimeout(() => {
+        endTimer = null;
+        setActive(false);
+        finishPlanningInteractionRef.current?.();
+      }, 0);
+    };
     // Capture sees the pointer before the resize handle stops propagation and
     // survives the optimistic-to-server rerender of that same handle.
     window.addEventListener("pointerdown", handlePointerDown, true);
@@ -675,6 +837,7 @@ export default function Planning() {
       window.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("pointerup", handlePointerEnd, true);
       window.removeEventListener("pointercancel", handlePointerEnd, true);
+      if (endTimer !== null) window.clearTimeout(endTimer);
     };
   }, []);
 
@@ -703,6 +866,13 @@ export default function Planning() {
       lastWrittenSearchKey.current = null;
       return;
     }
+    // Browser Back/Forward can change only /Planning's query string, so the
+    // route component stays mounted and no unmount cleanup runs. Cancel the
+    // held drop synchronously before hydrating a different planning context;
+    // it may never resume against a target from another range.
+    cancelHeldPlanningDrop(
+      "De vastgehouden sleepactie is geannuleerd voordat de planning via de browsergeschiedenis werd gewijzigd. Er is geen medewerker ingepland.",
+    );
     const nextDate = parseDateKey(searchParams.get("date")) || new Date();
     const requestedNextView = searchParams.get("view") === "four_weeks" ? "period" : searchParams.get("view");
     const nextView = VALID_VIEWS.has(requestedNextView) ? requestedNextView : "period";
@@ -726,7 +896,7 @@ export default function Planning() {
     setSelectedCaoPeriodId(nextCaoPeriod?.key || "");
     setSelectedShiftId(null);
     setEditing(false);
-  }, [searchParams, searchParamsKey]);
+  }, [cancelHeldPlanningDrop, searchParams, searchParamsKey]);
 
   useEffect(() => {
     if (hydratingFromUrl.current) {
@@ -893,7 +1063,12 @@ export default function Planning() {
     staleTime: 60_000,
   });
 
-  const refreshPlanning = async ({ includePublications = false } = {}) => {
+  const refreshPlanning = async ({ includePublications = false, includeEligibility = false } = {}) => {
+    // Shifts and assignments are themselves eligibility dependencies. Treat
+    // every planning consistency pass as one atomic fact generation; otherwise
+    // its separately completing queries can launch several obsolete server
+    // checks before the final basis is known.
+    const releaseEligibilityRefresh = beginEligibilityDependencyRefresh();
     const requests = [
       queryClient.invalidateQueries({ queryKey: ["planning-shifts"] }),
       queryClient.invalidateQueries({ queryKey: ["planning-assignments"] }),
@@ -904,7 +1079,22 @@ export default function Planning() {
     if (includePublications) {
       requests.push(queryClient.invalidateQueries({ queryKey: ["planning-publications"] }));
     }
-    await Promise.all(requests);
+    if (includeEligibility) {
+      requests.push(
+        queryClient.invalidateQueries({ queryKey: ["personnel"] }),
+        queryClient.invalidateQueries({ queryKey: ["personnel-absences"] }),
+        queryClient.invalidateQueries({ queryKey: ["personnel-qualifications"] }),
+        queryClient.invalidateQueries({ queryKey: ["personnel-security-passes"] }),
+        queryClient.invalidateQueries({ queryKey: ["personnel-restrictions"] }),
+        queryClient.invalidateQueries({ queryKey: ["personnel-contracts"] }),
+        queryClient.invalidateQueries({ queryKey: ["objects"] }),
+      );
+    }
+    try {
+      await boundedPlanningEligibilityPromise(Promise.all(requests));
+    } finally {
+      releaseEligibilityRefresh();
+    }
   };
   refreshPlanningRef.current = refreshPlanning;
 
@@ -938,6 +1128,136 @@ export default function Planning() {
   const refreshPlanningInBackground = options => {
     refreshScheduler.current?.schedule(options);
   };
+
+  const beginPlanningDragInteraction = () => {
+    if (planningDragLifecycleRef.current.active) return;
+    let resolveRelease;
+    const promise = new Promise(resolve => {
+      resolveRelease = resolve;
+    });
+    const scheduler = refreshScheduler.current;
+    const schedulerState = scheduler?.getState?.() || {};
+    const refreshWasInFlight = Boolean(schedulerState.inFlight);
+    const planningQueryFilters = [
+      { queryKey: ["planning-shifts"] },
+      { queryKey: ["planning-assignments"] },
+      { queryKey: ["planning-task-occurrences"] },
+      { queryKey: ["planning-task-source-changes"] },
+      { queryKey: ["planning-task-segments"] },
+    ];
+    const eligibilityQueryFilters = [
+      { queryKey: ["personnel"] },
+      { queryKey: ["personnel-absences"] },
+      { queryKey: ["personnel-qualifications"] },
+      { queryKey: ["personnel-security-passes"] },
+      { queryKey: ["personnel-restrictions"] },
+      { queryKey: ["personnel-contracts"] },
+      { queryKey: ["objects"] },
+    ];
+    const planningQueryWasFetching = planningQueryFilters.some(filter => queryClient.isFetching(filter) > 0);
+    const eligibilityQueryWasFetching = eligibilityQueryFilters.some(filter => queryClient.isFetching(filter) > 0);
+    const flushAfterRelease = Boolean(
+      refreshWasInFlight
+      || schedulerState.scheduled
+      || planningQueryWasFetching
+      || eligibilityQueryWasFetching
+    );
+    const releaseEligibilityRefresh = eligibilityQueryWasFetching
+      ? beginEligibilityDependencyRefresh()
+      : null;
+    const resumeRefresh = scheduler?.pause?.() || (() => undefined);
+    planningDragLifecycleRef.current = {
+      active: true,
+      promise,
+      resolve: resolveRelease,
+      resumeRefresh,
+      refreshWasInFlight,
+      flushAfterRelease,
+      releaseEligibilityRefresh,
+      scheduler,
+    };
+    planningDragGestureActiveRef.current = true;
+    setPlanningDragGestureActive(true);
+
+    // QueryClient can refetch independently of our consistency scheduler
+    // (window focus, stale dependencies, or an earlier direct invalidation).
+    // Cancel every topology/candidate source unconditionally; a no-op cancel
+    // is cheap, while a late response can unmount Pangea's active publisher.
+    void Promise.allSettled(
+      [...planningQueryFilters, ...eligibilityQueryFilters]
+        .map(filter => queryClient.cancelQueries(filter)),
+    );
+    if (refreshWasInFlight || planningQueryWasFetching || eligibilityQueryWasFetching) {
+      refreshPlanningInBackground({
+        reason: "drag-cancelled-active-refresh",
+        includeEligibility: eligibilityQueryWasFetching,
+      });
+    }
+  };
+
+  const finishPlanningDragInteraction = () => {
+    const lifecycle = planningDragLifecycleRef.current;
+    if (!lifecycle.active) return;
+    planningDragLifecycleRef.current = {
+      active: false,
+      promise: Promise.resolve(),
+      resolve: null,
+      resumeRefresh: null,
+      refreshWasInFlight: false,
+      flushAfterRelease: false,
+      releaseEligibilityRefresh: null,
+      scheduler: null,
+    };
+    planningDragGestureActiveRef.current = false;
+    setPlanningDragGestureActive(false);
+    lifecycle.resolve?.();
+    if (!lifecycle.flushAfterRelease) {
+      lifecycle.resumeRefresh?.();
+      lifecycle.releaseEligibilityRefresh?.();
+      return;
+    }
+    // The drop is processed before this function is called. Keep consistency
+    // refreshes paused until that write (or the pre-existing delete) has
+    // settled, then run the coalesced refresh immediately rather than leaving
+    // the eligibility handshake behind the normal eight-second delay.
+    void planningMutationQueue.current.drain()
+      .catch(() => null)
+      .then(async () => {
+        lifecycle.resumeRefresh?.();
+        await lifecycle.scheduler?.flush?.();
+      })
+      .finally(() => lifecycle.releaseEligibilityRefresh?.());
+  };
+
+  const waitForPlanningDragRelease = () => (
+    planningDragLifecycleRef.current.active
+      ? planningDragLifecycleRef.current.promise
+      : Promise.resolve()
+  );
+  beginPlanningInteractionRef.current = beginPlanningDragInteraction;
+  finishPlanningInteractionRef.current = finishPlanningDragInteraction;
+
+  useEffect(() => () => {
+    const lifecycle = planningDragLifecycleRef.current;
+    lifecycle.resolve?.();
+    lifecycle.resumeRefresh?.();
+    lifecycle.releaseEligibilityRefresh?.();
+    planningDragLifecycleRef.current = {
+      active: false,
+      promise: Promise.resolve(),
+      resolve: null,
+      resumeRefresh: null,
+      refreshWasInFlight: false,
+      flushAfterRelease: false,
+      releaseEligibilityRefresh: null,
+      scheduler: null,
+    };
+    // Browser Back and programmatic React-Router navigation can unmount the
+    // page without a link click. Clear the held drop before its outstanding
+    // eligibility promise can settle; the global toaster keeps the
+    // cancellation visible on the destination page.
+    cancelHeldPlanningDrop(undefined, { updateState: false });
+  }, [cancelHeldPlanningDrop]);
 
   const bootstrapMutation = useMutation({
     mutationFn: payload => invokePlanningApi(
@@ -1340,38 +1660,153 @@ export default function Planning() {
     contracts,
   }), [absences, allShifts, assignments, contracts, qualifications, restrictions, securityPasses]);
 
-  const eligibilityPlanningVersion = useMemo(() => shortPlanningVersionToken(
-    (planningQueueState.intents || []).map(intent => [
-      intent?.key,
-      ...(intent?.shifts || []).map(item => `${item.id}:${item.revision || 0}:${item.status}:${item.service_date}:${item.start_time}:${item.end_time}`),
-      ...(intent?.assignments || []).map(item => `${item.id}:${item.revision || 0}:${item.status}:${item.personnel_id}:${item.planning_shift_id || item.shift_id}`),
-      ...(intent?.occurrences || []).map(item => `${item.id}:${item.revision || 0}:${item.lifecycle_status}:${item.service_date}:${item.window_start_time}:${item.window_end_time}`),
-    ].join("~")).join("|"),
-  ), [planningQueueState.intents]);
+  const eligibilityDependencyVersions = useMemo(() => ({
+    personnel: planningEligibilityRecordsVersion(activePersonnel, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.status,
+      item.is_active,
+      item.available_for_planning,
+      item.planning_available,
+      item.wpbr_status,
+      item.cao_function_group,
+      item.function_type,
+      item.employee_type,
+    ]),
+    // Planning ACKs often change only a technical revision/metadata marker.
+    // Eligibility depends on the semantic interval and active staffing state;
+    // using those fields keeps an optimistic delete and its equivalent ACK on
+    // one basis while still invalidating every real schedule change.
+    shifts: planningEligibilityRecordsVersion(
+      allShifts.filter(item => item.status !== "cancelled"),
+      item => [
+        item.id,
+        item.status,
+        item.service_date,
+        item.end_date,
+        item.start_time,
+        item.end_time,
+        item.company_id,
+        item.customer_id,
+        item.object_id,
+        item.route_id,
+        item.task_id,
+        item.required_count,
+        item.cao_key,
+        item.service_function_type,
+        item.required_cao_function_group,
+        item.required_cao_function_level,
+        item.required_security_role_status,
+        item.required_qualification_types,
+        item.required_qualification_groups,
+        item.required_security_pass_types,
+      ],
+    ),
+    assignments: planningEligibilityRecordsVersion(
+      activeAssignments(assignments),
+      item => [
+        item.id,
+        item.status,
+        item.personnel_id,
+        item.planning_shift_id || item.shift_id,
+        item.slot_index,
+      ],
+    ),
+    absences: planningEligibilityRecordsVersion(absences, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.personnel_id,
+      item.status,
+      item.absence_type,
+      item.start_date,
+      item.end_date,
+    ]),
+    qualifications: planningEligibilityRecordsVersion(qualifications, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.personnel_id,
+      item.status,
+      item.qualification_type,
+      item.qualification_group,
+      item.valid_from,
+      item.valid_until,
+    ]),
+    securityPasses: planningEligibilityRecordsVersion(securityPasses, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.personnel_id,
+      item.company_id,
+      item.status,
+      item.pass_type,
+      item.valid_from,
+      item.valid_until,
+    ]),
+    restrictions: planningEligibilityRecordsVersion(restrictions, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.personnel_id,
+      item.status,
+      item.scope_type,
+      item.scope_id,
+      item.scope_label,
+      item.valid_from,
+      item.valid_until,
+    ]),
+    contracts: planningEligibilityRecordsVersion(contracts, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      item.personnel_id,
+      item.status,
+      item.company_id,
+      item.cao_key,
+      item.valid_from,
+      item.valid_until,
+      item.contract_form,
+      item.contract_hours_per_week,
+      item.contract_hours_per_pay_period,
+      item.cao_function_group,
+      item.cao_function_level,
+    ]),
+    objects: planningEligibilityRecordsVersion(objects, item => [
+      item.id,
+      item.revision || item.version || item.updated_date,
+      ...Object.values(buildPlanningEligibilityObjectShiftContext({ object: item })),
+    ]),
+  }), [
+    absences,
+    activePersonnel,
+    allShifts,
+    assignments,
+    contracts,
+    objects,
+    qualifications,
+    restrictions,
+    securityPasses,
+  ]);
   const eligibilityDependencies = useMemo(() => {
-    const dependency = (query, suffix = "") => ({
+    const dependency = (query, version) => ({
       status: query.status,
       hasData: query.data !== undefined,
       dataUpdatedAt: query.dataUpdatedAt,
       error: query.error,
-      version: `${query.dataUpdatedAt || 0}${suffix ? `:${suffix}` : ""}`,
+      version,
     });
     return {
-      personnel: dependency(personnelQuery),
-      shifts: dependency(shiftsQuery, eligibilityPlanningVersion),
-      assignments: dependency(assignmentsQuery, eligibilityPlanningVersion),
-      absences: dependency(absencesQuery),
-      qualifications: dependency(qualificationsQuery),
-      securityPasses: dependency(passesQuery),
-      restrictions: dependency(restrictionsQuery),
-      contracts: dependency(contractsQuery),
-      objects: dependency(objectsQuery),
+      personnel: dependency(personnelQuery, eligibilityDependencyVersions.personnel),
+      shifts: dependency(shiftsQuery, eligibilityDependencyVersions.shifts),
+      assignments: dependency(assignmentsQuery, eligibilityDependencyVersions.assignments),
+      absences: dependency(absencesQuery, eligibilityDependencyVersions.absences),
+      qualifications: dependency(qualificationsQuery, eligibilityDependencyVersions.qualifications),
+      securityPasses: dependency(passesQuery, eligibilityDependencyVersions.securityPasses),
+      restrictions: dependency(restrictionsQuery, eligibilityDependencyVersions.restrictions),
+      contracts: dependency(contractsQuery, eligibilityDependencyVersions.contracts),
+      objects: dependency(objectsQuery, eligibilityDependencyVersions.objects),
     };
   }, [
     absencesQuery,
     assignmentsQuery,
     contractsQuery,
-    eligibilityPlanningVersion,
+    eligibilityDependencyVersions,
     passesQuery,
     personnelQuery,
     qualificationsQuery,
@@ -1405,6 +1840,8 @@ export default function Planning() {
     restrictions,
     securityPasses,
   ]);
+  eligibilityIndexRef.current = eligibilityIndex;
+  eligibilityServerDecisionsRef.current = eligibilityServerDecisions;
 
   const eligibilityPlanningSnapshot = useMemo(() => ({
     shifts: allShifts,
@@ -1532,6 +1969,7 @@ export default function Planning() {
     basisToken,
     generation = null,
     priority = "background",
+    timeoutMs = PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS,
   }) => {
     if (!candidates.length) return;
     const batches = batchPlanningEligibilityCandidates(candidates);
@@ -1541,7 +1979,10 @@ export default function Planning() {
       || (
         eligibilityBackgroundPrefetchGenerationRef.current === generation
         && planningMutationQueue.current.getSnapshot().isIdle
+        && !planningDragGestureActiveRef.current
         && !planningResizeGestureActiveRef.current
+        && !eligibilityDependencyRefreshActiveRef.current
+        && eligibilityUrgentPrefetchKeysRef.current.size === 0
       )
     );
     const worker = async () => {
@@ -1557,11 +1998,11 @@ export default function Planning() {
             priority === "background"
             && eligibilityBackgroundRequestGateRef.current.hasCurrentBackgroundBatch()
           ) return;
-          const request = invokePlanningApi({
+          const request = boundedPlanningEligibilityPromise(invokePlanningApi({
             action: "prefetch_assignment_eligibility",
             basis_token: basisToken,
             candidates: batch.map(({ _local, ...candidate }) => candidate),
-          });
+          }), timeoutMs);
           const response = priority === "background"
             ? await eligibilityBackgroundRequestGateRef.current.trackBackgroundBatch(request)
             : await request;
@@ -1571,63 +2012,127 @@ export default function Planning() {
             expires_at: item.expires_at || response.expires_at,
           }));
         } catch {
+          const evaluatedAt = new Date().toISOString();
           const expiresAt = new Date(Date.now() + 15_000).toISOString();
           results = batch.map(candidate => ({
             candidate_key: candidate.candidate_key,
             personnel_id: candidate.personnel_id,
             status: "unavailable",
             basis_token: basisToken,
+            evaluated_at: evaluatedAt,
             expires_at: expiresAt,
             warning_snapshot: [],
           }));
         }
         if (!backgroundRequestIsCurrent()) return;
         setEligibilityServerDecisions(current => {
-          const byKey = new Map(current
-            .filter(item => item.basis_token === basisToken)
-            .map(item => [String(item.candidate_key), item]));
-          results.forEach(item => byKey.set(String(item.candidate_key), item));
-          return [...byKey.values()];
+          return mergePlanningEligibilityServerDecisions(current, results);
         });
       }
     };
     if (priority === "background") await worker();
     else await Promise.all([worker(), worker()]);
   }, []);
-  const requestUrgentEligibilityCandidates = useCallback(candidates => {
-    const now = Date.now();
-    const known = new Set(eligibilityServerDecisions
-      .filter(item => (
-        item.basis_token === eligibilityIndex.basisToken
-        && Date.parse(item.expires_at || "") > now
-      ))
-      .map(item => String(item.candidate_key)));
+  const requestUrgentEligibilityCandidates = useCallback((candidates, {
+    forceRetry = false,
+    timeoutMs = PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS,
+  } = {}) => {
+    // A candidate based on an optimistic post-delete snapshot may not yet
+    // exist on the server. Wait for the conflicting queue to settle and let
+    // the pending-drop handshake request the exact final-basis candidate.
+    if (
+      !planningMutationQueue.current.getSnapshot().isIdle
+      || eligibilityDependencyRefreshActiveRef.current
+    ) return "blocked";
+    const currentIndex = eligibilityIndexRef.current;
+    const basisToken = currentIndex?.basisToken || "";
+    if (!basisToken) return "blocked";
     const pending = eligibilityUrgentPrefetchKeysRef.current;
-    const requested = (candidates || []).filter(candidate => {
-      const requestKey = `${eligibilityIndex.basisToken}:${candidate?.candidate_key || ""}`;
-      return candidate?.candidate_key && !known.has(String(candidate.candidate_key)) && !pending.has(requestKey);
+    const selection = selectPlanningEligibilityRequestCandidates({
+      candidates,
+      decisions: eligibilityServerDecisionsRef.current,
+      basisToken,
+      pendingRequestKeys: pending,
+      forceRetry,
     });
-    if (!requested.length) return;
-    const requestKeys = requested.map(candidate => `${eligibilityIndex.basisToken}:${candidate.candidate_key}`);
+    if (selection.status !== "started") return selection.status;
+    const requested = selection.candidates;
+    const requestKeys = selection.requestKeys;
+    // Two obsolete hover calls may still be in flight when the pointer is
+    // released. The exact held-drop proof gets one separate bounded slot so a
+    // user's completed action never waits behind speculative pointer targets.
+    const requestGate = forceRetry
+      ? eligibilityHeldDropRequestGateRef.current
+      : eligibilityUrgentRequestGateRef.current;
+    const releaseUrgentSlot = requestGate.acquire();
+    if (!releaseUrgentSlot) return "pending";
     requestKeys.forEach(key => pending.add(key));
-    eligibilityIndex.prewarm(requested.map(item => item._local));
+    currentIndex.prewarm(requested.map(item => item._local));
     void requestEligibilityPrefetch({
       candidates: requested,
-      basisToken: eligibilityIndex.basisToken,
+      basisToken,
       priority: "urgent",
-    }).finally(() => requestKeys.forEach(key => pending.delete(key)));
-  }, [eligibilityIndex, eligibilityServerDecisions, requestEligibilityPrefetch]);
-  const refetchEligibilityDependencies = useCallback(() => Promise.allSettled([
-    queryClient.refetchQueries({ queryKey: ["personnel"], exact: true, type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["planning-shifts"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["planning-assignments"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["personnel-absences"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["personnel-qualifications"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["personnel-security-passes"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["personnel-restrictions"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["personnel-contracts"], type: "active" }),
-    queryClient.refetchQueries({ queryKey: ["objects"], exact: true, type: "active" }),
-  ]), [queryClient]);
+      timeoutMs,
+    }).finally(() => {
+      requestKeys.forEach(key => pending.delete(key));
+      releaseUrgentSlot();
+      // A newer hover target may have arrived while both slots were occupied.
+      // Re-evaluate only the currently visible candidate; obsolete pointer
+      // positions are intentionally never replayed.
+      setEligibilityFreshnessTick(value => value + 1);
+    });
+    return "started";
+  }, [requestEligibilityPrefetch]);
+  requestUrgentEligibilityCandidatesRef.current = requestUrgentEligibilityCandidates;
+  const refetchEligibilityDependencies = useCallback(async ({
+    force = false,
+    maxConsecutiveFailures = Number.POSITIVE_INFINITY,
+  } = {}) => {
+    if (planningDragLifecycleRef.current.active) {
+      await planningDragLifecycleRef.current.promise;
+    }
+    if (eligibilityDependencyRefreshPromiseRef.current) {
+      return eligibilityDependencyRefreshPromiseRef.current;
+    }
+    const now = Date.now();
+    const failureCount = eligibilityDependencyRefreshFailureCountRef.current;
+    if (!force && failureCount >= maxConsecutiveFailures) return null;
+    const retryDelayMs = planningEligibilityDependencyRetryDelay({
+      failureCount,
+      lastAttemptAt: eligibilityDependencyRefreshLastAttemptRef.current,
+      now,
+    });
+    if (!force && retryDelayMs > 0) return null;
+    eligibilityDependencyRefreshLastAttemptRef.current = now;
+    const releaseEligibilityRefresh = beginEligibilityDependencyRefresh();
+    const task = boundedPlanningEligibilityPromise(Promise.allSettled([
+      queryClient.refetchQueries({ queryKey: ["personnel"], exact: true, type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["planning-shifts"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["planning-assignments"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["personnel-absences"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["personnel-qualifications"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["personnel-security-passes"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["personnel-restrictions"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["personnel-contracts"], type: "active" }, { throwOnError: true }),
+      queryClient.refetchQueries({ queryKey: ["objects"], exact: true, type: "active" }, { throwOnError: true }),
+    ])).then(results => {
+      eligibilityDependencyRefreshFailureCountRef.current = results.some(result => result.status === "rejected")
+        ? eligibilityDependencyRefreshFailureCountRef.current + 1
+        : 0;
+      return results;
+    }).catch(() => {
+      eligibilityDependencyRefreshFailureCountRef.current += 1;
+      return [];
+    }).finally(() => {
+      if (eligibilityDependencyRefreshPromiseRef.current === task) {
+        eligibilityDependencyRefreshPromiseRef.current = null;
+      }
+      releaseEligibilityRefresh();
+      setEligibilityFreshnessTick(value => value + 1);
+    });
+    eligibilityDependencyRefreshPromiseRef.current = task;
+    return task;
+  }, [beginEligibilityDependencyRefresh, queryClient]);
   useEffect(() => {
     const now = Date.now();
     const remoteDeadlines = eligibilityServerDecisions
@@ -1637,23 +2142,61 @@ export default function Planning() {
     const dependencyDeadlines = Object.values(eligibilityDependencies)
       .map(item => Number(item?.dataUpdatedAt || 0) + PLANNING_ELIGIBILITY_MAX_AGE_MS)
       .filter(value => Number.isFinite(value) && value > PLANNING_ELIGIBILITY_MAX_AGE_MS);
+    const hasExpiredRemote = remoteDeadlines.some(value => value <= now);
+    const hasExpiredDependency = dependencyDeadlines.some(value => value <= now);
     const nextRemoteExpiry = remoteDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
     const nextDependencyExpiry = dependencyDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
     const nextExpiry = [nextRemoteExpiry, nextDependencyExpiry]
       .filter(Number.isFinite)
       .sort((left, right) => left - right)[0];
-    if (!nextExpiry) return undefined;
+    if (!nextExpiry && !hasExpiredRemote && !hasExpiredDependency) return undefined;
+    const dependencyRetryDelay = Math.max(1, planningEligibilityDependencyRetryDelay({
+      failureCount: eligibilityDependencyRefreshFailureCountRef.current,
+      lastAttemptAt: eligibilityDependencyRefreshLastAttemptRef.current,
+      now,
+    }));
+    const delay = hasExpiredDependency
+      ? eligibilityDependencyRefreshActive
+        ? 250
+        : dependencyRetryDelay
+      : hasExpiredRemote
+        ? 1
+        : Math.min(2_147_000_000, Math.max(1, nextExpiry - now + 1));
     const handle = window.setTimeout(() => {
+      const callbackNow = Date.now();
+      if (hasExpiredRemote || (nextRemoteExpiry && nextRemoteExpiry <= callbackNow)) {
+        setEligibilityServerDecisions(current => (
+          mergePlanningEligibilityServerDecisions(current, [], { now: callbackNow })
+        ));
+      }
       setEligibilityFreshnessTick(value => value + 1);
-      if (nextDependencyExpiry && nextDependencyExpiry <= nextExpiry) {
+      if (
+        !eligibilityDependencyRefreshActiveRef.current
+        && (
+          hasExpiredDependency
+          || (nextDependencyExpiry && nextDependencyExpiry <= nextExpiry)
+        )
+      ) {
         void refetchEligibilityDependencies();
       }
-    }, Math.min(2_147_000_000, Math.max(1, nextExpiry - Date.now() + 1)));
+    }, delay);
     return () => window.clearTimeout(handle);
-  }, [eligibilityDependencies, eligibilityIndex.basisToken, eligibilityServerDecisions, refetchEligibilityDependencies]);
+  }, [
+    eligibilityDependencies,
+    eligibilityDependencyRefreshActive,
+    eligibilityIndex.basisToken,
+    eligibilityServerDecisions,
+    refetchEligibilityDependencies,
+  ]);
   useEffect(() => {
     if (!dragEligibilityPreview?.eligibilityCandidate) return;
-    requestUrgentEligibilityCandidates([dragEligibilityPreview.eligibilityCandidate]);
+    // Pointer sensors can cross many task gaps in one gesture. Only prefetch a
+    // target that remained current for one short hover window; the held-drop
+    // handshake remains immediate and uses its own exact force-retry path.
+    const handle = window.setTimeout(() => {
+      requestUrgentEligibilityCandidates([dragEligibilityPreview.eligibilityCandidate]);
+    }, PLANNING_ELIGIBILITY_HOVER_DELAY_MS);
+    return () => window.clearTimeout(handle);
   }, [dragEligibilityPreview?.eligibilityCandidate, eligibilityFreshnessTick, eligibilityIndex.basisToken, requestUrgentEligibilityCandidates]);
   useEffect(() => {
     if (eligibilityPrewarmBasisRef.current === eligibilityIndex.basisToken) return;
@@ -1666,8 +2209,12 @@ export default function Planning() {
     // A mutation gets the planning API lane exclusively. Its ACK may change
     // the eligibility basis, but a 320-candidate background refill must not
     // race the dependent resize that the user is already performing.
-    if (!planningQueueState.isIdle || planningResizeGestureActive) return undefined;
-    setEligibilityServerDecisions([]);
+    if (
+      !planningQueueState.isIdle
+      || planningDragGestureActive
+      || planningResizeGestureActive
+      || eligibilityDependencyRefreshActive
+    ) return undefined;
     if (!backgroundEligibilityCandidates.length) return undefined;
     const schedule = typeof window.requestIdleCallback === "function"
       ? callback => window.requestIdleCallback(callback, { timeout: 500 })
@@ -1687,6 +2234,8 @@ export default function Planning() {
   }, [
     backgroundEligibilityCandidates,
     eligibilityIndex.basisToken,
+    eligibilityDependencyRefreshActive,
+    planningDragGestureActive,
     planningQueueState.isIdle,
     planningResizeGestureActive,
     requestEligibilityPrefetch,
@@ -1746,18 +2295,38 @@ export default function Planning() {
       };
     });
   }, [activePersonnel, assignments, eligibilityFreshnessTick, eligibilityIndex, eligibilityPlanningSnapshot, selectedShift, warningContext]);
+  const displayedCandidates = useMemo(() => {
+    if (!Array.isArray(dragPersonnelOrder) || dragPersonnelOrder.length === 0) return candidates;
+    const order = new Map(dragPersonnelOrder.map((id, index) => [String(id), index]));
+    return [...candidates].sort((left, right) => {
+      const leftIndex = order.get(String(left.personnel?.id));
+      const rightIndex = order.get(String(right.personnel?.id));
+      if (leftIndex == null && rightIndex == null) return 0;
+      if (leftIndex == null) return 1;
+      if (rightIndex == null) return -1;
+      return leftIndex - rightIndex;
+    });
+  }, [candidates, dragPersonnelOrder]);
   useEffect(() => {
-    if (!selectedShift) return;
+    if (!selectedShift || planningDragGestureActive || pendingEligibilityDrop) return;
     requestUrgentEligibilityCandidates(
       candidates.slice(0, 20).map(candidate => candidate.eligibilityCandidate).filter(Boolean),
     );
-  }, [candidates, requestUrgentEligibilityCandidates, selectedShift]);
+  }, [
+    candidates,
+    pendingEligibilityDrop,
+    planningDragGestureActive,
+    requestUrgentEligibilityCandidates,
+    selectedShift,
+  ]);
 
   const handleActionMutationError = (error, variables) => {
     if (error?.details?.code === "TASK_SHIFT_REMOVAL_CONFIRMATION_REQUIRED") return;
     if (variables?.action === "resize_shared_task_boundary") {
-      void refreshPlanning();
-      bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+      void waitForPlanningDragRelease().then(() => {
+        refreshPlanningInBackground({ reason: "shared-boundary-error" });
+        bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
+      });
     } else if (Number(error?.status) === 409) {
       refreshPlanningInBackground();
     }
@@ -1783,10 +2352,10 @@ export default function Planning() {
 
   const runQueuedIntentMutation = async (idempotencyKey, payload) => {
     const request = { ...payload, idempotency_key: idempotencyKey };
-    // The optimistic intent is already visible. Yield network priority only to
-    // the one background batch that was in flight before this write started;
-    // the now-busy mutation queue prevents that worker from starting another.
-    await eligibilityBackgroundRequestGateRef.current.waitForCurrentBackgroundBatch();
+    // Low-priority eligibility warming is best-effort and can never be an
+    // availability dependency of an interactive write. The busy queue stops
+    // subsequent background batches; an already-running request may finish in
+    // parallel while the idempotent write starts immediately.
     return invokePlanningApi(request);
   };
 
@@ -1809,6 +2378,7 @@ export default function Planning() {
       // Reporting must never prevent authoritative recovery or queue progress.
     }
     try {
+      await waitForPlanningDragRelease();
       await refreshPlanning();
     } catch {
       // The original execution error remains the actionable failure.
@@ -1820,6 +2390,7 @@ export default function Planning() {
       executionRange = { periodStart, periodEnd },
       ...reconcileOptions
     } = options;
+    await waitForPlanningDragRelease();
     try {
       if (result) reconcilePlanningResultForRange(result, executionRange, reconcileOptions);
     } catch {
@@ -2062,7 +2633,8 @@ export default function Planning() {
         };
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
         reconcilePlanningResultForRange(result, executionRange, {
           replaceShiftSegments: optimisticIntent.kind === "assign_and_merge_task_shift_partition",
         });
@@ -2087,6 +2659,12 @@ export default function Planning() {
   };
 
   const handleCandidateAssign = candidate => {
+    // A new explicit assignment supersedes an older held drop. Keeping both
+    // would allow the earlier drop to resume later and assign twice.
+    if (pendingEligibilityDropRef.current) {
+      pendingEligibilityDropRef.current = null;
+      setPendingEligibilityDrop(null);
+    }
     if (candidate?.eligibilityStatus !== "ready") {
       if (candidate?.eligibilityCandidate) {
         requestUrgentEligibilityCandidates([candidate.eligibilityCandidate]);
@@ -2337,7 +2915,8 @@ export default function Planning() {
         executedRequest = executionResolution.payload;
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
         const replaceShiftSegments = executionResolution?.kind === "merge";
         reconcilePlanningResultForRange(result, executionRange, { replaceShiftSegments });
         planningMutationQueue.current.updateIntents(intent => (
@@ -2722,7 +3301,8 @@ export default function Planning() {
         };
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
         setStatusFilter("all");
         reconcilePlanningResultForRange(result, executionRange);
         planningMutationQueue.current.updateIntents(intent => (
@@ -2873,7 +3453,8 @@ export default function Planning() {
         };
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
         setStatusFilter("all");
         reconcilePlanningResultForRange(result, executionRange, { replaceShiftSegments: true });
         planningMutationQueue.current.updateIntents(intent => (
@@ -3020,7 +3601,8 @@ export default function Planning() {
         executedRequest = executionResolution.payload;
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
         const replaceShiftSegments = executionResolution?.kind === "merge";
         reconcilePlanningResultForRange(result, executionRange, { replaceShiftSegments });
         planningMutationQueue.current.updateIntents(intent => (
@@ -3176,46 +3758,70 @@ export default function Planning() {
       }),
     };
   };
+  resolveDropEligibilityPreviewRef.current = resolveDropEligibilityPreview;
 
   const handleBeforeDragStart = start => {
+    // Starting another gesture is an explicit replacement of any drop that
+    // was waiting for a previous delete/eligibility handshake.
+    if (pendingEligibilityDropRef.current) {
+      pendingEligibilityDropRef.current = null;
+      setPendingEligibilityDrop(null);
+    }
+    beginPlanningDragInteraction();
     const draggableId = String(start?.draggableId || "");
     if (!draggableId.startsWith("personnel:")) return;
-    const personnelId = draggableId.slice("personnel:".length);
-    const personnelItem = activePersonnel.find(item => String(item.id) === personnelId);
-    if (!personnelItem) return;
-    requestUrgentEligibilityCandidates(buildEligibilityPrefetchCandidates([personnelItem]));
+    // Candidate ranking includes live scheduled hours. A delete ACK can change
+    // that ranking while Pangea owns a draggable; pin its index until onDragEnd
+    // so the publisher and pointer sensor keep the same source node.
+    setDragPersonnelOrder(candidates.map(candidate => String(candidate.personnel.id)));
   };
 
   const handleDragUpdate = update => {
     const drop = resolvePlanningDrop(update);
     const preview = drop ? resolveDropEligibilityPreview(drop) : null;
     setDragEligibilityPreview(preview);
-    if (preview?.eligibilityCandidate) {
-      requestUrgentEligibilityCandidates([preview.eligibilityCandidate]);
-    }
   };
 
-  const requireCurrentEligibilityVerdict = preview => {
-    if (preview?.verdict?.status === "ready") return true;
-    if (preview?.eligibilityCandidate) {
-      requestUrgentEligibilityCandidates([preview.eligibilityCandidate]);
-    }
-    const description = preview?.verdict?.status === "stale"
-      ? "De brongegevens voor deze medewerker zijn gewijzigd. De medewerker is nog niet ingepland; de voorcontrole wordt nu vernieuwd."
-      : preview?.verdict?.status === "unavailable"
-        ? "De volledige CAO- en inzetcontrole is nog niet beschikbaar. De medewerker is daarom nog niet ingepland."
-        : "De volledige CAO- en inzetcontrole wordt nog voorbereid. De medewerker is nog niet ingepland; sleep opnieuw zodra de controle actueel is.";
-    toast({ title: "Voorcontrole nog niet actueel", description });
+  const clearPendingEligibilityDrop = pendingId => {
+    if (pendingId && pendingEligibilityDropRef.current?.id !== pendingId) return false;
+    pendingEligibilityDropRef.current = null;
+    setPendingEligibilityDrop(null);
+    return true;
+  };
+
+  const holdPlanningDropForEligibility = (result, preview) => {
+    const pending = createPendingPlanningEligibilityDrop({ result, preview });
+    if (!pending) return false;
+    pendingEligibilityDropRef.current = pending;
+    setPendingEligibilityDrop(pending);
+    const description = planningMutationQueue.current.getSnapshot().isIdle
+      ? "De sleepactie is vastgehouden. De volledige CAO- en inzetcontrole wordt nu afgerond; u hoeft de medewerker niet opnieuw te slepen."
+      : "De sleepactie is vastgehouden tot de dienstverwijdering is bevestigd. Daarna wordt exact deze CAO- en inzetcontrole automatisch afgerond.";
+    toast({ title: "Voorcontrole wordt afgerond", description });
     setLiveMessage(description);
-    return false;
+    return true;
   };
 
-  const processPlanningDrop = (result, eligibilityPreview = null) => {
+  const reportUnavailablePlanningDrop = preview => {
+    const description = preview?.verdict?.status === "stale"
+      ? "De brongegevens voor deze medewerker zijn gewijzigd. De medewerker is niet ingepland; probeer het opnieuw zodra de controle actueel is."
+      : preview?.verdict?.status === "unavailable"
+        ? "De volledige CAO- en inzetcontrole kon niet veilig worden afgerond. De medewerker is niet ingepland."
+        : "De taak of medewerker staat niet meer in de actuele planning. De medewerker is niet ingepland.";
+    toast({ variant: "destructive", title: "Voorcontrole niet afgerond", description });
+    setLiveMessage(description);
+  };
+
+  const processPlanningDrop = (result, eligibilityPreview = null, { allowDeferred = true } = {}) => {
     if (!editing) return;
     const drop = resolvePlanningDrop(result);
     if (!drop) return;
     const preview = eligibilityPreview || resolveDropEligibilityPreview(drop);
-    if (!requireCurrentEligibilityVerdict(preview)) return;
+    if (preview?.verdict?.status !== "ready") {
+      if (allowDeferred && preview?.eligibilityCandidate && holdPlanningDropForEligibility(result, preview)) return;
+      reportUnavailablePlanningDrop(preview);
+      return;
+    }
     const candidateWarnings = preview?.verdict?.warnings || null;
 
     if (drop.kind === "compose_occurrence_slice_for_personnel") {
@@ -3268,14 +3874,152 @@ export default function Planning() {
     }
     composeAndAssignOccurrence(occurrence, personnelItem, dropServiceDate, candidateWarnings).catch(() => undefined);
   };
+  processPlanningDropRef.current = processPlanningDrop;
 
   const handleDragEnd = result => {
     const preview = resolveDropEligibilityPreview(resolvePlanningDrop(result));
     setDragEligibilityPreview(null);
     // Let the drag engine release its publisher and input lock before any
     // planning mutation changes or unmounts draggable/droppable elements.
-    window.setTimeout(() => processPlanningDrop(result, preview), 0);
+    window.setTimeout(() => {
+      try {
+        processPlanningDrop(result, preview);
+      } finally {
+        finishPlanningDragInteraction();
+        // Keep source indices fixed through Pangea's own onDragEnd cleanup.
+        window.setTimeout(() => setDragPersonnelOrder(null), 0);
+      }
+    }, 0);
   };
+
+  useEffect(() => {
+    if (!pendingEligibilityDrop) return undefined;
+    const pending = pendingEligibilityDrop;
+    let cancelled = false;
+    let timer = null;
+    const isCurrent = () => (
+      !cancelled && pendingEligibilityDropRef.current?.id === pending.id
+    );
+    const currentDrop = resolvePlanningDrop(pending.result);
+    const preview = resolveDropEligibilityPreviewRef.current?.(currentDrop) || null;
+    const resolution = resolvePendingPlanningEligibilityDrop({
+      pending,
+      preview,
+      queueIdle: (
+        planningMutationQueue.current.getSnapshot().isIdle
+        && !eligibilityDependencyRefreshActiveRef.current
+        && !planningResizeGestureActiveRef.current
+      ),
+    });
+
+    const finishWithoutWrite = (title, description, variant = "destructive") => {
+      if (!isCurrent() || !clearPendingEligibilityDrop(pending.id)) return;
+      toast({ variant, title, description });
+      setLiveMessage(description);
+    };
+
+    if (resolution.status === "ready" && !editing) {
+      finishWithoutWrite(
+        "Sleepactie geannuleerd",
+        "De bewerkmodus of zichtbare planning is intussen gewijzigd. De medewerker is niet op de achtergrond alsnog ingepland.",
+        "default",
+      );
+    } else if (resolution.status === "ready") {
+      if (clearPendingEligibilityDrop(pending.id)) {
+        // Use the exact preview that was proven ready in this render. Clearing
+        // the pending state must not cancel the commit, and recomputing later
+        // could pair the drop with a different basis or an unseen warning.
+        processPlanningDropRef.current?.(pending.result, preview, { allowDeferred: false });
+      }
+    } else if (resolution.status === "warnings_changed") {
+      const warningSummary = resolution.newWarnings
+        .slice(0, 2)
+        .map(item => item.title || item.detail || item.message)
+        .filter(Boolean)
+        .join(" · ");
+      finishWithoutWrite(
+        "Nieuwe inzetwaarschuwing",
+        warningSummary
+          ? `${warningSummary} De medewerker is nog niet ingepland; de waarschuwing is vóór de planningactie getoond.`
+          : "De actuele inzetcontrole bevat een nieuwe waarschuwing. De medewerker is nog niet ingepland.",
+        resolution.newWarnings.some(item => item.severity === "critical") ? "destructive" : "default",
+      );
+    } else if (resolution.status === "request") {
+      const requestDelayMs = Math.min(
+        Math.max(0, Number(resolution.delayMs || 0)),
+        Math.max(1, Number(pending.expiresAt || 0) - Date.now()),
+      );
+      timer = window.setTimeout(() => {
+        if (!isCurrent() || !preview?.eligibilityCandidate) return;
+        if (Date.now() >= Number(pending.expiresAt || 0)) {
+          setEligibilityFreshnessTick(value => value + 1);
+          return;
+        }
+        const outcome = requestUrgentEligibilityCandidatesRef.current?.(
+          [preview.eligibilityCandidate],
+          {
+            forceRetry: true,
+            timeoutMs: Math.max(1, Number(pending.expiresAt || 0) - Date.now()),
+          },
+        );
+        if (outcome === "started" && isCurrent()) {
+          const attempted = recordPendingPlanningEligibilityAttempt(pending, resolution.attemptKey);
+          pendingEligibilityDropRef.current = attempted;
+          setPendingEligibilityDrop(attempted);
+          return;
+        }
+        if (outcome === "known" && !eligibilityDependencyRefreshActiveRef.current) {
+          // The server evidence is current but one of the local fact queries is
+          // not. Refresh that bounded dependency wave; do not spend another
+          // server attempt or leave the held drop waiting forever.
+          void refetchEligibilityDependencies({ maxConsecutiveFailures: 2 });
+        }
+        // Pending, blocked and known-local-stale states all retain a watchdog.
+        // This guarantees the 15-second fail-closed deadline even when a
+        // network promise never settles or a dependency refresh is cancelled.
+        const remainingMs = Math.max(1, Number(pending.expiresAt || 0) - Date.now());
+        timer = window.setTimeout(
+          () => setEligibilityFreshnessTick(value => value + 1),
+          Math.min(500, remainingMs),
+        );
+      }, requestDelayMs);
+    } else if (resolution.status === "unavailable") {
+      finishWithoutWrite(
+        "Voorcontrole tijdelijk niet beschikbaar",
+        "De CAO- en inzetcontrole bleef na twee begrensde pogingen niet beschikbaar. De medewerker is niet ingepland.",
+      );
+    } else if (resolution.status === "expired") {
+      finishWithoutWrite(
+        "Voorcontrole verlopen",
+        "De planning veranderde te lang tijdens de controle. De medewerker is niet ingepland.",
+      );
+    } else if (resolution.status === "target_missing") {
+      finishWithoutWrite(
+        "Planningdoel gewijzigd",
+        "De open taak bestaat niet meer in deze vorm. De medewerker is niet ingepland.",
+      );
+    } else {
+      const remainingMs = Math.max(1, Number(pending.expiresAt || 0) - Date.now());
+      timer = window.setTimeout(
+        () => setEligibilityFreshnessTick(value => value + 1),
+        resolution.status === "wait_queue" ? remainingMs : Math.min(500, remainingMs),
+      );
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    eligibilityFreshnessTick,
+    eligibilityDependencyRefreshActive,
+    eligibilityServerDecisions,
+    editing,
+    pendingEligibilityDrop,
+    planningQueueState.isIdle,
+    planningResizeGestureActive,
+    refetchEligibilityDependencies,
+  ]);
 
   const handleShiftActionConfirm = async payload => {
     const action = shiftAction?.action;
@@ -3516,7 +4260,11 @@ export default function Planning() {
         };
         return runQueuedIntentMutation(pendingKey, executedRequest);
       },
-      onSuccess: result => {
+      onSuccess: async result => {
+        // The optimistic open gap is already visible while the delete is in
+        // flight. Do not replace its registered droppable or reorder the
+        // employee source list until Pangea has released the active pointer.
+        await waitForPlanningDragRelease();
         reconcilePlanningResultForRange(result, executionRange);
         planningMutationQueue.current.updateIntents(intent => (
           rebaseDependentPlanningIntent(intent, executionIntent, result)
@@ -3616,6 +4364,15 @@ export default function Planning() {
     };
   }, [ownedTaskOccurrencesInRange, planningStats, shiftsInRange, taskSegments]);
 
+  const assertNoPendingEligibilityDrop = () => {
+    if (!pendingEligibilityDropRef.current) return;
+    const error = /** @type {any} */ (new Error(
+      "De vastgehouden sleepactie wordt nog gecontroleerd. Wacht tot de medewerker is ingepland of de voorcontrole veilig is gestopt.",
+    ));
+    error.code = "PLANNING_ELIGIBILITY_DROP_PENDING";
+    throw error;
+  };
+
   const saveDraft = async () => {
     if (planningCommitFenceRef.current) return;
     const commitToken = Symbol("planning-draft-save");
@@ -3623,7 +4380,9 @@ export default function Planning() {
     setDraftSavePending(true);
     setLiveMessage("De laatste lokale roosterwijzigingen worden op de achtergrond afgerond.");
     try {
+      assertNoPendingEligibilityDrop();
       await settlePlanningDropEnqueues();
+      assertNoPendingEligibilityDrop();
       if (planningCommitFenceRef.current) return;
       planningCommitFenceRef.current = commitToken;
       const drainReport = await planningMutationQueue.current.drain({
@@ -3668,6 +4427,7 @@ export default function Planning() {
       };
       const drainCheckpoint = planningMutationQueue.current.createDrainCheckpoint();
       await settlePlanningDropEnqueues();
+      assertNoPendingEligibilityDrop();
       if (planningCommitFenceRef.current) {
         throw new Error("Een andere opslag- of publicatieactie wordt al afgerond.");
       }
@@ -3736,6 +4496,9 @@ export default function Planning() {
   });
 
   const changePeriod = direction => {
+    cancelHeldPlanningDrop(
+      "De vastgehouden sleepactie is geannuleerd voordat de zichtbare periode werd gewijzigd. Er is geen medewerker ingepland.",
+    );
     if (view === "period" && selectedCaoPeriod) {
       const nextPeriod = getAdjacentCaoPbPlanningPeriod(selectedCaoPeriod, direction);
       if (!nextPeriod) return;
@@ -3746,6 +4509,9 @@ export default function Planning() {
   };
 
   const updateCustomPeriod = (nextStartValue, nextEndValue) => {
+    cancelHeldPlanningDrop(
+      "De vastgehouden sleepactie is geannuleerd voordat de zichtbare periode werd gewijzigd. Er is geen medewerker ingepland.",
+    );
     const nextRange = getPlanningRange(parseDateKey(nextStartValue) || anchorDate, "period", {
       periodStart: nextStartValue,
       periodEnd: nextEndValue,
@@ -3758,6 +4524,9 @@ export default function Planning() {
   };
 
   const goToToday = () => {
+    cancelHeldPlanningDrop(
+      "De vastgehouden sleepactie is geannuleerd voordat de zichtbare periode werd gewijzigd. Er is geen medewerker ingepland.",
+    );
     const today = parseDateKey(new Date());
     if (view === "period") {
       const currentCaoPeriod = resolveCaoPbPlanningPeriod(today);
@@ -3803,6 +4572,9 @@ export default function Planning() {
       <PlanningToolbar
         perspective={perspective}
         onPerspectiveChange={nextPerspective => {
+          cancelHeldPlanningDrop(
+            "De vastgehouden sleepactie is geannuleerd voordat de planningweergave werd gewijzigd. Er is geen medewerker ingepland.",
+          );
           setPerspective(nextPerspective);
           setSelectedShiftId(null);
         }}
@@ -3815,6 +4587,9 @@ export default function Planning() {
         canZoomIn={zoomIndex < PLANNING_ZOOM_LEVELS.length - 1}
         view={view}
         onViewChange={nextView => {
+          cancelHeldPlanningDrop(
+            "De vastgehouden sleepactie is geannuleerd voordat de planningweergave werd gewijzigd. Er is geen medewerker ingepland.",
+          );
           if (nextView === "period" && view !== "period") {
             const nextCaoPeriod = resolveCaoPbPlanningPeriod(anchorDate)
               || resolveCaoPbPlanningPeriod(range.start)
@@ -3837,6 +4612,9 @@ export default function Planning() {
         }))}
         selectedPeriodId={selectedCaoPeriod?.key || ""}
         onPeriodChange={periodId => {
+          cancelHeldPlanningDrop(
+            "De vastgehouden sleepactie is geannuleerd voordat de zichtbare periode werd gewijzigd. Er is geen medewerker ingepland.",
+          );
           const period = getCaoPbPlanningPeriodByKey(periodId);
           if (!period) return;
           setSelectedCaoPeriodId(period.key);
@@ -3875,13 +4653,19 @@ export default function Planning() {
           setLiveMessage("Bewerkstand geopend. Wijzigingen worden als concept bewaard en zijn pas na publiceren definitief zichtbaar.");
         }}
         onSaveDraft={() => saveDraft().catch(() => undefined)}
-        saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0 || draftSavePending}
+        saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0 || draftSavePending || Boolean(pendingEligibilityDrop)}
         isSavingDraft={runActionMutation.isPending || draftSavePending}
         onPublish={() => {
+          if (pendingEligibilityDropRef.current) {
+            const description = "De vastgehouden sleepactie wordt nog gecontroleerd. Wacht op de uitkomst voordat u publiceert.";
+            toast({ title: "Voorcontrole wordt afgerond", description });
+            setLiveMessage(description);
+            return;
+          }
           mutationIntents.current.clear("publish");
           setPublishOpen(true);
         }}
-        publishDisabled={draftSavePending || planningQueueState.pendingCount > 0 || planningStats.sourceChangeCount > 0 || ownedShiftsInRange.length === 0 || publicationStats.draftShiftCount + publicationStats.draftAssignmentCount + publicationStats.taskCoverage.open + publicationStats.taskCoverage.partial === 0}
+        publishDisabled={draftSavePending || Boolean(pendingEligibilityDrop) || planningQueueState.pendingCount > 0 || planningStats.sourceChangeCount > 0 || ownedShiftsInRange.length === 0 || publicationStats.draftShiftCount + publicationStats.draftAssignmentCount + publicationStats.taskCoverage.open + publicationStats.taskCoverage.partial === 0}
         isPublishing={publishMutation.isPending}
       />
 
@@ -3914,7 +4698,7 @@ export default function Planning() {
             role="status"
             aria-live="assertive"
             data-planning-drag-eligibility={verdict.status}
-            className={`flex shrink-0 items-start gap-2 border-b px-3 py-2 text-[11px] ${tone}`}
+            className={`pointer-events-none fixed left-1/2 top-16 z-[90] flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 items-start gap-2 rounded-lg border px-3 py-2 text-[11px] shadow-xl ${tone}`}
           >
             {critical ? <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : clear ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
             <div className="min-w-0">
@@ -4077,7 +4861,7 @@ export default function Planning() {
                 }}
               employeeProps={{
                 selectedShift,
-                candidates,
+                candidates: displayedCandidates,
                 onAssign: candidate => handleCandidateAssign(candidate).catch(() => undefined),
                 onPrefetchCandidate: candidate => {
                   if (candidate?.eligibilityCandidate) {

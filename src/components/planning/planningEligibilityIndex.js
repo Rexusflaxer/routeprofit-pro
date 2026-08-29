@@ -359,16 +359,210 @@ function freshnessNotices(status, dependencyStates, remoteReason = null) {
 function normalizeRemoteDecisions(source) {
   if (source instanceof Map) return new Map(source);
   if (Array.isArray(source)) {
-    return new Map(source
-      .map(item => [text(item?.candidate_key ?? item?.candidateKey ?? item?.key), item])
-      .filter(([key]) => key));
+    const scoped = new Map();
+    source.forEach(item => {
+      const candidateKey = text(item?.candidate_key ?? item?.candidateKey ?? item?.key);
+      if (!candidateKey) return;
+      const basisToken = text(item?.basis_token ?? item?.basisToken);
+      if (basisToken) scoped.set(`${basisToken}\u0000${candidateKey}`, item);
+      // Keep one candidate-level fallback so an older-basis result can be
+      // surfaced as stale instead of looking as though no server check exists.
+      // The exact basis-scoped entry above always wins when it is available.
+      scoped.set(candidateKey, item);
+    });
+    return scoped;
   }
   if (source && typeof source === "object") return new Map(Object.entries(source));
   return new Map();
 }
 
+/**
+ * Merge server-side eligibility evidence without discarding other planning
+ * bases. An optimistic mutation temporarily changes the basis token and may
+ * later either commit to another authoritative basis or roll back to the
+ * original one. Keeping a small, bounded history prevents that transition
+ * from turning every visible employee/source combination cold again.
+ *
+ * Decisions remain strictly scoped by `basis_token`; `remoteVerdict` never
+ * treats evidence from an older basis as current. This helper therefore only
+ * preserves reusable evidence and does not weaken the fail-closed guard.
+ */
+export function mergePlanningEligibilityServerDecisions(current = [], incoming = [], {
+  now = Date.now(),
+  maxEntries = 1_280,
+  maxBasisTokens = 4,
+} = {}) {
+  const readNow = timestamp(now) ?? Date.now();
+  const entryLimit = Math.max(1, Math.trunc(Number(maxEntries) || 1));
+  const basisLimit = Math.max(1, Math.trunc(Number(maxBasisTokens) || 1));
+  const merged = new Map();
+  let sequence = 0;
+
+  const add = (record, preferred) => {
+    const candidateKey = text(record?.candidate_key ?? record?.candidateKey ?? record?.key);
+    const basisToken = text(record?.basis_token ?? record?.basisToken);
+    if (!candidateKey || !basisToken) return;
+    const expiresAt = timestamp(record?.expires_at ?? record?.expiresAt);
+    if (expiresAt !== null && expiresAt <= readNow) return;
+    const evaluatedAt = timestamp(record?.evaluated_at ?? record?.evaluatedAt) ?? 0;
+    const compositeKey = `${basisToken}\u0000${candidateKey}`;
+    const previous = merged.get(compositeKey);
+    const rank = {
+      preferred: preferred ? 1 : 0,
+      evaluatedAt,
+      sequence: sequence += 1,
+    };
+    // Completion order is not evidence order: a slow background response can
+    // arrive after a newer urgent check for the same basis and candidate.
+    // Prefer the newest evaluation and use incoming/sequence only as stable
+    // tie-breakers for otherwise equivalent records.
+    if (
+      !previous
+      || rank.evaluatedAt > previous.rank.evaluatedAt
+      || (
+        rank.evaluatedAt === previous.rank.evaluatedAt
+        && rank.preferred > previous.rank.preferred
+      )
+      || (
+        rank.evaluatedAt === previous.rank.evaluatedAt
+        && rank.preferred === previous.rank.preferred
+        && rank.sequence > previous.rank.sequence
+      )
+    ) {
+      merged.set(compositeKey, { record, basisToken, rank });
+    }
+  };
+
+  records(current).forEach(record => add(record, false));
+  records(incoming).forEach(record => add(record, true));
+
+  const basisRecency = new Map();
+  merged.forEach(item => {
+    const currentRank = basisRecency.get(item.basisToken) || { preferred: 0, evaluatedAt: 0, sequence: 0 };
+    const nextRank = item.rank;
+    if (
+      nextRank.preferred > currentRank.preferred
+      || (nextRank.preferred === currentRank.preferred && nextRank.evaluatedAt > currentRank.evaluatedAt)
+      || (
+        nextRank.preferred === currentRank.preferred
+        && nextRank.evaluatedAt === currentRank.evaluatedAt
+        && nextRank.sequence > currentRank.sequence
+      )
+    ) basisRecency.set(item.basisToken, nextRank);
+  });
+  const retainedBases = new Set([...basisRecency.entries()]
+    .sort((left, right) => (
+      right[1].preferred - left[1].preferred
+      || right[1].evaluatedAt - left[1].evaluatedAt
+      || right[1].sequence - left[1].sequence
+      || left[0].localeCompare(right[0])
+    ))
+    .slice(0, basisLimit)
+    .map(([basisToken]) => basisToken));
+
+  return [...merged.values()]
+    .filter(item => retainedBases.has(item.basisToken))
+    .sort((left, right) => (
+      right.rank.preferred - left.rank.preferred
+      || right.rank.evaluatedAt - left.rank.evaluatedAt
+      || right.rank.sequence - left.rank.sequence
+    ))
+    .slice(0, entryLimit)
+    .map(item => item.record);
+}
+
+/**
+ * Selects which exact eligibility candidates may start a server request.
+ * Normal hover treats every fresh non-ready result as a cooldown, preventing
+ * an unavailable response from retriggering itself. A held drop can opt into
+ * `forceRetry`; its separate gate still owns the strict retry budget.
+ */
+export function selectPlanningEligibilityRequestCandidates({
+  candidates = [],
+  decisions = [],
+  basisToken,
+  pendingRequestKeys = new Set(),
+  forceRetry = false,
+  now = Date.now(),
+} = {}) {
+  const basis = text(basisToken);
+  if (!basis) return Object.freeze({ status: "blocked", candidates: Object.freeze([]), requestKeys: Object.freeze([]) });
+  const readNow = timestamp(now) ?? Date.now();
+  const exactDecisionByCandidate = new Map(records(decisions)
+    .filter(item => (
+      text(item?.basis_token ?? item?.basisToken) === basis
+      && (timestamp(item?.expires_at ?? item?.expiresAt) ?? 0) > readNow
+    ))
+    .map(item => [text(item?.candidate_key ?? item?.candidateKey), item]));
+  const pending = pendingRequestKeys instanceof Set ? pendingRequestKeys : new Set(pendingRequestKeys || []);
+  let hasKnown = false;
+  let hasPending = false;
+  let hasCooldown = false;
+  const requested = records(candidates).filter(candidate => {
+    const candidateKey = text(candidate?.candidate_key ?? candidate?.candidateKey);
+    if (!candidateKey) return false;
+    const requestKey = `${basis}:${candidateKey}`;
+    if (pending.has(requestKey)) {
+      hasPending = true;
+      return false;
+    }
+    const decision = exactDecisionByCandidate.get(candidateKey);
+    if (text(decision?.status).toLowerCase() === "ready") {
+      hasKnown = true;
+      return false;
+    }
+    if (decision && !forceRetry) {
+      hasCooldown = true;
+      return false;
+    }
+    return true;
+  });
+  if (!requested.length) {
+    const status = hasPending ? "pending" : hasCooldown ? "cooldown" : hasKnown ? "known" : "blocked";
+    return Object.freeze({ status, candidates: Object.freeze([]), requestKeys: Object.freeze([]) });
+  }
+  return Object.freeze({
+    status: "started",
+    candidates: Object.freeze(requested),
+    requestKeys: Object.freeze(requested.map(candidate => (
+      `${basis}:${text(candidate?.candidate_key ?? candidate?.candidateKey)}`
+    ))),
+  });
+}
+
+/**
+ * Small synchronous semaphore for hover-prefetch calls. Pointer movement can
+ * emit many different candidate keys in one frame; without a shared gate each
+ * key starts its own function call. Callers retry the latest visible candidate
+ * when a slot is released, so queued obsolete hover positions need no network
+ * request of their own.
+ *
+ * @param {{ maxConcurrent?: number }} [options]
+ */
+export function createPlanningEligibilityUrgentRequestGate(options = {}) {
+  const maximum = Math.max(1, Math.floor(Number(options.maxConcurrent) || 2));
+  let active = 0;
+  return Object.freeze({
+    acquire() {
+      if (active >= maximum) return null;
+      active += 1;
+      let released = false;
+      return () => {
+        if (released) return false;
+        released = true;
+        active = Math.max(0, active - 1);
+        return true;
+      };
+    },
+    getSnapshot() {
+      return Object.freeze({ active, maximum, available: Math.max(0, maximum - active) });
+    },
+  });
+}
+
 function remoteVerdict({ remoteDecisions, candidateKey, basisToken, now, required }) {
-  const record = remoteDecisions.get(candidateKey);
+  const record = remoteDecisions.get(`${basisToken}\u0000${candidateKey}`)
+    || remoteDecisions.get(candidateKey);
   if (!record) return {
     status: required ? "checking" : "ready",
     reason: required ? "checking" : null,

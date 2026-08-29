@@ -12,7 +12,7 @@ describe("planning refresh scheduler", () => {
     const scheduler = createPlanningRefreshScheduler({ refresh, delayMs: 1_200 });
 
     scheduler.schedule();
-    scheduler.schedule({ includePublications: true, reason: "publish" });
+    scheduler.schedule({ includePublications: true, includeEligibility: true, reason: "publish" });
     scheduler.schedule({ reason: "mutation" });
 
     expect(scheduler.getState()).toMatchObject({ scheduled: true, inFlight: false });
@@ -23,6 +23,7 @@ describe("planning refresh scheduler", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith({
       includePublications: true,
+      includeEligibility: true,
       reason: "mutation",
     });
     expect(scheduler.getState()).toMatchObject({ scheduled: false, inFlight: false });
@@ -89,5 +90,73 @@ describe("planning refresh scheduler", () => {
     expect(scheduler.schedule()).toBe(false);
     await vi.runAllTimersAsync();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("houdt een verversing vast tijdens een drag en voert haar na pointer-release eenmaal uit", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const scheduler = createPlanningRefreshScheduler({ refresh, delayMs: 1_200 });
+
+    scheduler.schedule({ reason: "delete-ack" });
+    const resume = scheduler.pause();
+    await vi.advanceTimersByTimeAsync(1_200);
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(scheduler.getState()).toMatchObject({ paused: true, scheduled: false });
+
+    expect(resume()).toBe(true);
+    expect(resume()).toBe(false);
+    await vi.runAllTimersAsync();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith({
+      includePublications: false,
+      includeEligibility: false,
+      reason: "delete-ack",
+    });
+    expect(scheduler.getState()).toMatchObject({ paused: false, scheduled: false, inFlight: false });
+  });
+
+  it("hervat pas nadat alle overlappende directe interacties zijn vrijgegeven", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const scheduler = createPlanningRefreshScheduler({ refresh, delayMs: 100 });
+
+    scheduler.schedule({ reason: "mutation" });
+    const resumeDrag = scheduler.pause();
+    const resumeResize = scheduler.pause();
+    await vi.advanceTimersByTimeAsync(100);
+
+    resumeDrag();
+    await vi.runAllTimersAsync();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(scheduler.getState()).toMatchObject({ paused: true });
+
+    resumeResize();
+    await vi.runAllTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(scheduler.getState()).toMatchObject({ paused: false });
+  });
+
+  it("kan een tijdens slepen afgebroken gegevensronde direct na vrijgave uitvoeren", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const scheduler = createPlanningRefreshScheduler({ refresh, delayMs: 8_000 });
+
+    scheduler.schedule({ reason: "drag-cancelled-active-refresh", includeEligibility: true });
+    const resume = scheduler.pause();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refresh).not.toHaveBeenCalled();
+
+    resume();
+    await scheduler.flush();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "drag-cancelled-active-refresh",
+      includeEligibility: true,
+    }));
+    await vi.runAllTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

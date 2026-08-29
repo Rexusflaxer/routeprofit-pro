@@ -4,8 +4,11 @@ import {
   buildOccurrenceEligibilityShift,
   buildPlanningEligibilityObjectShiftContext,
   buildPlanningEligibilityPrefetchCandidate,
+  createPlanningEligibilityUrgentRequestGate,
   createPlanningEligibilityIndex,
+  mergePlanningEligibilityServerDecisions,
   planningEligibilityCandidateKey,
+  selectPlanningEligibilityRequestCandidates,
 } from "@/components/planning/planningEligibilityIndex";
 
 const NOW = Date.parse("2026-08-22T10:00:00.000Z");
@@ -85,6 +88,176 @@ function indexOptions(overrides = {}) {
 }
 
 describe("visible-range planning eligibility index", () => {
+  it("bewaart begrensd eligibility-bewijs per basis tijdens een optimistische delete-overgang", () => {
+    const expiresAt = new Date(NOW + 60_000).toISOString();
+    const original = {
+      candidate_key: "candidate-original",
+      basis_token: "basis-before-delete",
+      status: "ready",
+      evaluated_at: new Date(NOW - 2_000).toISOString(),
+      expires_at: expiresAt,
+    };
+    const optimistic = {
+      candidate_key: "candidate-open-task",
+      basis_token: "basis-optimistic-delete",
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      expires_at: expiresAt,
+    };
+
+    const merged = mergePlanningEligibilityServerDecisions([original], [optimistic], { now: NOW });
+
+    expect(merged).toEqual(expect.arrayContaining([original, optimistic]));
+  });
+
+  it("overschrijft alleen dezelfde candidate+basis en laat oud bewijs nooit als huidige basis gelden", () => {
+    const expiresAt = new Date(NOW + 60_000).toISOString();
+    const oldDecision = {
+      candidate_key: "candidate-1",
+      basis_token: "basis-1",
+      status: "checking",
+      evaluated_at: new Date(NOW - 5_000).toISOString(),
+      expires_at: expiresAt,
+    };
+    const replacement = {
+      ...oldDecision,
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+    };
+    const otherBasis = {
+      ...replacement,
+      basis_token: "basis-2",
+      status: "unavailable",
+    };
+
+    const merged = mergePlanningEligibilityServerDecisions(
+      [oldDecision, otherBasis],
+      [replacement],
+      { now: NOW },
+    );
+
+    expect(merged).toHaveLength(2);
+    expect(merged).toContain(replacement);
+    expect(merged).toContain(otherBasis);
+    expect(merged).not.toContain(oldDecision);
+  });
+
+  it("laat een laat oud antwoord een nieuwere beslissing voor dezelfde basis niet overschrijven", () => {
+    const current = {
+      candidate_key: "candidate-1",
+      basis_token: "basis-1",
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      expires_at: new Date(NOW + 60_000).toISOString(),
+    };
+    const lateOlderResponse = {
+      ...current,
+      status: "unavailable",
+      evaluated_at: new Date(NOW - 50_000).toISOString(),
+    };
+
+    expect(mergePlanningEligibilityServerDecisions(
+      [current],
+      [lateOlderResponse],
+      { now: NOW },
+    )).toEqual([current]);
+  });
+
+  it("herhaalt een mislukte hovercontrole niet maar laat een begrensde drop-retry wel toe", () => {
+    const candidate = { candidate_key: "candidate-1" };
+    const unavailable = [{
+      candidate_key: "candidate-1",
+      basis_token: "basis-1",
+      status: "unavailable",
+      evaluated_at: new Date(NOW).toISOString(),
+      expires_at: new Date(NOW + 15_000).toISOString(),
+    }];
+
+    expect(selectPlanningEligibilityRequestCandidates({
+      candidates: [candidate],
+      decisions: unavailable,
+      basisToken: "basis-1",
+      now: NOW + 1,
+    })).toMatchObject({ status: "cooldown", candidates: [] });
+
+    expect(selectPlanningEligibilityRequestCandidates({
+      candidates: [candidate],
+      decisions: unavailable,
+      basisToken: "basis-1",
+      forceRetry: true,
+      now: NOW + 1,
+    })).toMatchObject({
+      status: "started",
+      candidates: [candidate],
+      requestKeys: ["basis-1:candidate-1"],
+    });
+  });
+
+  it("start geen tweede verzoek zolang exact dezelfde candidate al onderweg is", () => {
+    expect(selectPlanningEligibilityRequestCandidates({
+      candidates: [{ candidate_key: "candidate-1" }],
+      basisToken: "basis-1",
+      pendingRequestKeys: new Set(["basis-1:candidate-1"]),
+      now: NOW,
+    })).toMatchObject({ status: "pending", candidates: [] });
+  });
+
+  it("kiest bij dezelfde candidate altijd het bewijs van de actuele basis", () => {
+    const withoutServer = createPlanningEligibilityIndex(indexOptions());
+    const candidateKey = planningEligibilityCandidateKey({ personnelId: person.id, shift });
+    const expiresAt = new Date(NOW + 60_000).toISOString();
+    const currentBasisDecision = {
+      candidate_key: candidateKey,
+      basis_token: withoutServer.basisToken,
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      expires_at: expiresAt,
+      warning_snapshot: [],
+    };
+    const oldBasisDecision = {
+      ...currentBasisDecision,
+      basis_token: "older-planning-basis",
+      status: "unavailable",
+      evaluated_at: new Date(NOW - 5_000).toISOString(),
+    };
+    const merged = mergePlanningEligibilityServerDecisions(
+      [oldBasisDecision],
+      [currentBasisDecision],
+      { now: NOW },
+    );
+    const withServer = createPlanningEligibilityIndex(indexOptions({
+      requireServerDecision: true,
+      serverDecisions: merged,
+    }));
+
+    expect(withServer.queryShift({ personnelId: person.id, shift })).toMatchObject({
+      basisToken: withoutServer.basisToken,
+      status: "ready",
+      isClear: true,
+    });
+  });
+
+  it("verwijdert verlopen bewijs en begrenst zowel bases als totale cacheomvang", () => {
+    const freshExpiry = new Date(NOW + 60_000).toISOString();
+    const records = Array.from({ length: 8 }, (_, index) => ({
+      candidate_key: `candidate-${index}`,
+      basis_token: `basis-${index}`,
+      status: "ready",
+      evaluated_at: new Date(NOW - index * 1_000).toISOString(),
+      expires_at: index === 7 ? new Date(NOW - 1).toISOString() : freshExpiry,
+    }));
+
+    const merged = mergePlanningEligibilityServerDecisions(records, [], {
+      now: NOW,
+      maxBasisTokens: 3,
+      maxEntries: 2,
+    });
+
+    expect(merged).toHaveLength(2);
+    expect(merged.every(item => item.expires_at === freshExpiry)).toBe(true);
+    expect(new Set(merged.map(item => item.basis_token)).size).toBeLessThanOrEqual(3);
+  });
+
   it("projecteert alle autoritatieve objectdefaults in dezelfde occurrence-context", () => {
     const context = buildPlanningEligibilityObjectShiftContext({
       object: {
@@ -494,5 +667,33 @@ describe("visible-range planning eligibility index", () => {
     });
 
     expect(changed).not.toBe(baseline);
+  });
+
+  it("begrensd snelle unieke hovercontroles en geeft een slot idempotent vrij", () => {
+    const gate = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 2 });
+    const releaseFirst = gate.acquire();
+    const releaseSecond = gate.acquire();
+
+    expect(releaseFirst).toEqual(expect.any(Function));
+    expect(releaseSecond).toEqual(expect.any(Function));
+    expect(gate.acquire()).toBeNull();
+    expect(gate.getSnapshot()).toEqual({ active: 2, maximum: 2, available: 0 });
+
+    expect(releaseFirst()).toBe(true);
+    expect(releaseFirst()).toBe(false);
+    const releaseLatest = gate.acquire();
+    expect(releaseLatest).toEqual(expect.any(Function));
+    expect(gate.getSnapshot()).toEqual({ active: 2, maximum: 2, available: 0 });
+
+    releaseSecond();
+    releaseLatest();
+    expect(gate.getSnapshot()).toEqual({ active: 0, maximum: 2, available: 2 });
+
+    const heldDropGate = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 1 });
+    const releaseHeldDrop = heldDropGate.acquire();
+    expect(releaseHeldDrop).toEqual(expect.any(Function));
+    expect(heldDropGate.acquire()).toBeNull();
+    releaseHeldDrop();
+    expect(heldDropGate.getSnapshot()).toEqual({ active: 0, maximum: 1, available: 1 });
   });
 });
