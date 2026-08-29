@@ -3261,6 +3261,163 @@ describe("planningApi dienstsamenstelling", () => {
     )?.metadata?.claims).toEqual({});
   });
 
+  it("geeft een eerder verkregen resourcelease vrij wanneer een latere resource tijdelijk bezet is", async () => {
+    const { base44, entities } = setup([]);
+    const descriptors = [
+      { coordinatorKey: "lease-acquire-cleanup:01", resourceType: "shift_composition", resourceId: "shift-free" },
+      { coordinatorKey: "lease-acquire-cleanup:02", resourceType: "personnel_day", resourceId: "day-busy" },
+    ];
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-acquire-free",
+        coordinator_key: descriptors[0].coordinatorKey,
+        resource_type: descriptors[0].resourceType,
+        resource_id: descriptors[0].resourceId,
+        lease: null,
+        revision: 1,
+        created_date: "2026-08-17T08:00:00.000Z",
+        metadata: {},
+      },
+      {
+        id: "coordinator-acquire-busy",
+        coordinator_key: descriptors[1].coordinatorKey,
+        resource_type: descriptors[1].resourceType,
+        resource_id: descriptors[1].resourceId,
+        lease: {
+          token: "foreign-active-lease",
+          status: "pending",
+          expires_at: "2099-08-17T12:00:00.000Z",
+        },
+        revision: 1,
+        created_date: "2026-08-17T08:00:00.000Z",
+        metadata: {},
+      },
+    );
+
+    await expect(backend.acquirePlanningResourceLeases(
+      base44,
+      user,
+      context("lease-acquire-successful-cleanup"),
+      "request-hash-successful-cleanup",
+      descriptors,
+    )).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "PLANNING_RESOURCE_BUSY",
+        transient: true,
+        resource_type: "personnel_day",
+        resource_id: "day-busy",
+      },
+    });
+
+    expect(entities.PlanningMutationCoordinator.records.find(
+      item => item.id === "coordinator-acquire-free",
+    )?.lease).toBeNull();
+    expect(entities.PlanningMutationCoordinator.records.find(
+      item => item.id === "coordinator-acquire-busy",
+    )?.lease?.token).toBe("foreign-active-lease");
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toEqual([]);
+  });
+
+  it("meldt een mislukte partial-acquire-cleanup apart en nooit als retry-veilige busy-fout", async () => {
+    const { base44, entities } = setup([]);
+    const descriptors = [
+      { coordinatorKey: "lease-acquire-exhausted:01", resourceType: "shift_composition", resourceId: "shift-free" },
+      { coordinatorKey: "lease-acquire-exhausted:02", resourceType: "personnel_day", resourceId: "day-busy" },
+    ];
+    entities.PlanningMutationCoordinator.records.push(
+      {
+        id: "coordinator-acquire-release-exhausted",
+        coordinator_key: descriptors[0].coordinatorKey,
+        resource_type: descriptors[0].resourceType,
+        resource_id: descriptors[0].resourceId,
+        lease: null,
+        revision: 1,
+        created_date: "2026-08-17T08:00:00.000Z",
+        metadata: {},
+      },
+      {
+        id: "coordinator-acquire-still-busy",
+        coordinator_key: descriptors[1].coordinatorKey,
+        resource_type: descriptors[1].resourceType,
+        resource_id: descriptors[1].resourceId,
+        lease: {
+          token: "foreign-active-lease-secret",
+          status: "pending",
+          expires_at: "2099-08-17T12:00:00.000Z",
+        },
+        revision: 1,
+        created_date: "2026-08-17T08:00:00.000Z",
+        metadata: {},
+      },
+    );
+    const originalCoordinatorUpdate = entities.PlanningMutationCoordinator.updateMany.bind(
+      entities.PlanningMutationCoordinator,
+    );
+    let releaseAttempts = 0;
+    entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      if (query.id === "coordinator-acquire-release-exhausted" && update.$set?.lease === null) {
+        releaseAttempts += 1;
+        const error = new Error("rate limit exceeded while releasing must-not-leak");
+        error.status = 429;
+        error.details = { retry_after_ms: 1, internal_token: "must-not-leak" };
+        throw error;
+      }
+      return originalCoordinatorUpdate(query, update);
+    };
+
+    let exhaustedError;
+    try {
+      await backend.acquirePlanningResourceLeases(
+        base44,
+        user,
+        context("lease-acquire-exhausted-cleanup"),
+        "request-hash-exhausted-cleanup",
+        descriptors,
+      );
+    } catch (error) {
+      exhaustedError = error;
+    }
+
+    expect(exhaustedError).toMatchObject({
+      status: 503,
+      details: {
+        lease_release_exhausted: true,
+        lease_acquire_cleanup_exhausted: true,
+        retry_safe: false,
+        retry_after: expect.stringMatching(/Z$/),
+        retry_after_ms: expect.any(Number),
+        acquire_error: {
+          status: 409,
+          code: "PLANNING_RESOURCE_BUSY",
+          resource_type: "personnel_day",
+          resource_id: "day-busy",
+        },
+        lease_release_errors: [expect.objectContaining({
+          entity: "PlanningMutationCoordinator",
+          id: "coordinator-acquire-release-exhausted",
+          status: 429,
+          rate_limited: true,
+          attempts: 6,
+          retry_after_ms: 1,
+        })],
+      },
+    });
+    expect(exhaustedError.details).not.toHaveProperty("code");
+    expect(exhaustedError.details).not.toHaveProperty("transient");
+    expect(JSON.stringify(exhaustedError.details)).not.toContain("foreign-active-lease-secret");
+    expect(JSON.stringify(exhaustedError.details)).not.toContain("must-not-leak");
+    expect(releaseAttempts).toBe(6);
+    expect(entities.PlanningMutationCoordinator.records.find(
+      item => item.id === "coordinator-acquire-release-exhausted",
+    )?.lease).toMatchObject({ status: "pending" });
+    expect(entities.PlanningShift.records).toEqual([]);
+    expect(entities.PlanningAssignment.records).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toEqual([]);
+  });
+
   it("geeft eerder verkregen occurrence-reserveringen vrij als een latere reservation-CAS faalt", async () => {
     const firstDemand = occurrence("occurrence-reception", "object-1", "08:00", "12:00", 240);
     const secondDemand = occurrence("occurrence-rounds", "object-2", "12:00", "16:00", 240);
@@ -3619,8 +3776,11 @@ describe("planningApi dienstsamenstelling", () => {
       }, context("compose-week-lease-friday-blocked"))).rejects.toMatchObject({
         status: 409,
         details: {
+          code: "PLANNING_RESOURCE_BUSY",
+          transient: true,
           resource_type: "personnel_day",
           resource_id: `week:${personnelId}:2026-08-17`,
+          reservation_expires_at: expect.any(String),
         },
       });
     } finally {

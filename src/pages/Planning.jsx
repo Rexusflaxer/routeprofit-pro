@@ -62,6 +62,7 @@ import {
   getPlanningMutationQueue,
   planningPersonnelDayResourceKey,
   planningPersonnelEligibilityResourceKeys,
+  planningPersonnelShiftResourceKeys,
   settlePlanningDropEnqueues,
 } from "@/components/planning/planningMutationQueue";
 import {
@@ -398,26 +399,15 @@ function occurrenceSegmentForTimelineSlice(occurrence, serviceDate, startTime, e
 
 function personnelDayQueueResourceKeys(personnelId, record) {
   if (!personnelId || !record) return [];
-  const interval = getShiftInterval({
-    service_date: record.start_date || record.service_date,
-    end_date: record.end_date || record.start_date || record.service_date,
-    start_time: record.start_time,
-    end_time: record.end_time,
-    overnight: true,
-  });
   const fallbackDate = record.start_date || record.service_date;
-  if (!interval.valid) {
+  const keys = planningPersonnelShiftResourceKeys(personnelId, [record]);
+  if (!keys.length) {
     const fallback = planningPersonnelDayResourceKey(personnelId, fallbackDate);
     return fallback
       ? planningPersonnelEligibilityResourceKeys(personnelId, fallbackDate)
       : [];
   }
-
-  return planningPersonnelEligibilityResourceKeys(
-    personnelId,
-    toDateKey(interval.start),
-    toDateKey(new Date(interval.end.getTime() - 1)),
-  );
+  return keys;
 }
 
 function planningEligibilityCandidateSourceResourceKey(candidate) {
@@ -540,6 +530,13 @@ function mutationMessage(error) {
 function queuedPlanningRebaseError(reason) {
   const messages = {
     shift_missing: "De dienst bestaat niet meer in de actuele planning.",
+    shift_cancelled: "Een geannuleerde dienst kan niet meer worden aangepast.",
+    shift_source_changed: "De dienstinhoud of diensttijd is intussen gewijzigd.",
+    assignment_missing: "De medewerkerstoewijzing bestaat niet meer in de actuele planning.",
+    assignment_ambiguous: "De medewerkerstoewijzing kan niet eenduidig worden bepaald.",
+    assignment_source_changed: "De medewerkerstoewijzing is intussen gewijzigd.",
+    segment_source_changed: "Het taakdeel hoort niet meer bij deze dienst.",
+    planning_parent_failed: "De oorspronkelijke planningactie kon niet worden opgeslagen.",
     personnel_already_assigned: "De medewerker staat inmiddels al op deze dienst.",
     shift_full: "De dienst is inmiddels volledig bezet.",
     occurrence_missing: "De klanttaak bestaat niet meer in de actuele planning.",
@@ -553,6 +550,111 @@ function queuedPlanningRebaseError(reason) {
     status: 409,
     details: { code: "queued_planning_rebase_blocked", reason },
   });
+}
+
+const PLANNING_MANUAL_MOVE_CONTEXT_FIELDS = Object.freeze([
+  "source_type",
+  "source_id",
+  "source_shift_id",
+  "source_route_execution_id",
+  "company_id",
+  "customer_id",
+  "customer_ids",
+  "object_id",
+  "object_ids",
+  "route_id",
+  "task_id",
+  "task_occurrence_ids",
+  "task_segment_count",
+  "customer_contract_line_id",
+  "timezone",
+  "required_count",
+  "cao_key",
+  "required_cao_function_group",
+  "required_cao_function_level",
+  "required_security_role_status",
+  "required_qualification_types",
+  "required_qualification_groups",
+  "required_security_pass_types",
+  "contract_assignment_policy",
+  "performs_security_work",
+  "security_work_percentage",
+  "works_event_or_hospitality_security",
+  "event_hospitality_cao_applies",
+  "works_airport_schiphol",
+  "works_cash_value_logistics",
+  "customer_billable",
+  "counts_toward_required_staffing",
+  "service_context_snapshot",
+]);
+
+function canonicalPlanningManualMoveValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalPlanningManualMoveValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [
+      key,
+      canonicalPlanningManualMoveValue(value[key]),
+    ]));
+  }
+  return value == null || value === "" ? null : value;
+}
+
+function planningManualMoveSemanticFingerprint(shift) {
+  return JSON.stringify(canonicalPlanningManualMoveValue({
+    service_date: shift?.service_date || null,
+    end_date: shift?.end_date || null,
+    start_time: shift?.start_time || null,
+    end_time: shift?.end_time || null,
+    service_name_snapshot: shift?.service_name_snapshot || shift?.name || null,
+    customer_name_snapshot: shift?.customer_name_snapshot || shift?.customer_name || null,
+    object_name_snapshot: shift?.object_name_snapshot || shift?.object_name || null,
+    route_name_snapshot: shift?.route_name_snapshot || shift?.route_name || null,
+    service_function_type: shift?.service_function_type || shift?.function_type || null,
+    context: Object.fromEntries(PLANNING_MANUAL_MOVE_CONTEXT_FIELDS.map(field => [
+      field,
+      shift?.[field] ?? null,
+    ])),
+  }));
+}
+
+const PLANNING_EDITOR_SEGMENT_SEMANTIC_FIELDS = Object.freeze([
+  "shift_id",
+  "task_occurrence_id",
+  "object_task_definition_id",
+  "sequence_index",
+  "start_date",
+  "end_date",
+  "start_time",
+  "end_time",
+  "timezone",
+  "company_id",
+  "customer_id",
+  "object_id",
+  "task_type",
+  "task_name_snapshot",
+  "customer_name_snapshot",
+  "object_name_snapshot",
+  "instructions_snapshot",
+]);
+
+function planningEditorSegmentSemanticFingerprint(segment) {
+  return JSON.stringify(canonicalPlanningManualMoveValue(Object.fromEntries(
+    PLANNING_EDITOR_SEGMENT_SEMANTIC_FIELDS.map(field => [field, segment?.[field] ?? null]),
+  )));
+}
+
+function projectPlanningManualMoveShift(shift, startTime, endTime) {
+  const serviceDate = shift?.service_date;
+  const endDate = serviceDate && endTime <= startTime
+    ? toDateKey(addDays(serviceDate, 1))
+    : null;
+  return {
+    ...shift,
+    start_time: startTime,
+    end_time: endTime,
+    end_date: endDate,
+    _optimistic_pending: true,
+  };
 }
 
 async function listAllEntityRecords(entity, sort) {
@@ -2519,6 +2621,229 @@ export default function Planning() {
     return { ...authoritative, ...projected };
   };
 
+  const resolveQueuedServiceEditorRecords = ({ shift, assignment = null, segments = [] }) => {
+    if (!shift) return { status: "blocked", reason: "shift_missing" };
+    const overlayKnownTerminalRecords = (
+      records,
+      result,
+      pluralKey,
+      singularKey,
+      originIntentId,
+    ) => {
+      const savedRecords = [
+        ...(Array.isArray(result?.[pluralKey]) ? result[pluralKey] : []),
+        result?.[singularKey],
+      ].filter(item => item?.id != null);
+      return (records || []).map(record => {
+        // A terminal result may contain related records that were subsequently
+        // changed by a newer optimistic command. Only adopt full server
+        // semantics for records owned by this exact parent; the generic
+        // rebase above is sufficient to carry ids/revisions through older
+        // parents without reverting a newer local proposal.
+        if (String(planningOriginIntentId(record) || "") !== String(originIntentId)) return record;
+        const saved = savedRecords.find(item => String(item.id) === String(record.id));
+        if (!saved) return record;
+        return {
+          ...record,
+          ...saved,
+          ...(record._planning_ref ? { _planning_ref: record._planning_ref } : {}),
+          ...(record._planning_origin_intent_id
+            ? { _planning_origin_intent_id: record._planning_origin_intent_id }
+            : {}),
+        };
+      });
+    };
+    let editorIntent = {
+      shift_id: shift.id,
+      ...(assignment?.id ? { assignment_id: assignment.id } : {}),
+      shifts: [shift],
+      assignments: assignment ? [assignment] : [],
+      segments: Array.isArray(segments) ? segments : [],
+      occurrences: [],
+    };
+    const originIntentIds = [...new Set([
+      planningOriginIntentId(shift),
+      planningOriginIntentId(assignment),
+      ...(Array.isArray(segments) ? segments.map(planningOriginIntentId) : []),
+    ].filter(Boolean))];
+    const activeParentIntentIds = [];
+    const assignmentOriginIntentId = planningOriginIntentId(assignment);
+    let knownAssignmentIdentityRebase = false;
+    const terminalParents = [];
+    for (const [originOrder, originIntentId] of originIntentIds.entries()) {
+      if (planningMutationQueue.current.has(originIntentId)) {
+        activeParentIntentIds.push(originIntentId);
+        continue;
+      }
+      const terminalParent = planningMutationQueue.current.getTerminalState(originIntentId);
+      if (!terminalParent) continue;
+      if (terminalParent.status !== "succeeded") {
+        return { status: "blocked", reason: "planning_parent_failed", terminalParent };
+      }
+      terminalParents.push({ originIntentId, originOrder, terminalParent });
+    }
+    terminalParents.sort((left, right) => {
+      const leftSequence = left.terminalParent.sequence == null
+        ? Number.MAX_SAFE_INTEGER
+        : Number(left.terminalParent.sequence);
+      const rightSequence = right.terminalParent.sequence == null
+        ? Number.MAX_SAFE_INTEGER
+        : Number(right.terminalParent.sequence);
+      const normalizedLeft = Number.isFinite(leftSequence) ? leftSequence : Number.MAX_SAFE_INTEGER;
+      const normalizedRight = Number.isFinite(rightSequence) ? rightSequence : Number.MAX_SAFE_INTEGER;
+      return normalizedLeft - normalizedRight || left.originOrder - right.originOrder;
+    });
+    for (const { originIntentId, terminalParent } of terminalParents) {
+      const previousAssignmentId = editorIntent.assignment_id;
+      const rebasedEditorIntent = rebaseDependentPlanningIntent(
+        editorIntent,
+        terminalParent.originalIntent || terminalParent.intent,
+        terminalParent.result,
+      );
+      if (assignment && originIntentId === assignmentOriginIntentId) {
+        const terminalAssignments = [
+          ...(Array.isArray(terminalParent.result?.assignments) ? terminalParent.result.assignments : []),
+          terminalParent.result?.assignment,
+        ].filter(Boolean);
+        knownAssignmentIdentityRebase = (
+          rebasedEditorIntent.assignment_id !== previousAssignmentId
+          || terminalAssignments.some(item => (
+            String(item.personnel_id) === String(assignment.personnel_id)
+            && Number(item.slot_index || 0) === Number(assignment.slot_index || 0)
+            && String(item.planning_shift_id || item.shift_id) === String(rebasedEditorIntent.shift_id)
+          ))
+        );
+      }
+      editorIntent = {
+        ...rebasedEditorIntent,
+        shifts: overlayKnownTerminalRecords(
+          rebasedEditorIntent.shifts,
+          terminalParent.result,
+          "shifts",
+          "shift",
+          originIntentId,
+        ),
+        assignments: overlayKnownTerminalRecords(
+          rebasedEditorIntent.assignments,
+          terminalParent.result,
+          "assignments",
+          "assignment",
+          originIntentId,
+        ),
+        segments: overlayKnownTerminalRecords(
+          rebasedEditorIntent.segments,
+          terminalParent.result,
+          "segments",
+          "segment",
+          originIntentId,
+        ),
+      };
+    }
+
+    const snapshot = queuedEffectiveSnapshot();
+    const requestedShift = editorIntent.shifts?.[0] || shift;
+    const shiftTarget = resolvePlanningShiftTarget(snapshot, {
+      id: editorIntent.shift_id,
+      ref: planningRecordReference(requestedShift, "shift"),
+    });
+    if (shiftTarget.status !== "ready") {
+      return { status: "blocked", reason: shiftTarget.reason, snapshot };
+    }
+    if (requestedShift.status === "cancelled" || shiftTarget.record.status === "cancelled") {
+      return { status: "blocked", reason: "shift_cancelled", snapshot };
+    }
+    if (
+      planningManualMoveSemanticFingerprint(requestedShift)
+      !== planningManualMoveSemanticFingerprint(shiftTarget.record)
+    ) {
+      return { status: "blocked", reason: "shift_source_changed", snapshot };
+    }
+
+    const resolvedSegments = [];
+    for (const requestedSegment of editorIntent.segments || []) {
+      const segmentTarget = resolvePlanningSegmentTarget(snapshot, {
+        id: requestedSegment.id,
+        ref: planningRecordReference(requestedSegment, "segment"),
+      });
+      if (segmentTarget.status !== "ready") {
+        return { status: "blocked", reason: segmentTarget.reason, snapshot };
+      }
+      if (
+        requestedSegment.status === "removed"
+        || segmentTarget.record.status === "removed"
+        || String(segmentTarget.record.shift_id) !== String(shiftTarget.record.id)
+        || planningEditorSegmentSemanticFingerprint(requestedSegment)
+          !== planningEditorSegmentSemanticFingerprint(segmentTarget.record)
+      ) {
+        return { status: "blocked", reason: "segment_source_changed", snapshot };
+      }
+      resolvedSegments.push(segmentTarget.record);
+    }
+    if (editorIntent.segments?.length) {
+      const expectedSegmentIds = resolvedSegments
+        .slice()
+        .sort((left, right) => (
+          Number(left.sequence_index || 0) - Number(right.sequence_index || 0)
+          || String(left.id).localeCompare(String(right.id))
+        ))
+        .map(item => String(item.id));
+      const currentSegmentIds = (snapshot.segments || [])
+        .filter(item => item.status !== "removed" && String(item.shift_id) === String(shiftTarget.record.id))
+        .sort((left, right) => (
+          Number(left.sequence_index || 0) - Number(right.sequence_index || 0)
+          || String(left.id).localeCompare(String(right.id))
+        ))
+        .map(item => String(item.id));
+      if (JSON.stringify(expectedSegmentIds) !== JSON.stringify(currentSegmentIds)) {
+        return { status: "blocked", reason: "segment_source_changed", snapshot };
+      }
+    }
+
+    let resolvedAssignment = null;
+    if (assignment) {
+      const requestedAssignment = editorIntent.assignments?.[0] || assignment;
+      const assignmentTarget = resolvePlanningAssignmentTarget(snapshot, {
+        id: editorIntent.assignment_id,
+        ref: planningRecordReference(requestedAssignment, "assignment"),
+      });
+      if (assignmentTarget.status === "ready") {
+        resolvedAssignment = assignmentTarget.record;
+      } else if (assignmentTarget.reason === "assignment_target_missing" && knownAssignmentIdentityRebase) {
+        const fallbackCandidates = activeAssignments(snapshot.assignments).filter(item => (
+          String(item.planning_shift_id || item.shift_id) === String(shiftTarget.record.id)
+          && String(item.personnel_id) === String(requestedAssignment.personnel_id)
+          && Number(item.slot_index || 0) === Number(requestedAssignment.slot_index || 0)
+        ));
+        if (fallbackCandidates.length !== 1) {
+          return {
+            status: "blocked",
+            reason: fallbackCandidates.length > 1 ? "assignment_ambiguous" : "assignment_missing",
+            snapshot,
+          };
+        }
+        [resolvedAssignment] = fallbackCandidates;
+      } else {
+        return { status: "blocked", reason: "assignment_ambiguous", snapshot };
+      }
+      if (
+        String(resolvedAssignment.planning_shift_id || resolvedAssignment.shift_id) !== String(shiftTarget.record.id)
+        || String(resolvedAssignment.personnel_id) !== String(requestedAssignment.personnel_id)
+        || Number(resolvedAssignment.slot_index || 0) !== Number(requestedAssignment.slot_index || 0)
+      ) {
+        return { status: "blocked", reason: "assignment_source_changed", snapshot };
+      }
+    }
+
+    return {
+      status: "ready",
+      snapshot,
+      shift: shiftTarget.record,
+      assignment: resolvedAssignment,
+      segments: resolvedSegments,
+      parentIntentIds: [...new Set(activeParentIntentIds)],
+    };
+  };
+
   const recoverQueuedPlanningAfterExecutionError = async (error, request) => {
     try {
       handleActionMutationError(error, request);
@@ -2604,7 +2929,13 @@ export default function Planning() {
     });
   };
 
-  const executeAssignment = async (shift, personnelItem, requestedSlotIndex = null, candidateWarnings = null) => {
+  const executeAssignment = async (
+    shift,
+    personnelItem,
+    requestedSlotIndex = null,
+    candidateWarnings = null,
+    { dependsOn = [] } = {},
+  ) => {
     if (!shift || !personnelItem) return;
     if (planningCommitFenceRef.current) return null;
     const initialSnapshot = queuedEffectiveSnapshot();
@@ -2646,6 +2977,7 @@ export default function Planning() {
     const pendingKey = createPlanningMutationKey("planning-assign");
     const mergeCandidate = initialMerge.status === "merge" ? initialMerge.candidate : null;
     const parentIntentIds = [...new Set([
+      ...(Array.isArray(dependsOn) ? dependsOn : []),
       planningOriginIntentId(initialTarget.shift),
       planningOriginIntentId(initialMerge.targetSegment),
       planningOriginIntentId(mergeCandidate?.shift),
@@ -2824,32 +3156,51 @@ export default function Planning() {
     );
   };
 
-  const handleUnassign = async (shift, assignment) => {
+  const handleUnassign = async (shift, assignment, { dependsOn = [] } = {}) => {
     if (!shift || !assignment || planningCommitFenceRef.current) return null;
+    const sourceResolution = resolveQueuedServiceEditorRecords({ shift, assignment });
+    if (sourceResolution.status !== "ready") {
+      const error = queuedPlanningRebaseError(sourceResolution.reason);
+      toast({ variant: "destructive", title: "Medewerker niet uitgepland", description: error.message });
+      setLiveMessage(error.message);
+      return null;
+    }
+    const sourceShift = sourceResolution.shift;
+    const sourceAssignment = sourceResolution.assignment;
     const executionRange = Object.freeze({ periodStart, periodEnd });
     const pendingKey = createPlanningMutationKey("planning-unassign");
-    const parentIntentId = planningOriginIntentId(assignment) || planningOriginIntentId(shift);
-    const relatedSegments = (activeTaskSegmentsByShift.get(String(shift.id)) || []);
+    const parentIntentIds = [...new Set([
+      ...(Array.isArray(dependsOn) ? dependsOn : []),
+      ...(sourceResolution.parentIntentIds || []),
+      planningOriginIntentId(assignment),
+      planningOriginIntentId(shift),
+      planningOriginIntentId(sourceAssignment),
+      planningOriginIntentId(sourceShift),
+    ].filter(id => id && planningMutationQueue.current.has(id)))];
+    const relatedSegments = (sourceResolution.snapshot.segments || []).filter(item => (
+      item.status !== "removed"
+      && String(item.shift_id) === String(sourceShift.id)
+    ));
     const occurrenceIds = [...new Set(relatedSegments.map(item => String(item.task_occurrence_id)))];
     const optimisticIntent = {
       ...buildDependentPlanningUnassignIntent({
         key: pendingKey,
         originIntentId: pendingKey,
-        shift,
-        assignment,
+        shift: sourceShift,
+        assignment: sourceAssignment,
       }),
-      shift_id: shift.id,
-      assignment_id: assignment.id,
+      shift_id: sourceShift.id,
+      assignment_id: sourceAssignment.id,
     };
     let executionIntent = optimisticIntent;
     let executedRequest = null;
     const operation = planningMutationQueue.current.enqueue({
       id: pendingKey,
-      dependsOn: parentIntentId && planningMutationQueue.current.has(parentIntentId) ? [parentIntentId] : [],
+      dependsOn: parentIntentIds,
       resourceKeys: [
-        `shift:${shift.id}`,
+        `shift:${sourceShift.id}`,
         ...occurrenceIds.map(id => `occurrence:${id}`),
-        ...personnelDayQueueResourceKeys(assignment.personnel_id, shift),
+        ...personnelDayQueueResourceKeys(sourceAssignment.personnel_id, sourceShift),
       ],
       intent: optimisticIntent,
       execute: ({ intent }) => {
@@ -2878,19 +3229,19 @@ export default function Planning() {
           rebaseDependentPlanningIntent(intent, executionIntent, result)
         ));
         refreshPlanningInBackground();
-        const description = `${assignment.personnel_name || "Medewerker"} is vrijgemaakt van ${shift.name || "de dienst"}; de dienst blijft openstaan.`;
+        const description = `${sourceAssignment.personnel_name || "Medewerker"} is vrijgemaakt van ${sourceShift.name || "de dienst"}; de dienst blijft openstaan.`;
         rememberUndo(result, description);
         setLiveMessage(description);
       },
       onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
         action: "unassign",
-        shift_id: shift.id,
-        assignment_id: assignment.id,
+        shift_id: sourceShift.id,
+        assignment_id: sourceAssignment.id,
       }),
       onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
     });
     void operation.catch(() => undefined);
-    return { accepted: true, operation };
+    return { accepted: true, commandId: operation.commandId || pendingKey, operation };
   };
 
   const handleUndo = async (item = undoStack[0]) => {
@@ -3307,10 +3658,21 @@ export default function Planning() {
 
   const resizeTimelineTaskSegment = ({ shift, segment, startDate, endDate, startTime, endTime, notification = null }) => {
     if (!shift || !segment) return;
-    const activeSegments = [...(activeTaskSegmentsByShift.get(String(shift.id)) || [])]
+    const sourceResolution = resolveQueuedServiceEditorRecords({ shift, segments: [segment] });
+    if (sourceResolution.status !== "ready") {
+      const error = queuedPlanningRebaseError(sourceResolution.reason);
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description: error.message });
+      setLiveMessage(error.message);
+      return null;
+    }
+    const sourceShift = sourceResolution.shift;
+    const sourceSegment = sourceResolution.segments[0];
+    const activeSegments = (sourceResolution.snapshot.segments || []).filter(item => (
+      item.status !== "removed" && String(item.shift_id) === String(sourceShift.id)
+    ))
       .sort((left, right) => Number(left.sequence_index || 0) - Number(right.sequence_index || 0));
     const occurrenceIds = [...new Set(activeSegments.map(item => String(item.task_occurrence_id)))];
-    const occurrenceById = new Map(taskOccurrences.map(item => [String(item.id), item]));
+    const occurrenceById = new Map((sourceResolution.snapshot.occurrences || []).map(item => [String(item.id), item]));
     const missingOccurrenceIds = occurrenceIds.filter(id => !occurrenceById.has(id));
     if (missingOccurrenceIds.length) {
       const description = "Niet alle gekoppelde klanttaken zijn in de huidige periode geladen. Open de volledige dienstinhoud om deze dienst veilig te wijzigen.";
@@ -3326,79 +3688,40 @@ export default function Planning() {
     }
     const pendingKey = createPlanningMutationKey("timeline-preserve-resize");
     const executionRange = Object.freeze({ periodStart, periodEnd });
-    const shiftAssignments = activeAssignments(assignments).filter(item => (
-      String(item.planning_shift_id || item.shift_id) === String(shift.id)
+    const shiftAssignments = activeAssignments(sourceResolution.snapshot.assignments || []).filter(item => (
+      String(item.planning_shift_id || item.shift_id) === String(sourceShift.id)
     ));
-    const parentIntentId = planningOriginIntentId(shift) || planningOriginIntentId(segment);
-    const staleGestureIntent = {
+    const parentIntentIds = sourceResolution.parentIntentIds || [];
+    const optimisticIntent = {
       ...buildDependentPlanningResizeIntent({
         key: pendingKey,
         originIntentId: pendingKey,
-        shift,
-        segment,
+        shift: sourceShift,
+        segment: sourceSegment,
         assignments: shiftAssignments,
         nextStartDate: startDate,
         nextEndDate: endDate,
         nextStartTime: startTime,
         nextEndTime: endTime,
       }),
-      shift_id: shift.id,
-      segment_id: segment.id,
+      shift_id: sourceShift.id,
+      segment_id: sourceSegment.id,
       task_occurrence_id: occurrenceIds[0],
     };
-    const terminalParent = parentIntentId
-      ? planningMutationQueue.current.getTerminalState(parentIntentId)
-      : null;
-    if (terminalParent && terminalParent.status !== "succeeded") {
-      const description = "De oorspronkelijke dienst kon niet worden opgeslagen; deze tijdswijziging is daarom vervallen.";
-      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description });
-      setLiveMessage(description);
-      return null;
-    }
-    // Pointer listeners intentionally retain the optimistic records they were
-    // started with. If the compose ACK completed before pointer-up, recover
-    // its terminal identity map and enqueue the resize directly against the
-    // authoritative ids/revisions instead of retrying the stale temp ids.
-    const optimisticIntent = terminalParent?.status === "succeeded"
-      ? rebaseDependentPlanningIntent(
-          staleGestureIntent,
-          terminalParent.originalIntent || terminalParent.intent,
-          terminalParent.result,
-        )
-      : staleGestureIntent;
-    if (terminalParent?.status === "succeeded") {
-      const terminalSnapshot = planningExecutionSnapshotFromCache(
-        queryClient,
-        executionRange.periodStart,
-        executionRange.periodEnd,
-      );
-      const terminalTargets = [
-        resolvePlanningShiftTarget(terminalSnapshot, {
-          id: optimisticIntent.shift_id,
-          ref: optimisticIntent._planning_target_refs?.shift,
-        }),
-        resolvePlanningSegmentTarget(terminalSnapshot, {
-          id: optimisticIntent.segment_id,
-          ref: optimisticIntent._planning_target_refs?.segment,
-        }),
-      ];
-      if (terminalTargets.some(target => target.status !== "ready")) {
-        const description = "De opgeslagen dienst kon niet eenduidig aan de lokale tijdsgreep worden gekoppeld. Er is geen tweede planningactie verstuurd; ververs de planning en probeer opnieuw.";
-        toast({ variant: "destructive", title: "Diensttijd niet aangepast", description });
-        setLiveMessage(description);
-        return null;
-      }
-    }
     let executionIntent = optimisticIntent;
     let executedRequest = null;
     const operation = planningMutationQueue.current.enqueue({
       id: pendingKey,
-      dependsOn: parentIntentId && planningMutationQueue.current.has(parentIntentId) ? [parentIntentId] : [],
-      coalesceKey: `resize:${planningRecordReference(shift, "shift")}:${planningRecordReference(segment, "segment")}`,
+      dependsOn: parentIntentIds,
+      coalesceKey: `resize:${planningRecordReference(sourceShift, "shift")}:${planningRecordReference(sourceSegment, "segment")}`,
       coalesceIntent: (_current, incoming) => incoming,
       resourceKeys: [
         `shift:${optimisticIntent.shift_id}`,
         ...occurrenceIds.map(id => `occurrence:${id}`),
+        ...shiftAssignments.flatMap(assignment => planningPersonnelShiftResourceKeys(
+          assignment.personnel_id,
+          [sourceShift, ...(optimisticIntent.shifts || [])],
+        )),
       ],
       intent: optimisticIntent,
       execute: ({ intent }) => {
@@ -3452,20 +3775,25 @@ export default function Planning() {
         ));
         refreshPlanningInBackground();
         const description = notification?.description
-          || `${shift.name || shift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen deel is een echte open dienst.`;
+          || `${sourceShift.name || sourceShift.service_name_snapshot || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}. Het vrijgekomen deel is een echte open dienst.`;
         toast({ title: notification?.title || "Diensttijd aangepast", description });
         setLiveMessage(description);
       },
       onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
         action: "resize_task_shift_preserving_coverage",
-        shift_id: shift.id,
-        segment_id: segment.id,
+        shift_id: sourceShift.id,
+        segment_id: sourceSegment.id,
       }),
       onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
     });
     void operation.catch(() => undefined);
     setStatusFilter("all");
-    return { accepted: true, operation };
+    return {
+      accepted: true,
+      commandId: operation.commandId || pendingKey,
+      operation,
+      shift: optimisticIntent.shifts[0],
+    };
   };
 
   const resizeTimelineSharedBoundary = ({
@@ -3534,6 +3862,12 @@ export default function Planning() {
       planningOriginIntentId(right.shift),
       planningOriginIntentId(right.segment),
     ].filter(id => id && planningMutationQueue.current.has(id)))];
+    const affectedPersonnelIds = [...new Set(activeAssignments(initialSnapshot.assignments)
+      .filter(assignment => [String(left.shift.id), String(right.shift.id)].includes(
+        String(assignment.planning_shift_id || assignment.shift_id),
+      ))
+      .map(assignment => assignment.personnel_id)
+      .filter(Boolean))];
     let executionIntent = optimisticIntent;
     let executedRequest = null;
     const operation = planningMutationQueue.current.enqueue({
@@ -3545,9 +3879,10 @@ export default function Planning() {
         `occurrence:${occurrence.id}`,
         `shift:${left.shift.id}`,
         `shift:${right.shift.id}`,
-        ...activeAssignments(initialSnapshot.assignments)
-          .filter(assignment => [String(left.shift.id), String(right.shift.id)].includes(String(assignment.planning_shift_id || assignment.shift_id)))
-          .flatMap(assignment => planningPersonnelDayResourceKeys(assignment.personnel_id, left.shift)),
+        ...affectedPersonnelIds.flatMap(personnelId => planningPersonnelShiftResourceKeys(
+          personnelId,
+          [left.shift, right.shift, leftShift, rightShift],
+        )),
       ],
       intent: optimisticIntent,
       execute: ({ intent }) => {
@@ -4194,15 +4529,177 @@ export default function Planning() {
     setShiftAction(null);
   };
 
+  const queueManualServiceMove = ({ shift, startTime, endTime }) => {
+    if (!shift || planningCommitFenceRef.current) return null;
+    const executionRange = Object.freeze({ periodStart, periodEnd });
+    const sourceOriginIntentId = planningOriginIntentId(shift);
+    const terminalParent = sourceOriginIntentId
+      ? planningMutationQueue.current.getTerminalState(sourceOriginIntentId)
+      : null;
+    if (terminalParent && terminalParent.status !== "succeeded") {
+      const description = "De oorspronkelijke dienst kon niet worden opgeslagen; deze tijdswijziging is daarom vervallen.";
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description });
+      setLiveMessage(description);
+      return null;
+    }
+    const rebasedSourceIntent = terminalParent?.status === "succeeded"
+      ? rebaseDependentPlanningIntent({
+          shift_id: shift.id,
+          shifts: [shift],
+          segments: [],
+          assignments: [],
+          occurrences: [],
+        }, terminalParent.originalIntent || terminalParent.intent, terminalParent.result)
+      : { shift_id: shift.id, shifts: [shift] };
+    const rebasedSourceShift = rebasedSourceIntent.shifts?.[0] || shift;
+    const initialSnapshot = queuedEffectiveSnapshot();
+    const initialShiftTarget = resolvePlanningShiftTarget(initialSnapshot, {
+      id: rebasedSourceIntent.shift_id,
+      ref: planningRecordReference(rebasedSourceShift, "shift"),
+    });
+    if (initialShiftTarget.status !== "ready") {
+      const error = queuedPlanningRebaseError(initialShiftTarget.reason);
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description: error.message });
+      setLiveMessage(error.message);
+      return null;
+    }
+    const sourceShift = initialShiftTarget.record;
+    if (rebasedSourceShift.status === "cancelled" || sourceShift.status === "cancelled") {
+      const error = queuedPlanningRebaseError("shift_cancelled");
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description: error.message });
+      setLiveMessage(error.message);
+      return null;
+    }
+    const sourceFingerprint = planningManualMoveSemanticFingerprint(rebasedSourceShift);
+    if (planningManualMoveSemanticFingerprint(sourceShift) !== sourceFingerprint) {
+      const error = queuedPlanningRebaseError("shift_source_changed");
+      toast({ variant: "destructive", title: "Diensttijd niet aangepast", description: error.message });
+      setLiveMessage(error.message);
+      return null;
+    }
+    const shiftAssignments = activeAssignments(initialSnapshot.assignments).filter(item => (
+      String(item.planning_shift_id || item.shift_id) === String(sourceShift.id)
+    ));
+    const parentIntentIds = [...new Set([
+      sourceOriginIntentId,
+      planningOriginIntentId(sourceShift),
+      ...shiftAssignments.map(planningOriginIntentId),
+    ].filter(id => id && planningMutationQueue.current.has(id)))];
+    const pendingKey = createPlanningMutationKey("planning-service-edit-time");
+    const proposedShift = projectPlanningManualMoveShift(sourceShift, startTime, endTime);
+    const stampedIntent = withPlanningOptimisticIntentIdentity({
+      key: pendingKey,
+      kind: "move_shift",
+      shift_id: sourceShift.id,
+      source_shift_fingerprint: sourceFingerprint,
+      shifts: [proposedShift],
+      segments: [],
+      assignments: [],
+      occurrences: [],
+    }, { originIntentId: pendingKey });
+    const optimisticIntent = {
+      ...stampedIntent,
+      _planning_target_refs: {
+        shift: planningRecordReference(stampedIntent.shifts[0], "shift"),
+      },
+    };
+    let executionIntent = optimisticIntent;
+    let executedRequest = null;
+    const operation = planningMutationQueue.current.enqueue({
+      id: pendingKey,
+      dependsOn: parentIntentIds,
+      resourceKeys: [
+        `shift:${sourceShift.id}`,
+        ...shiftAssignments.flatMap(item => planningPersonnelShiftResourceKeys(
+          item.personnel_id,
+          [sourceShift, optimisticIntent.shifts[0]],
+        )),
+      ],
+      intent: optimisticIntent,
+      execute: ({ intent }) => {
+        executionIntent = intent;
+        const snapshot = planningExecutionSnapshotFromCache(
+          queryClient,
+          executionRange.periodStart,
+          executionRange.periodEnd,
+        );
+        const currentShift = resolvePlanningShiftTarget(snapshot, {
+          id: intent.shift_id,
+          ref: intent._planning_target_refs?.shift,
+        });
+        const requestedShift = resolvePlanningShiftTarget(intent, {
+          id: intent.shift_id,
+          ref: intent._planning_target_refs?.shift,
+        });
+        const blocked = [currentShift, requestedShift].find(target => target.status !== "ready");
+        if (blocked) throw queuedPlanningRebaseError(blocked.reason);
+        if (currentShift.record.status === "cancelled") {
+          throw queuedPlanningRebaseError("shift_cancelled");
+        }
+        if (planningManualMoveSemanticFingerprint(currentShift.record) !== intent.source_shift_fingerprint) {
+          throw queuedPlanningRebaseError("shift_source_changed");
+        }
+        executedRequest = {
+          action: "move",
+          shift_id: currentShift.record.id,
+          service_date: currentShift.record.service_date,
+          end_date: requestedShift.record.end_date || null,
+          start_time: requestedShift.record.start_time,
+          end_time: requestedShift.record.end_time,
+          expected_shift_revision: Number(currentShift.record.revision || 1),
+        };
+        return runQueuedIntentMutation(pendingKey, executedRequest);
+      },
+      onSuccess: async result => {
+        await waitForPlanningDragRelease();
+        reconcilePlanningResultForRange(result, executionRange);
+        planningMutationQueue.current.updateIntents(intent => (
+          rebaseDependentPlanningIntent(intent, executionIntent, result)
+        ));
+        refreshPlanningInBackground();
+        const description = `${shift.name || "Dienst"} loopt nu van ${result.shift?.start_time || startTime} tot ${result.shift?.end_time || endTime}.`;
+        toast({ title: "Dienst bijgewerkt", description });
+        setLiveMessage(description);
+      },
+      onError: error => recoverQueuedPlanningAfterExecutionError(error, executedRequest || {
+        action: "move",
+        shift_id: shift.id,
+      }),
+      onCallbackError: context => recoverQueuedPlanningAfterCallbackError(context, { executionRange }),
+    });
+    void operation.catch(() => undefined);
+    return {
+      accepted: true,
+      commandId: operation.commandId || pendingKey,
+      operation,
+      shift: optimisticIntent.shifts[0],
+    };
+  };
+
   const saveServiceEdit = async ({ shift, assignment, segments: requestSegments = [], startTime, endTime, personnelId }) => {
-    let currentShift = shift;
-    const timesChanged = startTime !== shift.start_time || endTime !== shift.end_time;
-    if (timesChanged && requestSegments.length === 1) {
-      const segment = requestSegments[0];
-      const startDate = segment.start_date || shift.service_date;
+    const editorResolution = resolveQueuedServiceEditorRecords({
+      shift,
+      assignment,
+      segments: requestSegments,
+    });
+    if (editorResolution.status !== "ready") {
+      const error = queuedPlanningRebaseError(editorResolution.reason);
+      toast({ variant: "destructive", title: "Dienst niet bijgewerkt", description: error.message });
+      setLiveMessage(error.message);
+      return;
+    }
+    const editorShift = editorResolution.shift;
+    const editorAssignment = editorResolution.assignment;
+    const editorSegments = editorResolution.segments;
+    let currentShift = editorShift;
+    let personnelMutationDependencies = [...(editorResolution.parentIntentIds || [])];
+    const timesChanged = startTime !== editorShift.start_time || endTime !== editorShift.end_time;
+    if (timesChanged && editorSegments.length === 1) {
+      const segment = editorSegments[0];
+      const startDate = segment.start_date || editorShift.service_date;
       const endDate = toDateKey(addDays(startDate, endTime <= startTime ? 1 : 0));
-      resizeTimelineTaskSegment({
-        shift,
+      const queuedResize = resizeTimelineTaskSegment({
+        shift: editorShift,
         segment,
         startDate,
         endDate,
@@ -4210,25 +4707,31 @@ export default function Planning() {
         endTime,
         notification: {
           title: "Dienst bijgewerkt",
-          description: `${shift.name || "Dienst"} loopt nu van ${startTime} tot ${endTime}.`,
+          description: `${editorShift.name || "Dienst"} loopt nu van ${startTime} tot ${endTime}.`,
         },
       });
-    } else if (timesChanged && requestSegments.length) {
-      if (shift._optimistic_pending) {
+      if (!queuedResize?.accepted) return;
+      currentShift = queuedResize.shift;
+      personnelMutationDependencies = [queuedResize.commandId];
+    } else if (timesChanged && editorSegments.length) {
+      if (editorShift._optimistic_pending) {
         const description = "Een samengestelde dienst kan pas na de eerste serversynchronisatie via Dienstinhoud worden aangepast.";
         toast({ title: "Dienstinhoud wordt voorbereid", description });
         setLiveMessage(description);
         return;
       }
-      const ordered = [...requestSegments].sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
+      const ordered = [...editorSegments].sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
       const affectedIds = [...new Set(ordered.map(item => String(item.task_occurrence_id)))];
-      const result = await runIntentMutation(`service-edit-time:${shift.id}`, "planning-service-edit-time", {
+      const result = await runIntentMutation(`service-edit-time:${editorShift.id}`, "planning-service-edit-time", {
         action: "update_shift_composition",
-        shift_id: shift.id,
-        expected_shift_revision: Number(shift.revision || 1),
-        service_name: shift.name || shift.service_name_snapshot,
-        required_count: Number(shift.required_count || 1),
-        expected_occurrence_revisions: Object.fromEntries(affectedIds.map(id => [id, Number(taskOccurrences.find(item => String(item.id) === id)?.revision || 1)])),
+        shift_id: editorShift.id,
+        expected_shift_revision: Number(editorShift.revision || 1),
+        service_name: editorShift.name || editorShift.service_name_snapshot,
+        required_count: Number(editorShift.required_count || 1),
+        expected_occurrence_revisions: Object.fromEntries(affectedIds.map(id => [
+          id,
+          Number(editorResolution.snapshot.occurrences.find(item => String(item.id) === id)?.revision || 1),
+        ])),
         segments: ordered.map((segment, index) => ({
           task_occurrence_id: segment.task_occurrence_id,
           start_date: segment.start_date,
@@ -4242,30 +4745,40 @@ export default function Planning() {
       reconcilePlanningResult(result, { replaceShiftSegments: true });
       currentShift = result.shift || currentShift;
     } else if (timesChanged) {
-      const result = await runIntentMutation(`service-edit-time:${shift.id}`, "planning-service-edit-time", {
-        action: "move",
-        shift_id: shift.id,
-        service_date: shift.service_date,
-        start_time: startTime,
-        end_time: endTime,
-        expected_shift_revision: Number(shift.revision || 1),
-      });
-      reconcilePlanningResult(result);
-      currentShift = result.shift || currentShift;
+      const queuedMove = queueManualServiceMove({ shift: editorShift, startTime, endTime });
+      if (!queuedMove?.accepted) return;
+      currentShift = queuedMove.shift;
+      personnelMutationDependencies = [queuedMove.commandId];
     }
-    const currentPersonnelId = assignment?.personnel_id ? String(assignment.personnel_id) : null;
-    if (currentPersonnelId !== personnelId) {
-      if (assignment) {
-        await handleUnassign(currentShift, assignment);
+    const currentPersonnelId = editorAssignment?.personnel_id ? String(editorAssignment.personnel_id) : null;
+    const nextPersonnelId = personnelId ? String(personnelId) : null;
+    if (currentPersonnelId !== nextPersonnelId) {
+      if (editorAssignment) {
+        const queuedUnassign = await handleUnassign(currentShift, editorAssignment, {
+          dependsOn: personnelMutationDependencies,
+        });
+        if (!queuedUnassign?.accepted) return;
+        personnelMutationDependencies = [
+          ...personnelMutationDependencies,
+          queuedUnassign.commandId,
+        ];
       }
-      if (personnelId) {
-        const person = activePersonnel.find(item => String(item.id) === String(personnelId));
-        if (person) void executeAssignment(currentShift, person, Number(assignment?.slot_index || 0)).catch(() => undefined);
+      if (nextPersonnelId) {
+        const person = activePersonnel.find(item => String(item.id) === nextPersonnelId);
+        if (person) {
+          void executeAssignment(
+            currentShift,
+            person,
+            Number(editorAssignment?.slot_index || 0),
+            null,
+            { dependsOn: personnelMutationDependencies },
+          ).catch(() => undefined);
+        }
       }
     }
     refreshPlanningInBackground();
     setServiceEditor(null);
-    setLiveMessage(`${shift.name || "Dienst"} is bijgewerkt.`);
+    setLiveMessage(`${editorShift.name || "Dienst"} is bijgewerkt.`);
   };
 
   const openTaskComposer = ({ shift = null, occurrence = null } = {}) => {
