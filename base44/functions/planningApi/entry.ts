@@ -2059,11 +2059,58 @@ function planningIntervalDates(shift: LooseRecord) {
   return dateKeysBetween(startDate, endDate);
 }
 
+function planningWeekStartDate(value: string) {
+  const date = asDate(value, 'service_date');
+  const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay();
+  return addDateDays(date, -((weekday + 6) % 7));
+}
+
+function planningWeekDates(value: string) {
+  const start = planningWeekStartDate(value);
+  return dateKeysBetween(start, addDateDays(start, 6));
+}
+
+function planningContractWeekQueryDates(coveredDates: string[]) {
+  const weekStarts = uniqueStrings(coveredDates.map(planningWeekStartDate));
+  return uniqueStrings(weekStarts.flatMap(start => [
+    // A maximum twelve-hour shift can start on Sunday and still contribute to
+    // the new Monday week. Include that carry-in day without adding a second
+    // PlanningShift query to the hot path.
+    addDateDays(start, -1),
+    ...planningWeekDates(start),
+  ]));
+}
+
 async function personnelDayDescriptors(personnelIds: string[], shifts: LooseRecord[]) {
   const descriptors: LooseRecord[] = [];
+  // The final rest check spans a day boundary. Acquiring D-1, D and D+1 makes
+  // a late service on D mutually exclusive with an early service on D+1.
+  // Keeping the existing D coordinator in this set also makes the rollout
+  // safe when an older planningApi version is still active concurrently.
+  const protectedDates = uniqueStrings(shifts.flatMap(shift => (
+    planningIntervalDates(shift).flatMap(date => [
+      addDateDays(date, -1),
+      date,
+      addDateDays(date, 1),
+    ])
+  )));
+  const protectedWeekStarts = uniqueStrings(shifts.flatMap(shift => (
+    planningIntervalDates(shift).map(planningWeekStartDate)
+  )));
   for (const personnelId of uniqueStrings(personnelIds)) {
-    for (const date of uniqueStrings(shifts.flatMap(planningIntervalDates))) {
+    for (const date of protectedDates) {
       descriptors.push(await resourceCoordinatorDescriptor('personnel_day', `${personnelId}:${date}`));
+    }
+    // Week-hour validation must observe every earlier write in the same ISO
+    // week, including non-adjacent days. Reusing the existing resource type
+    // avoids an entity/schema rollout; the prefix keeps week and day identities
+    // disjoint. Day keys above remain mandatory for rest safety and old/new
+    // deployment interoperability.
+    for (const weekStart of protectedWeekStarts) {
+      descriptors.push(await resourceCoordinatorDescriptor(
+        'personnel_day',
+        `week:${personnelId}:${weekStart}`,
+      ));
     }
   }
   return descriptors;
@@ -3402,6 +3449,98 @@ function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: Loos
   return warnings;
 }
 
+function routedContractWeekLimitMinutes(contract: LooseRecord | null | undefined) {
+  const rawHours = contract?.max_hours_per_week ?? contract?.contract_hours_per_week;
+  const hours = Number(rawHours);
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : null;
+}
+
+function planningMinutesWithinWeek(shift: LooseRecord, weekStartDate: string) {
+  const interval = shiftInterval(shift);
+  if (!interval) return 0;
+  const weekStart = dateOrdinal(weekStartDate) * 1440;
+  const weekEnd = weekStart + 7 * 1440;
+  return Math.max(0, Math.min(interval.end, weekEnd) - Math.max(interval.start, weekStart));
+}
+
+function formatPlanningHours(minutes: number) {
+  const roundedMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainder = roundedMinutes % 60;
+  return remainder ? `${hours}u ${String(remainder).padStart(2, '0')}m` : `${hours}u`;
+}
+
+function authoritativeContractWeekWarnings(
+  routingResults: LooseRecord[],
+  candidateShifts: LooseRecord[],
+  personnelAssignments: LooseRecord[],
+  targetShift: LooseRecord,
+) {
+  const routedContracts = routingResults.map(result => ({
+    serviceDate: result.service_date,
+    contract: result.resolved ? result.decision?.selected_contract || null : null,
+  }));
+  // Mixed deployments or a manual-review routing result may not expose the
+  // selected contract yet. In that case the caller retains the local supplied
+  // warning instead of pretending that the server disproved it.
+  if (!routedContracts.length || routedContracts.some(item => !item.contract)) {
+    return { authoritative: false, warnings: [] };
+  }
+
+  const activeShiftIds = new Set(personnelAssignments
+    .filter(assignment => assignment.status !== 'removed')
+    .map(assignment => compact(assignment.shift_id))
+    .filter(Boolean));
+  const targetShiftId = compact(targetShift.id);
+  const scheduledShifts = uniqueRecords(
+    [...candidateShifts, targetShift],
+    candidate => compact(candidate.id),
+  ).filter(candidate => {
+    const candidateId = compact(candidate.id);
+    // compose_and_assign deliberately keeps its target cancelled until the
+    // final saga commit. This function evaluates the proposed assignment, so
+    // the explicit target still contributes while unrelated cancelled shifts
+    // remain excluded.
+    return candidateId === targetShiftId
+      || (candidate.status !== 'cancelled' && activeShiftIds.has(candidateId));
+  });
+  const checks = new Map<string, LooseRecord>();
+  for (const item of routedContracts) {
+    const contractId = compact(item.contract.id) || 'routed-contract';
+    const weekStart = planningWeekStartDate(item.serviceDate);
+    checks.set(`${contractId}:${weekStart}`, {
+      contract: item.contract,
+      contractId,
+      weekStart,
+      weekEnd: addDateDays(weekStart, 6),
+    });
+  }
+
+  const warnings: LooseRecord[] = [];
+  for (const check of checks.values()) {
+    const limitMinutes = routedContractWeekLimitMinutes(check.contract);
+    if (limitMinutes == null) continue;
+    const scheduledMinutes = scheduledShifts.reduce((total, scheduledShift) => (
+      total + planningMinutesWithinWeek(scheduledShift, check.weekStart)
+    ), 0);
+    if (scheduledMinutes <= limitMinutes) continue;
+    warnings.push(warning(
+      'contract_hours_exceeded',
+      'warning',
+      `Na deze dienst staat ${formatPlanningHours(scheduledMinutes)} gepland in de week ${check.weekStart} t/m ${check.weekEnd}; de contractgrens is ${formatPlanningHours(limitMinutes)}.`,
+      'planning_contract_hours',
+      {
+        contract_id: check.contractId,
+        week_start: check.weekStart,
+        week_end: check.weekEnd,
+        scheduled_minutes: scheduledMinutes,
+        limit_minutes: limitMinutes,
+      },
+    ));
+  }
+  return { authoritative: true, warnings };
+}
+
 async function evaluateAssignmentWarnings(
   base44: LooseRecord,
   shift: LooseRecord,
@@ -3497,10 +3636,16 @@ async function evaluateAssignmentWarnings(
   const ignoredShiftIdSet = new Set(uniqueStrings(ignoredShiftIds));
   const firstCoveredDate = coveredDates[0] || asDate(shift.service_date, 'service_date');
   const lastCoveredDate = coveredDates.at(-1) || firstCoveredDate;
-  const overlapCandidateDates = dateKeysBetween(
-    addDateDays(firstCoveredDate, -1),
-    addDateDays(lastCoveredDate, 1),
-  );
+  const overlapCandidateDates = uniqueStrings([
+    ...dateKeysBetween(
+      addDateDays(firstCoveredDate, -1),
+      addDateDays(lastCoveredDate, 1),
+    ),
+    // Prefetch receives its own bounded schedule snapshot and deliberately
+    // keeps using local optimistic week-hour evaluation. Final mutations load
+    // both complete touched weeks in this same existing shift query.
+    ...(!prefetched ? planningContractWeekQueryDates(coveredDates) : []),
+  ]);
   const [candidateShifts, absences, restrictions, securityPasses] = prefetched
     ? [
         normalizeArray<LooseRecord>(prefetched.candidateShifts),
@@ -3635,6 +3780,23 @@ async function evaluateAssignmentWarnings(
         decisions: routingDecisions,
         contract_id: personnelContractId,
       };
+
+  if (!prefetched) {
+    const contractWeekResult = authoritativeContractWeekWarnings(
+      routingResults,
+      consideredCandidateShifts,
+      personnelAssignments,
+      shift,
+    );
+    if (contractWeekResult.authoritative) {
+      // Replace rather than append the browser snapshot: a concurrent planning
+      // write may have made a previously shown warning appear or disappear.
+      for (let index = warnings.length - 1; index >= 0; index -= 1) {
+        if (warnings[index]?.code === 'contract_hours_exceeded') warnings.splice(index, 1);
+      }
+      warnings.push(...contractWeekResult.warnings);
+    }
+  }
 
   const snapshot = dedupeWarnings(warnings);
   return {

@@ -8,6 +8,8 @@ import {
   createPlanningEligibilityIndex,
   mergePlanningEligibilityServerDecisions,
   planningEligibilityCandidateKey,
+  planningEligibilityOwnSourceRevisionMatches,
+  planningEligibilitySourceSemanticsEqual,
   selectPlanningEligibilityRequestCandidates,
 } from "@/components/planning/planningEligibilityIndex";
 
@@ -161,6 +163,96 @@ describe("visible-range planning eligibility index", () => {
       [lateOlderResponse],
       { now: NOW },
     )).toEqual([current]);
+  });
+
+  it("laat een latere revision-stale response fail-closed een oud ready-verdict verdringen", () => {
+    const readyRevisionThree = {
+      candidate_key: "candidate-semantic-shift",
+      basis_token: "remote-facts-basis-1",
+      status: "ready",
+      source: { kind: "shift", id: "shift-1", revision: 3 },
+      evaluated_at: new Date(NOW - 5_000).toISOString(),
+      expires_at: new Date(NOW + 60_000).toISOString(),
+      warning_snapshot: [],
+    };
+    const lateRevisionStale = {
+      ...readyRevisionThree,
+      status: "stale",
+      source: { kind: "shift", id: "shift-1", revision: 4 },
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      warning_snapshot: [{
+        code: "eligibility_source_revision_stale",
+        severity: "warning",
+        message: "De dienstrevision is intussen technisch verhoogd.",
+        source: "planningApi",
+      }],
+      warning_codes: ["eligibility_source_revision_stale"],
+    };
+
+    expect(mergePlanningEligibilityServerDecisions(
+      [readyRevisionThree],
+      [lateRevisionStale],
+      { now: NOW },
+    )).toEqual([lateRevisionStale]);
+  });
+
+  it("behoudt warm bewijs alleen wanneer de actuele bronrevision semantisch gelijk is bewezen", () => {
+    const compositeKey = "remote-facts-basis-1\u0000candidate-semantic-shift";
+    const ready = {
+      candidate_key: "candidate-semantic-shift",
+      basis_token: "remote-facts-basis-1",
+      status: "ready",
+      source: { kind: "shift", id: "shift-1", revision: 3 },
+      evaluated_at: new Date(NOW - 5_000).toISOString(),
+      expires_at: new Date(NOW + 60_000).toISOString(),
+      warning_snapshot: [],
+    };
+    const stale = {
+      ...ready,
+      status: "stale",
+      source: { kind: "shift", id: "shift-1", revision: 4 },
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      warning_codes: ["eligibility_source_revision_stale"],
+    };
+    const beforeAck = { ...shift, id: "shift-1", revision: 3 };
+    const technicalAck = { ...beforeAck, revision: 4 };
+    const semanticEdit = { ...technicalAck, end_time: "16:00" };
+
+    expect(planningEligibilitySourceSemanticsEqual(beforeAck, technicalAck)).toBe(true);
+    expect(planningEligibilitySourceSemanticsEqual(beforeAck, semanticEdit)).toBe(false);
+    expect(mergePlanningEligibilityServerDecisions([ready], [stale], {
+      now: NOW,
+      retainReadySourceRevisionKeys: new Set([compositeKey]),
+    })).toEqual([ready]);
+    expect(mergePlanningEligibilityServerDecisions([ready], [stale], {
+      now: NOW,
+      retainReadySourceRevisionKeys: new Set(),
+    })).toEqual([stale]);
+  });
+
+  it("accepteert een revision-stale uitzondering alleen voor een aantoonbare eigen ACK", () => {
+    const acknowledged = {
+      revision: 4,
+      source: { ...shift, id: "shift-1", revision: 4 },
+    };
+    const resultSource = { kind: "shift", id: "shift-1", revision: 4 };
+    const currentSource = { ...shift, id: "shift-1", revision: 4 };
+
+    expect(planningEligibilityOwnSourceRevisionMatches(
+      acknowledged,
+      resultSource,
+      currentSource,
+    )).toBe(true);
+    expect(planningEligibilityOwnSourceRevisionMatches(
+      acknowledged,
+      { ...resultSource, revision: 5 },
+      { ...currentSource, revision: 5 },
+    )).toBe(false);
+    expect(planningEligibilityOwnSourceRevisionMatches(
+      acknowledged,
+      resultSource,
+      { ...currentSource, end_time: "16:00" },
+    )).toBe(false);
   });
 
   it("herhaalt een mislukte hovercontrole niet maar laat een begrensde drop-retry wel toe", () => {
@@ -323,6 +415,130 @@ describe("visible-range planning eligibility index", () => {
     expect(result.isClear).toBe(true);
     expect(result.displayWarnings).toEqual([]);
     expect(result.serverFinalAuthority).toBe(true);
+  });
+
+  it("houdt server-feiten warm wanneer alleen de optimistische planning wijzigt", () => {
+    const before = createPlanningEligibilityIndex(indexOptions());
+    const after = createPlanningEligibilityIndex(indexOptions({
+      dependencies: readyDependencies({
+        shifts: { version: "shifts-2" },
+        assignments: { version: "assignments-2" },
+      }),
+    }));
+
+    expect(after.basisToken).toBe(before.basisToken);
+    expect(after.remoteFactsBasisToken).toBe(before.remoteFactsBasisToken);
+    expect(after.scheduleBasisToken).not.toBe(before.scheduleBasisToken);
+    expect(after.basisToken).not.toContain("shifts:");
+    expect(after.basisToken).not.toContain("assignments:");
+    expect(after.scheduleBasisToken).toContain("shifts:ready:shifts-2");
+    expect(after.scheduleBasisToken).toContain("assignments:ready:assignments-2");
+  });
+
+  it("hergebruikt warme serverfeiten maar ziet een optimistische overlap, rust- en urenwaarschuwing direct", () => {
+    const shortContract = { ...contract, contract_hours_per_week: 12 };
+    const bootstrap = createPlanningEligibilityIndex(indexOptions({
+      contracts: [shortContract],
+      requireServerDecision: true,
+    }));
+    const candidateKey = planningEligibilityCandidateKey({ personnelId: person.id, shift });
+    const warmDecision = {
+      candidate_key: candidateKey,
+      basis_token: bootstrap.basisToken,
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      expires_at: new Date(NOW + 60_000).toISOString(),
+      warning_snapshot: [],
+    };
+    const before = createPlanningEligibilityIndex(indexOptions({
+      contracts: [shortContract],
+      requireServerDecision: true,
+      serverDecisions: [warmDecision],
+    }));
+    expect(before.queryShift({ personnelId: person.id, shift })).toMatchObject({
+      status: "ready",
+      isClear: true,
+    });
+
+    const overlappingShift = {
+      ...shift,
+      id: "shift-optimistic-overlap",
+      name: "Optimistische overlap",
+      start_time: "08:00",
+      end_time: "12:00",
+    };
+    const nearbyShift = {
+      ...shift,
+      id: "shift-optimistic-nearby",
+      name: "Optimistische avonddienst",
+      start_time: "20:00",
+      end_time: "21:00",
+    };
+    const after = createPlanningEligibilityIndex(indexOptions({
+      shifts: [shift, overlappingShift, nearbyShift],
+      assignments: [overlappingShift, nearbyShift].map(item => ({
+        id: `assignment-${item.id}`,
+        planning_shift_id: item.id,
+        personnel_id: person.id,
+        status: "draft",
+      })),
+      contracts: [shortContract],
+      dependencies: readyDependencies({
+        shifts: { version: "shifts-optimistic-2" },
+        assignments: { version: "assignments-optimistic-2" },
+      }),
+      requireServerDecision: true,
+      serverDecisions: [warmDecision],
+    }));
+    const result = after.queryShift({ personnelId: person.id, shift });
+
+    expect(after.basisToken).toBe(before.basisToken);
+    expect(after.scheduleBasisToken).not.toBe(before.scheduleBasisToken);
+    expect(result.status).toBe("ready");
+    expect(result.warnings.map(item => item.code)).toEqual(expect.arrayContaining([
+      "double_booking",
+      "insufficient_rest",
+      "contract_hours_exceeded",
+    ]));
+  });
+
+  it("verwijdert oude server-planningswaarschuwingen maar behoudt statische CAO-waarschuwingen", () => {
+    const bootstrap = createPlanningEligibilityIndex(indexOptions({ requireServerDecision: true }));
+    const candidateKey = planningEligibilityCandidateKey({ personnelId: person.id, shift });
+    const caoWarning = {
+      code: "cao_manual_review",
+      severity: "warning",
+      title: "CAO-controle",
+      detail: "Handmatige beoordeling nodig.",
+      source: "cao",
+    };
+    const index = createPlanningEligibilityIndex(indexOptions({
+      requireServerDecision: true,
+      serverDecisions: [{
+        candidate_key: candidateKey,
+        basis_token: bootstrap.basisToken,
+        status: "ready",
+        expires_at: new Date(NOW + 60_000).toISOString(),
+        warning_snapshot: [
+          {
+            code: "legacy_planning_warning",
+            severity: "warning",
+            message: "Planning is intussen gewijzigd.",
+            source: "planning",
+          },
+          { code: "shift_overlap", severity: "critical", message: "Oude overlap." },
+          { code: "double_booking", severity: "critical", message: "Oude dubbele dienst." },
+          { code: "insufficient_rest", severity: "warning", message: "Oude rustwaarschuwing." },
+          { code: "contract_hours_exceeded", severity: "warning", message: "Oude urenwaarschuwing." },
+          caoWarning,
+        ],
+      }],
+    }));
+    const result = index.queryShift({ personnelId: person.id, shift });
+
+    expect(result.status).toBe("ready");
+    expect(result.warnings).toEqual([caoWarning]);
+    expect(result.displayWarnings.map(item => item.code)).toEqual(["cao_manual_review"]);
   });
 
   it("toont ontbrekende of ladende data nooit als veilig", () => {
@@ -667,6 +883,58 @@ describe("visible-range planning eligibility index", () => {
     });
 
     expect(changed).not.toBe(baseline);
+  });
+
+  it("houdt dezelfde semantische dienstcandidate warm na alleen een technische revision-ACK", () => {
+    const beforeAck = planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: { ...shift, revision: 3 },
+    });
+    const afterAck = planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: { ...shift, revision: 4 },
+    });
+
+    expect(afterAck).toBe(beforeAck);
+    expect(planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: { ...shift, revision: 4, start_time: "07:00" },
+    })).not.toBe(beforeAck);
+    expect(planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: { ...shift, revision: 4, status: "cancelled" },
+    })).not.toBe(beforeAck);
+  });
+
+  it("bindt een dienstcandidate ook aan routebeperkingen en expliciete pasvrijstelling", () => {
+    const baseline = planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: {
+        ...shift,
+        route_name_snapshot: "Route Noord",
+        requires_security_pass: true,
+        security_pass_required: true,
+      },
+    });
+
+    expect(planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: {
+        ...shift,
+        route_name_snapshot: "Route Zuid",
+        requires_security_pass: true,
+        security_pass_required: true,
+      },
+    })).not.toBe(baseline);
+    expect(planningEligibilityCandidateKey({
+      personnelId: person.id,
+      shift: {
+        ...shift,
+        route_name_snapshot: "Route Noord",
+        requires_security_pass: false,
+        security_pass_required: false,
+      },
+    })).not.toBe(baseline);
   });
 
   it("begrensd snelle unieke hovercontroles en geeft een slot idempotent vrij", () => {

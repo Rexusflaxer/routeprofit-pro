@@ -613,7 +613,11 @@ export function getPlanningMutationQueue() {
   if (!sharedPlanningMutationQueue) {
     const target = typeof window !== "undefined" ? window : null;
     sharedPlanningMutationQueue = createPlanningMutationQueue({
-      maxParallel: 4,
+      // Optimistic rendering makes throughput independent from the number of
+      // simultaneous Base44 writes. Two lanes keep independent work moving
+      // while avoiding the 4x function/entity burst that previously triggered
+      // rate limits during rapid assignment.
+      maxParallel: 2,
       beforeUnloadTarget: target,
     });
   }
@@ -646,6 +650,36 @@ export function planningPersonnelDayResourceKeys(personnelId, startDate, endDate
     cursor = new Date(cursor.getTime() + 86_400_000);
   }
   return keys;
+}
+
+export function planningPersonnelWeekResourceKey(personnelId, serviceDate) {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!personnelId || !datePattern.test(String(serviceDate || ""))) return null;
+  const date = new Date(`${serviceDate}T12:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== serviceDate) return null;
+  const weekday = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - ((weekday + 6) % 7));
+  return `personnel-week:${personnelId}:${date.toISOString().slice(0, 10)}`;
+}
+
+/**
+ * Resource fence for the complete eligibility horizon of an assignment.
+ * D-1/D/D+1 serialises the eleven-hour rest check. ISO-week keys serialise
+ * authoritative contract-hour totals while the optimistic UI can keep
+ * accepting subsequent drops immediately.
+ */
+export function planningPersonnelEligibilityResourceKeys(personnelId, startDate, endDate = startDate) {
+  const coveredDays = planningPersonnelDayResourceKeys(personnelId, startDate, endDate);
+  if (!coveredDays.length) return [];
+  const first = new Date(`${startDate}T00:00:00.000Z`);
+  const last = new Date(`${endDate}T00:00:00.000Z`);
+  const paddedStart = new Date(first.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const paddedEnd = new Date(last.getTime() + 86_400_000).toISOString().slice(0, 10);
+  const dayKeys = planningPersonnelDayResourceKeys(personnelId, paddedStart, paddedEnd);
+  const weekKeys = [...new Set(coveredDays.map(key => (
+    planningPersonnelWeekResourceKey(personnelId, key.slice(key.lastIndexOf(":") + 1))
+  )).filter(Boolean))];
+  return [...dayKeys, ...weekKeys];
 }
 
 export const planningMutationQueueInternals = {

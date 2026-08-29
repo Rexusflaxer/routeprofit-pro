@@ -2320,8 +2320,8 @@ describe("planningApi dienstsamenstelling", () => {
     expect(calls.count("PlanningAssignment.create")).toBe(1);
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
-    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
-    expect(calls.total()).toBeLessThanOrEqual(50);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(16);
+    expect(calls.total()).toBe(65);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -2384,6 +2384,105 @@ describe("planningApi dienstsamenstelling", () => {
       expect.objectContaining({ code: "security_pass_expired", severity: "critical" }),
       expect.objectContaining({ code: "insufficient_rest", severity: "warning" }),
     ]));
+  });
+
+  it("herberekent contractweekuren finaal met het geroute contract en de actuele assignment-write", async () => {
+    const demand = {
+      ...occurrence("occurrence-final-contract-week", "object-1", "08:00", "16:00", 480),
+      service_date: "2026-08-21",
+      end_date: "2026-08-21",
+    };
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-final-contract-week";
+    entities.Personnel.records.push({ id: personnelId, name: "Weekbeveiliger", status: "active" });
+    ["2026-08-17", "2026-08-18", "2026-08-19"].forEach((serviceDate, index) => {
+      const shiftId = `shift-contract-week-${index + 1}`;
+      entities.PlanningShift.records.push({
+        id: shiftId,
+        source_key: `manual:${shiftId}`,
+        source_type: "manual",
+        service_name_snapshot: "Bestaande weekdienst",
+        service_date: serviceDate,
+        start_time: "08:00",
+        end_time: "16:00",
+        required_count: 1,
+        status: "published",
+        revision: 1,
+        published_revision: 1,
+      });
+      entities.PlanningAssignment.records.push({
+        id: `assignment-contract-week-${index + 1}`,
+        shift_id: shiftId,
+        slot_index: 0,
+        personnel_id: personnelId,
+        status: "published",
+        revision: 1,
+        published_revision: 1,
+      });
+    });
+    const originalAssignmentCreate = entities.PlanningAssignment.create.bind(entities.PlanningAssignment);
+    entities.PlanningAssignment.create = async data => {
+      const created = await originalAssignmentCreate(data);
+      entities.PlanningShift.records.push({
+        id: "shift-contract-week-concurrent",
+        source_key: "manual:shift-contract-week-concurrent",
+        source_type: "manual",
+        service_name_snapshot: "Gelijktijdig toegevoegde weekdienst",
+        service_date: "2026-08-20",
+        start_time: "08:00",
+        end_time: "16:00",
+        required_count: 1,
+        status: "draft",
+        revision: 1,
+        published_revision: 0,
+      });
+      entities.PlanningAssignment.records.push({
+        id: "assignment-contract-week-concurrent",
+        shift_id: "shift-contract-week-concurrent",
+        slot_index: 0,
+        personnel_id: personnelId,
+        status: "draft",
+        revision: 1,
+        published_revision: 0,
+      });
+      return created;
+    };
+    base44.asServiceRole.functions.invoke = async () => ({
+      contract_id: "contract-final-week",
+      selected_contract: {
+        id: "contract-final-week",
+        contract_hours_per_week: 36,
+        max_hours_per_week: null,
+      },
+    });
+    const result = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      warning_snapshot: [{
+        code: "contract_hours_exceeded",
+        severity: "warning",
+        message: "Oude lokale weekurenwaarschuwing",
+        source: "planner",
+      }],
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-final-contract-week"));
+
+    const weekWarnings = result.assignment.warning_snapshot.filter(item => (
+      item.code === "contract_hours_exceeded"
+    ));
+    expect(result.assignment.personnel_contract_id).toBe("contract-final-week");
+    expect(weekWarnings).toEqual([expect.objectContaining({
+      severity: "warning",
+      source: "planning_contract_hours",
+      details: expect.objectContaining({
+        contract_id: "contract-final-week",
+        week_start: "2026-08-17",
+        week_end: "2026-08-23",
+        scheduled_minutes: 40 * 60,
+        limit_minutes: 36 * 60,
+      }),
+    })]);
+    expect(weekWarnings[0].message).not.toContain("Oude lokale");
   });
 
   it("staat exact twaalf uur automatisch toe, maar weigert twaalf uur en vijf minuten zonder neveneffecten", async () => {
@@ -2556,13 +2655,13 @@ describe("planningApi dienstsamenstelling", () => {
       expected_shift_revision: 1,
     }, context("assign-lease-callcount"));
 
-    expect(entities.PlanningMutationCoordinator.records).toHaveLength(2);
-    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(4);
+    expect(entities.PlanningMutationCoordinator.records).toHaveLength(5);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningAssignment.create")).toBe(1);
     expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
     expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
-    expect(calls.total()).toBeLessThanOrEqual(29);
+    expect(calls.total()).toBe(42);
     expect(assignmentValidationSawProvisionalWrite).toBe(true);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
@@ -2705,7 +2804,16 @@ describe("planningApi dienstsamenstelling", () => {
       "historical-shift-99",
     ]));
     expect(shiftQueries).toContainEqual({
-      service_date: { $in: ["2026-08-16", "2026-08-17", "2026-08-18"] },
+      service_date: { $in: [
+        "2026-08-16",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-22",
+        "2026-08-23",
+      ] },
     });
   });
 
@@ -3410,6 +3518,194 @@ describe("planningApi dienstsamenstelling", () => {
       .toBeUndefined();
   });
 
+  it("serialiseert een late dienst op D met een vroege dienst op D+1 en hercontroleert de rusttijd", async () => {
+    const lateDemand = occurrence("occurrence-late-adjacent-day", "object-1", "21:00", "23:00", 120);
+    const earlyDemand = {
+      ...occurrence("occurrence-early-adjacent-day", "object-2", "06:00", "10:00", 240),
+      service_date: "2026-08-18",
+      end_date: "2026-08-18",
+    };
+    const { base44, entities } = setup([lateDemand, earlyDemand]);
+    const personnelId = "personnel-adjacent-rest";
+    entities.Personnel.records.push({ id: personnelId, name: "Rustvenster Beveiliger", status: "active" });
+    const originalShiftCreate = entities.PlanningShift.create.bind(entities.PlanningShift);
+    let markFirstAtCreate;
+    let releaseFirstCreate;
+    const firstAtCreate = new Promise(resolve => { markFirstAtCreate = resolve; });
+    const createReleased = new Promise(resolve => { releaseFirstCreate = resolve; });
+    let blockFirstCreate = true;
+    entities.PlanningShift.create = async data => {
+      if (blockFirstCreate) {
+        blockFirstCreate = false;
+        markFirstAtCreate();
+        await createReleased;
+      }
+      return originalShiftCreate(data);
+    };
+
+    const firstAttempt = backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: lateDemand.id, start_time: "21:00", end_time: "23:00" }],
+      expected_occurrence_revisions: { [lateDemand.id]: 1 },
+    }, context("compose-adjacent-rest-late"));
+    await firstAtCreate;
+    try {
+      await expect(backend.composeAndAssign(base44, user, {
+        personnel_id: personnelId,
+        segments: [{ task_occurrence_id: earlyDemand.id, start_time: "06:00", end_time: "10:00" }],
+        expected_occurrence_revisions: { [earlyDemand.id]: 1 },
+      }, context("compose-adjacent-rest-early-blocked"))).rejects.toMatchObject({ status: 409 });
+    } finally {
+      releaseFirstCreate();
+    }
+    await firstAttempt;
+
+    const retried = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: earlyDemand.id, start_time: "06:00", end_time: "10:00" }],
+      expected_occurrence_revisions: { [earlyDemand.id]: 1 },
+    }, context("compose-adjacent-rest-early-retry"));
+
+    expect(retried.assignment.warning_codes).toContain("insufficient_rest");
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(2);
+  });
+
+  it("serialiseert niet-aangrenzende diensten binnen dezelfde ISO-week en herberekent daarna de weekgrens", async () => {
+    const mondayDemand = occurrence("occurrence-week-lease-monday", "object-1", "08:00", "16:00", 480);
+    const fridayDemand = {
+      ...occurrence("occurrence-week-lease-friday", "object-2", "08:00", "16:00", 480),
+      service_date: "2026-08-21",
+      end_date: "2026-08-21",
+    };
+    const { base44, entities } = setup([mondayDemand, fridayDemand]);
+    const personnelId = "personnel-week-lease";
+    entities.Personnel.records.push({ id: personnelId, name: "Weekgrens Beveiliger", status: "active" });
+    base44.asServiceRole.functions.invoke = async () => ({
+      contract_id: "contract-week-lease",
+      selected_contract: {
+        id: "contract-week-lease",
+        contract_hours_per_week: 12,
+        max_hours_per_week: null,
+      },
+    });
+    const originalShiftCreate = entities.PlanningShift.create.bind(entities.PlanningShift);
+    let markFirstAtCreate;
+    let releaseFirstCreate;
+    const firstAtCreate = new Promise(resolve => { markFirstAtCreate = resolve; });
+    const createReleased = new Promise(resolve => { releaseFirstCreate = resolve; });
+    let blockFirstCreate = true;
+    entities.PlanningShift.create = async data => {
+      if (blockFirstCreate) {
+        blockFirstCreate = false;
+        markFirstAtCreate();
+        await createReleased;
+      }
+      return originalShiftCreate(data);
+    };
+
+    const completionOrder = [];
+    const firstAttempt = backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: mondayDemand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [mondayDemand.id]: 1 },
+    }, context("compose-week-lease-monday"));
+    await firstAtCreate;
+    try {
+      await expect(backend.composeAndAssign(base44, user, {
+        personnel_id: personnelId,
+        segments: [{ task_occurrence_id: fridayDemand.id, start_time: "08:00", end_time: "16:00" }],
+        expected_occurrence_revisions: { [fridayDemand.id]: 1 },
+      }, context("compose-week-lease-friday-blocked"))).rejects.toMatchObject({
+        status: 409,
+        details: {
+          resource_type: "personnel_day",
+          resource_id: `week:${personnelId}:2026-08-17`,
+        },
+      });
+    } finally {
+      releaseFirstCreate();
+    }
+    await firstAttempt;
+    completionOrder.push("maandag");
+
+    const retried = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: fridayDemand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [fridayDemand.id]: 1 },
+    }, context("compose-week-lease-friday-retry"));
+    completionOrder.push("vrijdag");
+
+    expect(completionOrder).toEqual(["maandag", "vrijdag"]);
+    expect(retried.assignment.warning_snapshot).toContainEqual(expect.objectContaining({
+      code: "contract_hours_exceeded",
+      source: "planning_contract_hours",
+      details: expect.objectContaining({
+        week_start: "2026-08-17",
+        week_end: "2026-08-23",
+        scheduled_minutes: 16 * 60,
+        limit_minutes: 12 * 60,
+      }),
+    }));
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(2);
+  });
+
+  it("laat dezelfde medewerker in verschillende ISO-weken parallel doorlopen", async () => {
+    const firstWeekDemand = occurrence("occurrence-parallel-week-one", "object-1", "08:00", "12:00", 240);
+    const secondWeekDemand = {
+      ...occurrence("occurrence-parallel-week-two", "object-2", "08:00", "12:00", 240),
+      service_date: "2026-08-24",
+      end_date: "2026-08-24",
+    };
+    const { base44, entities } = setup([firstWeekDemand, secondWeekDemand]);
+    const personnelId = "personnel-parallel-weeks";
+    entities.Personnel.records.push({ id: personnelId, name: "Parallelle Week Beveiliger", status: "active" });
+    const originalShiftCreate = entities.PlanningShift.create.bind(entities.PlanningShift);
+    let markFirstAtCreate;
+    let releaseFirstCreate;
+    const firstAtCreate = new Promise(resolve => { markFirstAtCreate = resolve; });
+    const createReleased = new Promise(resolve => { releaseFirstCreate = resolve; });
+    let blockFirstCreate = true;
+    entities.PlanningShift.create = async data => {
+      if (blockFirstCreate) {
+        blockFirstCreate = false;
+        markFirstAtCreate();
+        await createReleased;
+      }
+      return originalShiftCreate(data);
+    };
+
+    const firstAttempt = backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: firstWeekDemand.id, start_time: "08:00", end_time: "12:00" }],
+      expected_occurrence_revisions: { [firstWeekDemand.id]: 1 },
+    }, context("compose-parallel-week-one"));
+    await firstAtCreate;
+    let secondResult;
+    try {
+      secondResult = await backend.composeAndAssign(base44, user, {
+        personnel_id: personnelId,
+        segments: [{ task_occurrence_id: secondWeekDemand.id, start_time: "08:00", end_time: "12:00" }],
+        expected_occurrence_revisions: { [secondWeekDemand.id]: 1 },
+      }, context("compose-parallel-week-two"));
+    } finally {
+      releaseFirstCreate();
+    }
+    await firstAttempt;
+
+    expect(secondResult.assignment.personnel_id).toBe(personnelId);
+    expect(entities.PlanningMutationCoordinator.records
+      .filter(item => item.resource_type === "personnel_day" && item.resource_id.startsWith("week:"))
+      .map(item => item.resource_id)
+      .sort()).toEqual([
+        `week:${personnelId}:2026-08-17`,
+        `week:${personnelId}:2026-08-24`,
+      ]);
+    expect(entities.PlanningShift.records).toHaveLength(2);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(2);
+  });
+
   it("serialiseert dezelfde sleutel ook bij disjuncte occurrences en verschillende payloads", async () => {
     const firstDemand = occurrence("occurrence-reception", "object-1", "08:00", "12:00", 240);
     const secondDemand = occurrence("occurrence-rounds", "object-2", "12:00", "16:00", 240);
@@ -3661,8 +3957,11 @@ describe("planningApi dienstsamenstelling", () => {
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
       .sort()).toEqual([
+        "personnel-night:2026-08-16",
         "personnel-night:2026-08-17",
         "personnel-night:2026-08-18",
+        "personnel-night:2026-08-19",
+        "week:personnel-night:2026-08-17",
       ]);
   });
 
@@ -4861,8 +5160,8 @@ describe("planningApi dienstsamenstelling", () => {
     )).toMatchObject({ coverage_status: "full", allocated_minutes: 690, remaining_minutes: 0 });
     expect(validationCalls).toBe(1);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
-    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(8);
-    expect(calls.total()).toBeLessThanOrEqual(47);
+    expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(14);
+    expect(calls.total()).toBe(56);
 
     const shiftCount = entities.PlanningShift.records.length;
     const segmentCount = entities.PlanningShiftTaskSegment.records.length;
@@ -5070,9 +5369,9 @@ describe("planningApi dienstsamenstelling", () => {
       item.action === "resize_task_shift_preserving_coverage"
     ))).toHaveLength(0);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease == null)).toBe(true);
-    expect(releaseAttemptsByCoordinator.size).toBe(4);
-    expect([...releaseAttemptsByCoordinator.values()]).toEqual([3, 3, 3, 3]);
-    expect(retryDelays).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+    expect(releaseAttemptsByCoordinator.size).toBe(7);
+    expect([...releaseAttemptsByCoordinator.values()]).toEqual([3, 3, 3, 3, 3, 3, 3]);
+    expect(retryDelays).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
 
     const recovered = await backend.resizeTaskShiftPreservingCoverage(
       base44,
@@ -5184,9 +5483,9 @@ describe("planningApi dienstsamenstelling", () => {
     });
     expect(exhaustedError.details.retry_after_ms).toBeGreaterThan(100_000);
     expect(Date.parse(exhaustedError.details.retry_after)).toBeGreaterThan(Date.now() + 100_000);
-    expect(releaseAttemptsByCoordinator.size).toBe(4);
-    expect([...releaseAttemptsByCoordinator.values()]).toEqual([6, 6, 6, 6]);
-    expect(entities.PlanningMutationCoordinator.records.filter(item => item.lease != null)).toHaveLength(4);
+    expect(releaseAttemptsByCoordinator.size).toBe(7);
+    expect([...releaseAttemptsByCoordinator.values()]).toEqual([6, 6, 6, 6, 6, 6, 6]);
+    expect(entities.PlanningMutationCoordinator.records.filter(item => item.lease != null)).toHaveLength(7);
     expect(entities.PlanningAuditEvent.records.filter(item => (
       item.action === "resize_task_shift_preserving_coverage"
     ))).toHaveLength(0);
@@ -6050,8 +6349,11 @@ describe("planningApi dienstsamenstelling", () => {
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
       .sort()).toEqual([
+      `${fixture.personnelId}:2026-08-16`,
       `${fixture.personnelId}:2026-08-17`,
       `${fixture.personnelId}:2026-08-18`,
+      `${fixture.personnelId}:2026-08-19`,
+      `week:${fixture.personnelId}:2026-08-17`,
     ]);
   });
 
@@ -6506,8 +6808,11 @@ describe("planningApi medewerker/dag-reserveringen", () => {
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
       .sort()).toEqual([
+        "personnel-night:2026-08-16",
         "personnel-night:2026-08-17",
         "personnel-night:2026-08-18",
+        "personnel-night:2026-08-19",
+        "week:personnel-night:2026-08-17",
       ]);
   });
 
@@ -6554,10 +6859,13 @@ describe("planningApi medewerker/dag-reserveringen", () => {
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
       .sort()).toEqual([
+        "personnel-night:2026-08-16",
         "personnel-night:2026-08-17",
         "personnel-night:2026-08-18",
         "personnel-night:2026-08-19",
         "personnel-night:2026-08-20",
+        "personnel-night:2026-08-21",
+        "week:personnel-night:2026-08-17",
       ]);
   });
 
@@ -6622,8 +6930,11 @@ describe("planningApi medewerker/dag-reserveringen", () => {
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
       .sort()).toEqual([
+        "personnel-night:2026-08-18",
         "personnel-night:2026-08-19",
         "personnel-night:2026-08-20",
+        "personnel-night:2026-08-21",
+        "week:personnel-night:2026-08-17",
       ]);
   });
 });
