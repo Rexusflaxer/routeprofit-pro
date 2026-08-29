@@ -12,6 +12,27 @@ function resourcesOverlap(left, right) {
   return left.some(key => rightKeys.has(key));
 }
 
+const RESOURCE_INTENT_ID_FIELDS = [
+  ["shift", "shift_id"],
+  ["shift", "left_shift_id"],
+  ["shift", "right_shift_id"],
+  ["occurrence", "task_occurrence_id"],
+  ["occurrence", "occurrence_id"],
+];
+
+function rebasePlanningResourceKeys(resourceKeys, previousIntent, nextIntent) {
+  if (!previousIntent || !nextIntent) return normalizeResourceKeys(resourceKeys);
+  const existing = new Set(resourceKeys || []);
+  const additions = [];
+  RESOURCE_INTENT_ID_FIELDS.forEach(([prefix, field]) => {
+    const previousId = previousIntent?.[field];
+    const nextId = nextIntent?.[field];
+    if (previousId == null || nextId == null || String(previousId) === String(nextId)) return;
+    if (existing.has(`${prefix}:${previousId}`)) additions.push(`${prefix}:${nextId}`);
+  });
+  return normalizeResourceKeys([...(resourceKeys || []), ...additions]);
+}
+
 function safeCallback(callback, value) {
   if (typeof callback !== "function") return Promise.resolve();
   return Promise.resolve().then(() => callback(value));
@@ -564,6 +585,13 @@ export function createPlanningMutationQueue({ maxParallel = 4, beforeUnloadTarge
       if (!entry || typeof updater !== "function") return false;
       const nextIntent = updater(entry.intent, entry);
       if (nextIntent === entry.intent) return false;
+      const previousResourceKeys = entry.resourceKeys;
+      entry.resourceKeys = rebasePlanningResourceKeys(entry.resourceKeys, entry.intent, nextIntent);
+      if (entry.status === "running") {
+        entry.resourceKeys
+          .filter(key => !previousResourceKeys.includes(key))
+          .forEach(key => activeResourceKeys.add(key));
+      }
       entry.intent = nextIntent;
       updateSnapshot();
       return true;
@@ -576,6 +604,13 @@ export function createPlanningMutationQueue({ maxParallel = 4, beforeUnloadTarge
         if (entry.status !== "queued" && entry.status !== "running") return;
         const nextIntent = updater(entry.intent, entry);
         if (nextIntent === entry.intent) return;
+        const previousResourceKeys = entry.resourceKeys;
+        entry.resourceKeys = rebasePlanningResourceKeys(entry.resourceKeys, entry.intent, nextIntent);
+        if (entry.status === "running") {
+          entry.resourceKeys
+            .filter(key => !previousResourceKeys.includes(key))
+            .forEach(key => activeResourceKeys.add(key));
+        }
         entry.intent = nextIntent;
         changed += 1;
       });
@@ -682,10 +717,53 @@ export function planningPersonnelEligibilityResourceKeys(personnelId, startDate,
   return [...dayKeys, ...weekKeys];
 }
 
+function planningShiftResourceDateRange(record) {
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const startDate = String(record?.service_date || record?.start_date || "");
+  if (!datePattern.test(startDate)) return null;
+  let endDate = String(record?.end_date || "");
+  if (!endDate) {
+    const parseMinutes = value => {
+      const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+      if (!match) return null;
+      const hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      if (hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+      return hours * 60 + minutes;
+    };
+    const startMinutes = parseMinutes(record?.start_time);
+    const endMinutes = parseMinutes(record?.end_time);
+    if (startMinutes == null || endMinutes == null) return null;
+    if (endMinutes <= startMinutes) {
+      const start = new Date(`${startDate}T00:00:00.000Z`);
+      endDate = new Date(start.getTime() + 86_400_000).toISOString().slice(0, 10);
+    } else {
+      endDate = startDate;
+    }
+  }
+  if (!datePattern.test(endDate)) return null;
+  return { startDate, endDate };
+}
+
+/**
+ * Mirrors planningApi.personnelDayDescriptors for one employee over every
+ * old and proposed shift interval participating in a planning command.
+ * Explicit end_date is inclusive, including an end exactly at 00:00.
+ */
+export function planningPersonnelShiftResourceKeys(personnelId, shiftRecords = []) {
+  const ranges = (Array.isArray(shiftRecords) ? shiftRecords : [shiftRecords])
+    .map(planningShiftResourceDateRange)
+    .filter(Boolean);
+  return normalizeResourceKeys(ranges.flatMap(({ startDate, endDate }) => (
+    planningPersonnelEligibilityResourceKeys(personnelId, startDate, endDate)
+  )));
+}
+
 export const planningMutationQueueInternals = {
   createBeforeUnloadProtection,
   normalizeCommandIds,
   normalizeResourceKeys,
+  rebasePlanningResourceKeys,
   planningDependencyError,
   resetSharedQueueForTests() {
     sharedPlanningMutationQueue?.dispose();

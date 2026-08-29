@@ -903,6 +903,32 @@ function planningLeaseReleaseFailureDetails(releaseErrors: LooseRecord[]) {
   };
 }
 
+function planningLeaseAcquireFailureSummary(error: unknown) {
+  const details = error && typeof error === 'object'
+    ? (error as any).details
+    : null;
+  return {
+    status: planningErrorStatus(error) || 500,
+    ...(compact(details?.code) ? { code: compact(details.code) } : {}),
+    ...(compact(details?.resource_type) ? { resource_type: compact(details.resource_type) } : {}),
+    ...(compact(details?.resource_id) ? { resource_id: compact(details.resource_id) } : {}),
+  };
+}
+
+function planningLeaseReleaseErrorSummary(error: LooseRecord) {
+  return {
+    entity: compact(error.entity) || null,
+    id: compact(error.id) || null,
+    resource_type: compact(error.resource_type) || null,
+    resource_id: compact(error.resource_id) || null,
+    status: Number(error.status || 0) || null,
+    rate_limited: error.rate_limited === true,
+    attempts: Number(error.attempts || 0) || null,
+    retry_after_ms: Number(error.retry_after_ms || 0) || null,
+    lease_expires_at: compact(error.lease_expires_at) || null,
+  };
+}
+
 async function acquirePlanningResourceLeases(
   base44: LooseRecord,
   user: LooseRecord,
@@ -947,6 +973,8 @@ async function acquirePlanningResourceLeases(
         }
         if (leaseIsActive(coordinator.lease)) {
           throw new ApiError(409, 'Deze planningresource wordt momenteel door een andere planningactie gewijzigd', {
+            code: 'PLANNING_RESOURCE_BUSY',
+            transient: true,
             resource_type: descriptor.resourceType,
             resource_id: descriptor.resourceId,
             reservation_expires_at: coordinator.lease.expires_at,
@@ -992,7 +1020,20 @@ async function acquirePlanningResourceLeases(
     }
     return acquired;
   } catch (error) {
-    await releasePlanningResourceLeases(base44, user, acquired);
+    const releaseErrors = await releasePlanningResourceLeases(base44, user, acquired);
+    if (releaseErrors.length) {
+      throw new ApiError(
+        503,
+        'Planningreservering kon na een afgebroken reserveringspoging niet volledig worden vrijgegeven',
+        {
+          ...planningLeaseReleaseFailureDetails(releaseErrors),
+          lease_acquire_cleanup_exhausted: true,
+          retry_safe: false,
+          acquire_error: planningLeaseAcquireFailureSummary(error),
+          lease_release_errors: releaseErrors.map(planningLeaseReleaseErrorSummary),
+        },
+      );
+    }
     throw error;
   }
 }
@@ -17510,6 +17551,7 @@ async function publishPlanning(
 }
 
 export {
+  acquirePlanningResourceLeases,
   activeTaskSegments,
   addObjectTaskSeries,
   amsterdamServerClock,

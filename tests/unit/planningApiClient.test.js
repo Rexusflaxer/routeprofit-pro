@@ -26,6 +26,7 @@ async function loadPlanningClient({ pinned = true } = {}) {
 
 describe("planningApiClient functieversieherstel", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
     vi.clearAllMocks();
     vi.useRealTimers();
@@ -209,6 +210,128 @@ describe("planningApiClient functieversieherstel", () => {
 
     await expect(pending).resolves.toMatchObject({ ok: true, idempotent: true });
     expect(invoke.mock.calls[1][1]).toBe(invoke.mock.calls[0][1]);
+  });
+
+  it("herhaalt een onvolledig opgeruimde partial acquire nooit automatisch", async () => {
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValueOnce(planningError(503, "Planningreservering kon niet volledig worden vrijgegeven", null, {
+      lease_release_exhausted: true,
+      lease_acquire_cleanup_exhausted: true,
+      retry_safe: false,
+      retry_after_ms: 120_000,
+      acquire_error: {
+        status: 409,
+        code: "PLANNING_RESOURCE_BUSY",
+        resource_type: "personnel_day",
+        resource_id: "day-busy",
+      },
+    }));
+
+    await expect(invokePlanningApi({
+      action: "compose_and_assign",
+      idempotency_key: "planning-partial-acquire-cleanup-exhausted-key",
+    })).rejects.toMatchObject({
+      status: 503,
+      details: {
+        lease_release_exhausted: true,
+        lease_acquire_cleanup_exhausted: true,
+        retry_safe: false,
+      },
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("houdt een idempotente write lokaal vast bij een tijdelijke medewerkerresourcebotsing", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke
+      .mockRejectedValueOnce(planningError(409, "Deze planningresource wordt momenteel door een andere planningactie gewijzigd", null, {
+        code: "PLANNING_RESOURCE_BUSY",
+        transient: true,
+        resource_type: "personnel_day",
+        resource_id: "week:person-1:2026-08-24",
+        reservation_expires_at: "2026-08-29T12:02:00.000Z",
+      }))
+      .mockResolvedValueOnce({ data: { ok: true, assignment: { id: "assignment-2" } } });
+
+    const pending = invokePlanningApi({
+      action: "compose_and_assign",
+      idempotency_key: "planning-resource-busy-retry-key",
+    });
+    await vi.advanceTimersByTimeAsync(249);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(pending).resolves.toMatchObject({ ok: true, assignment: { id: "assignment-2" } });
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[1][1]).toBe(invoke.mock.calls[0][1]);
+  });
+
+  it("respecteert retry_safe false vóór de tijdelijke-resourceclassificatie", async () => {
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValueOnce(planningError(409, "Resourcecleanup vereist handmatige recovery", null, {
+      code: "PLANNING_RESOURCE_BUSY",
+      transient: true,
+      retry_safe: false,
+      resource_type: "personnel_day",
+      resource_id: "day-cleanup-uncertain",
+      reservation_expires_at: "2026-08-29T12:02:00.000Z",
+    }));
+
+    await expect(invokePlanningApi({
+      action: "compose_and_assign",
+      idempotency_key: "planning-resource-busy-not-retry-safe-key",
+    })).rejects.toMatchObject({
+      status: 409,
+      details: { retry_safe: false },
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("herhaalt een semantische revisie-409 niet", async () => {
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValueOnce(planningError(409, "De planning is intussen gewijzigd", null, {
+      code: "STALE_PLANNING_REVISION",
+      transient: false,
+      resource_type: "shift_composition",
+    }));
+
+    await expect(invokePlanningApi({
+      action: "resize_task_shift_preserving_coverage",
+      idempotency_key: "planning-semantic-conflict-key",
+    })).rejects.toMatchObject({ status: 409 });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("meldt een blijvend bezette resource pas na een begrensde stille retryreeks", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { invokePlanningApi, invoke } = await loadPlanningClient({ pinned: false });
+    invoke.mockRejectedValue(planningError(409, "Deze planningresource wordt momenteel door een andere planningactie gewijzigd", null, {
+      code: "PLANNING_RESOURCE_BUSY",
+      transient: true,
+      resource_type: "shift_composition",
+      resource_id: "shift-1",
+      reservation_expires_at: "2026-08-29T12:02:00.000Z",
+    }));
+
+    const pending = invokePlanningApi({
+      action: "move",
+      shift_id: "shift-1",
+      idempotency_key: "planning-resource-busy-exhausted-key",
+    });
+    const rejection = expect(pending).rejects.toMatchObject({
+      status: 409,
+      details: { code: "PLANNING_RESOURCE_BUSY" },
+    });
+    await vi.advanceTimersByTimeAsync(7_099);
+    expect(invoke).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await rejection;
+    expect(invoke).toHaveBeenCalledTimes(6);
+    expect(invoke.mock.calls.every(call => call[1] === invoke.mock.calls[0][1])).toBe(true);
   });
 
   it.each([

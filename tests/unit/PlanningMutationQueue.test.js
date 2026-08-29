@@ -6,6 +6,7 @@ import {
   planningPersonnelDayResourceKey,
   planningPersonnelDayResourceKeys,
   planningPersonnelEligibilityResourceKeys,
+  planningPersonnelShiftResourceKeys,
   planningPersonnelWeekResourceKey,
   planningMutationQueueInternals,
   settlePlanningDropEnqueues,
@@ -15,6 +16,7 @@ import {
   buildPlanningPublicationSnapshot,
   readPlanningRangeSnapshot,
   rebaseDependentPlanningIntent,
+  resolvePlanningShiftTarget,
   withPlanningOptimisticIntentIdentity,
 } from "@/components/planning/planningEffectivePlan";
 
@@ -68,6 +70,45 @@ describe("planning mutation queue", () => {
     );
   });
 
+  it("spiegelt expliciete einddatums inclusief 00:00 over een ISO-weekgrens", () => {
+    expect(planningPersonnelShiftResourceKeys("person-midnight", [{
+      service_date: "2026-08-30",
+      end_date: "2026-08-31",
+      start_time: "20:00",
+      end_time: "00:00",
+    }])).toEqual([
+      "personnel-day:person-midnight:2026-08-29",
+      "personnel-day:person-midnight:2026-08-30",
+      "personnel-day:person-midnight:2026-08-31",
+      "personnel-day:person-midnight:2026-09-01",
+      "personnel-week:person-midnight:2026-08-24",
+      "personnel-week:person-midnight:2026-08-31",
+    ]);
+  });
+
+  it("neemt voor een tijdswijziging de unie van het oude en voorgestelde interval", () => {
+    expect(planningPersonnelShiftResourceKeys("person-resize", [
+      {
+        service_date: "2026-08-24",
+        end_date: "2026-08-24",
+        start_time: "06:30",
+        end_time: "18:00",
+      },
+      {
+        service_date: "2026-08-24",
+        end_date: "2026-08-25",
+        start_time: "15:30",
+        end_time: "00:00",
+      },
+    ])).toEqual([
+      "personnel-day:person-resize:2026-08-23",
+      "personnel-day:person-resize:2026-08-24",
+      "personnel-day:person-resize:2026-08-25",
+      "personnel-day:person-resize:2026-08-26",
+      "personnel-week:person-resize:2026-08-24",
+    ]);
+  });
+
   it("voert snelle diensten op aangrenzende dagen en in dezelfde contractweek FIFO uit", async () => {
     const queue = createPlanningMutationQueue({ maxParallel: 2 });
     const first = deferred();
@@ -113,6 +154,690 @@ describe("planning mutation queue", () => {
     await Promise.all([adjacentOperation, nonAdjacentOperation]);
     expect(started).toEqual(["first", "other-personnel", "adjacent", "non-adjacent"]);
     queue.dispose();
+  });
+
+  it("serialiseert assign-resize-assign voor dezelfde medewerker terwijl een andere medewerker parallel blijft", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const firstAssign = deferred();
+    const resize = deferred();
+    const otherPersonnel = deferred();
+    const started = [];
+    const first = queue.enqueue({
+      id: "rapid-assign-one",
+      resourceKeys: [
+        "occurrence:task-a",
+        ...planningPersonnelShiftResourceKeys("person-rapid", [{
+          service_date: "2026-08-24",
+          start_time: "06:30",
+          end_time: "18:00",
+        }]),
+      ],
+      execute: () => {
+        started.push("assign-one");
+        return firstAssign.promise;
+      },
+    });
+    const resizeOperation = queue.enqueue({
+      id: "rapid-resize-one",
+      dependsOn: ["rapid-assign-one"],
+      resourceKeys: [
+        "shift:pending-a",
+        "occurrence:task-a",
+        ...planningPersonnelShiftResourceKeys("person-rapid", [
+          { service_date: "2026-08-24", start_time: "06:30", end_time: "18:00" },
+          { service_date: "2026-08-24", start_time: "06:30", end_time: "15:30" },
+        ]),
+      ],
+      execute: () => {
+        started.push("resize-one");
+        return resize.promise;
+      },
+    });
+    const second = queue.enqueue({
+      id: "rapid-assign-two",
+      resourceKeys: [
+        "occurrence:task-b",
+        ...planningPersonnelShiftResourceKeys("person-rapid", [{
+          service_date: "2026-08-28",
+          start_time: "08:00",
+          end_time: "12:00",
+        }]),
+      ],
+      intent: {
+        key: "rapid-assign-two",
+        assignments: [{ id: "pending-assignment-two", _optimistic_pending: true }],
+      },
+      execute: () => {
+        started.push("assign-two");
+        return "assign-two";
+      },
+    });
+    const other = queue.enqueue({
+      id: "rapid-other-personnel",
+      resourceKeys: planningPersonnelShiftResourceKeys("person-other", [{
+        service_date: "2026-08-24",
+        start_time: "08:00",
+        end_time: "12:00",
+      }]),
+      execute: () => {
+        started.push("other-personnel");
+        return otherPersonnel.promise;
+      },
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["assign-one", "other-personnel"]);
+    expect(queue.getSnapshot().intents).toContainEqual(expect.objectContaining({
+      key: "rapid-assign-two",
+      assignments: [expect.objectContaining({ id: "pending-assignment-two" })],
+    }));
+    firstAssign.resolve("assign-one");
+    await first;
+    await flushMicrotasks();
+    expect(started).toEqual(["assign-one", "other-personnel", "resize-one"]);
+    otherPersonnel.resolve("other-personnel");
+    await other;
+    await flushMicrotasks();
+    expect(started).not.toContain("assign-two");
+    expect(queue.getSnapshot().intents).toContainEqual(expect.objectContaining({
+      key: "rapid-assign-two",
+    }));
+    resize.resolve("resize-one");
+    await resizeOperation;
+    await expect(second).resolves.toBe("assign-two");
+    expect(started).toEqual(["assign-one", "other-personnel", "resize-one", "assign-two"]);
+    queue.dispose();
+  });
+
+  it("houdt ook assign-assign-resize voor dezelfde medewerker strikt FIFO", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const first = deferred();
+    const second = deferred();
+    const resize = deferred();
+    const started = [];
+    const personnelKeys = planningPersonnelShiftResourceKeys("person-reverse-order", [{
+      service_date: "2026-08-24",
+      start_time: "06:30",
+      end_time: "18:00",
+    }]);
+    const firstOperation = queue.enqueue({
+      id: "reverse-assign-one",
+      resourceKeys: ["occurrence:reverse-a", ...personnelKeys],
+      execute: () => { started.push("assign-one"); return first.promise; },
+    });
+    const secondOperation = queue.enqueue({
+      id: "reverse-assign-two",
+      resourceKeys: ["occurrence:reverse-b", ...personnelKeys],
+      execute: () => { started.push("assign-two"); return second.promise; },
+    });
+    const resizeOperation = queue.enqueue({
+      id: "reverse-resize-one",
+      dependsOn: ["reverse-assign-one"],
+      resourceKeys: ["shift:reverse-a", "occurrence:reverse-a", ...personnelKeys],
+      execute: () => { started.push("resize-one"); return resize.promise; },
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["assign-one"]);
+    first.resolve("assign-one");
+    await firstOperation;
+    await flushMicrotasks();
+    expect(started).toEqual(["assign-one", "assign-two"]);
+    second.resolve("assign-two");
+    await secondOperation;
+    await flushMicrotasks();
+    expect(started).toEqual(["assign-one", "assign-two", "resize-one"]);
+    resize.resolve("resize-one");
+    await resizeOperation;
+    queue.dispose();
+  });
+
+  it("behoudt zowel tijdelijke als serverresource tijdens een intent-rebase", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const parent = deferred();
+    const child = queue.enqueue({
+      id: "resource-rebase-child",
+      resourceKeys: ["shift:pending-shift", "occurrence:occurrence-1"],
+      intent: {
+        shift_id: "pending-shift",
+        task_occurrence_id: "occurrence-1",
+      },
+      execute: () => parent.promise,
+    });
+    await flushMicrotasks();
+
+    expect(queue.updateIntent("resource-rebase-child", intent => ({
+      ...intent,
+      shift_id: "server-shift",
+    }))).toBe(true);
+    expect(queue.getSnapshot().resourceKeys).toEqual([
+      "occurrence:occurrence-1",
+      "shift:pending-shift",
+      "shift:server-shift",
+    ]);
+
+    parent.resolve("done");
+    await child;
+    queue.dispose();
+  });
+
+  it("rebased een handmatige move na de assign-ACK en houdt de vervolgactie FIFO", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const assignmentGate = deferred();
+    const moveGate = deferred();
+    const started = [];
+    const moveWrite = vi.fn(request => {
+      started.push("move");
+      return moveGate.promise;
+    });
+    const unassignWrite = vi.fn(() => {
+      started.push("unassign");
+      return "unassigned";
+    });
+    const reassignWrite = vi.fn(() => {
+      started.push("reassign");
+      return "reassigned";
+    });
+    const sourceShift = {
+      id: "pending-shift-manual-move",
+      revision: 7,
+      service_date: "2026-08-24",
+      start_time: "06:30",
+      end_time: "18:00",
+      status: "draft",
+    };
+    const parentIntent = withPlanningOptimisticIntentIdentity({
+      key: "assign-before-manual-move",
+      shift_id: sourceShift.id,
+      shifts: [sourceShift],
+      assignments: [{
+        id: "pending-assignment-manual-move",
+        planning_shift_id: sourceShift.id,
+        shift_id: sourceShift.id,
+        personnel_id: "person-manual-move",
+        status: "draft",
+      }],
+      segments: [],
+      occurrences: [],
+    }, { originIntentId: "assign-before-manual-move" });
+    const sharedResources = [
+      `shift:${sourceShift.id}`,
+      ...planningPersonnelShiftResourceKeys("person-manual-move", [sourceShift]),
+    ];
+    let authoritativeShift = null;
+    const assignmentOperation = queue.enqueue({
+      id: "assign-before-manual-move",
+      resourceKeys: sharedResources,
+      intent: parentIntent,
+      execute: () => {
+        started.push("assign");
+        return assignmentGate.promise;
+      },
+      onSuccess: result => {
+        authoritativeShift = result.shift;
+        queue.updateIntents(intent => rebaseDependentPlanningIntent(intent, parentIntent, result));
+      },
+    });
+    const moveIntent = withPlanningOptimisticIntentIdentity({
+      key: "manual-move-child",
+      kind: "move_shift",
+      shift_id: sourceShift.id,
+      shifts: [{ ...sourceShift, end_time: "15:30" }],
+      assignments: [],
+      segments: [],
+      occurrences: [],
+    }, { originIntentId: "manual-move-child" });
+    const moveOperation = queue.enqueue({
+      id: "manual-move-child",
+      dependsOn: ["assign-before-manual-move"],
+      resourceKeys: sharedResources,
+      intent: moveIntent,
+      execute: ({ intent }) => {
+        const currentShift = resolvePlanningShiftTarget(
+          { shifts: [authoritativeShift] },
+          { id: intent.shift_id },
+        );
+        const requestedShift = resolvePlanningShiftTarget(intent, { id: intent.shift_id });
+        expect(currentShift.status).toBe("ready");
+        expect(requestedShift.status).toBe("ready");
+        return moveWrite({
+          action: "move",
+          shift_id: currentShift.record.id,
+          end_date: requestedShift.record.end_date || null,
+          start_time: requestedShift.record.start_time,
+          end_time: requestedShift.record.end_time,
+          expected_shift_revision: currentShift.record.revision,
+        });
+      },
+    });
+    const unassignAfterMove = queue.enqueue({
+      id: "unassign-after-manual-move",
+      dependsOn: [moveOperation.commandId],
+      resourceKeys: sharedResources,
+      execute: unassignWrite,
+    });
+    const reassignAfterMove = queue.enqueue({
+      id: "reassign-after-manual-move",
+      dependsOn: [moveOperation.commandId, unassignAfterMove.commandId],
+      resourceKeys: sharedResources,
+      execute: reassignWrite,
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["assign"]);
+    assignmentGate.resolve({
+      shift: { ...sourceShift, id: "server-shift-manual-move", revision: 8 },
+      assignment: {
+        id: "server-assignment-manual-move",
+        planning_shift_id: "server-shift-manual-move",
+        shift_id: "server-shift-manual-move",
+        personnel_id: "person-manual-move",
+        status: "draft",
+      },
+    });
+    await assignmentOperation;
+    await flushMicrotasks();
+
+    expect(moveWrite).toHaveBeenCalledTimes(1);
+    expect(moveWrite).toHaveBeenCalledWith({
+      action: "move",
+      shift_id: "server-shift-manual-move",
+      end_date: null,
+      start_time: "06:30",
+      end_time: "15:30",
+      expected_shift_revision: 8,
+    });
+    expect(started).toEqual(["assign", "move"]);
+
+    moveGate.resolve({
+      shift: {
+        ...sourceShift,
+        id: "server-shift-manual-move",
+        revision: 9,
+        end_time: "15:30",
+      },
+    });
+    await moveOperation;
+    await expect(unassignAfterMove).resolves.toBe("unassigned");
+    await expect(reassignAfterMove).resolves.toBe("reassigned");
+    expect(started).toEqual(["assign", "move", "unassign", "reassign"]);
+    expect(moveWrite).toHaveBeenCalledTimes(1);
+    expect(unassignWrite).toHaveBeenCalledTimes(1);
+    expect(reassignWrite).toHaveBeenCalledTimes(1);
+    queue.dispose();
+  });
+
+  it("annuleert unassign en reassign na een mislukte queued move en draint de keten exact eenmaal", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const checkpoint = queue.createDrainCheckpoint();
+    const moveFailure = new Error("move geweigerd");
+    const moveWrite = vi.fn(() => Promise.reject(moveFailure));
+    const unassignWrite = vi.fn(() => "unassigned");
+    const reassignWrite = vi.fn(() => "reassigned");
+    const move = queue.enqueue({
+      id: "manual-move-fails",
+      resourceKeys: ["shift:manual-cascade"],
+      execute: moveWrite,
+    });
+    const unassign = queue.enqueue({
+      id: "manual-move-unassign-child",
+      dependsOn: [move.commandId],
+      resourceKeys: ["shift:manual-cascade", "personnel-day:old:2026-08-24"],
+      execute: unassignWrite,
+    });
+    const reassign = queue.enqueue({
+      id: "manual-move-reassign-grandchild",
+      dependsOn: [move.commandId, unassign.commandId],
+      resourceKeys: ["shift:manual-cascade", "personnel-day:new:2026-08-24"],
+      execute: reassignWrite,
+    });
+    const drain = queue.drain({ checkpoint });
+
+    const states = await Promise.allSettled([move, unassign, reassign]);
+    const report = await drain;
+
+    expect(states[0]).toMatchObject({ status: "rejected", reason: moveFailure });
+    expect(states.slice(1)).toEqual([
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "PLANNING_DEPENDENCY_FAILED" }),
+      }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "PLANNING_DEPENDENCY_FAILED" }),
+      }),
+    ]);
+    expect(moveWrite).toHaveBeenCalledTimes(1);
+    expect(unassignWrite).not.toHaveBeenCalled();
+    expect(reassignWrite).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      ok: false,
+      completedCount: 3,
+      failures: [{ id: "manual-move-fails", status: "failed", error: moveFailure }],
+      cancellations: [
+        expect.objectContaining({ id: "manual-move-unassign-child", status: "cancelled" }),
+        expect.objectContaining({ id: "manual-move-reassign-grandchild", status: "cancelled" }),
+      ],
+    });
+    expect(new Set([
+      ...report.failures.map(item => item.id),
+      ...report.cancellations.map(item => item.id),
+    ])).toEqual(new Set([
+      "manual-move-fails",
+      "manual-move-unassign-child",
+      "manual-move-reassign-grandchild",
+    ]));
+
+    expect(queue.acknowledgeDrain(report)).toBe(true);
+    await expect(queue.drain({ checkpoint: queue.createDrainCheckpoint() })).resolves.toMatchObject({
+      ok: true,
+      completedCount: 0,
+      failures: [],
+      cancellations: [],
+    });
+    queue.dispose();
+  });
+
+  it("voert resize, unassign en reassign bij een geslaagde single-segment edit strikt als keten uit", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const resizeGate = deferred();
+    const order = [];
+    const resizeWrite = vi.fn(() => {
+      order.push("resize");
+      return resizeGate.promise;
+    });
+    const unassignWrite = vi.fn(() => {
+      order.push("unassign");
+      return "unassigned";
+    });
+    const reassignWrite = vi.fn(() => {
+      order.push("reassign");
+      return "reassigned";
+    });
+    const resize = queue.enqueue({
+      id: "single-segment-resize-success",
+      resourceKeys: ["shift:single-segment", "occurrence:single-segment"],
+      execute: resizeWrite,
+    });
+    const unassign = queue.enqueue({
+      id: "single-segment-unassign-after-resize",
+      dependsOn: [resize.commandId],
+      resourceKeys: ["shift:single-segment", "personnel-day:old:2026-08-24"],
+      execute: unassignWrite,
+    });
+    const reassign = queue.enqueue({
+      id: "single-segment-reassign-after-resize",
+      dependsOn: [resize.commandId, unassign.commandId],
+      resourceKeys: ["shift:single-segment", "personnel-day:new:2026-08-24"],
+      execute: reassignWrite,
+    });
+
+    await flushMicrotasks();
+    expect(order).toEqual(["resize"]);
+    expect(unassignWrite).not.toHaveBeenCalled();
+    expect(reassignWrite).not.toHaveBeenCalled();
+
+    resizeGate.resolve({ shift: { id: "shift-single-segment", revision: 9 } });
+    await expect(resize).resolves.toMatchObject({ shift: { revision: 9 } });
+    await expect(unassign).resolves.toBe("unassigned");
+    await expect(reassign).resolves.toBe("reassigned");
+    expect(order).toEqual(["resize", "unassign", "reassign"]);
+    expect(resizeWrite).toHaveBeenCalledTimes(1);
+    expect(unassignWrite).toHaveBeenCalledTimes(1);
+    expect(reassignWrite).toHaveBeenCalledTimes(1);
+    queue.dispose();
+  });
+
+  it("annuleert de volledige medewerkerwissel als de single-segment resize faalt", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const checkpoint = queue.createDrainCheckpoint();
+    const failure = new Error("resize geweigerd");
+    const resizeWrite = vi.fn(() => Promise.reject(failure));
+    const unassignWrite = vi.fn();
+    const reassignWrite = vi.fn();
+    const resize = queue.enqueue({
+      id: "single-segment-resize-fails",
+      resourceKeys: ["shift:single-segment-failure", "occurrence:single-segment-failure"],
+      execute: resizeWrite,
+    });
+    const unassign = queue.enqueue({
+      id: "single-segment-unassign-cancelled",
+      dependsOn: [resize.commandId],
+      resourceKeys: ["shift:single-segment-failure"],
+      execute: unassignWrite,
+    });
+    const reassign = queue.enqueue({
+      id: "single-segment-reassign-cancelled",
+      dependsOn: [resize.commandId, unassign.commandId],
+      resourceKeys: ["shift:single-segment-failure"],
+      execute: reassignWrite,
+    });
+    const drain = queue.drain({ checkpoint });
+
+    await Promise.allSettled([resize, unassign, reassign]);
+    const report = await drain;
+    expect(resizeWrite).toHaveBeenCalledTimes(1);
+    expect(unassignWrite).not.toHaveBeenCalled();
+    expect(reassignWrite).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      ok: false,
+      completedCount: 3,
+      failures: [{ id: "single-segment-resize-fails", error: failure }],
+      cancellations: [
+        expect.objectContaining({ id: "single-segment-unassign-cancelled" }),
+        expect.objectContaining({ id: "single-segment-reassign-cancelled" }),
+      ],
+    });
+    expect(queue.acknowledgeDrain(report)).toBe(true);
+    await expect(queue.drain({ checkpoint: queue.createDrainCheckpoint() })).resolves.toMatchObject({
+      ok: true,
+      completedCount: 0,
+    });
+    queue.dispose();
+  });
+
+  it("gebruikt bij een times-unchanged editorwissel de terminale server-assignment exact eenmaal", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const parentIntent = withPlanningOptimisticIntentIdentity({
+      key: "terminal-editor-assignment-parent",
+      shift_id: "temp-shift-terminal-editor",
+      shifts: [{
+        id: "temp-shift-terminal-editor",
+        revision: 7,
+        service_date: "2026-08-24",
+        start_time: "06:30",
+        end_time: "18:00",
+        status: "draft",
+      }],
+      assignments: [{
+        id: "temp-assignment-terminal-editor",
+        revision: 1,
+        shift_id: "temp-shift-terminal-editor",
+        planning_shift_id: "temp-shift-terminal-editor",
+        personnel_id: "person-terminal-old",
+        slot_index: 0,
+        status: "draft",
+      }],
+      segments: [],
+      occurrences: [],
+    }, { originIntentId: "terminal-editor-assignment-parent" });
+    const parentResult = {
+      shift: { ...parentIntent.shifts[0], id: "server-shift-terminal-editor", revision: 8 },
+      assignment: {
+        ...parentIntent.assignments[0],
+        id: "server-assignment-terminal-editor",
+        revision: 4,
+        shift_id: "server-shift-terminal-editor",
+        planning_shift_id: "server-shift-terminal-editor",
+      },
+    };
+    const frozenEditorIntent = rebaseDependentPlanningIntent({
+      shift_id: parentIntent.shifts[0].id,
+      assignment_id: parentIntent.assignments[0].id,
+      shifts: [parentIntent.shifts[0]],
+      assignments: [parentIntent.assignments[0]],
+      segments: [],
+      occurrences: [],
+    }, parentIntent, parentResult);
+    const unassignWrite = vi.fn(() => "unassigned");
+    const replacementAssignWrite = vi.fn(() => "replacement-assigned");
+    const unassign = queue.enqueue({
+      id: "terminal-editor-unassign",
+      resourceKeys: ["shift:server-shift-terminal-editor"],
+      execute: () => unassignWrite({
+        action: "unassign",
+        shift_id: frozenEditorIntent.shift_id,
+        assignment_id: frozenEditorIntent.assignment_id,
+        expected_shift_revision: parentResult.shift.revision,
+      }),
+    });
+    const replacementAssign = queue.enqueue({
+      id: "terminal-editor-replacement-assign",
+      dependsOn: [unassign.commandId],
+      resourceKeys: ["shift:server-shift-terminal-editor"],
+      execute: replacementAssignWrite,
+    });
+
+    await expect(unassign).resolves.toBe("unassigned");
+    await expect(replacementAssign).resolves.toBe("replacement-assigned");
+    expect(frozenEditorIntent).toMatchObject({
+      shift_id: "server-shift-terminal-editor",
+      assignment_id: "server-assignment-terminal-editor",
+      shifts: [{ revision: 8 }],
+      assignments: [{ revision: 4, planning_shift_id: "server-shift-terminal-editor" }],
+    });
+    expect(unassignWrite).toHaveBeenCalledTimes(1);
+    expect(unassignWrite).toHaveBeenCalledWith({
+      action: "unassign",
+      shift_id: "server-shift-terminal-editor",
+      assignment_id: "server-assignment-terminal-editor",
+      expected_shift_revision: 8,
+    });
+    expect(replacementAssignWrite).toHaveBeenCalledTimes(1);
+    queue.dispose();
+  });
+
+  it("verstuurd een stale terminale single-segment editorresize exact eenmaal met en zonder personeelketen", async () => {
+    for (const replacePersonnel of [false, true]) {
+      const queue = createPlanningMutationQueue({ maxParallel: 2 });
+      const suffix = replacePersonnel ? "with-personnel" : "without-personnel";
+      const parentIntent = withPlanningOptimisticIntentIdentity({
+        key: `terminal-resize-parent-${suffix}`,
+        shift_id: `temp-shift-${suffix}`,
+        segment_id: `temp-segment-${suffix}`,
+        shifts: [{
+          id: `temp-shift-${suffix}`,
+          revision: 1,
+          service_date: "2026-08-24",
+          start_time: "06:30",
+          end_time: "18:00",
+          status: "draft",
+        }],
+        segments: [{
+          id: `temp-segment-${suffix}`,
+          revision: 1,
+          shift_id: `temp-shift-${suffix}`,
+          task_occurrence_id: `occurrence-${suffix}`,
+          start_date: "2026-08-24",
+          end_date: "2026-08-24",
+          start_time: "06:30",
+          end_time: "18:00",
+          status: "draft",
+        }],
+        assignments: [{
+          id: `temp-assignment-${suffix}`,
+          revision: 1,
+          shift_id: `temp-shift-${suffix}`,
+          planning_shift_id: `temp-shift-${suffix}`,
+          personnel_id: `person-old-${suffix}`,
+          slot_index: 0,
+          status: "draft",
+        }],
+        occurrences: [],
+      }, { originIntentId: `terminal-resize-parent-${suffix}` });
+      const parentResult = {
+        shift: { ...parentIntent.shifts[0], id: `server-shift-${suffix}`, revision: 8 },
+        segment: {
+          ...parentIntent.segments[0],
+          id: `server-segment-${suffix}`,
+          revision: 5,
+          shift_id: `server-shift-${suffix}`,
+        },
+        assignment: {
+          ...parentIntent.assignments[0],
+          id: `server-assignment-${suffix}`,
+          revision: 4,
+          shift_id: `server-shift-${suffix}`,
+          planning_shift_id: `server-shift-${suffix}`,
+        },
+      };
+      const frozenEditorIntent = rebaseDependentPlanningIntent({
+        shift_id: parentIntent.shifts[0].id,
+        segment_id: parentIntent.segments[0].id,
+        assignment_id: parentIntent.assignments[0].id,
+        shifts: [parentIntent.shifts[0]],
+        segments: [parentIntent.segments[0]],
+        assignments: [parentIntent.assignments[0]],
+        occurrences: [],
+      }, parentIntent, parentResult);
+      let currentShift = parentResult.shift;
+      const resizeWrite = vi.fn(() => ({
+        shift: { ...currentShift, revision: 9, end_time: "15:30" },
+        segment: { ...parentResult.segment, revision: 6, end_time: "15:30" },
+        assignment: { ...parentResult.assignment, revision: 5 },
+      }));
+      const unassignWrite = vi.fn(() => "unassigned");
+      const replacementAssignWrite = vi.fn(() => "replacement-assigned");
+      const resize = queue.enqueue({
+        id: `terminal-resize-${suffix}`,
+        resourceKeys: [`shift:${parentResult.shift.id}`, `occurrence:${parentResult.segment.task_occurrence_id}`],
+        execute: () => resizeWrite({
+          action: "resize_task_shift_preserving_coverage",
+          shift_id: frozenEditorIntent.shift_id,
+          segment_id: frozenEditorIntent.segment_id,
+          expected_shift_revision: currentShift.revision,
+          expected_segment_revision: parentResult.segment.revision,
+        }),
+        onSuccess: result => { currentShift = result.shift; },
+      });
+      const operations = [resize];
+      if (replacePersonnel) {
+        const unassign = queue.enqueue({
+          id: `terminal-resize-unassign-${suffix}`,
+          dependsOn: [resize.commandId],
+          resourceKeys: [`shift:${parentResult.shift.id}`],
+          execute: () => unassignWrite({
+            assignment_id: frozenEditorIntent.assignment_id,
+            expected_shift_revision: currentShift.revision,
+          }),
+        });
+        operations.push(unassign, queue.enqueue({
+          id: `terminal-resize-reassign-${suffix}`,
+          dependsOn: [resize.commandId, unassign.commandId],
+          resourceKeys: [`shift:${parentResult.shift.id}`],
+          execute: replacementAssignWrite,
+        }));
+      }
+
+      await Promise.all(operations);
+      expect(resizeWrite).toHaveBeenCalledTimes(1);
+      expect(resizeWrite).toHaveBeenCalledWith({
+        action: "resize_task_shift_preserving_coverage",
+        shift_id: `server-shift-${suffix}`,
+        segment_id: `server-segment-${suffix}`,
+        expected_shift_revision: 8,
+        expected_segment_revision: 5,
+      });
+      expect(unassignWrite).toHaveBeenCalledTimes(replacePersonnel ? 1 : 0);
+      expect(replacementAssignWrite).toHaveBeenCalledTimes(replacePersonnel ? 1 : 0);
+      if (replacePersonnel) {
+        expect(unassignWrite).toHaveBeenCalledWith({
+          assignment_id: `server-assignment-${suffix}`,
+          expected_shift_revision: 9,
+        });
+      }
+      queue.dispose();
+    }
   });
 
   it("begrensd de appbrede write-lane op twee gelijktijdige Base44-mutaties", async () => {
