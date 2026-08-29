@@ -16,6 +16,15 @@ export const PLANNING_ELIGIBILITY_DEPENDENCIES = Object.freeze([
   "objects",
 ]);
 
+// Server eligibility evidence describes employee, contract, CAO and object
+// facts. The current schedule is deliberately excluded from this basis: live
+// overlap, rest and contract-hour warnings are recomputed below from the
+// optimistic client schedule. This keeps valid server evidence warm while a
+// planner makes several independent changes in quick succession.
+export const PLANNING_ELIGIBILITY_REMOTE_FACT_DEPENDENCIES = Object.freeze(
+  PLANNING_ELIGIBILITY_DEPENDENCIES.filter(name => name !== "shifts" && name !== "assignments"),
+);
+
 const READY_STATES = new Set(["ready", "success"]);
 const CHECKING_STATES = new Set(["checking", "loading", "pending", "idle"]);
 const ERROR_STATES = new Set(["error", "failed", "unavailable"]);
@@ -74,8 +83,8 @@ function aggregateDependencyStatus(dependencies) {
   return "ready";
 }
 
-function basisTokenFor(dependencies) {
-  return PLANNING_ELIGIBILITY_DEPENDENCIES.map(name => {
+function basisTokenFor(dependencies, names = PLANNING_ELIGIBILITY_DEPENDENCIES) {
+  return names.map(name => {
     const item = dependencies[name];
     return `${name}:${item.status}:${item.version || item.updatedAt || "unknown"}`;
   }).join("|");
@@ -135,11 +144,26 @@ export function buildPlanningEligibilityObjectShiftContext({ object, occurrence 
   };
 }
 
-function shiftFingerprint(shift) {
+function stableFingerprintValue(value) {
+  if (Array.isArray(value)) return `[${value.map(stableFingerprintValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => (
+      `${JSON.stringify(key)}:${stableFingerprintValue(value[key])}`
+    )).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function shiftFingerprint(shift, { includeRevision = false } = {}) {
   const context = shift?.service_context_snapshot || {};
   return [
     shift?.id,
-    shift?.revision,
+    includeRevision ? shift?.revision : null,
+    shift?.status,
+    shift?.lifecycle_status,
+    shift?.is_active,
+    shift?.source_type,
+    shift?.source_id,
     shift?.service_date,
     shift?.end_date,
     shift?.start_time,
@@ -155,9 +179,14 @@ function shiftFingerprint(shift) {
     shift?.required_cao_function_group ?? context.required_cao_function_group,
     shift?.required_cao_function_level ?? context.required_cao_function_level,
     shift?.required_security_role_status ?? context.required_security_role_status,
+    shift?.requires_security_pass,
+    shift?.security_pass_required,
     records(shift?.required_qualification_types).join(","),
     records(shift?.required_qualification_groups).join(","),
     records(shift?.required_security_pass_types).join(","),
+    records(shift?.required_pass_types).join(","),
+    shift?.required_pass_type,
+    stableFingerprintValue(shift?.requirements?.security_pass_types),
     shift?.contract_assignment_policy ?? context.contract_assignment_policy,
     shift?.performs_security_work ?? context.performs_security_work,
     shift?.security_work_percentage ?? context.security_work_percentage,
@@ -170,7 +199,58 @@ function shiftFingerprint(shift) {
     shift?.timezone ?? context.timezone,
     records(shift?.customer_ids).map(text).sort().join(","),
     records(shift?.object_ids).map(text).sort().join(","),
+    records(shift?.task_occurrence_ids).map(text).sort().join(","),
+    shift?.task_segment_count,
+    shift?.company_name,
+    shift?.company_name_snapshot,
+    shift?.company_label,
+    shift?.customer_name,
+    shift?.customer_name_snapshot,
+    shift?.customer_label,
+    shift?.object_name,
+    shift?.object_name_snapshot,
+    shift?.object_label,
+    shift?.location_name,
+    shift?.route_name,
+    shift?.route_name_snapshot,
+    shift?.route_label,
+    shift?.function_group_id,
+    shift?.function_id,
+    shift?.function_group,
+    shift?.function_group_label,
+    shift?.function_name,
+    shift?.scope_id,
+    shift?.scope_label,
+    stableFingerprintValue(context),
   ].map(text).join("~");
+}
+
+export function planningEligibilitySourceSemanticsEqual(left, right, { kind = "shift" } = {}) {
+  if (!left || !right || text(left.id) !== text(right.id)) return false;
+  return shiftFingerprint(left, { includeRevision: kind === "occurrence" })
+    === shiftFingerprint(right, { includeRevision: kind === "occurrence" });
+}
+
+export function planningEligibilityOwnSourceRevisionMatches(
+  acknowledgement,
+  resultSource,
+  currentSource,
+) {
+  if (
+    !acknowledgement?.source
+    || resultSource?.kind !== "shift"
+    || text(acknowledgement.source.id) !== text(resultSource?.id)
+    || text(currentSource?.id) !== text(resultSource?.id)
+  ) return false;
+  const acknowledgedRevision = Number(acknowledgement.revision);
+  const resultRevision = Number(resultSource?.revision);
+  const currentRevision = Number(currentSource?.revision);
+  if (
+    !Number.isFinite(acknowledgedRevision)
+    || acknowledgedRevision !== resultRevision
+    || resultRevision !== currentRevision
+  ) return false;
+  return planningEligibilitySourceSemanticsEqual(acknowledgement.source, currentSource);
 }
 
 function compactFingerprint(value) {
@@ -193,7 +273,12 @@ export function planningEligibilityCandidateKey({
   excludeAssignmentId = null,
 } = {}) {
   const sourceId = text(occurrenceId || shift?.id || shift?.source_key || "preview");
-  const parts = [kind, requestedPersonnelId, sourceId, compactFingerprint(shiftFingerprint(shift))];
+  const parts = [
+    kind,
+    requestedPersonnelId,
+    sourceId,
+    compactFingerprint(shiftFingerprint(shift, { includeRevision: kind === "occurrence" })),
+  ];
   if (excludeAssignmentId) parts.push(`exclude:${excludeAssignmentId}`);
   return parts
     .map(value => encodeURIComponent(text(value)))
@@ -233,6 +318,7 @@ export function buildPlanningEligibilityPrefetchCandidate({
     _local: {
       personnelId: id,
       shift,
+      source,
       ...(excludeAssignmentId ? { excludeAssignmentId } : {}),
       ...(sourceKind === "occurrence" ? {
         kind: "occurrence",
@@ -376,6 +462,20 @@ function normalizeRemoteDecisions(source) {
   return new Map();
 }
 
+const REMOTE_SCHEDULE_WARNING_CODES = new Set([
+  "shift_overlap",
+  "double_booking",
+  "insufficient_rest",
+  "contract_hours_exceeded",
+]);
+
+function reusableRemoteWarnings(source) {
+  return records(source).filter(item => (
+    text(item?.source).toLowerCase() !== "planning"
+    && !REMOTE_SCHEDULE_WARNING_CODES.has(text(item?.code).toLowerCase())
+  ));
+}
+
 /**
  * Merge server-side eligibility evidence without discarding other planning
  * bases. An optimistic mutation temporarily changes the basis token and may
@@ -391,6 +491,7 @@ export function mergePlanningEligibilityServerDecisions(current = [], incoming =
   now = Date.now(),
   maxEntries = 1_280,
   maxBasisTokens = 4,
+  retainReadySourceRevisionKeys = new Set(),
 } = {}) {
   const readNow = timestamp(now) ?? Date.now();
   const entryLimit = Math.max(1, Math.trunc(Number(maxEntries) || 1));
@@ -407,6 +508,17 @@ export function mergePlanningEligibilityServerDecisions(current = [], incoming =
     const evaluatedAt = timestamp(record?.evaluated_at ?? record?.evaluatedAt) ?? 0;
     const compositeKey = `${basisToken}\u0000${candidateKey}`;
     const previous = merged.get(compositeKey);
+    const warningCodes = records(record?.warning_codes).map(item => text(item).toLowerCase());
+    const isSourceRevisionStale = text(record?.status).toLowerCase() === "stale"
+      && warningCodes.includes("eligibility_source_revision_stale");
+    const previousIsFreshReady = text(previous?.record?.status).toLowerCase() === "ready"
+      && ((timestamp(previous?.record?.expires_at ?? previous?.record?.expiresAt) ?? Number.POSITIVE_INFINITY) > readNow);
+    if (
+      preferred
+      && isSourceRevisionStale
+      && previousIsFreshReady
+      && retainReadySourceRevisionKeys?.has?.(compositeKey)
+    ) return;
     const rank = {
       preferred: preferred ? 1 : 0,
       evaluatedAt,
@@ -569,7 +681,11 @@ function remoteVerdict({ remoteDecisions, candidateKey, basisToken, now, require
     warnings: [],
   };
   const state = text(record.status || record.state || "ready").toLowerCase();
-  const warnings = records(record.warning_snapshot || record.warnings);
+  // A server response can arrive after the planner has already changed the
+  // optimistic schedule. Retain stable CAO/fact warnings, but never replay
+  // server planning warnings that the local index can evaluate synchronously
+  // against the newer schedule.
+  const warnings = reusableRemoteWarnings(record.warning_snapshot || record.warnings);
   if (ERROR_STATES.has(state) || record.error) return {
     status: required ? "unavailable" : "ready",
     reason: required ? "unavailable" : null,
@@ -681,7 +797,8 @@ export function createPlanningEligibilityIndex({
   ]));
   const dependencyStates = dependencyStatesAt(readNow());
   const localStatus = aggregateDependencyStatus(dependencyStates);
-  const basisToken = basisTokenFor(dependencyStates);
+  const basisToken = basisTokenFor(dependencyStates, PLANNING_ELIGIBILITY_REMOTE_FACT_DEPENDENCIES);
+  const scheduleBasisToken = basisTokenFor(dependencyStates);
   const remoteByKey = normalizeRemoteDecisions(serverDecisions);
   const personnelById = new Map(records(personnel).map(item => [text(item?.id), item]).filter(([id]) => id));
   const shiftById = new Map(records(shifts).map(item => [text(item?.id), item]).filter(([id]) => id));
@@ -714,7 +831,11 @@ export function createPlanningEligibilityIndex({
     const queryNow = readNow();
     const currentDependencyStates = dependencyStatesAt(queryNow);
     const currentLocalStatus = aggregateDependencyStatus(currentDependencyStates);
-    const currentBasisToken = basisTokenFor(currentDependencyStates);
+    const currentBasisToken = basisTokenFor(
+      currentDependencyStates,
+      PLANNING_ELIGIBILITY_REMOTE_FACT_DEPENDENCIES,
+    );
+    const currentScheduleBasisToken = basisTokenFor(currentDependencyStates);
     const remote = remoteVerdict({
       remoteDecisions: remoteByKey,
       candidateKey,
@@ -722,7 +843,7 @@ export function createPlanningEligibilityIndex({
       now: queryNow,
       required: requireServerDecision,
     });
-    const cacheKey = `${currentBasisToken}|${candidateKey}|${text(excludeAssignmentId)}|${requireServerDecision ? "server" : "local"}|${remote.status}:${remote.reason || ""}`;
+    const cacheKey = `${currentScheduleBasisToken}|${candidateKey}|${text(excludeAssignmentId)}|${requireServerDecision ? "server" : "local"}|${remote.status}:${remote.reason || ""}`;
     if (cache.has(cacheKey)) {
       stats.cacheHits += 1;
       return cache.get(cacheKey);
@@ -767,6 +888,8 @@ export function createPlanningEligibilityIndex({
     const result = Object.freeze({
       candidateKey,
       basisToken: currentBasisToken,
+      remoteFactsBasisToken: currentBasisToken,
+      scheduleBasisToken: currentScheduleBasisToken,
       status,
       warnings,
       warningSnapshot: warnings,
@@ -807,6 +930,8 @@ export function createPlanningEligibilityIndex({
 
   return Object.freeze({
     basisToken,
+    remoteFactsBasisToken: basisToken,
+    scheduleBasisToken,
     status: localStatus,
     dependencyStates,
     queryShift,

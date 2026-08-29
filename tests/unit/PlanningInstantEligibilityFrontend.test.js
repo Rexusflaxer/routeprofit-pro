@@ -121,7 +121,7 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     const requestSource = between("const requestEligibilityPrefetch", "const requestUrgentEligibilityCandidates = useCallback");
     const queuedWriteSource = between("const runQueuedIntentMutation", "const queuedEffectiveSnapshot");
     const backgroundEffect = between(
-      "const generation = eligibilityBackgroundPrefetchGenerationRef.current + 1",
+      "// A mutation gets the planning API lane exclusively.",
       "const candidates = useMemo",
     );
 
@@ -135,7 +135,7 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     expect(source).toContain('window.addEventListener("pointerdown", handlePointerDown, true)');
     expect(backgroundEffect).toContain("|| eligibilityDependencyRefreshActive");
     expect(backgroundEffect).not.toContain("setEligibilityServerDecisions([])");
-    expect(requestSource).toContain("mergePlanningEligibilityServerDecisions(current, results)");
+    expect(requestSource).toContain("mergePlanningEligibilityServerDecisions(current, results, {");
     expect(backgroundEffect).toContain('priority: "background"');
     expect(backgroundEffect).toContain("planningQueueState.isIdle,");
     expect(backgroundEffect).toContain("planningDragGestureActive,");
@@ -143,6 +143,92 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     expect(queuedWriteSource).not.toContain("waitForCurrentBackgroundBatch()");
     expect(queuedWriteSource).toContain("can never be an");
     expect(queuedWriteSource).toContain("return invokePlanningApi(request)");
+  });
+
+  it("blokkeert een exacte voorcontrole niet op een ongerelateerde planningwrite", () => {
+    const urgentSource = between(
+      "const requestUrgentEligibilityCandidates = useCallback",
+      "requestUrgentEligibilityCandidatesRef.current = requestUrgentEligibilityCandidates",
+    );
+
+    expect(urgentSource).not.toContain("planningMutationQueue.current.getSnapshot().isIdle");
+    expect(urgentSource).toContain("selectPlanningEligibilityRequestCandidates({");
+  });
+
+  it("stuurt bij achtergrondopwarming alleen candidates zonder actueel serverbewijs", () => {
+    const backgroundEffect = between(
+      "// A mutation gets the planning API lane exclusively.",
+      "const candidates = useMemo",
+    );
+
+    expect(backgroundEffect).toContain("selectPlanningEligibilityRequestCandidates({");
+    expect(backgroundEffect).toContain("candidates: backgroundEligibilityCandidates");
+    expect(backgroundEffect).toContain("decisions: eligibilityServerDecisionsRef.current");
+    expect(backgroundEffect).toContain('if (backgroundSelection.status !== "started") return');
+    expect(backgroundEffect).toContain("candidates: backgroundSelection.candidates");
+  });
+
+  it("dedupliceert dezelfde candidate over achtergrond-, hover- en dropcontroles", () => {
+    const requestSource = between(
+      "const requestEligibilityPrefetch",
+      "const requestUrgentEligibilityCandidates = useCallback",
+    );
+    const urgentSource = between(
+      "const requestUrgentEligibilityCandidates = useCallback",
+      "requestUrgentEligibilityCandidatesRef.current = requestUrgentEligibilityCandidates",
+    );
+
+    expect(requestSource).toContain("pendingRequestKeys: eligibilityUrgentPrefetchKeysRef.current");
+    expect(requestSource).toContain("backgroundRequestKeys.forEach(key => eligibilityUrgentPrefetchKeysRef.current.add(key))");
+    expect(requestSource).toContain("backgroundRequestKeys.forEach(key => eligibilityUrgentPrefetchKeysRef.current.delete(key))");
+    expect(urgentSource).toContain("pendingRequestKeys: pending");
+    expect(source).toContain("createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 1 })");
+  });
+
+  it("laat nieuw zichtbare koude candidates na een lopende achtergrondbatch niet stranden", () => {
+    const requestSource = between(
+      "const requestEligibilityPrefetch",
+      "const requestUrgentEligibilityCandidates = useCallback",
+    );
+    const backgroundEffect = between(
+      "// A mutation gets the planning API lane exclusively.",
+      "const candidates = useMemo",
+    );
+
+    expect(requestSource).toContain("setEligibilityFreshnessTick(value => value + 1)");
+    expect(backgroundEffect).toContain("eligibilityBackgroundPrefetchBasisRef.current !== eligibilityIndex.basisToken");
+    expect(backgroundEffect).toContain("const generation = eligibilityBackgroundPrefetchGenerationRef.current");
+    expect(backgroundEffect).toContain("eligibilityBackgroundRetryAtRef.current - Date.now()");
+    expect(backgroundEffect).toContain("backgroundRetryDelay");
+  });
+
+  it("laat een technische eigen shift-ACK geen warm CAO-bewijs koud maken", () => {
+    const requestSource = between(
+      "const requestEligibilityPrefetch",
+      "const requestUrgentEligibilityCandidates = useCallback",
+    );
+
+    expect(requestSource).toContain('result?.source?.kind !== "shift"');
+    expect(requestSource).toContain("eligibilityOwnAckSourceRevisionsRef.current.get");
+    expect(requestSource).toContain("planningEligibilityOwnSourceRevisionMatches");
+    expect(requestSource).toContain("planningEligibilitySourceSemanticsEqual(requested._local.source, currentSource)");
+    expect(requestSource).toContain("retainReadySourceRevisionKeys");
+  });
+
+  it("ververst warm bewijs voor de TTL verloopt zonder een checking-venster te openen", () => {
+    const freshnessSource = between(
+      "const remoteDeadlines = eligibilityServerDecisions",
+      "useEffect(() => {\n    if (!dragEligibilityPreview?.eligibilityCandidate) return;",
+    );
+    const backgroundEffect = between(
+      "// A mutation gets the planning API lane exclusively.",
+      "const candidates = useMemo",
+    );
+
+    expect(source).toContain("const PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS = 15_000");
+    expect(freshnessSource).toContain("value - PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS");
+    expect(backgroundEffect).toContain("now: Date.now() + PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS");
+    expect(backgroundEffect).toContain("eligibilityFreshnessTick");
   });
 
   it("toont een medewerker alleen groen wanneer ook de servervoorcontrole actueel is", () => {
@@ -210,8 +296,6 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     expect(source).toContain("const recoverQueuedPlanningAfterExecutionError = async");
     expect(source).toContain("const recoverQueuedPlanningAfterCallbackError = async");
     expect(source).toContain("setDragPersonnelOrder(candidates.map(candidate => String(candidate.personnel.id)))");
-    expect(source).toContain("Starting another gesture is an explicit replacement of any drop");
-    expect(source).toContain("A new explicit assignment supersedes an older held drop");
     expect(source).toContain("candidates: displayedCandidates");
     expect(deleteSource).toContain("onSuccess: async result =>");
     expect(deleteSource.indexOf("await waitForPlanningDragRelease()")).toBeLessThan(
@@ -219,6 +303,44 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
     );
     expect(bannerSource).toContain("pointer-events-none fixed");
     expect(bannerSource).not.toContain("className={`flex shrink-0");
+  });
+
+  it("annuleert een eerder geaccepteerde vastgehouden drop niet stil bij een nieuwe actie", () => {
+    const beforeDragSource = between("const handleBeforeDragStart", "const handleDragUpdate");
+    const candidateAssignSource = between("const handleCandidateAssign", "const handleUnassign");
+
+    expect(beforeDragSource).not.toContain("pendingEligibilityDropRef.current = null");
+    expect(beforeDragSource).not.toContain("setPendingEligibilityDrop(null)");
+    expect(candidateAssignSource).not.toContain("pendingEligibilityDropRef.current = null");
+    expect(candidateAssignSource).not.toContain("setPendingEligibilityDrop(null)");
+    expect(source).not.toContain("explicit replacement of any drop");
+    expect(source).not.toContain("supersedes an older held drop");
+    expect(source).toContain("pendingEligibilityDropBacklogRef.current");
+    expect(source).toContain("pendingEligibilityDropBacklogRef.current.shift() || null");
+    expect(source).toContain("if (!backlog.some(item => item.id === pending.id)) backlog.push(pending)");
+  });
+
+  it("bepaalt de dropvoorcontrole pas nadat de drag-engine haar invoerslot heeft vrijgegeven", () => {
+    const dragEndSource = between(
+      "const handleDragEnd = result =>",
+      "useEffect(() => {\n    if (!pendingEligibilityDrop) return undefined;\n    const pending = pendingEligibilityDrop;",
+    );
+    const releaseBoundary = dragEndSource.indexOf("window.setTimeout(() =>");
+    const previewResolution = dragEndSource.indexOf("resolveDropEligibilityPreviewRef.current?.(resolvePlanningDrop(result))");
+
+    expect(releaseBoundary).toBeGreaterThanOrEqual(0);
+    expect(previewResolution).toBeGreaterThan(releaseBoundary);
+    expect(dragEndSource.slice(0, releaseBoundary)).not.toContain("resolveDropEligibilityPreview");
+  });
+
+  it("gebruikt bij een generieke vastgehouden assignment nooit tekst over een dienstverwijdering", () => {
+    const holdSource = between(
+      "const holdPlanningDropForEligibility",
+      "const reportUnavailablePlanningDrop",
+    );
+
+    expect(holdSource).not.toContain("dienstverwijdering");
+    expect(holdSource).not.toContain("planningMutationQueue.current.getSnapshot().isIdle");
   });
 
   it("koelt een mislukte hover af en bewaakt een vastgehouden drop tot zijn harde eindtijd", () => {

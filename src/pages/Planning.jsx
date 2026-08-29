@@ -61,7 +61,7 @@ import {
   createPlanningBackgroundRequestGate,
   getPlanningMutationQueue,
   planningPersonnelDayResourceKey,
-  planningPersonnelDayResourceKeys,
+  planningPersonnelEligibilityResourceKeys,
   settlePlanningDropEnqueues,
 } from "@/components/planning/planningMutationQueue";
 import {
@@ -86,6 +86,8 @@ import {
   createPlanningEligibilityUrgentRequestGate,
   createPlanningEligibilityIndex,
   mergePlanningEligibilityServerDecisions,
+  planningEligibilityOwnSourceRevisionMatches,
+  planningEligibilitySourceSemanticsEqual,
   selectPlanningEligibilityRequestCandidates,
 } from "@/components/planning/planningEligibilityIndex";
 import {
@@ -134,6 +136,7 @@ const PLANNING_ZOOM_LEVELS = [0.7, 0.85, 1, 1.15, 1.3];
 const PLANNING_ELIGIBILITY_MAX_AGE_MS = 120_000;
 const PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS = 12_000;
 const PLANNING_ELIGIBILITY_HOVER_DELAY_MS = 80;
+const PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS = 15_000;
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 const compactDateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
@@ -405,14 +408,29 @@ function personnelDayQueueResourceKeys(personnelId, record) {
   const fallbackDate = record.start_date || record.service_date;
   if (!interval.valid) {
     const fallback = planningPersonnelDayResourceKey(personnelId, fallbackDate);
-    return fallback ? [fallback] : [];
+    return fallback
+      ? planningPersonnelEligibilityResourceKeys(personnelId, fallbackDate)
+      : [];
   }
 
-  return planningPersonnelDayResourceKeys(
+  return planningPersonnelEligibilityResourceKeys(
     personnelId,
     toDateKey(interval.start),
     toDateKey(new Date(interval.end.getTime() - 1)),
   );
+}
+
+function planningEligibilityCandidateSourceResourceKey(candidate) {
+  const sourceId = String(candidate?.source_id || "").trim();
+  if (!sourceId) return null;
+  return candidate?.source_kind === "occurrence"
+    ? `occurrence:${sourceId}`
+    : `shift:${sourceId}`;
+}
+
+function planningEligibilityCandidateHasQueuedSourceConflict(candidate, resourceKeys = []) {
+  const sourceKey = planningEligibilityCandidateSourceResourceKey(candidate);
+  return Boolean(sourceKey && new Set(resourceKeys || []).has(sourceKey));
 }
 
 function optimisticCompositionRecords({ key, occurrence, personnelItem = null, segment, warnings = [] }) {
@@ -699,24 +717,32 @@ export default function Planning() {
     scheduler: null,
   });
   const pendingEligibilityDropRef = useRef(null);
+  const pendingEligibilityDropBacklogRef = useRef([]);
   const resolveDropEligibilityPreviewRef = useRef(null);
   const processPlanningDropRef = useRef(null);
   const requestUrgentEligibilityCandidatesRef = useRef(null);
   const planningResizeGestureActiveRef = useRef(false);
   const eligibilityBackgroundRequestGateRef = useRef(createPlanningBackgroundRequestGate());
   const eligibilityBackgroundPrefetchGenerationRef = useRef(0);
+  const eligibilityBackgroundPrefetchBasisRef = useRef("");
+  const eligibilityBackgroundRetryAtRef = useRef(0);
   const eligibilityPrewarmBasisRef = useRef("");
   const eligibilityUrgentPrefetchKeysRef = useRef(new Set());
   const eligibilityUrgentRequestGateRef = useRef(null);
   const eligibilityHeldDropRequestGateRef = useRef(null);
   if (!eligibilityUrgentRequestGateRef.current) {
-    eligibilityUrgentRequestGateRef.current = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 2 });
+    // Background warming and speculative hover share one Base44 lane. A held
+    // drop has one separate bounded slot so user intent can pre-empt warming
+    // without recreating the former request burst.
+    eligibilityUrgentRequestGateRef.current = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 1 });
   }
   if (!eligibilityHeldDropRequestGateRef.current) {
     eligibilityHeldDropRequestGateRef.current = createPlanningEligibilityUrgentRequestGate({ maxConcurrent: 1 });
   }
   const eligibilityServerDecisionsRef = useRef([]);
   const eligibilityIndexRef = useRef(null);
+  const eligibilityPlanningSnapshotRef = useRef(null);
+  const eligibilityOwnAckSourceRevisionsRef = useRef(new Map());
   const eligibilityDependencyRefreshTokensRef = useRef(new Set());
   const eligibilityDependencyRefreshActiveRef = useRef(false);
   const eligibilityDependencyRefreshPromiseRef = useRef(null);
@@ -728,6 +754,7 @@ export default function Planning() {
   const cancelHeldPlanningDrop = useCallback((description, { updateState = true } = {}) => {
     if (!pendingEligibilityDropRef.current) return false;
     pendingEligibilityDropRef.current = null;
+    pendingEligibilityDropBacklogRef.current = [];
     if (updateState) setPendingEligibilityDrop(null);
     const message = description
       || "De vastgehouden sleepactie is geannuleerd omdat u de planning hebt verlaten of van periode bent gewisseld.";
@@ -1113,6 +1140,20 @@ export default function Planning() {
   }, []);
 
   const reconcilePlanningResultForRange = (result, targetRange, options = {}) => {
+    const acknowledgedShifts = [
+      ...(Array.isArray(result?.shifts) ? result.shifts : []),
+      result?.shift,
+    ].filter(shift => shift?.id && Number.isFinite(Number(shift?.revision)));
+    for (const shift of acknowledgedShifts) {
+      eligibilityOwnAckSourceRevisionsRef.current.set(String(shift.id), {
+        revision: Number(shift.revision),
+        source: shift,
+      });
+    }
+    while (eligibilityOwnAckSourceRevisionsRef.current.size > 256) {
+      const oldestKey = eligibilityOwnAckSourceRevisionsRef.current.keys().next().value;
+      eligibilityOwnAckSourceRevisionsRef.current.delete(oldestKey);
+    }
     applyPlanningMutationResultToCache(queryClient, {
       periodStart: targetRange.periodStart,
       periodEnd: targetRange.periodEnd,
@@ -1849,6 +1890,7 @@ export default function Planning() {
     segments: taskSegments,
     occurrences: taskOccurrences,
   }), [allShifts, assignments, taskOccurrences, taskSegments]);
+  eligibilityPlanningSnapshotRef.current = eligibilityPlanningSnapshot;
   const eligibilityPrefetchSources = useMemo(() => {
     const openShiftSources = matrixShifts
       .filter(shift => shift.status !== "cancelled")
@@ -1974,7 +2016,7 @@ export default function Planning() {
     if (!candidates.length) return;
     const batches = batchPlanningEligibilityCandidates(candidates);
     let cursor = 0;
-    const backgroundRequestIsCurrent = () => (
+    const backgroundRequestMayContinue = () => (
       priority !== "background"
       || (
         eligibilityBackgroundPrefetchGenerationRef.current === generation
@@ -1989,15 +2031,36 @@ export default function Planning() {
       while (cursor < batches.length) {
         // Low-priority matrix warming yields immediately to a real planning
         // write. Exact drag/hover requests remain urgent and are never gated.
-        if (!backgroundRequestIsCurrent()) return;
-        const batch = batches[cursor];
+        if (!backgroundRequestMayContinue()) return;
+        let batch = batches[cursor];
         cursor += 1;
+        let backgroundRequestKeys = [];
+        if (priority === "background") {
+          const selection = selectPlanningEligibilityRequestCandidates({
+            candidates: batch,
+            decisions: eligibilityServerDecisionsRef.current,
+            basisToken,
+            pendingRequestKeys: eligibilityUrgentPrefetchKeysRef.current,
+            // Refresh before the server proof expires, but keep the current
+            // proof visible until its real expiry if warming fails.
+            now: Date.now() + PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS,
+          });
+          if (selection.status !== "started") continue;
+          batch = [...selection.candidates];
+          backgroundRequestKeys = [...selection.requestKeys];
+          backgroundRequestKeys.forEach(key => eligibilityUrgentPrefetchKeysRef.current.add(key));
+        }
         let results;
+        let releaseBackgroundSlot = null;
         try {
           if (
             priority === "background"
             && eligibilityBackgroundRequestGateRef.current.hasCurrentBackgroundBatch()
           ) return;
+          if (priority === "background") {
+            releaseBackgroundSlot = eligibilityUrgentRequestGateRef.current.acquire();
+            if (!releaseBackgroundSlot) return;
+          }
           const request = boundedPlanningEligibilityPromise(invokePlanningApi({
             action: "prefetch_assignment_eligibility",
             basis_token: basisToken,
@@ -2011,23 +2074,76 @@ export default function Planning() {
             basis_token: item.basis_token || response.basis_token,
             expires_at: item.expires_at || response.expires_at,
           }));
+          if (priority === "background") eligibilityBackgroundRetryAtRef.current = 0;
         } catch {
-          const evaluatedAt = new Date().toISOString();
-          const expiresAt = new Date(Date.now() + 15_000).toISOString();
-          results = batch.map(candidate => ({
-            candidate_key: candidate.candidate_key,
-            personnel_id: candidate.personnel_id,
-            status: "unavailable",
-            basis_token: basisToken,
-            evaluated_at: evaluatedAt,
-            expires_at: expiresAt,
-            warning_snapshot: [],
-          }));
+          if (priority === "background") {
+            // Background warming is best-effort. Do not replace a still-valid
+            // ready proof with a speculative unavailable result; the expiry
+            // watchdog will retry or fail closed at the real deadline.
+            results = [];
+            eligibilityBackgroundRetryAtRef.current = Date.now() + 5_000;
+          } else {
+            const evaluatedAt = new Date().toISOString();
+            const expiresAt = new Date(Date.now() + 15_000).toISOString();
+            results = batch.map(candidate => ({
+              candidate_key: candidate.candidate_key,
+              personnel_id: candidate.personnel_id,
+              status: "unavailable",
+              basis_token: basisToken,
+              evaluated_at: evaluatedAt,
+              expires_at: expiresAt,
+              warning_snapshot: [],
+            }));
+          }
+        } finally {
+          releaseBackgroundSlot?.();
+          backgroundRequestKeys.forEach(key => eligibilityUrgentPrefetchKeysRef.current.delete(key));
+          if (priority === "background") {
+            // The visible candidate set may have changed while this batch was
+            // in flight. Re-run cold-key selection after releasing the shared
+            // single-flight keys so newly visible work cannot remain stranded.
+            setEligibilityFreshnessTick(value => value + 1);
+          }
         }
-        if (!backgroundRequestIsCurrent()) return;
-        setEligibilityServerDecisions(current => {
-          return mergePlanningEligibilityServerDecisions(current, results);
-        });
+        // A planning write that started while this one bounded facts batch was
+        // in flight does not invalidate its static result. Keep that work, but
+        // do not start another background batch until the interactive lane is
+        // idle again. Only a changed facts basis makes the response obsolete.
+        if (
+          priority === "background"
+          && eligibilityIndexRef.current?.basisToken !== basisToken
+        ) return;
+        if (results.length) {
+          const retainReadySourceRevisionKeys = new Set(results.flatMap(result => {
+            if (
+              result?.status !== "stale"
+              || !(result?.warning_codes || []).includes("eligibility_source_revision_stale")
+              || result?.source?.kind !== "shift"
+            ) return [];
+            const requested = batch.find(candidate => candidate.candidate_key === result.candidate_key);
+            const currentSource = (eligibilityPlanningSnapshotRef.current?.shifts || []).find(shift => (
+              String(shift.id) === String(result.source?.id)
+            ));
+            const ownAcknowledgement = eligibilityOwnAckSourceRevisionsRef.current.get(
+              String(result.source?.id || ""),
+            );
+            if (
+              !requested?._local?.source
+              || !planningEligibilityOwnSourceRevisionMatches(
+                ownAcknowledgement,
+                result.source,
+                currentSource,
+              )
+              || !planningEligibilitySourceSemanticsEqual(requested._local.source, currentSource)
+            ) return [];
+            return [`${basisToken}\u0000${result.candidate_key}`];
+          }));
+          setEligibilityServerDecisions(current => {
+            return mergePlanningEligibilityServerDecisions(current, results, {
+              retainReadySourceRevisionKeys,
+            });
+          });
+        }
       }
     };
     if (priority === "background") await worker();
@@ -2037,19 +2153,23 @@ export default function Planning() {
     forceRetry = false,
     timeoutMs = PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS,
   } = {}) => {
-    // A candidate based on an optimistic post-delete snapshot may not yet
-    // exist on the server. Wait for the conflicting queue to settle and let
-    // the pending-drop handshake request the exact final-basis candidate.
-    if (
-      !planningMutationQueue.current.getSnapshot().isIdle
-      || eligibilityDependencyRefreshActiveRef.current
-    ) return "blocked";
+    if (eligibilityDependencyRefreshActiveRef.current) return "blocked";
+    // Server evidence now contains only personnel/CAO/context facts. An
+    // unrelated planning write cannot invalidate those facts, so it must not
+    // stop a second drag. Only wait when the exact source is being rewritten:
+    // that source may not yet exist on the server or may receive a new
+    // semantic interval before the eligibility request starts.
+    const queueResourceKeys = planningMutationQueue.current.getSnapshot().resourceKeys;
+    const stableSourceCandidates = candidates.filter(candidate => (
+      !planningEligibilityCandidateHasQueuedSourceConflict(candidate, queueResourceKeys)
+    ));
+    if (!stableSourceCandidates.length) return "blocked";
     const currentIndex = eligibilityIndexRef.current;
     const basisToken = currentIndex?.basisToken || "";
     if (!basisToken) return "blocked";
     const pending = eligibilityUrgentPrefetchKeysRef.current;
     const selection = selectPlanningEligibilityRequestCandidates({
-      candidates,
+      candidates: stableSourceCandidates,
       decisions: eligibilityServerDecisionsRef.current,
       basisToken,
       pendingRequestKeys: pending,
@@ -2144,9 +2264,13 @@ export default function Planning() {
       .filter(value => Number.isFinite(value) && value > PLANNING_ELIGIBILITY_MAX_AGE_MS);
     const hasExpiredRemote = remoteDeadlines.some(value => value <= now);
     const hasExpiredDependency = dependencyDeadlines.some(value => value <= now);
+    const nextRemoteRefresh = remoteDeadlines
+      .map(value => value - PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS)
+      .filter(value => value > now)
+      .sort((left, right) => left - right)[0];
     const nextRemoteExpiry = remoteDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
     const nextDependencyExpiry = dependencyDeadlines.filter(value => value > now).sort((left, right) => left - right)[0];
-    const nextExpiry = [nextRemoteExpiry, nextDependencyExpiry]
+    const nextExpiry = [nextRemoteRefresh, nextRemoteExpiry, nextDependencyExpiry]
       .filter(Number.isFinite)
       .sort((left, right) => left - right)[0];
     if (!nextExpiry && !hasExpiredRemote && !hasExpiredDependency) return undefined;
@@ -2184,6 +2308,7 @@ export default function Planning() {
   }, [
     eligibilityDependencies,
     eligibilityDependencyRefreshActive,
+    eligibilityFreshnessTick,
     eligibilityIndex.basisToken,
     eligibilityServerDecisions,
     refetchEligibilityDependencies,
@@ -2204,11 +2329,9 @@ export default function Planning() {
     eligibilityIndex.prewarm(backgroundEligibilityCandidates.map(item => item._local));
   }, [backgroundEligibilityCandidates, eligibilityIndex]);
   useEffect(() => {
-    const generation = eligibilityBackgroundPrefetchGenerationRef.current + 1;
-    eligibilityBackgroundPrefetchGenerationRef.current = generation;
     // A mutation gets the planning API lane exclusively. Its ACK may change
-    // the eligibility basis, but a 320-candidate background refill must not
-    // race the dependent resize that the user is already performing.
+    // the local schedule, but a 320-candidate background refill must not race
+    // the dependent resize that the user is already performing.
     if (
       !planningQueueState.isIdle
       || planningDragGestureActive
@@ -2216,6 +2339,30 @@ export default function Planning() {
       || eligibilityDependencyRefreshActive
     ) return undefined;
     if (!backgroundEligibilityCandidates.length) return undefined;
+    const backgroundRetryDelay = Math.max(0, eligibilityBackgroundRetryAtRef.current - Date.now());
+    if (backgroundRetryDelay > 0) {
+      const retryHandle = window.setTimeout(
+        () => setEligibilityFreshnessTick(value => value + 1),
+        backgroundRetryDelay,
+      );
+      return () => window.clearTimeout(retryHandle);
+    }
+    const backgroundSelection = selectPlanningEligibilityRequestCandidates({
+      candidates: backgroundEligibilityCandidates,
+      decisions: eligibilityServerDecisionsRef.current,
+      basisToken: eligibilityIndex.basisToken,
+      pendingRequestKeys: eligibilityUrgentPrefetchKeysRef.current,
+      now: Date.now() + PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS,
+    });
+    // Re-renders caused by an optimistic assignment must not refill the whole
+    // visible matrix. Stable facts evidence is reusable; only genuinely cold
+    // candidates are scheduled in the low-priority lane.
+    if (backgroundSelection.status !== "started") return undefined;
+    if (eligibilityBackgroundPrefetchBasisRef.current !== eligibilityIndex.basisToken) {
+      eligibilityBackgroundPrefetchBasisRef.current = eligibilityIndex.basisToken;
+      eligibilityBackgroundPrefetchGenerationRef.current += 1;
+    }
+    const generation = eligibilityBackgroundPrefetchGenerationRef.current;
     const schedule = typeof window.requestIdleCallback === "function"
       ? callback => window.requestIdleCallback(callback, { timeout: 500 })
       : callback => window.setTimeout(callback, 200);
@@ -2224,7 +2371,7 @@ export default function Planning() {
       : handle => window.clearTimeout(handle);
     const handle = schedule(() => {
       void requestEligibilityPrefetch({
-        candidates: backgroundEligibilityCandidates,
+        candidates: backgroundSelection.candidates,
         basisToken: eligibilityIndex.basisToken,
         generation,
         priority: "background",
@@ -2235,6 +2382,7 @@ export default function Planning() {
     backgroundEligibilityCandidates,
     eligibilityIndex.basisToken,
     eligibilityDependencyRefreshActive,
+    eligibilityFreshnessTick,
     planningDragGestureActive,
     planningQueueState.isIdle,
     planningResizeGestureActive,
@@ -2659,12 +2807,6 @@ export default function Planning() {
   };
 
   const handleCandidateAssign = candidate => {
-    // A new explicit assignment supersedes an older held drop. Keeping both
-    // would allow the earlier drop to resume later and assign twice.
-    if (pendingEligibilityDropRef.current) {
-      pendingEligibilityDropRef.current = null;
-      setPendingEligibilityDrop(null);
-    }
     if (candidate?.eligibilityStatus !== "ready") {
       if (candidate?.eligibilityCandidate) {
         requestUrgentEligibilityCandidates([candidate.eligibilityCandidate]);
@@ -3761,12 +3903,9 @@ export default function Planning() {
   resolveDropEligibilityPreviewRef.current = resolveDropEligibilityPreview;
 
   const handleBeforeDragStart = start => {
-    // Starting another gesture is an explicit replacement of any drop that
-    // was waiting for a previous delete/eligibility handshake.
-    if (pendingEligibilityDropRef.current) {
-      pendingEligibilityDropRef.current = null;
-      setPendingEligibilityDrop(null);
-    }
+    // A new gesture must never silently discard an earlier accepted drop.
+    // Warm facts make ordinary rapid planning ready immediately; a genuinely
+    // source-conflicted drop remains owned by its handshake until it settles.
     beginPlanningDragInteraction();
     const draggableId = String(start?.draggableId || "");
     if (!draggableId.startsWith("personnel:")) return;
@@ -3784,20 +3923,25 @@ export default function Planning() {
 
   const clearPendingEligibilityDrop = pendingId => {
     if (pendingId && pendingEligibilityDropRef.current?.id !== pendingId) return false;
-    pendingEligibilityDropRef.current = null;
-    setPendingEligibilityDrop(null);
+    const next = pendingEligibilityDropBacklogRef.current.shift() || null;
+    pendingEligibilityDropRef.current = next;
+    setPendingEligibilityDrop(next);
     return true;
   };
 
   const holdPlanningDropForEligibility = (result, preview) => {
     const pending = createPendingPlanningEligibilityDrop({ result, preview });
     if (!pending) return false;
-    pendingEligibilityDropRef.current = pending;
-    setPendingEligibilityDrop(pending);
-    const description = planningMutationQueue.current.getSnapshot().isIdle
-      ? "De sleepactie is vastgehouden. De volledige CAO- en inzetcontrole wordt nu afgerond; u hoeft de medewerker niet opnieuw te slepen."
-      : "De sleepactie is vastgehouden tot de dienstverwijdering is bevestigd. Daarna wordt exact deze CAO- en inzetcontrole automatisch afgerond.";
-    toast({ title: "Voorcontrole wordt afgerond", description });
+    if (pendingEligibilityDropRef.current) {
+      const backlog = pendingEligibilityDropBacklogRef.current;
+      if (!backlog.some(item => item.id === pending.id)) backlog.push(pending);
+    } else {
+      pendingEligibilityDropRef.current = pending;
+      setPendingEligibilityDrop(pending);
+    }
+    const description = "De volledige CAO- en inzetcontrole wordt op de achtergrond afgerond; u hoeft de medewerker niet opnieuw te slepen.";
+    // Keep the rare cold/source-conflicted path accessible without interrupting
+    // rapid planning with a toast. The normal warm path never enters this gate.
     setLiveMessage(description);
     return true;
   };
@@ -3877,13 +4021,13 @@ export default function Planning() {
   processPlanningDropRef.current = processPlanningDrop;
 
   const handleDragEnd = result => {
-    const preview = resolveDropEligibilityPreview(resolvePlanningDrop(result));
     setDragEligibilityPreview(null);
     // Let the drag engine release its publisher and input lock before any
     // planning mutation changes or unmounts draggable/droppable elements.
     window.setTimeout(() => {
       try {
-        processPlanningDrop(result, preview);
+        const preview = resolveDropEligibilityPreviewRef.current?.(resolvePlanningDrop(result)) || null;
+        processPlanningDropRef.current?.(result, preview);
       } finally {
         finishPlanningDragInteraction();
         // Keep source indices fixed through Pangea's own onDragEnd cleanup.
@@ -3902,11 +4046,15 @@ export default function Planning() {
     );
     const currentDrop = resolvePlanningDrop(pending.result);
     const preview = resolveDropEligibilityPreviewRef.current?.(currentDrop) || null;
+    const queuedSourceConflict = planningEligibilityCandidateHasQueuedSourceConflict(
+      preview?.eligibilityCandidate,
+      planningMutationQueue.current.getSnapshot().resourceKeys,
+    );
     const resolution = resolvePendingPlanningEligibilityDrop({
       pending,
       preview,
       queueIdle: (
-        planningMutationQueue.current.getSnapshot().isIdle
+        !queuedSourceConflict
         && !eligibilityDependencyRefreshActiveRef.current
         && !planningResizeGestureActiveRef.current
       ),
@@ -4017,6 +4165,7 @@ export default function Planning() {
     editing,
     pendingEligibilityDrop,
     planningQueueState.isIdle,
+    planningQueueState.resourceKeys,
     planningResizeGestureActive,
     refetchEligibilityDependencies,
   ]);

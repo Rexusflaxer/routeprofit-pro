@@ -5,6 +5,8 @@ import {
   getPlanningMutationQueue,
   planningPersonnelDayResourceKey,
   planningPersonnelDayResourceKeys,
+  planningPersonnelEligibilityResourceKeys,
+  planningPersonnelWeekResourceKey,
   planningMutationQueueInternals,
   settlePlanningDropEnqueues,
 } from "@/components/planning/planningMutationQueue";
@@ -45,6 +47,103 @@ describe("planning mutation queue", () => {
       "personnel-day:person-1:2026-08-24",
       "personnel-day:person-1:2026-08-25",
     ]);
+  });
+
+  it("fencet rustdagen en contractweek zonder verschillende medewerkers te blokkeren", () => {
+    expect(planningPersonnelWeekResourceKey("person-1", "2026-08-30")).toBe(
+      "personnel-week:person-1:2026-08-24",
+    );
+    expect(planningPersonnelWeekResourceKey("person-1", "2026-08-31")).toBe(
+      "personnel-week:person-1:2026-08-31",
+    );
+    expect(planningPersonnelEligibilityResourceKeys("person-1", "2026-08-24", "2026-08-25")).toEqual([
+      "personnel-day:person-1:2026-08-23",
+      "personnel-day:person-1:2026-08-24",
+      "personnel-day:person-1:2026-08-25",
+      "personnel-day:person-1:2026-08-26",
+      "personnel-week:person-1:2026-08-24",
+    ]);
+    expect(planningPersonnelEligibilityResourceKeys("person-2", "2026-08-24")).not.toContain(
+      "personnel-week:person-1:2026-08-24",
+    );
+  });
+
+  it("voert snelle diensten op aangrenzende dagen en in dezelfde contractweek FIFO uit", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const first = deferred();
+    const started = [];
+    const firstOperation = queue.enqueue({
+      id: "same-week-first",
+      resourceKeys: planningPersonnelEligibilityResourceKeys("person-1", "2026-08-24"),
+      execute: () => {
+        started.push("first");
+        return first.promise;
+      },
+    });
+    const adjacentOperation = queue.enqueue({
+      id: "same-week-adjacent",
+      resourceKeys: planningPersonnelEligibilityResourceKeys("person-1", "2026-08-25"),
+      execute: () => {
+        started.push("adjacent");
+        return "adjacent";
+      },
+    });
+    const nonAdjacentOperation = queue.enqueue({
+      id: "same-week-non-adjacent",
+      resourceKeys: planningPersonnelEligibilityResourceKeys("person-1", "2026-08-28"),
+      execute: () => {
+        started.push("non-adjacent");
+        return "non-adjacent";
+      },
+    });
+    const otherPersonnelOperation = queue.enqueue({
+      id: "other-personnel",
+      resourceKeys: planningPersonnelEligibilityResourceKeys("person-2", "2026-08-25"),
+      execute: () => {
+        started.push("other-personnel");
+        return "other-personnel";
+      },
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["first", "other-personnel"]);
+    await otherPersonnelOperation;
+    first.resolve("first");
+    await firstOperation;
+    await Promise.all([adjacentOperation, nonAdjacentOperation]);
+    expect(started).toEqual(["first", "other-personnel", "adjacent", "non-adjacent"]);
+    queue.dispose();
+  });
+
+  it("begrensd de appbrede write-lane op twee gelijktijdige Base44-mutaties", async () => {
+    planningMutationQueueInternals.resetSharedQueueForTests();
+    const queue = getPlanningMutationQueue();
+    const first = deferred();
+    const second = deferred();
+    const third = deferred();
+    const started = [];
+    const operations = [first, second, third].map((gate, index) => queue.enqueue({
+      id: `bounded-write-${index + 1}`,
+      resourceKeys: [`occurrence:bounded-${index + 1}`],
+      execute: () => {
+        started.push(index + 1);
+        return gate.promise;
+      },
+    }));
+
+    await flushMicrotasks();
+    expect(started).toEqual([1, 2]);
+    expect(queue.getSnapshot()).toMatchObject({ runningCount: 2, queuedCount: 1 });
+
+    first.resolve("first");
+    await operations[0];
+    await flushMicrotasks();
+    expect(started).toEqual([1, 2, 3]);
+
+    second.resolve("second");
+    third.resolve("third");
+    await Promise.all(operations);
+    planningMutationQueueInternals.resetSharedQueueForTests();
   });
 
   it("laat een lokale compose-write alleen de reeds lopende achtergrondbatch uitdrainen", async () => {
