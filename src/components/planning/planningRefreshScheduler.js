@@ -6,6 +6,7 @@ function mergeRefreshOptions(current, incoming) {
     ...(current || {}),
     ...next,
     includePublications: Boolean(current?.includePublications || next.includePublications),
+    includeEligibility: Boolean(current?.includeEligibility || next.includeEligibility),
   };
 }
 
@@ -32,6 +33,7 @@ export function createPlanningRefreshScheduler({
   let scheduledTimer = null;
   let inFlight = null;
   let disposed = false;
+  let pauseCount = 0;
 
   const clearScheduledTimer = () => {
     if (scheduledTimer === null) return;
@@ -41,6 +43,11 @@ export function createPlanningRefreshScheduler({
 
   const executePending = () => {
     clearScheduledTimer();
+    // Direct manipulation owns the visible planning tree until its drag/drop
+    // lifecycle has fully finished. Keep the coalesced refresh request queued;
+    // applying a query result while the drag publisher is active can remove or
+    // move its registered draggable/droppable nodes before pointer-up.
+    if (pauseCount > 0) return inFlight || Promise.resolve(null);
     if (disposed || !pendingOptions) return inFlight || Promise.resolve(null);
     if (inFlight) return inFlight.then(() => executePending());
 
@@ -75,6 +82,24 @@ export function createPlanningRefreshScheduler({
       return executePending();
     },
 
+    pause() {
+      if (disposed) return () => undefined;
+      pauseCount += 1;
+      let resumed = false;
+      return () => {
+        if (resumed) return false;
+        resumed = true;
+        pauseCount = Math.max(0, pauseCount - 1);
+        if (pauseCount === 0 && pendingOptions && scheduledTimer === null) {
+          scheduledTimer = setTimer(() => {
+            scheduledTimer = null;
+            void executePending();
+          }, 0);
+        }
+        return true;
+      };
+    },
+
     cancel() {
       clearScheduledTimer();
       pendingOptions = null;
@@ -82,6 +107,7 @@ export function createPlanningRefreshScheduler({
 
     dispose() {
       disposed = true;
+      pauseCount = 0;
       clearScheduledTimer();
       pendingOptions = null;
     },
@@ -90,6 +116,7 @@ export function createPlanningRefreshScheduler({
       return {
         disposed,
         inFlight: Boolean(inFlight),
+        paused: pauseCount > 0,
         scheduled: scheduledTimer !== null,
       };
     },

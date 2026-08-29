@@ -68,9 +68,9 @@ describe("Planning queued optimistic frontend contract", () => {
     expect(source).toContain("const saveDraft = async () =>");
     expect(source).toContain("await settlePlanningDropEnqueues()");
     expect(source).not.toContain("authoritativePlanningRef");
-    expect(source).toContain("saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0 || draftSavePending}");
+    expect(source).toContain("saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0 || draftSavePending || Boolean(pendingEligibilityDrop)}");
     expect(source).toContain("mutationPending={publishMutation.isPending || draftSavePending}");
-    expect(source).toContain("publishDisabled={draftSavePending || planningQueueState.pendingCount > 0");
+    expect(source).toContain("publishDisabled={draftSavePending || Boolean(pendingEligibilityDrop) || planningQueueState.pendingCount > 0");
     expect(source).toContain("const postDrainSnapshot = planningExecutionSnapshotFromCache(");
     expect(source).toContain("buildPlanningPublicationSnapshot({");
     expect(source).not.toContain("shift_ids: ownedShiftsInRange.map");
