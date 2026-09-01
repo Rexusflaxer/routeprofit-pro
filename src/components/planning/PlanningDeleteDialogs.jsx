@@ -5,13 +5,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 export default function PlanningTaskDeleteDialog({ request, open, onOpenChange, onConfirm, isPending }) {
   const serviceCount = request?.linkedShifts?.length || 0;
-  const employeeCount = request?.employeeCount || 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[16px]"><AlertTriangle className="h-4 w-4 text-destructive" />Taak en diensten verwijderen</DialogTitle>
-          <DialogDescription className="text-[12px]">Deze taak heeft al {serviceCount} ingeplande {serviceCount === 1 ? "dienst" : "diensten"}. Bevestigen verwijdert ook deze diensten{employeeCount ? ` en plant ${employeeCount} ${employeeCount === 1 ? "medewerker" : "medewerkers"} uit` : ""}.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2 text-[16px]"><AlertTriangle className="h-4 w-4 text-destructive" />Taak uit planning verwijderen</DialogTitle>
+          <DialogDescription className="text-[12px]">
+            Deze taak is gekoppeld aan {serviceCount} ingeplande {serviceCount === 1 ? "dienst" : "diensten"}. Bevestigen verwijdert alleen dit taakdeel. Een dienst zonder andere taken wordt verwijderd; een samengestelde dienst blijft met haar medewerkers bestaan en wordt aangepast.
+          </DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-border bg-muted/35 p-3">
           <p className="text-[12px] font-semibold">{request?.occurrence?.task_name_snapshot || "Taak"}</p>
@@ -19,7 +20,7 @@ export default function PlanningTaskDeleteDialog({ request, open, onOpenChange, 
         </div>
         <DialogFooter>
           <Button variant="outline" disabled={isPending} onClick={() => onOpenChange(false)}>Behouden</Button>
-          <Button variant="destructive" disabled={isPending} onClick={() => onConfirm(request)}><Trash2 className="h-4 w-4" />{isPending ? "Verwijderen…" : "Taak en diensten verwijderen"}</Button>
+          <Button variant="destructive" disabled={isPending} onClick={() => onConfirm(request)}><Trash2 className="h-4 w-4" />{isPending ? "Verwijderen…" : "Taak verwijderen"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

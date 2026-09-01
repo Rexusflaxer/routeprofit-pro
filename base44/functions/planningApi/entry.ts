@@ -6358,9 +6358,6 @@ async function changeSingleTaskOccurrence(
         recurrence_end_date: serviceDate,
         recurrence_anchor_date: serviceDate,
       }, taskSnapshot, 'single_occurrence', amsterdamServerClock());
-  if (cancelOccurrence) {
-    assertFutureSchedule(serviceDate, startTime, amsterdamServerClock());
-  }
 
   const initialImpact = await loadObjectTaskPlanningImpact(base44, [initialOccurrence], {
     extraShiftIds: initialRecoveryMarker?.linked_shift_ids,
@@ -6570,15 +6567,10 @@ async function changeSingleTaskOccurrence(
               assignment_identity: lockedAssignments
                 .filter(item => item.status !== 'removed')
                 .map(item => pick(item, ['id', 'shift_id', 'personnel_id', 'slot_index'])),
-              request_payload: {
-                occurrence_id: occurrence.id,
-                source_revision_id: sourceRevision.id,
-                start_time: cancelOccurrence ? null : startTime,
-                end_time: cancelOccurrence ? null : endTime,
-                ...(cancelOccurrence ? { cancel_occurrence: true } : {}),
-                expected_occurrence_revision: expectedOccurrenceRevision,
-                confirm_remove_outside_shifts: body.confirm_remove_outside_shifts === true,
-              },
+              // Bootstrap recovery must replay byte-for-byte equivalent input.
+              // Reconstructing optional fields (for example null start/end on
+              // cancellation) changes the request hash and strands the marker.
+              request_payload: mutationRequestPayload(body),
             },
           },
         },

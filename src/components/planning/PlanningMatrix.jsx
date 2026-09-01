@@ -192,6 +192,7 @@ function OpenTaskIntervalCard({
   onDeleteTask,
   mutationPending,
   actionPending = mutationPending,
+  deletePending = mutationPending,
   embeddedInLane = false,
   style,
   editable = false,
@@ -221,7 +222,7 @@ function OpenTaskIntervalCard({
         { label: "Dienst hier plakken", disabled: actionPending || !canPaste, onSelect: () => onPasteService?.({ occurrence, serviceDate: dropServiceDate, startTime: serviceClipboard.startTime, endTime: serviceClipboard.endTime, personnelId: serviceClipboard.personnelId }), Icon: ClipboardPaste },
         { label: "Taak bewerken", disabled: actionPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
         { label: "Taak kopiëren", disabled: actionPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
-        { label: "Taak verwijderen", disabled: actionPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+        { label: "Taak verwijderen", disabled: deletePending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
       ]}
     >
     <article
@@ -1093,6 +1094,7 @@ function TaskCoverageLane({
   onResizeTaskBoundary,
   mutationPending,
   actionPending = mutationPending,
+  deletePending = mutationPending,
   compact,
   editable = false,
 }) {
@@ -1222,6 +1224,7 @@ function TaskCoverageLane({
   const laneHeight = getTaskTimelineLaneHeight(duration, { compact });
   const isLaneBusy = mutationPending || resizeSaving;
   const isLaneActionPending = actionPending || isLaneBusy;
+  const isLaneDeletePending = deletePending || isLaneBusy;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
 
   const segmentPayload = (service, interval) => {
@@ -1294,7 +1297,7 @@ function TaskCoverageLane({
         items={[
           { label: "Taak bewerken", disabled: isLaneActionPending, onSelect: () => onEditTask?.(occurrence), Icon: Pencil },
           { label: "Taak kopiëren", disabled: isLaneActionPending, onSelect: () => onCopyTask?.(occurrence), Icon: Copy },
-          { label: "Taak verwijderen", disabled: isLaneActionPending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
+          { label: "Taak verwijderen", disabled: isLaneDeletePending, onSelect: () => onDeleteTask?.(occurrence), Icon: Trash2, destructive: true },
         ]}
       >
       <button
@@ -1389,6 +1392,7 @@ function TaskCoverageLane({
             onDeleteTask={onDeleteTask}
             mutationPending={isLaneBusy}
             actionPending={isLaneActionPending}
+            deletePending={isLaneDeletePending}
             editable={editable}
             embeddedInLane
             style={pieceStyle(gap.startMinute, gap.endMinute)}
@@ -1822,6 +1826,7 @@ function ObjectDayCell({
               onResizeTaskBoundary={onResizeTaskBoundary}
               mutationPending={lanePending}
               actionPending={laneActionPending}
+              deletePending={lanePending}
               compact={compact}
               editable={editable}
             />
@@ -1849,6 +1854,7 @@ function ObjectDayCell({
               onDeleteTask={onDeleteTask}
               editable={editable}
               mutationPending={openTaskPending}
+              deletePending={openTaskPending}
               actionPending={openTaskPending || isPlanningResourcePending(
                 queuedResourceKeys,
                 false,
