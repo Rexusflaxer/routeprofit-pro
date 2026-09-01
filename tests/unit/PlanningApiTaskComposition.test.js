@@ -3,7 +3,7 @@ import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
 import { QueryClient } from "@tanstack/react-query";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { applyPlanningMutationResultToCache } from "@/components/planning/planningQueryCache";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -306,6 +306,63 @@ async function createWeeklyObjectTask({
       recurrence_end_date: recurrenceEndDate,
     }],
   }, context(`create-object-task-${key}`));
+}
+
+async function prepareCancellableWeeklyOccurrence({
+  key,
+  serviceDate = "2099-08-31",
+}) {
+  const { base44, entities } = setup([]);
+  const created = await createWeeklyObjectTask({
+    base44,
+    entities,
+    key,
+  });
+  await backend.bootstrapRange(base44, user, {
+    period_start: serviceDate,
+    period_end: serviceDate,
+  }, context(`bootstrap-${key}`));
+  const sourceOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+    item.lifecycle_status === "active"
+    && item.object_task_definition_id === created.definition.id
+    && item.service_date === serviceDate
+  ));
+  const personnelId = `personnel-${key}`;
+  entities.Personnel.records.push({
+    id: personnelId,
+    name: "Dagbeveiliger",
+    status: "active",
+  });
+  const composition = await backend.composeAndAssign(base44, user, {
+    personnel_id: personnelId,
+    segments: [{
+      task_occurrence_id: sourceOccurrence.id,
+      start_date: sourceOccurrence.service_date,
+      start_time: sourceOccurrence.window_start_time,
+      end_date: sourceOccurrence.end_date,
+      end_time: sourceOccurrence.window_end_time,
+    }],
+    expected_occurrence_revisions: {
+      [sourceOccurrence.id]: sourceOccurrence.revision,
+    },
+  }, context(`compose-${key}`));
+  const plannedOccurrence = await entities.PlanningTaskOccurrence.get(sourceOccurrence.id);
+  const body = {
+    occurrence_id: sourceOccurrence.id,
+    source_revision_id: sourceOccurrence.object_task_schedule_revision_id,
+    expected_occurrence_revision: plannedOccurrence.revision,
+    cancel_occurrence: true,
+    confirm_remove_outside_shifts: true,
+  };
+  return {
+    base44,
+    entities,
+    created,
+    sourceOccurrence: plannedOccurrence,
+    composition,
+    personnelId,
+    body,
+  };
 }
 
 function weeklyReceptionDefinitionStartingAugust17() {
@@ -1154,6 +1211,315 @@ describe("planningApi losse taakuitzonderingen vanuit Planning", () => {
       "2099-08-17",
       "2099-09-14",
     ]);
+  });
+
+  it("annuleert een reeds begonnen ongepubliceerde taak met dienst en medewerker", async () => {
+    const fixture = await prepareCancellableWeeklyOccurrence({
+      key: "cancel-started-unpublished-occurrence",
+    });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2099-08-31T07:00:00.000Z"));
+      expect(backend.amsterdamServerClock()).toMatchObject({
+        date: "2099-08-31",
+        time: "09:00",
+      });
+
+      const cancelled = await backend.changeSingleTaskOccurrence(
+        fixture.base44,
+        user,
+        fixture.body,
+        context("cancel-started-unpublished-occurrence"),
+      );
+
+      expect(cancelled.task_schedule_exception).toMatchObject({
+        service_date: "2099-08-31",
+        kind: "cancelled",
+        status: "active",
+      });
+      expect(cancelled.task_occurrences).toEqual([
+        expect.objectContaining({
+          id: fixture.sourceOccurrence.id,
+          lifecycle_status: "superseded",
+          superseded_by_task_occurrence_id: null,
+        }),
+      ]);
+      expect(cancelled.shifts).toEqual([
+        expect.objectContaining({
+          id: fixture.composition.shift.id,
+          status: "cancelled",
+        }),
+      ]);
+      expect(cancelled.segments).toEqual([
+        expect.objectContaining({
+          id: fixture.composition.segments[0].id,
+          status: "removed",
+        }),
+      ]);
+      expect(cancelled.assignments).toEqual([
+        expect.objectContaining({
+          id: fixture.composition.assignment.id,
+          status: "removed",
+        }),
+      ]);
+      expect(cancelled.removed_segment_ids).toEqual([fixture.composition.segments[0].id]);
+      expect(cancelled.removed_assignment_ids).toEqual([fixture.composition.assignment.id]);
+      expect(fixture.entities.PlanningAuditEvent.records.filter(item => (
+        item.action === "change_single_task_occurrence"
+      ))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("verwijdert uit een samengestelde dienst alleen het gekozen taakdeel en behoudt de medewerker", async () => {
+    const { base44, entities } = setup([]);
+    const earlyTask = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "cancel-composed-early-task",
+      startTime: "06:30",
+      endTime: "12:00",
+    });
+    const lateTask = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "cancel-composed-late-task",
+      startTime: "12:00",
+      endTime: "18:00",
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-31",
+      period_end: "2099-08-31",
+    }, context("bootstrap-cancel-composed-task"));
+    const earlyOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === earlyTask.definition.id
+      && item.service_date === "2099-08-31"
+    ));
+    const lateOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === lateTask.definition.id
+      && item.service_date === "2099-08-31"
+    ));
+    entities.Personnel.records.push({
+      id: "personnel-cancel-composed-task",
+      name: "Samengestelde beveiliger",
+      status: "active",
+    });
+    const composition = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-cancel-composed-task",
+      segments: [
+        {
+          task_occurrence_id: earlyOccurrence.id,
+          start_date: "2099-08-31",
+          end_date: "2099-08-31",
+          start_time: "06:30",
+          end_time: "12:00",
+        },
+        {
+          task_occurrence_id: lateOccurrence.id,
+          start_date: "2099-08-31",
+          end_date: "2099-08-31",
+          start_time: "12:00",
+          end_time: "18:00",
+        },
+      ],
+      expected_occurrence_revisions: {
+        [earlyOccurrence.id]: earlyOccurrence.revision,
+        [lateOccurrence.id]: lateOccurrence.revision,
+      },
+    }, context("compose-before-partial-task-cancel"));
+    const earlySegment = composition.segments.find(item => (
+      item.task_occurrence_id === earlyOccurrence.id
+    ));
+    const lateSegment = composition.segments.find(item => (
+      item.task_occurrence_id === lateOccurrence.id
+    ));
+    const currentEarlyOccurrence = await entities.PlanningTaskOccurrence.get(earlyOccurrence.id);
+
+    const cancelled = await backend.changeSingleTaskOccurrence(base44, user, {
+      occurrence_id: earlyOccurrence.id,
+      source_revision_id: earlyOccurrence.object_task_schedule_revision_id,
+      expected_occurrence_revision: currentEarlyOccurrence.revision,
+      cancel_occurrence: true,
+      confirm_remove_outside_shifts: true,
+    }, context("cancel-one-task-from-composed-shift"));
+
+    expect(cancelled.task_occurrences).toContainEqual(expect.objectContaining({
+      id: earlyOccurrence.id,
+      lifecycle_status: "superseded",
+    }));
+    expect(cancelled.shifts).toContainEqual(expect.objectContaining({
+      id: composition.shift.id,
+      status: "draft",
+      start_time: "12:00",
+      end_time: "18:00",
+      task_occurrence_ids: [lateOccurrence.id],
+      task_segment_count: 1,
+    }));
+    expect(await entities.PlanningShiftTaskSegment.get(earlySegment.id)).toMatchObject({
+      status: "removed",
+      task_occurrence_id: earlyOccurrence.id,
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(lateSegment.id)).toMatchObject({
+      status: "draft",
+      task_occurrence_id: lateOccurrence.id,
+    });
+    expect(await entities.PlanningAssignment.get(composition.assignment.id)).toMatchObject({
+      status: "draft",
+      personnel_id: "personnel-cancel-composed-task",
+      metadata: expect.objectContaining({
+        task_boundary_revalidated_at: expect.any(String),
+        source_task_occurrence_id: earlyOccurrence.id,
+      }),
+    });
+    expect(cancelled.removed_segment_ids).toEqual([earlySegment.id]);
+    expect(cancelled.removed_assignment_ids).toEqual([]);
+  });
+
+  it("houdt een reeds begonnen gepubliceerde taakdienst fail-closed", async () => {
+    const fixture = await prepareCancellableWeeklyOccurrence({
+      key: "cancel-started-published-occurrence",
+    });
+    const storedShift = fixture.entities.PlanningShift.records.find(item => (
+      item.id === fixture.composition.shift.id
+    ));
+    storedShift.status = "published";
+    storedShift.published_revision = 1;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2099-08-31T07:00:00.000Z"));
+
+      await expect(backend.changeSingleTaskOccurrence(
+        fixture.base44,
+        user,
+        fixture.body,
+        context("cancel-started-published-occurrence"),
+      )).rejects.toMatchObject({
+        status: 409,
+        details: {
+          code: "TASK_PUBLISHED_SHIFT_CANCELLATION_REQUIRED",
+          shifts: [expect.objectContaining({ id: fixture.composition.shift.id })],
+        },
+      });
+      expect(fixture.entities.ObjectTaskScheduleException.records).toHaveLength(0);
+      expect(fixture.entities.PlanningAuditEvent.records.filter(item => (
+        item.action === "change_single_task_occurrence"
+      ))).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("blijft een taakwijziging naar een reeds begonnen tijd weigeren", async () => {
+    const fixture = await prepareCancellableWeeklyOccurrence({
+      key: "edit-started-occurrence-remains-blocked",
+    });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2099-08-31T07:00:00.000Z"));
+
+      await expect(backend.changeSingleTaskOccurrence(
+        fixture.base44,
+        user,
+        {
+          occurrence_id: fixture.sourceOccurrence.id,
+          source_revision_id: fixture.sourceOccurrence.object_task_schedule_revision_id,
+          expected_occurrence_revision: fixture.sourceOccurrence.revision,
+          start_time: "08:00",
+          end_time: "16:00",
+          confirm_remove_outside_shifts: true,
+        },
+        context("edit-started-occurrence-remains-blocked"),
+      )).rejects.toMatchObject({
+        status: 409,
+        details: {
+          code: "TASK_SCHEDULE_IN_PAST",
+          service_date: "2099-08-31",
+          start_time: "08:00",
+        },
+      });
+      expect(fixture.entities.ObjectTaskScheduleException.records).toHaveLength(0);
+      expect(fixture.entities.PlanningAuditEvent.records.filter(item => (
+        item.action === "change_single_task_occurrence"
+      ))).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("herstelt een onderbroken annulering na de starttijd exact eenmaal", async () => {
+    const fixture = await prepareCancellableWeeklyOccurrence({
+      key: "recover-cancel-after-start-boundary",
+    });
+    const mutation = context("recover-cancel-after-start-boundary");
+    const originalExceptionCreate = fixture.entities.ObjectTaskScheduleException.create
+      .bind(fixture.entities.ObjectTaskScheduleException);
+    let failExceptionOnce = true;
+    fixture.entities.ObjectTaskScheduleException.create = async data => {
+      if (failExceptionOnce) {
+        failExceptionOnce = false;
+        throw new Error("tijdelijke cancel-exception-writefout");
+      }
+      return originalExceptionCreate(data);
+    };
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2099-08-31T04:00:00.000Z"));
+      expect(backend.amsterdamServerClock()).toMatchObject({ time: "06:00" });
+      await expect(backend.changeSingleTaskOccurrence(
+        fixture.base44,
+        user,
+        fixture.body,
+        mutation,
+      )).rejects.toThrow("tijdelijke cancel-exception-writefout");
+      expect(await fixture.entities.PlanningTaskOccurrence.get(fixture.sourceOccurrence.id))
+        .toMatchObject({
+          lifecycle_status: "active",
+          metadata: {
+            single_task_occurrence_mutation: {
+              phase: "state_written_audit_pending",
+              idempotency_key: mutation.idempotencyKey,
+            },
+          },
+        });
+
+      vi.setSystemTime(new Date("2099-08-31T07:00:00.000Z"));
+      expect(backend.amsterdamServerClock()).toMatchObject({ time: "09:00" });
+      const recovery = await backend.bootstrapRange(fixture.base44, user, {
+        period_start: "2099-08-31",
+        period_end: "2099-08-31",
+      }, context("bootstrap-late-recover-cancel-after-start-boundary"));
+      const replay = await backend.changeSingleTaskOccurrence(
+        fixture.base44,
+        user,
+        fixture.body,
+        mutation,
+      );
+
+      expect(recovery.repaired_single_task_occurrence_ids)
+        .toContain(fixture.sourceOccurrence.id);
+      expect(replay).toMatchObject({
+        ok: true,
+        idempotent: true,
+        task_schedule_exception: {
+          kind: "cancelled",
+          status: "active",
+        },
+      });
+      expect(fixture.entities.ObjectTaskScheduleException.records).toHaveLength(1);
+      expect(fixture.entities.PlanningAuditEvent.records.filter(item => (
+        item.action === "change_single_task_occurrence"
+        && item.idempotency_key === mutation.idempotencyKey
+      ))).toHaveLength(1);
+      expect(await fixture.entities.PlanningShift.get(fixture.composition.shift.id))
+        .toMatchObject({ status: "cancelled" });
+      expect(await fixture.entities.PlanningAssignment.get(fixture.composition.assignment.id))
+        .toMatchObject({ status: "removed" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("wijzigt een bestaand planningalternatief alleen binnen diens eigen one_time-reeks", async () => {

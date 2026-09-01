@@ -395,7 +395,7 @@ describe("directe planningwaarschuwingen en vervolgacties", () => {
 
     expect(saveSource).toContain("assertNoPendingEligibilityDrop()");
     expect(publishSource).toContain("assertNoPendingEligibilityDrop()");
-    expect(source).toContain("saveDraftDisabled={runActionMutation.isPending || pendingResourceKeys.size > 0 || draftSavePending || Boolean(pendingEligibilityDrop)}");
+    expect(source).toContain("saveDraftDisabled={runActionMutation.isPending || matrixPendingResourceKeys.size > 0 || draftSavePending || Boolean(pendingEligibilityDrop)}");
     expect(source).toContain("publishDisabled={draftSavePending || Boolean(pendingEligibilityDrop)");
     expect(source).toContain('window.addEventListener("beforeunload", protectPendingDrop)');
   });

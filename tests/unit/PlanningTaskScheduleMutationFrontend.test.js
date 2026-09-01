@@ -39,14 +39,18 @@ describe("Planning taak-plak- en verwijderlatency", () => {
     expect(bootstrapMutationSource).toContain("void refreshScheduler.current?.flush()");
   });
 
-  it("verwijdert één taakdatum met één autoritatief exception-intent", () => {
+  it("verwijdert één taakdatum via één queued autoritatief exception-intent", () => {
+    expect(deleteSource).toContain("planningMutationQueue.current.enqueue({");
+    expect(deleteSource).toContain("planningExecutionSnapshotFromCache(");
+    expect(deleteSource).toContain("resolvePlanningOccurrenceTarget(snapshot, {");
     expect(deleteSource).toContain('action: "change_single_task_occurrence"');
-    expect(deleteSource).toContain("occurrence_id: occurrence.id");
-    expect(deleteSource).toContain("source_revision_id: occurrence.object_task_schedule_revision_id || null");
-    expect(deleteSource).toContain("expected_occurrence_revision: Number(occurrence.revision || 1)");
+    expect(deleteSource).toContain("occurrence_id: currentOccurrence.record.id");
+    expect(deleteSource).toContain("source_revision_id: currentOccurrence.record.object_task_schedule_revision_id || null");
+    expect(deleteSource).toContain("expected_occurrence_revision: Number(currentOccurrence.record.revision || 1)");
     expect(deleteSource).toContain("cancel_occurrence: true");
     expect(deleteSource).toContain("confirm_remove_outside_shifts: true");
-    expect(deleteSource).toContain("reconcilePlanningResult(result)");
+    expect(deleteSource).toContain("reconcilePlanningResultForRange(result, executionRange)");
+    expect(deleteSource).toContain("rebaseDependentPlanningIntent(intent, executionIntent, result)");
     expect(deleteSource).toContain("refreshPlanningInBackground()");
     expect(deleteSource).not.toContain("await bootstrapMutation");
     expect(deleteSource).not.toContain("await refreshPlanning(");

@@ -572,6 +572,16 @@ export function createPlanningMutationQueue({ maxParallel = 4, beforeUnloadTarge
       return snapshot;
     },
 
+    getActiveCommandIdsForResources(resourceKeys = []) {
+      const requestedResourceKeys = normalizeResourceKeys(resourceKeys);
+      return Object.freeze(entries
+        .filter(entry => (
+          (entry.status === "queued" || entry.status === "running")
+          && resourcesOverlap(entry.resourceKeys, requestedResourceKeys)
+        ))
+        .map(entry => entry.id));
+    },
+
     getTerminalState(id) {
       return terminalStateById(id);
     },

@@ -292,6 +292,236 @@ describe("planning mutation queue", () => {
     queue.dispose();
   });
 
+  it("verwerkt inplannen, inkorten, verwijderen en opnieuw inplannen als één snelle keten", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const checkpoint = queue.createDrainCheckpoint();
+    const firstWrite = deferred();
+    const independentWrite = deferred();
+    const started = [];
+    let savedShift = null;
+
+    const personnelKeys = planningPersonnelShiftResourceKeys("person-chain", [{
+      service_date: "2026-08-24",
+      end_date: "2026-08-24",
+      start_time: "06:30",
+      end_time: "18:00",
+    }]);
+    const sharedTaskKeys = [
+      "occurrence:task-chain",
+      "task-definition:definition-chain",
+      "task-series:series-chain",
+      ...personnelKeys,
+    ];
+
+    const assign = queue.enqueue({
+      id: "chain-assign",
+      resourceKeys: [...sharedTaskKeys, "shift:pending-chain"],
+      intent: {
+        key: "chain-assign",
+        shift_id: "pending-chain",
+        shifts: [{ id: "pending-chain", revision: 1, _optimistic_pending: true }],
+      },
+      execute: () => {
+        started.push("assign");
+        return firstWrite.promise;
+      },
+      onSuccess: result => { savedShift = result.shift; },
+    });
+    const resize = queue.enqueue({
+      id: "chain-resize",
+      dependsOn: [assign.commandId],
+      resourceKeys: [...sharedTaskKeys, "shift:pending-chain"],
+      execute: () => {
+        started.push("resize");
+        expect(savedShift).toMatchObject({ id: "server-chain", revision: 2, end_time: "18:00" });
+        return {
+          shift: { ...savedShift, revision: 3, end_time: "15:30" },
+        };
+      },
+      onSuccess: result => { savedShift = result.shift; },
+    });
+    const remove = queue.enqueue({
+      id: "chain-delete",
+      dependsOn: [resize.commandId],
+      resourceKeys: [...sharedTaskKeys, "shift:pending-chain"],
+      execute: () => {
+        started.push("delete");
+        expect(savedShift).toMatchObject({ id: "server-chain", revision: 3, end_time: "15:30" });
+        return {
+          shift: {
+            id: "server-open-chain",
+            revision: 1,
+            status: "draft",
+            start_time: "06:30",
+            end_time: "18:00",
+          },
+        };
+      },
+      onSuccess: result => { savedShift = result.shift; },
+    });
+    const reassign = queue.enqueue({
+      id: "chain-reassign",
+      dependsOn: [remove.commandId],
+      resourceKeys: [...sharedTaskKeys, "shift:server-open-chain"],
+      execute: () => {
+        started.push("reassign");
+        expect(savedShift).toMatchObject({
+          id: "server-open-chain",
+          revision: 1,
+          start_time: "06:30",
+          end_time: "18:00",
+        });
+        return { assignment: { id: "assignment-chain", personnel_id: "person-chain" } };
+      },
+    });
+    const independent = queue.enqueue({
+      id: "chain-independent",
+      resourceKeys: [
+        "occurrence:task-independent",
+        ...planningPersonnelShiftResourceKeys("person-independent", [{
+          service_date: "2026-08-24",
+          start_time: "09:00",
+          end_time: "12:00",
+        }]),
+      ],
+      execute: () => {
+        started.push("independent");
+        return independentWrite.promise;
+      },
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["assign", "independent"]);
+    expect(queue.getSnapshot()).toMatchObject({ runningCount: 2, queuedCount: 3 });
+
+    independentWrite.resolve("independent-saved");
+    await independent;
+    firstWrite.resolve({
+      shift: {
+        id: "server-chain",
+        revision: 2,
+        status: "draft",
+        start_time: "06:30",
+        end_time: "18:00",
+      },
+    });
+    await Promise.all([assign, resize, remove, reassign]);
+    await expect(queue.drain({ checkpoint })).resolves.toMatchObject({ ok: true, completedCount: 5 });
+    expect(started).toEqual(["assign", "independent", "resize", "delete", "reassign"]);
+    queue.dispose();
+  });
+
+  it("annuleert herinplannen wanneer de optimistic dienstverwijdering waarvan het gat afhangt mislukt", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const checkpoint = queue.createDrainCheckpoint();
+    const deleteWrite = deferred();
+    const reassignWrite = vi.fn(() => ({ assignment: { id: "unexpected-assignment" } }));
+    const remove = queue.enqueue({
+      id: "delete-service-before-reassign",
+      resourceKeys: ["occurrence:occurrence-delete-reassign", "shift:shift-to-delete"],
+      intent: {
+        key: "delete-service-before-reassign",
+        kind: "dependent_delete",
+        task_occurrence_id: "occurrence-delete-reassign",
+      },
+      execute: () => deleteWrite.promise,
+    });
+    const parentIntentIds = queue.getActiveCommandIdsForResources([
+      "occurrence:occurrence-delete-reassign",
+    ]);
+    expect(parentIntentIds).toEqual(["delete-service-before-reassign"]);
+    expect(Object.isFrozen(parentIntentIds)).toBe(true);
+    const reassign = queue.enqueue({
+      id: "reassign-optimistic-gap",
+      dependsOn: parentIntentIds,
+      resourceKeys: [
+        "occurrence:occurrence-delete-reassign",
+        "personnel-day:person-delete-reassign:2026-08-24",
+      ],
+      execute: reassignWrite,
+    });
+    const outcomes = Promise.allSettled([remove, reassign]);
+
+    deleteWrite.reject(new Error("dienstverwijdering geweigerd"));
+    const states = await outcomes;
+    expect(states).toEqual([
+      expect.objectContaining({ status: "rejected" }),
+      expect.objectContaining({
+        status: "rejected",
+        reason: expect.objectContaining({ code: "PLANNING_DEPENDENCY_FAILED" }),
+      }),
+    ]);
+    expect(reassignWrite).not.toHaveBeenCalled();
+    await expect(queue.drain({ checkpoint })).resolves.toMatchObject({
+      ok: false,
+      completedCount: 2,
+      failures: [expect.objectContaining({ id: "delete-service-before-reassign" })],
+      cancellations: [expect.objectContaining({ id: "reassign-optimistic-gap" })],
+    });
+    queue.dispose();
+  });
+
+  it("houdt drie snelle taakverwijderingen uit dezelfde reeks FIFO en laat een andere reeks parallel", async () => {
+    const queue = createPlanningMutationQueue({ maxParallel: 2 });
+    const checkpoint = queue.createDrainCheckpoint();
+    const firstDelete = deferred();
+    const otherSeriesDelete = deferred();
+    const started = [];
+    const sameSeriesKeys = [
+      "task-definition:definition-repeated-delete",
+      "task-series:series-repeated-delete",
+    ];
+
+    const first = queue.enqueue({
+      id: "delete-occurrence-one",
+      resourceKeys: [...sameSeriesKeys, "occurrence:occurrence-one"],
+      execute: () => {
+        started.push("same-1");
+        return firstDelete.promise;
+      },
+    });
+    const second = queue.enqueue({
+      id: "delete-occurrence-two",
+      resourceKeys: [...sameSeriesKeys, "occurrence:occurrence-two"],
+      execute: () => {
+        started.push("same-2");
+        return "deleted-2";
+      },
+    });
+    const third = queue.enqueue({
+      id: "delete-occurrence-three",
+      resourceKeys: [...sameSeriesKeys, "occurrence:occurrence-three"],
+      execute: () => {
+        started.push("same-3");
+        return "deleted-3";
+      },
+    });
+    const other = queue.enqueue({
+      id: "delete-other-series",
+      resourceKeys: [
+        "task-definition:definition-other-delete",
+        "task-series:series-other-delete",
+        "occurrence:occurrence-other-delete",
+      ],
+      execute: () => {
+        started.push("other");
+        return otherSeriesDelete.promise;
+      },
+    });
+
+    await flushMicrotasks();
+    expect(started).toEqual(["same-1", "other"]);
+    expect(queue.getSnapshot()).toMatchObject({ runningCount: 2, queuedCount: 2 });
+
+    otherSeriesDelete.resolve("other-deleted");
+    await other;
+    firstDelete.resolve("deleted-1");
+    await Promise.all([first, second, third]);
+    expect(started).toEqual(["same-1", "other", "same-2", "same-3"]);
+    await expect(queue.drain({ checkpoint })).resolves.toMatchObject({ ok: true, completedCount: 4 });
+    queue.dispose();
+  });
+
   it("behoudt zowel tijdelijke als serverresource tijdens een intent-rebase", async () => {
     const queue = createPlanningMutationQueue({ maxParallel: 2 });
     const parent = deferred();
