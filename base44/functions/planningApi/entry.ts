@@ -3016,11 +3016,6 @@ function taskOccurrenceSourceSnapshot(value: LooseRecord | null | undefined) {
 const TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS = [
   'company_id',
   'service_responsible_company_id',
-  'selling_company_id',
-  'customer_contract_id',
-  'customer_contract_line_id',
-  'commercial_routing_status',
-  'commercial_routing_snapshot',
   'customer_id',
   'object_id',
   'security_plan_id',
@@ -3043,7 +3038,73 @@ const TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS = [
 ] as const;
 
 function taskOccurrencePlanningImpactSnapshot(value: LooseRecord | null | undefined) {
-  return value ? pick(value, TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS) : null;
+  if (!value) return null;
+  return {
+    ...pick(value, TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS),
+    // These fields were introduced after task occurrences could already have
+    // been composed into shifts. Treat a missing legacy projection as its
+    // deterministic value so a schema backfill cannot become a roster change.
+    service_responsible_company_id: compact(
+      value.service_responsible_company_id || value.company_id,
+    ) || null,
+    task_type_key: planningTaskTypeKey(value),
+  };
+}
+
+function nextNonOperationalOccurrenceRevisionWindow(
+  occurrence: LooseRecord,
+  desiredImpact: LooseRecord | null,
+  reason: string,
+) {
+  const currentRevision = revisionOf(occurrence);
+  const currentImpact = taskOccurrencePlanningImpactSnapshot(occurrence);
+  const previous = occurrence.metadata?.non_operational_revision_window;
+  const previousWindowStillCurrent = (
+    Number(previous?.to_revision) === currentRevision
+    && Number.isInteger(Number(previous?.from_revision))
+    && stableStringify(previous?.planning_impact_snapshot || null)
+      === stableStringify(currentImpact)
+  );
+  return {
+    from_revision: previousWindowStillCurrent
+      ? Number(previous.from_revision)
+      : currentRevision,
+    to_revision: currentRevision + 1,
+    planning_impact_snapshot: desiredImpact,
+    reason,
+    recorded_at: nowIso(),
+  };
+}
+
+function occurrenceRevisionMatchesExpected(occurrence: LooseRecord, expectedRevision: number) {
+  const currentRevision = revisionOf(occurrence);
+  if (currentRevision === expectedRevision) return true;
+  const window = occurrence.metadata?.non_operational_revision_window;
+  const fromRevision = Number(window?.from_revision);
+  return (
+    Number(window?.to_revision) === currentRevision
+    && Number.isInteger(fromRevision)
+    && expectedRevision >= fromRevision
+    && expectedRevision < currentRevision
+    && stableStringify(window?.planning_impact_snapshot || null)
+      === stableStringify(taskOccurrencePlanningImpactSnapshot(occurrence))
+  );
+}
+
+function assertExpectedOccurrenceRevision(
+  occurrence: LooseRecord,
+  supplied: unknown,
+  field: string,
+) {
+  const expected = positiveInteger(supplied, field);
+  if (!occurrenceRevisionMatchesExpected(occurrence, expected)) {
+    throw new ApiError(409, 'Planning is intussen gewijzigd', {
+      entity: 'PlanningTaskOccurrence',
+      id: occurrence.id,
+      expected_revision: expected,
+      current_revision: revisionOf(occurrence),
+    });
+  }
 }
 
 function commercialRoutingEvidenceStatus(value: LooseRecord | null | undefined) {
@@ -3112,34 +3173,21 @@ function commercialRoutingServiceContext(segments: LooseRecord[]) {
   };
 }
 
-async function objectTaskOccurrenceContext(
-  base44: LooseRecord,
-  definition: LooseRecord,
-  object: LooseRecord,
-  customer: LooseRecord,
+function taskOccurrenceSecurityPlanSnapshot(
+  securityPlan: LooseRecord | null,
+  publishedRevision: LooseRecord | null,
 ) {
-  const securityPlan = definition.security_plan_id
-    ? await getRecord(base44, 'ObjectSecurityPlan', definition.security_plan_id)
-    : null;
-  const publishedRevision = securityPlan?.current_published_revision_id
-    ? await getRecord(base44, 'ObjectSecurityPlanRevision', securityPlan.current_published_revision_id)
-    : null;
-  const validRevision = publishedRevision?.status === 'published'
-    && String(publishedRevision.security_plan_id) === String(securityPlan?.id)
-    ? publishedRevision
-    : null;
-  const securityPlanSnapshot = securityPlan ? {
-    plan: pick(securityPlan, [
-      'id',
-      'task_type',
-      'category',
-      'variant_name',
-      'title',
-      'current_published_revision_id',
-      'latest_revision_number',
-      'status',
-    ]),
-    published_revision: validRevision ? pick(validRevision, [
+  if (!securityPlan) return null;
+  return {
+    plan: {
+      id: securityPlan.id,
+      task_type: securityPlan.task_type || securityPlan.category || null,
+      variant_name: securityPlan.variant_name || securityPlan.title || null,
+      current_published_revision_id: securityPlan.current_published_revision_id || null,
+      latest_revision_number: Number(securityPlan.latest_revision_number || 0),
+      status: securityPlan.status || null,
+    },
+    published_revision: publishedRevision ? pick(publishedRevision, [
       'id',
       'security_plan_id',
       'customer_id',
@@ -3163,7 +3211,26 @@ async function objectTaskOccurrenceContext(
       'published_by_user_id',
       'version',
     ]) : null,
-  } : null;
+  };
+}
+
+async function objectTaskOccurrenceContext(
+  base44: LooseRecord,
+  definition: LooseRecord,
+  object: LooseRecord,
+  customer: LooseRecord,
+) {
+  const securityPlan = definition.security_plan_id
+    ? await getRecord(base44, 'ObjectSecurityPlan', definition.security_plan_id)
+    : null;
+  const publishedRevision = securityPlan?.current_published_revision_id
+    ? await getRecord(base44, 'ObjectSecurityPlanRevision', securityPlan.current_published_revision_id)
+    : null;
+  const validRevision = publishedRevision?.status === 'published'
+    && String(publishedRevision.security_plan_id) === String(securityPlan?.id)
+    ? publishedRevision
+    : null;
+  const securityPlanSnapshot = taskOccurrenceSecurityPlanSnapshot(securityPlan, validRevision);
   return {
     company_id: object.default_operating_company_id || null,
     service_responsible_company_id: object.default_operating_company_id || null,
@@ -3369,7 +3436,10 @@ async function replaceTaskOccurrenceSnapshot(
   base44: LooseRecord, user: LooseRecord, sourceOccurrence: LooseRecord, desiredPayload: LooseRecord,
 ) {
   const candidates = await filterAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, { source_key: desiredPayload.source_key }, 'created_date');
-  let replacement = candidates.filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null;
+  let replacement = candidates.filter(item => (
+    item.lifecycle_status === 'active'
+    && String(item.id) !== String(sourceOccurrence.id)
+  )).sort(coordinatorOrder)[0] || null;
   if (replacement) {
     const expectedReplacement = { ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null };
     const additiveBackfillFields = [
@@ -3393,6 +3463,12 @@ async function replaceTaskOccurrenceSnapshot(
     const mismatchedFields = TASK_OCCURRENCE_COMPARABLE_FIELDS.filter(field => stableStringify(replacement[field] ?? null) !== stableStringify(expectedReplacement[field] ?? null));
     if (mismatchedFields.length) throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', { source_key: desiredPayload.source_key, task_occurrence_id: replacement.id, mismatched_fields: mismatchedFields });
   } else replacement = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null, revision: 1, published_revision: 0, last_published_correlation_id: null });
+  if (String(replacement.id) === String(sourceOccurrence.id)) {
+    throw new ApiError(409, 'Een taakuitvoering kan nooit zichzelf vervangen', {
+      code: 'TASK_OCCURRENCE_SELF_REPLACEMENT_BLOCKED',
+      task_occurrence_id: sourceOccurrence.id,
+    });
+  }
   const currentSource = await requireRecord(base44, 'PlanningTaskOccurrence', sourceOccurrence.id, 'Taakuitvoering');
   if (currentSource.lifecycle_status !== 'superseded' || String(currentSource.superseded_by_task_occurrence_id || '') !== String(replacement.id)) {
     await casUpdate(base44, 'PlanningTaskOccurrence', currentSource, revisionOf(currentSource), {
@@ -3401,6 +3477,435 @@ async function replaceTaskOccurrenceSnapshot(
     });
   }
   return replacement;
+}
+
+type BootstrapTaskOccurrenceReconciliation =
+  | { status: 'pending'; occurrence: LooseRecord }
+  | {
+      status: 'unchanged' | 'refreshed';
+      occurrence: LooseRecord;
+      beforeImpact: LooseRecord | null;
+      desiredImpact: LooseRecord | null;
+    }
+  | {
+      status: 'replaced';
+      occurrence: LooseRecord;
+      replacement: LooseRecord;
+      beforeImpact: LooseRecord | null;
+      desiredImpact: LooseRecord | null;
+    };
+
+async function reconcileBootstrapTaskOccurrenceSnapshot(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  bootstrapRequestHash: string,
+  sourceOccurrence: LooseRecord,
+  desiredPayload: LooseRecord,
+): Promise<BootstrapTaskOccurrenceReconciliation> {
+  try {
+    const initialBeforeImpact = taskOccurrencePlanningImpactSnapshot(sourceOccurrence);
+    const desiredImpact = taskOccurrencePlanningImpactSnapshot(desiredPayload);
+    const initialPlanningImpactChanged = stableStringify(initialBeforeImpact)
+      !== stableStringify(desiredImpact)
+      || Boolean(desiredPayload.logical_source_key && !sourceOccurrence.logical_source_key);
+    const replacementCandidates = initialPlanningImpactChanged
+      ? await filterAllRecords(
+          base44.asServiceRole.entities.PlanningTaskOccurrence,
+          { source_key: desiredPayload.source_key },
+          'created_date',
+        )
+      : [];
+    const descriptorIds = uniqueStrings([
+      sourceOccurrence.id,
+      ...replacementCandidates
+        .filter(item => item.lifecycle_status === 'active')
+        .map(item => item.id),
+    ]);
+    const descriptors = await Promise.all(descriptorIds.map(id => (
+      resourceCoordinatorDescriptor('task_occurrence', id)
+    )));
+    const occurrenceRequestHash = await sha256(stableStringify({
+      action: 'bootstrap_task_occurrence_snapshot',
+      bootstrap_request_hash: bootstrapRequestHash,
+      task_occurrence_id: sourceOccurrence.id,
+      desired_source_snapshot: taskOccurrenceSourceSnapshot(desiredPayload),
+    }));
+    return await withPlanningResourceLeases(
+      base44,
+      user,
+      context,
+      occurrenceRequestHash,
+      descriptors,
+      async leases => {
+        const currentOccurrence = await requireRecord(
+          base44,
+          'PlanningTaskOccurrence',
+          sourceOccurrence.id,
+          'Taakuitvoering',
+        );
+        if (
+          currentOccurrence.lifecycle_status !== 'active'
+          || hasActivePlanningCompositionReservation(currentOccurrence)
+        ) {
+          return { status: 'pending', occurrence: currentOccurrence };
+        }
+        const beforeImpact = taskOccurrencePlanningImpactSnapshot(currentOccurrence);
+        const sourceChanged = stableStringify(taskOccurrenceSourceSnapshot(currentOccurrence))
+          !== stableStringify(taskOccurrenceSourceSnapshot(desiredPayload));
+        if (!sourceChanged) {
+          return { status: 'unchanged', occurrence: currentOccurrence, beforeImpact, desiredImpact };
+        }
+        const planningImpactChanged = stableStringify(beforeImpact) !== stableStringify(desiredImpact)
+          || Boolean(desiredPayload.logical_source_key && !currentOccurrence.logical_source_key);
+        // The preliminary read intentionally avoids locking replacement rows
+        // for a commercial-only refresh. If the occurrence changed while the
+        // lease was being acquired, defer a newly operational replacement to
+        // the next bootstrap so every row it can touch is fenced first.
+        if (planningImpactChanged && !initialPlanningImpactChanged) {
+          return { status: 'pending', occurrence: currentOccurrence };
+        }
+        await renewPlanningResourceLeases(base44, user, leases);
+        if (!planningImpactChanged) {
+          const refreshed = await casUpdate(
+            base44,
+            'PlanningTaskOccurrence',
+            currentOccurrence,
+            revisionOf(currentOccurrence),
+            {
+              ...taskOccurrenceSourceSnapshot(desiredPayload),
+              last_modified_by_user_id: user.id || null,
+              last_modified_at: nowIso(),
+              metadata: {
+                ...(currentOccurrence.metadata || {}),
+                source_snapshot_refreshed_by_bootstrap: true,
+                non_operational_revision_window: nextNonOperationalOccurrenceRevisionWindow(
+                  currentOccurrence,
+                  desiredImpact,
+                  'bootstrap_source_snapshot_refresh',
+                ),
+              },
+            },
+          );
+          return { status: 'refreshed', occurrence: refreshed, beforeImpact, desiredImpact };
+        }
+        const replacement = await replaceTaskOccurrenceSnapshot(
+          base44,
+          user,
+          currentOccurrence,
+          desiredPayload,
+        );
+        return {
+          status: 'replaced',
+          occurrence: currentOccurrence,
+          replacement,
+          beforeImpact,
+          desiredImpact,
+        };
+      },
+    );
+  } catch (error) {
+    const status = Number((error as any)?.status || 0);
+    if (status === 409 || status === 429) {
+      return { status: 'pending', occurrence: sourceOccurrence };
+    }
+    throw error;
+  }
+}
+
+function sourceChangeOperationalSnapshot(source: LooseRecord, snapshot: LooseRecord | null | undefined) {
+  return taskOccurrencePlanningImpactSnapshot({
+    ...source,
+    ...(snapshot || {}),
+  });
+}
+
+function sourceChangeHasNoOperationalImpact(change: LooseRecord, source: LooseRecord) {
+  if (!change.previous_snapshot || !change.desired_snapshot) return false;
+  return stableStringify(sourceChangeOperationalSnapshot(source, change.previous_snapshot))
+    === stableStringify(sourceChangeOperationalSnapshot(source, change.desired_snapshot));
+}
+
+async function repairSelfSupersededTaskOccurrences(
+  base44: LooseRecord,
+  user: LooseRecord,
+  context: ReturnType<typeof mutationContext>,
+  bootstrapRequestHash: string,
+  occurrences: LooseRecord[],
+  segments: LooseRecord[],
+  shifts: LooseRecord[],
+  sourceChanges: LooseRecord[],
+  periodStart: string,
+  periodEnd: string,
+) {
+  const activeSegments = activeTaskSegments(segments, shifts);
+  const activeSegmentOccurrenceIds = new Set(
+    activeSegments.map((item: LooseRecord) => String(item.task_occurrence_id)),
+  );
+  const activeSegmentsByOccurrenceId = new Map<string, LooseRecord[]>();
+  for (const segment of activeSegments) {
+    const occurrenceId = String(segment.task_occurrence_id);
+    activeSegmentsByOccurrenceId.set(
+      occurrenceId,
+      [...(activeSegmentsByOccurrenceId.get(occurrenceId) || []), segment],
+    );
+  }
+  const repairedOccurrenceIds: string[] = [];
+  const resolvedSourceChangeIds: string[] = [];
+  const pendingOccurrenceIds: string[] = [];
+  const pendingSourceKeys: string[] = [];
+  const occurrenceUpdates: LooseRecord[] = [];
+  const sourceChangeUpdates: LooseRecord[] = [];
+  const candidates = occurrences.filter((item: LooseRecord) => (
+    (
+      (
+        item.lifecycle_status === 'superseded'
+        && String(item.superseded_by_task_occurrence_id || '') === String(item.id)
+      )
+      || (
+        item.lifecycle_status === 'active'
+        && item.metadata?.commercial_routing_self_supersede_repaired_at
+      )
+    )
+    && item.service_date <= periodEnd
+    && (item.end_date || item.service_date) >= periodStart
+    && activeSegmentOccurrenceIds.has(String(item.id))
+  ));
+
+  for (const source of candidates) {
+    const selfChanges = sourceChanges.filter((change: LooseRecord) => (
+      change.status === 'open'
+      && change.change_type === 'schedule_changed'
+      && String(change.source_task_occurrence_id || change.task_occurrence_id || change.occurrence_id)
+        === String(source.id)
+      && String(change.replacement_task_occurrence_id || '') === String(source.id)
+    ));
+    const sameSourceActiveDuplicates = occurrences.filter((item: LooseRecord) => (
+      item.lifecycle_status === 'active'
+      && String(item.id) !== String(source.id)
+      && String(item.source_key || '') === String(source.source_key || '')
+    ));
+    const snapshotsProveNoOperationalImpact = selfChanges.length > 0
+      && selfChanges.every(change => sourceChangeHasNoOperationalImpact(change, source));
+    const duplicatesProveNoOperationalImpact = sameSourceActiveDuplicates.length > 0
+      && sameSourceActiveDuplicates.every(item => (
+        !activeSegmentOccurrenceIds.has(String(item.id))
+        && stableStringify(taskOccurrencePlanningImpactSnapshot(item))
+          === stableStringify(taskOccurrencePlanningImpactSnapshot(source))
+      ));
+    if (!snapshotsProveNoOperationalImpact && !duplicatesProveNoOperationalImpact) continue;
+    if (sameSourceActiveDuplicates.some(item => (
+      activeSegmentOccurrenceIds.has(String(item.id))
+      || stableStringify(taskOccurrencePlanningImpactSnapshot(item))
+        !== stableStringify(taskOccurrencePlanningImpactSnapshot(source))
+    ))) continue;
+
+    const linkedSegments = activeSegmentsByOccurrenceId.get(String(source.id)) || [];
+    const linkedShiftIds = uniqueStrings(linkedSegments.map(item => item.shift_id));
+    const repairRequestHash = await sha256(stableStringify({
+      action: 'repair_commercial_routing_self_supersede',
+      bootstrap_request_hash: bootstrapRequestHash,
+      task_occurrence_id: source.id,
+      duplicate_task_occurrence_ids: sameSourceActiveDuplicates.map(item => item.id).sort(),
+      shift_ids: [...linkedShiftIds].sort(),
+    }));
+    const descriptors = await Promise.all([
+      resourceCoordinatorDescriptor('task_occurrence', source.id),
+      ...sameSourceActiveDuplicates.map(item => (
+        resourceCoordinatorDescriptor('task_occurrence', item.id)
+      )),
+      ...linkedShiftIds.map(id => resourceCoordinatorDescriptor('shift_composition', id)),
+    ]);
+
+    let repairResult: LooseRecord;
+    try {
+      repairResult = await withPlanningResourceLeases(
+        base44,
+        user,
+        context,
+        repairRequestHash,
+        descriptors,
+        async leases => {
+        const currentSource = await requireRecord(
+          base44,
+          'PlanningTaskOccurrence',
+          source.id,
+          'Taakuitvoering',
+        );
+        const isSelfSuperseded = (
+          currentSource.lifecycle_status === 'superseded'
+          && String(currentSource.superseded_by_task_occurrence_id || '') === String(currentSource.id)
+        );
+        const isPartiallyRepaired = (
+          currentSource.lifecycle_status === 'active'
+          && Boolean(currentSource.metadata?.commercial_routing_self_supersede_repaired_at)
+        );
+        if (
+          !isSelfSuperseded
+          && !isPartiallyRepaired
+        ) return { repaired: false, resolved_source_change_ids: [] as string[] };
+        let currentLinkedSegments = (await filterAllRecords(
+          base44.asServiceRole.entities.PlanningShiftTaskSegment,
+          { task_occurrence_id: currentSource.id },
+          '-start_date',
+        )).filter(item => item.status !== 'removed' && linkedShiftIds.includes(String(item.shift_id)));
+        const currentShiftStates = new Map<string, LooseRecord>();
+        for (const shiftId of uniqueStrings(currentLinkedSegments.map(item => item.shift_id))) {
+          currentShiftStates.set(
+            shiftId,
+            await requireRecord(base44, 'PlanningShift', shiftId, 'Dienst'),
+          );
+        }
+        currentLinkedSegments = currentLinkedSegments.filter(item => (
+          shiftAllowsActiveTaskSegments(currentShiftStates.get(String(item.shift_id)))
+        ));
+        if (!currentLinkedSegments.length) {
+          return { repaired: false, resolved_source_change_ids: [] as string[] };
+        }
+        const currentDuplicates: LooseRecord[] = [];
+        for (const duplicate of sameSourceActiveDuplicates) {
+          const currentDuplicate = await requireRecord(
+            base44,
+            'PlanningTaskOccurrence',
+            duplicate.id,
+            'Dubbele taakuitvoering',
+          );
+          if (currentDuplicate.lifecycle_status !== 'active') continue;
+          const duplicateSegments = (await filterAllRecords(
+            base44.asServiceRole.entities.PlanningShiftTaskSegment,
+            { task_occurrence_id: currentDuplicate.id },
+            '-start_date',
+          )).filter(item => item.status !== 'removed');
+          if (
+            duplicateSegments.length
+            || String(currentDuplicate.source_key || '') !== String(currentSource.source_key || '')
+            || stableStringify(taskOccurrencePlanningImpactSnapshot(currentDuplicate))
+              !== stableStringify(taskOccurrencePlanningImpactSnapshot(currentSource))
+          ) {
+            return { repaired: false, resolved_source_change_ids: [] as string[] };
+          }
+          currentDuplicates.push(currentDuplicate);
+        }
+        const currentChanges: LooseRecord[] = [];
+        for (const sourceChange of selfChanges) {
+          const currentChange = await requireRecord(
+            base44,
+            'PlanningTaskSourceChange',
+            sourceChange.id,
+            'Taakbronwijziging',
+          );
+          if (currentChange.status !== 'open') continue;
+          if (
+            currentChange.change_type !== 'schedule_changed'
+            || String(currentChange.source_task_occurrence_id
+              || currentChange.task_occurrence_id
+              || currentChange.occurrence_id) !== String(currentSource.id)
+            || String(currentChange.replacement_task_occurrence_id || '') !== String(currentSource.id)
+            || !sourceChangeHasNoOperationalImpact(currentChange, currentSource)
+          ) {
+            return { repaired: false, resolved_source_change_ids: [] as string[] };
+          }
+          currentChanges.push(currentChange);
+        }
+        if (!currentChanges.length && !currentDuplicates.length) {
+          return { repaired: false, resolved_source_change_ids: [] as string[] };
+        }
+
+        await renewPlanningResourceLeases(base44, user, leases);
+        const repairedSource = isSelfSuperseded
+          ? await casUpdate(
+              base44,
+              'PlanningTaskOccurrence',
+              currentSource,
+              revisionOf(currentSource),
+              {
+                lifecycle_status: 'active',
+                superseded_by_task_occurrence_id: null,
+                last_modified_by_user_id: user.id || null,
+                last_modified_at: nowIso(),
+                metadata: {
+                  ...(currentSource.metadata || {}),
+                  commercial_routing_self_supersede_repaired_at: nowIso(),
+                  non_operational_revision_window: nextNonOperationalOccurrenceRevisionWindow(
+                    currentSource,
+                    taskOccurrencePlanningImpactSnapshot(currentSource),
+                    'commercial_routing_self_supersede_repair',
+                  ),
+                },
+              },
+            )
+          : currentSource;
+        occurrenceUpdates.push(repairedSource);
+        for (const duplicate of currentDuplicates) {
+          await renewPlanningResourceLeases(base44, user, leases);
+          const repairedDuplicate = await casUpdate(
+            base44,
+            'PlanningTaskOccurrence',
+            duplicate,
+            revisionOf(duplicate),
+            {
+              lifecycle_status: 'superseded',
+              supersedes_task_occurrence_id: null,
+              superseded_by_task_occurrence_id: repairedSource.id,
+              last_modified_by_user_id: user.id || null,
+              last_modified_at: nowIso(),
+              metadata: {
+                ...(duplicate.metadata || {}),
+                commercial_routing_duplicate_of_task_occurrence_id: repairedSource.id,
+                commercial_routing_duplicate_repaired_at: nowIso(),
+              },
+            },
+          );
+          occurrenceUpdates.push(repairedDuplicate);
+        }
+        const resolvedIds: string[] = [];
+        for (const sourceChange of currentChanges) {
+          await renewPlanningResourceLeases(base44, user, leases);
+          const resolvedSourceChange = await casVersionUpdate(
+            base44,
+            'PlanningTaskSourceChange',
+            sourceChange,
+            versionOf(sourceChange),
+            {
+              status: 'resolved',
+              resolved_at: nowIso(),
+              resolved_by_user_id: user.id || null,
+              resolution_reason: 'Commerciële routering bijgewerkt zonder roosterimpact',
+              metadata: {
+                ...(sourceChange.metadata || {}),
+                commercial_routing_self_supersede_repaired: true,
+              },
+            },
+          );
+          sourceChangeUpdates.push(resolvedSourceChange);
+          resolvedIds.push(sourceChange.id);
+        }
+        return { repaired: true, resolved_source_change_ids: resolvedIds };
+        },
+      );
+    } catch (error) {
+      const status = Number((error as any)?.status || 0);
+      if (status === 409 || status === 429) {
+        // Bootstrap is a read/reconcile aid and must never interrupt an active
+        // planner gesture. A later bootstrap retries this idempotent repair.
+        pendingOccurrenceIds.push(String(source.id));
+        pendingSourceKeys.push(String(source.source_key || ''));
+        continue;
+      }
+      throw error;
+    }
+    if (!repairResult.repaired) continue;
+    repairedOccurrenceIds.push(source.id);
+    resolvedSourceChangeIds.push(...repairResult.resolved_source_change_ids);
+  }
+  return {
+    repaired_occurrence_ids: uniqueStrings(repairedOccurrenceIds),
+    resolved_source_change_ids: uniqueStrings(resolvedSourceChangeIds),
+    pending_occurrence_ids: uniqueStrings(pendingOccurrenceIds),
+    pending_source_keys: uniqueStrings(pendingSourceKeys),
+    occurrence_updates: uniqueRecords(occurrenceUpdates, item => String(item.id)),
+    source_change_updates: uniqueRecords(sourceChangeUpdates, item => String(item.id)),
+  };
 }
 
 async function resolveSatisfiedTaskSourceChanges(
@@ -3630,9 +4135,35 @@ async function reconcileSeriesMaterializedOccurrences(
       },
     };
     const previousImpact = taskOccurrencePlanningImpactSnapshot(occurrence);
+    const desiredImpact = taskOccurrencePlanningImpactSnapshot(desired);
     const sourceChanged = stableStringify(taskOccurrenceSourceSnapshot(occurrence))
       !== stableStringify(taskOccurrenceSourceSnapshot(desired));
     if (!sourceChanged) continue;
+    if (stableStringify(previousImpact) === stableStringify(desiredImpact)) {
+      const refreshed = await casUpdate(
+        base44,
+        'PlanningTaskOccurrence',
+        occurrence,
+        revisionOf(occurrence),
+        {
+          ...taskOccurrenceSourceSnapshot(desired),
+          last_modified_by_user_id: user.id || null,
+          last_modified_at: nowIso(),
+          metadata: {
+            ...(occurrence.metadata || {}),
+            source_snapshot_refreshed_by_series_reconcile: true,
+            non_operational_revision_window: nextNonOperationalOccurrenceRevisionWindow(
+              occurrence,
+              desiredImpact,
+              'series_source_snapshot_refresh',
+            ),
+          },
+        },
+      );
+      occurrenceById.set(String(refreshed.id), refreshed);
+      result.refreshed_occurrence_ids.push(refreshed.id);
+      continue;
+    }
     const replacement = await replaceTaskOccurrenceSnapshot(base44, user, occurrence, desired);
     result.created_occurrence_ids.push(replacement.id);
     result.superseded_occurrence_ids.push(occurrence.id);
@@ -7279,7 +7810,10 @@ async function changeSingleTaskOccurrence(
   if (initialOccurrence.lifecycle_status !== 'active' && !initialRecoveryMarker) {
     throw new ApiError(409, 'Deze taakuitvoering is intussen vervangen; laad het rooster opnieuw');
   }
-  if (!initialRecoveryMarker && revisionOf(initialOccurrence) !== expectedOccurrenceRevision) {
+  if (
+    !initialRecoveryMarker
+    && !occurrenceRevisionMatchesExpected(initialOccurrence, expectedOccurrenceRevision)
+  ) {
     throw new ApiError(409, 'De taakuitvoering is intussen gewijzigd', {
       expected_revision: expectedOccurrenceRevision,
       current_revision: revisionOf(initialOccurrence),
@@ -7452,7 +7986,7 @@ async function changeSingleTaskOccurrence(
     );
     if (!recoveryMarker && (
       occurrence.lifecycle_status !== 'active'
-      || revisionOf(occurrence) !== expectedOccurrenceRevision
+      || !occurrenceRevisionMatchesExpected(occurrence, expectedOccurrenceRevision)
     )) {
       throw new ApiError(409, 'De taakuitvoering is intussen gewijzigd; laad het rooster opnieuw');
     }
@@ -7523,7 +8057,7 @@ async function changeSingleTaskOccurrence(
         base44,
         'PlanningTaskOccurrence',
         occurrence,
-        expectedOccurrenceRevision,
+        revisionOf(occurrence),
         {
           last_modified_by_user_id: user.id || null,
           last_modified_at: nowIso(),
@@ -9390,6 +9924,9 @@ async function bootstrapRange(
   const supersededOccurrenceIds: string[] = [];
   const taskSourceChangeIds: string[] = [];
   const resolvedTaskSourceChangeIds: string[] = [];
+  const repairedCommercialRoutingOccurrenceIds: string[] = [];
+  const pendingCommercialRoutingOccurrenceIds: string[] = [];
+  const pendingCommercialRoutingSourceKeys = new Set<string>();
   const invalidTaskDefinitionIds: string[] = [];
   const duplicateSourceKeys: string[] = [];
   const seenSourceKeys = new Set<string>();
@@ -9667,6 +10204,46 @@ async function bootstrapRange(
     }
   }
 
+  const commercialRoutingRepair = await repairSelfSupersededTaskOccurrences(
+    base44,
+    user,
+    context,
+    requestHash,
+    existingOccurrences,
+    existingTaskSegments,
+    existingShifts,
+    existingTaskSourceChanges,
+    periodStart,
+    periodEnd,
+  );
+  if (commercialRoutingRepair.repaired_occurrence_ids.length) {
+    repairedCommercialRoutingOccurrenceIds.push(
+      ...commercialRoutingRepair.repaired_occurrence_ids,
+    );
+    refreshedOccurrenceIds.push(...commercialRoutingRepair.repaired_occurrence_ids);
+    resolvedTaskSourceChangeIds.push(...commercialRoutingRepair.resolved_source_change_ids);
+  }
+  pendingCommercialRoutingOccurrenceIds.push(...commercialRoutingRepair.pending_occurrence_ids);
+  commercialRoutingRepair.pending_source_keys.forEach((sourceKey: string) => (
+    pendingCommercialRoutingSourceKeys.add(sourceKey)
+  ));
+  const repairedOccurrenceById = new Map<string, LooseRecord>(
+    commercialRoutingRepair.occurrence_updates.map((item: LooseRecord) => [String(item.id), item]),
+  );
+  if (repairedOccurrenceById.size) {
+    existingOccurrences = existingOccurrences.map((item: LooseRecord) => (
+      repairedOccurrenceById.get(String(item.id)) || item
+    ));
+  }
+  const repairedSourceChangeById = new Map<string, LooseRecord>(
+    commercialRoutingRepair.source_change_updates.map((item: LooseRecord) => [String(item.id), item]),
+  );
+  if (repairedSourceChangeById.size) {
+    existingTaskSourceChanges = existingTaskSourceChanges.map((item: LooseRecord) => (
+      repairedSourceChangeById.get(String(item.id)) || item
+    ));
+  }
+
   const occurrenceHasActiveSegment = new Set(
     activeTaskSegments(existingTaskSegments, existingShifts)
       .map((item: LooseRecord) => String(item.task_occurrence_id)),
@@ -9676,6 +10253,7 @@ async function bootstrapRange(
   for (const occurrence of existingOccurrences) {
     if (occurrence.lifecycle_status !== 'active') continue;
     const key = String(occurrence.source_key);
+    if (pendingCommercialRoutingSourceKeys.has(key)) continue;
     occurrenceSourceCounts.set(key, Number(occurrenceSourceCounts.get(key) || 0) + 1);
   }
   for (const [sourceKey, count] of occurrenceSourceCounts) {
@@ -9688,17 +10266,27 @@ async function bootstrapRange(
   }
   const occurrenceBySourceKey = new Map<string, LooseRecord>(
     reconciledOccurrences
-      .filter((item: LooseRecord) => item.lifecycle_status === 'active')
+      .filter((item: LooseRecord) => (
+        item.lifecycle_status === 'active'
+        && !pendingCommercialRoutingSourceKeys.has(String(item.source_key))
+      ))
       .map((item: LooseRecord) => [String(item.source_key), item]),
   );
   const occurrenceByIdentityKey = new Map<string, LooseRecord>(
     reconciledOccurrences
-      .filter((item: LooseRecord) => item.lifecycle_status === 'active')
+      .filter((item: LooseRecord) => (
+        item.lifecycle_status === 'active'
+        && !pendingCommercialRoutingSourceKeys.has(String(item.source_key))
+      ))
       .map((item: LooseRecord) => [taskOccurrenceIdentityKey(item), item]),
   );
   const occurrenceByLogicalSourceKey = new Map<string, LooseRecord>(
     reconciledOccurrences
-      .filter((item: LooseRecord) => item.lifecycle_status === 'active' && item.logical_source_key)
+      .filter((item: LooseRecord) => (
+        item.lifecycle_status === 'active'
+        && item.logical_source_key
+        && !pendingCommercialRoutingSourceKeys.has(String(item.source_key))
+      ))
       .map((item: LooseRecord) => [String(item.logical_source_key), item]),
   );
   const desiredOccurrenceSourceKeys = new Set<string>();
@@ -9756,40 +10344,10 @@ async function bootstrapRange(
       && String(publishedSecurityPlanRevision.security_plan_id) === String(securityPlan?.id)
       ? publishedSecurityPlanRevision
       : null;
-    const securityPlanSnapshot = securityPlan ? {
-      plan: {
-        id: securityPlan.id,
-        task_type: securityPlan.task_type || securityPlan.category || null,
-        variant_name: securityPlan.variant_name || securityPlan.title || null,
-        current_published_revision_id: securityPlan.current_published_revision_id || null,
-        latest_revision_number: Number(securityPlan.latest_revision_number || 0),
-        status: securityPlan.status || null,
-      },
-      published_revision: validPublishedSecurityPlanRevision ? pick(validPublishedSecurityPlanRevision, [
-        'id',
-        'security_plan_id',
-        'customer_id',
-        'object_id',
-        'revision_number',
-        'status',
-        'summary',
-        'duration_mode',
-        'duration_minutes',
-        'section_policy',
-        'default_section_ids',
-        'allowed_section_ids',
-        'instruction_blocks',
-        'module_assignments',
-        'floorplan_id',
-        'floorplan_revision',
-        'route_overlay',
-        'readiness_snapshot',
-        'content_checksum',
-        'published_at',
-        'published_by_user_id',
-        'version',
-      ]) : null,
-    } : null;
+    const securityPlanSnapshot = taskOccurrenceSecurityPlanSnapshot(
+      securityPlan,
+      validPublishedSecurityPlanRevision,
+    );
     const securityPlanChecksum = securityPlanSnapshot
       ? await sha256(stableStringify(securityPlanSnapshot))
       : null;
@@ -9797,6 +10355,12 @@ async function bootstrapRange(
     for (const blueprint of blueprints) {
       await renewPlanningResourceLeases(base44, user, definitionLeases);
       desiredOccurrenceSourceKeys.add(blueprint.source_key);
+      if (pendingCommercialRoutingSourceKeys.has(String(blueprint.source_key))) {
+        reconciledOccurrences
+          .filter((item: LooseRecord) => String(item.source_key) === String(blueprint.source_key))
+          .forEach((item: LooseRecord) => desiredOccurrenceIds.add(String(item.id)));
+        continue;
+      }
       const commercialRoute = resolveCommercialPlanningRoute(
         {
           ...blueprint,
@@ -9865,74 +10429,37 @@ async function bootstrapRange(
       }
       let currentOccurrence: LooseRecord = existing;
       desiredOccurrenceIds.add(String(currentOccurrence.id));
-      if (hasActivePlanningCompositionReservation(currentOccurrence)) continue;
-      if (!occurrenceHasActiveSegment.has(String(currentOccurrence.id))) {
-        const additiveBackfillFields = [
-          'service_responsible_company_id',
-          'task_type_key',
-          'commercial_routing_status',
-          'commercial_routing_snapshot',
-        ];
-        const additiveBackfill = Object.fromEntries(additiveBackfillFields
-          .filter(field => currentOccurrence[field] == null && payload[field] != null)
-          .map(field => [field, payload[field]]));
-        if (Object.keys(additiveBackfill).length) {
-          currentOccurrence = await casUpdate(
-            base44,
-            'PlanningTaskOccurrence',
-            currentOccurrence,
-            revisionOf(currentOccurrence),
-            additiveBackfill,
-          );
-        }
-      }
-      const commercialIdentityUnchanged = [
-        'selling_company_id',
-        'customer_contract_id',
-        'customer_contract_line_id',
-      ].every(field => stableStringify(currentOccurrence[field] ?? null) === stableStringify(payload[field] ?? null));
-      const commercialAttentionChanged = [
-        'commercial_routing_status',
-        'commercial_routing_snapshot',
-      ].some(field => stableStringify(currentOccurrence[field] ?? null) !== stableStringify(payload[field] ?? null));
-      if (
-        commercialIdentityUnchanged
-        && commercialAttentionChanged
-        && !occurrenceHasActiveSegment.has(String(currentOccurrence.id))
-      ) {
-        currentOccurrence = await casUpdate(
-          base44,
-          'PlanningTaskOccurrence',
-          currentOccurrence,
-          revisionOf(currentOccurrence),
-          {
-            commercial_routing_status: payload.commercial_routing_status,
-            commercial_routing_snapshot: payload.commercial_routing_snapshot,
-          },
-        );
-      }
-      const beforeImpact = taskOccurrencePlanningImpactSnapshot(currentOccurrence);
-      const desiredImpact = taskOccurrencePlanningImpactSnapshot(payload);
       const sourceChanged = stableStringify(taskOccurrenceSourceSnapshot(currentOccurrence))
         !== stableStringify(taskOccurrenceSourceSnapshot(payload));
-      const planningImpactChanged = stableStringify(beforeImpact) !== stableStringify(desiredImpact)
-        || Boolean(blueprint.logical_source_key && !currentOccurrence.logical_source_key);
-      if (sourceChanged && !planningImpactChanged) {
-        currentOccurrence = await casUpdate(
-          base44,
-          'PlanningTaskOccurrence',
-          currentOccurrence,
-          revisionOf(currentOccurrence),
-          {
-            ...taskOccurrenceSourceSnapshot(payload),
-            last_modified_by_user_id: user.id || null,
-            last_modified_at: nowIso(),
-            metadata: {
-              ...(currentOccurrence.metadata || {}),
-              source_snapshot_refreshed_by_bootstrap: true,
-            },
-          },
-        );
+      if (!sourceChanged) {
+        if (blueprint.logical_source_key) {
+          occurrenceByLogicalSourceKey.set(String(blueprint.logical_source_key), currentOccurrence);
+        }
+        continue;
+      }
+      const occurrenceReconciliation = await reconcileBootstrapTaskOccurrenceSnapshot(
+        base44,
+        user,
+        context,
+        requestHash,
+        currentOccurrence,
+        payload,
+      );
+      await renewPlanningResourceLeases(base44, user, definitionLeases);
+      if (occurrenceReconciliation.status === 'pending') {
+        pendingCommercialRoutingOccurrenceIds.push(String(currentOccurrence.id));
+        pendingCommercialRoutingSourceKeys.add(String(blueprint.source_key));
+        continue;
+      }
+      currentOccurrence = occurrenceReconciliation.occurrence;
+      if (occurrenceReconciliation.status === 'unchanged') {
+        occurrenceBySourceKey.set(blueprint.source_key, currentOccurrence);
+        if (blueprint.logical_source_key) {
+          occurrenceByLogicalSourceKey.set(String(blueprint.logical_source_key), currentOccurrence);
+        }
+        continue;
+      }
+      if (occurrenceReconciliation.status === 'refreshed') {
         occurrenceBySourceKey.set(blueprint.source_key, currentOccurrence);
         if (blueprint.logical_source_key) {
           occurrenceByLogicalSourceKey.set(String(blueprint.logical_source_key), currentOccurrence);
@@ -9940,13 +10467,15 @@ async function bootstrapRange(
         refreshedOccurrenceIds.push(currentOccurrence.id);
         continue;
       }
-      if (sourceChanged && planningImpactChanged) {
-        const replacement = await replaceTaskOccurrenceSnapshot(
-          base44,
-          user,
-          currentOccurrence,
-          payload,
-        );
+      if (occurrenceReconciliation.status === 'replaced') {
+        const replacement = occurrenceReconciliation.replacement;
+        const beforeImpact = occurrenceReconciliation.beforeImpact;
+        const desiredImpact = occurrenceReconciliation.desiredImpact;
+        if (!replacement) {
+          pendingCommercialRoutingOccurrenceIds.push(String(currentOccurrence.id));
+          pendingCommercialRoutingSourceKeys.add(String(blueprint.source_key));
+          continue;
+        }
         occurrenceBySourceKey.set(blueprint.source_key, replacement);
         if (blueprint.logical_source_key) {
           occurrenceByLogicalSourceKey.set(String(blueprint.logical_source_key), replacement);
@@ -9995,8 +10524,6 @@ async function bootstrapRange(
             }
           }
         }
-      } else if (blueprint.logical_source_key) {
-        occurrenceByLogicalSourceKey.set(String(blueprint.logical_source_key), currentOccurrence);
       }
     }
       },
@@ -10009,6 +10536,7 @@ async function bootstrapRange(
       || occurrence.service_date > periodEnd
       || occurrence.lifecycle_status !== 'active'
       || supersededThisBootstrap.has(String(occurrence.id))
+      || pendingCommercialRoutingSourceKeys.has(String(occurrence.source_key))
       || blockedLegacySeriesIds.has(String(occurrence.object_task_schedule_series_id || ''))
       || desiredOccurrenceSourceKeys.has(String(occurrence.source_key))
       || desiredOccurrenceIds.has(String(occurrence.id))
@@ -10138,6 +10666,8 @@ async function bootstrapRange(
     resolved_task_source_change_ids: [...new Set(resolvedTaskSourceChangeIds)],
     repaired_shared_boundary_occurrence_ids: repairedSharedBoundaryOccurrenceIds,
     repaired_single_task_occurrence_ids: repairedSingleTaskOccurrenceIds,
+    repaired_commercial_routing_occurrence_ids: repairedCommercialRoutingOccurrenceIds,
+    pending_commercial_routing_occurrence_ids: uniqueStrings(pendingCommercialRoutingOccurrenceIds),
     migrated_legacy_single_task_occurrences: legacySingleTaskMigrationReports
       .filter(item => item.status === 'migrated'),
     completed_legacy_single_task_occurrences: legacySingleTaskMigrationReports
@@ -10525,7 +11055,7 @@ async function composeShift(
       });
     }
     if (
-      revisionOf(occurrence) !== expected
+      !occurrenceRevisionMatchesExpected(occurrence, expected)
       && !ownsReservation
       && !completedByThisComposition
       && !compensatedByThisComposition
@@ -10627,6 +11157,49 @@ async function composeShift(
       compositionDescriptors,
     );
     latencyProbe?.mark('leases');
+
+    // Occurrences were first read before the resource leases were acquired so
+    // the descriptor set could be built. A low-priority bootstrap can finish a
+    // commercial-only refresh in that interval. Replace every preflight
+    // snapshot with a fenced reread; the reservation CAS below can then accept
+    // its proven non-operational revision window while still rejecting a real
+    // planning change.
+    const lockedAffectedOccurrences = await Promise.all(
+      affectedOccurrenceIds.map(id => (
+        requireRecord(base44, 'PlanningTaskOccurrence', id, 'Taakuitvoering')
+      )),
+    );
+    affectedOccurrences.splice(
+      0,
+      affectedOccurrences.length,
+      ...lockedAffectedOccurrences,
+    );
+    const lockedAffectedOccurrenceById = new Map<string, LooseRecord>(
+      lockedAffectedOccurrences.map(item => [String(item.id), item]),
+    );
+    occurrences.splice(
+      0,
+      occurrences.length,
+      ...occurrenceIds.map(id => lockedAffectedOccurrenceById.get(String(id)) as LooseRecord),
+    );
+    occurrenceById.clear();
+    occurrences.forEach(occurrence => occurrenceById.set(String(occurrence.id), occurrence));
+    occurrences.forEach(occurrence => {
+      if (occurrence.lifecycle_status !== 'active') {
+        throw new ApiError(409, 'Een vervallen taakuitvoering kan niet worden ingepland', {
+          task_occurrence_id: occurrence.id,
+          lifecycle_status: occurrence.lifecycle_status,
+        });
+      }
+      const boundaryState = unresolvedSharedBoundaryMutation(occurrence);
+      if (boundaryState) {
+        throw new ApiError(409, 'Een eerdere gedeelde grens moet eerst automatisch worden hersteld', {
+          code: 'BOUNDARY_RECOVERY_REQUIRED',
+          task_occurrence_id: occurrence.id,
+          operation_id: boundaryState.operation_id || null,
+        });
+      }
+    });
 
   const sourceKey = composeAndAssignMode
     ? `task-compose-and-assign:${context.idempotencyKey}`
@@ -11400,7 +11973,12 @@ async function composeShift(
       && Number(occurrence.metadata?.last_composition_recovery_revision) === revisionOf(occurrence);
     const expectedRevision = compensatedByThisRequest || compensatedByThisComposition
       ? revisionOf(occurrence)
-      : expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
+      : occurrenceRevisionMatchesExpected(
+          occurrence,
+          expectedOccurrenceRevisionById.get(String(occurrence.id)) as number,
+        )
+        ? revisionOf(occurrence)
+        : expectedOccurrenceRevisionById.get(String(occurrence.id)) as number;
     await renewPlanningResourceLeases(base44, user, compositionLeases);
     const reservedOccurrence = await casUpdate(
       base44,
@@ -12382,7 +12960,7 @@ async function resizeSharedTaskBoundary(
             });
           }
         }
-        if (revisionOf(occurrence) !== expectedOccurrenceRevision) {
+        if (!occurrenceRevisionMatchesExpected(occurrence, expectedOccurrenceRevision)) {
           throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
             entity: 'PlanningTaskOccurrence',
             id: occurrence.id,
@@ -13817,7 +14395,11 @@ async function resizeTaskShiftPreservingCoverage(
       }
       assertExpectedRecordRevision(shift, body.expected_shift_revision, 'expected_shift_revision', 'PlanningShift');
       assertExpectedRecordRevision(segment, body.expected_segment_revision, 'expected_segment_revision', 'PlanningShiftTaskSegment');
-      assertExpectedRecordRevision(occurrence, body.expected_occurrence_revision, 'expected_occurrence_revision', 'PlanningTaskOccurrence');
+      assertExpectedOccurrenceRevision(
+        occurrence,
+        body.expected_occurrence_revision,
+        'expected_occurrence_revision',
+      );
     }
     let assignments = await filterAllRecords(
       base44.asServiceRole.entities.PlanningAssignment,
@@ -14383,7 +14965,11 @@ async function vacateTaskShiftPartition(
       if (targetSegment.status === 'removed') throw new ApiError(409, 'Het taakdeel is intussen verwijderd');
       assertExpectedRecordRevision(targetShift, body.expected_shift_revision, 'expected_shift_revision', 'PlanningShift');
       assertExpectedRecordRevision(targetSegment, body.expected_segment_revision, 'expected_segment_revision', 'PlanningShiftTaskSegment');
-      assertExpectedRecordRevision(occurrence, body.expected_occurrence_revision, 'expected_occurrence_revision', 'PlanningTaskOccurrence');
+      assertExpectedOccurrenceRevision(
+        occurrence,
+        body.expected_occurrence_revision,
+        'expected_occurrence_revision',
+      );
     }
     let targetAssignments = await filterAllRecords(
       base44.asServiceRole.entities.PlanningAssignment,
@@ -14900,11 +15486,10 @@ async function assignAndMergeTaskShiftPartition(
         'expected_adjacent_assignment_revision',
         'PlanningAssignment',
       );
-      assertExpectedRecordRevision(
+      assertExpectedOccurrenceRevision(
         occurrence,
         body.expected_occurrence_revision,
         'expected_occurrence_revision',
-        'PlanningTaskOccurrence',
       );
     } else if (
       String(marker.target_shift_id) !== String(targetShift.id)
@@ -16117,7 +16702,11 @@ async function cancelTaskShift(
     const expected = expectedOccurrenceRevisions[occurrence.id] == null
       ? revisionOf(occurrence)
       : positiveInteger(expectedOccurrenceRevisions[occurrence.id], `expected_occurrence_revisions.${occurrence.id}`);
-    if (revisionOf(occurrence) !== expected && !ownsReservation && !completedByThisRequest) {
+    if (
+      !occurrenceRevisionMatchesExpected(occurrence, expected)
+      && !ownsReservation
+      && !completedByThisRequest
+    ) {
       throw new ApiError(409, 'Taakdekking is intussen gewijzigd', {
         entity: 'PlanningTaskOccurrence',
         id: occurrence.id,
@@ -16130,22 +16719,28 @@ async function cancelTaskShift(
       continue;
     }
     await renewPlanningResourceLeases(base44, user, leases);
-    reservedOccurrences.push(await casUpdate(base44, 'PlanningTaskOccurrence', occurrence, expected, {
-      last_modified_by_user_id: user.id || null,
-      last_modified_at: nowIso(),
-      metadata: {
-        ...(occurrence.metadata || {}),
-        planning_composition_reservation: {
-          idempotency_key: context.idempotencyKey,
-          correlation_id: context.correlationId,
-          action: 'cancel_task_shift',
-          request_hash: requestHash,
-          status: 'pending',
-          acquired_at: nowIso(),
-          expires_at: reservationExpiresAt,
+    reservedOccurrences.push(await casUpdate(
+      base44,
+      'PlanningTaskOccurrence',
+      occurrence,
+      revisionOf(occurrence),
+      {
+        last_modified_by_user_id: user.id || null,
+        last_modified_at: nowIso(),
+        metadata: {
+          ...(occurrence.metadata || {}),
+          planning_composition_reservation: {
+            idempotency_key: context.idempotencyKey,
+            correlation_id: context.correlationId,
+            action: 'cancel_task_shift',
+            request_hash: requestHash,
+            status: 'pending',
+            acquired_at: nowIso(),
+            expires_at: reservationExpiresAt,
+          },
         },
       },
-    }));
+    ));
   }
 
   const beforeState = { shift, segments, assignments };

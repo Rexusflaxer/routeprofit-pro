@@ -80,6 +80,7 @@ import {
   planningTaskCopyReference,
   reconcileOptimisticTaskCopy,
 } from "@/components/planning/planningTaskCopyDomain";
+import { projectSegmentsToCurrentTaskOccurrences } from "@/components/planning/planningTaskOccurrenceProjection";
 import {
   batchPlanningEligibilityCandidates,
   buildOccurrenceEligibilityShift,
@@ -139,6 +140,8 @@ const PLANNING_ELIGIBILITY_MAX_AGE_MS = 120_000;
 const PLANNING_ELIGIBILITY_REQUEST_TIMEOUT_MS = 12_000;
 const PLANNING_ELIGIBILITY_HOVER_DELAY_MS = 80;
 const PLANNING_ELIGIBILITY_PREFETCH_LEAD_MS = 15_000;
+const PLANNING_COMMERCIAL_REPAIR_MAX_RETRIES = 3;
+const PLANNING_COMMERCIAL_REPAIR_RETRY_MS = 5_000;
 const dateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 const dayLabel = new Intl.DateTimeFormat("nl-NL", { weekday: "long", day: "numeric", month: "long" });
 const compactDateLabel = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
@@ -328,26 +331,6 @@ function annotateSourceChangedShifts(shifts, sourceChangesByShift) {
           message: `${changes.length} gekoppelde objecttaak${changes.length === 1 ? " is" : "taken zijn"} vanaf een latere week gewijzigd. Pas de dienstinhoud aan.`,
         }],
       },
-    };
-  });
-}
-
-function projectSegmentsToCurrentTaskOccurrences(segments, occurrences) {
-  const occurrenceById = new Map(occurrences.map(item => [String(item.id), item]));
-  const currentByLogicalKey = new Map();
-  occurrences
-    .filter(item => item.lifecycle_status === "active" && item.logical_source_key)
-    .forEach(item => currentByLogicalKey.set(String(item.logical_source_key), item));
-
-  return segments.map(segment => {
-    const linked = occurrenceById.get(String(segment.task_occurrence_id));
-    if (linked?.lifecycle_status !== "superseded" || !linked.logical_source_key) return segment;
-    const current = currentByLogicalKey.get(String(linked.logical_source_key));
-    if (!current) return segment;
-    return {
-      ...segment,
-      task_occurrence_id: current.id,
-      source_task_occurrence_id: segment.task_occurrence_id,
     };
   });
 }
@@ -992,6 +975,7 @@ export default function Planning() {
   const [planningResizeGestureActive, setPlanningResizeGestureActive] = useState(false);
   const lastBootstrapKey = useRef("");
   const bootstrapRecoveryTimer = useRef(null);
+  const commercialRoutingRecovery = useRef({ key: "", attempts: 0 });
   const lastBoundaryRecoveryKey = useRef("");
   const mutationIntents = useRef(null);
   if (!mutationIntents.current) mutationIntents.current = createPlanningMutationIntentRegistry();
@@ -1665,11 +1649,37 @@ export default function Planning() {
       globalThis.clearTimeout(bootstrapRecoveryTimer.current);
       bootstrapRecoveryTimer.current = null;
     }
-    const pendingRepairs = bootstrapMutation.data?.pending_shared_boundary_repairs || [];
-    if (bootstrapMutation.isPending || pendingRepairs.length === 0) return undefined;
-    const delay = getSharedBoundaryRepairRetryDelay(pendingRepairs);
+    if (bootstrapMutation.isPending) return undefined;
+    const pendingBoundaryRepairs = bootstrapMutation.data?.pending_shared_boundary_repairs || [];
+    const pendingCommercialOccurrenceIds = [...new Set(
+      (bootstrapMutation.data?.pending_commercial_routing_occurrence_ids || [])
+        .filter(Boolean)
+        .map(String),
+    )].sort();
+    const commercialRecoveryKey = pendingCommercialOccurrenceIds.length
+      ? `${bootstrapStart}:${periodEnd}:${pendingCommercialOccurrenceIds.join("|")}`
+      : "";
+    if (commercialRoutingRecovery.current.key !== commercialRecoveryKey) {
+      commercialRoutingRecovery.current = { key: commercialRecoveryKey, attempts: 0 };
+    }
+    const retryCommercialRouting = Boolean(
+      commercialRecoveryKey
+      && commercialRoutingRecovery.current.attempts < PLANNING_COMMERCIAL_REPAIR_MAX_RETRIES,
+    );
+    if (pendingBoundaryRepairs.length === 0 && !retryCommercialRouting) return undefined;
+    const boundaryDelay = pendingBoundaryRepairs.length
+      ? getSharedBoundaryRepairRetryDelay(pendingBoundaryRepairs)
+      : Number.POSITIVE_INFINITY;
+    const commercialDelay = retryCommercialRouting
+      ? PLANNING_COMMERCIAL_REPAIR_RETRY_MS
+      : Number.POSITIVE_INFINITY;
+    const delay = Math.min(boundaryDelay, commercialDelay);
     bootstrapRecoveryTimer.current = globalThis.setTimeout(() => {
       bootstrapRecoveryTimer.current = null;
+      if (
+        retryCommercialRouting
+        && commercialRoutingRecovery.current.key === commercialRecoveryKey
+      ) commercialRoutingRecovery.current.attempts += 1;
       bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd });
     }, delay);
     return () => {
@@ -1705,15 +1715,18 @@ export default function Planning() {
   const allShifts = interactivePlanningRecords.shifts;
   const assignments = interactivePlanningRecords.assignments;
   const taskOccurrences = interactivePlanningRecords.occurrences;
-  const taskSegments = useMemo(
-    () => projectSegmentsToCurrentTaskOccurrences(interactivePlanningRecords.segments, taskOccurrences),
-    [interactivePlanningRecords.segments, taskOccurrences],
-  );
   const openTaskSourceChanges = useMemo(() => (taskSourceChangesQuery.data || []).filter(change => (
     change.status === "open"
     && String(change.service_date || change.effective_from || "") >= periodStart
     && String(change.service_date || change.effective_from || "") <= periodEnd
   )), [periodEnd, periodStart, taskSourceChangesQuery.data]);
+  const taskSegments = useMemo(
+    () => projectSegmentsToCurrentTaskOccurrences(interactivePlanningRecords.segments,
+      taskOccurrences,
+      openTaskSourceChanges,
+    ),
+    [interactivePlanningRecords.segments, openTaskSourceChanges, taskOccurrences],
+  );
   const sourceChangesByOccurrence = useMemo(() => {
     const grouped = new Map();
     openTaskSourceChanges.forEach(change => {
