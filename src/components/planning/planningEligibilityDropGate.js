@@ -3,12 +3,16 @@ function text(value) {
 }
 
 function warningKey(warning) {
+  const details = warning?.details || {};
   return [
-    text(warning?.code),
-    text(warning?.severity),
-    text(warning?.detail || warning?.message || warning?.title),
+    text(warning?.policy_key || warning?.code).toLowerCase(),
+    text(details.service_date || warning?.service_date),
+    text(details.scope_type || warning?.scope_type),
+    text(details.scope_id || warning?.scope_id),
   ].join("|");
 }
+
+const ROUTING_DRAFT_WARNING_CODES = new Set(["contract_missing", "contract_ambiguous"]);
 
 /**
  * @param {{ result?: any, preview?: any, now?: number, timeoutMs?: number }} [options]
@@ -98,10 +102,23 @@ export function resolvePendingPlanningEligibilityDrop(options = {}) {
 
   const verdict = preview.verdict || {};
   if (verdict.status === "ready") {
+    const draftAllowed = verdict.draftAssignmentAllowed === true
+      || verdict.draft_assignment_allowed === true;
+    if (!draftAllowed) {
+      return Object.freeze({
+        status: "blocked",
+        newWarnings: Object.freeze([...(verdict.warnings || [])]),
+      });
+    }
     const known = new Set(pending.initialWarningKeys || []);
     const newWarnings = (verdict.warnings || []).filter(warning => !known.has(warningKey(warning)));
+    const newlyBlockingWarnings = newWarnings.filter(warning => (
+      text(warning?.severity).toLowerCase() !== "info"
+      && text(warning?.severity).toLowerCase() !== "success"
+      && !ROUTING_DRAFT_WARNING_CODES.has(text(warning?.policy_key || warning?.code).toLowerCase())
+    ));
     return Object.freeze({
-      status: newWarnings.length ? "warnings_changed" : "ready",
+      status: newlyBlockingWarnings.length ? "warnings_changed" : "ready",
       newWarnings: Object.freeze(newWarnings),
     });
   }

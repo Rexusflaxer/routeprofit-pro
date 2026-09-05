@@ -29,11 +29,32 @@
     "task_type": {
       "type": "string"
     },
+    "task_type_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke, stabiele taaksoortsleutel voor commerciële en arbeidscontractroutering."
+    },
     "operating_company_id": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "service_responsible_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Operationeel/juridisch verantwoordelijke dienst-BV uit het bevroren planningsbewijs; nooit afleiden uit verkoper of werkgever."
+    },
+    "supplying_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Leverende BV wanneer die rol expliciet is bewezen; blijft anders leeg."
     },
     "selling_company_id": {
       "type": [
@@ -74,6 +95,28 @@
         "null"
       ]
     },
+    "commercial_routing_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "resolved",
+        "not_applicable",
+        "missing_contract",
+        "ambiguous",
+        "manual_review_required",
+        "stale",
+        null
+      ]
+    },
+    "commercial_routing_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "customer_snapshot": {
       "type": [
         "object",
@@ -111,8 +154,11 @@
       "additionalProperties": true
     },
     "customer_billable": {
-      "type": "boolean",
-      "default": false
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Expliciete facturatie-indicatie uit de gepubliceerde dienstcontext; ontbrekend blijft onbekend en mag nooit stil als niet-factureerbaar gelden."
     },
     "billable_quantity_minor": {
       "type": [
@@ -232,6 +278,20 @@
         "string",
         "null"
       ]
+    },
+    "employing_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Juridische werkgever/loonbetaler uit het geselecteerde arbeidscontract; onafhankelijk van selling_company_id."
+    },
+    "payroll_cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Loon-CAO uit het geselecteerde arbeidscontract; nooit afleiden uit de service- of verkoopcontext."
     },
     "contract_function_key": {
       "type": [

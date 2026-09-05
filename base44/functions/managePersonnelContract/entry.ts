@@ -4,7 +4,40 @@ const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const CAO_EHB_KEY = 'cao_evenementen_horecabeveiliging';
 const FLEX_REFORM_EFFECTIVE_DATE = '2028-01-01';
 const FUNCTION_POLICY_VERSION = 'employee-contract-routing-v2';
+const TASK_ROUTING_POLICY_VERSION = 'employee-contract-task-routing-v1';
 const CHAIN_POLICY_VERSION = 'nl-chain-rule-2026-v1';
+
+const TASK_TYPE_KEY_ALIASES = {
+  objectbeveiliging: 'object_security',
+  mobiele_controleronde: 'mobile_control_round',
+  externe_controleronde: 'external_control_round',
+  externe_sluitronde: 'external_closing_round',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  openingsronde: 'opening_round',
+  sluitbegeleiding: 'closing_assistance',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  concierge: 'concierge',
+  portier_concierge: 'concierge'
+};
+const STANDARD_OBJECT_TASK_TYPE_KEYS = new Set([
+  'object_security',
+  'fire_closing_round',
+  'external_closing_round',
+  'external_control_round',
+  'opening_round',
+  'mobile_control_round',
+  'reception',
+  'closing_assistance',
+  'access_control',
+  'fire_watch',
+  'concierge'
+]);
+const CUSTOM_TASK_TYPE_KEY_PATTERN = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
 
 const COMMITTED_DOCUMENT_STATUSES = new Set(['signed', 'scheduled', 'active', 'expired']);
 const EHB_EXTENDED_CHAIN_LEVELS = new Set(['a', 'b', 'c', 'd']);
@@ -100,6 +133,25 @@ function contractFunctionKeys(contract) {
     ...normalizeArray(contract?.allowed_function_types).map(normalizeToken)
   ].filter(Boolean);
   return unique([...assignments, ...legacy]).filter(value => !['unknown', 'all', 'not_applicable'].includes(value));
+}
+
+function canonicalTaskTypeKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.toLowerCase().startsWith('other:')) {
+    const definitionId = raw.slice(raw.indexOf(':') + 1).trim();
+    const customKey = definitionId ? `other:${definitionId}` : '';
+    return CUSTOM_TASK_TYPE_KEY_PATTERN.test(customKey) ? customKey : '';
+  }
+  const normalized = normalizeToken(raw);
+  const canonical = TASK_TYPE_KEY_ALIASES[normalized] || normalized;
+  return STANDARD_OBJECT_TASK_TYPE_KEYS.has(canonical) ? canonical : '';
+}
+
+function contractTaskTypeKeys(contract) {
+  return unique(normalizeArray(contract?.allowed_task_types)
+    .map(canonicalTaskTypeKey)
+    .filter(value => value && !['unknown', 'all', 'not_applicable', 'other'].includes(value)));
 }
 
 function normalizePrimaryFunctionState(contract) {
@@ -459,9 +511,10 @@ function evaluateChain(candidate, contracts, companyById, personnel = null) {
 
 function evaluateFunctionConflicts(candidate, contracts, companyById) {
   const candidateFunctions = contractFunctionKeys(candidate);
+  const candidateTaskTypes = contractTaskTypeKeys(candidate);
   const candidateEmployerKey = legalEmployerKey(candidate, companyById);
   const conflicts = [];
-  if (!candidate.company_id || !candidate.contract_start_date || candidateFunctions.length === 0) {
+  if (!candidate.company_id || !candidate.contract_start_date || candidateTaskTypes.length === 0) {
     return { status: 'not_checked', conflicts, blocking_reasons: [] };
   }
 
@@ -477,29 +530,34 @@ function evaluateFunctionConflicts(candidate, contracts, companyById) {
     .forEach(contract => {
       const otherFunctions = contractFunctionKeys(contract);
       const duplicateFunctions = candidateFunctions.filter(key => otherFunctions.includes(key));
+      const otherTaskTypes = contractTaskTypeKeys(contract);
+      const duplicateTaskTypes = candidateTaskTypes.filter(key => otherTaskTypes.includes(key));
       if (legalEmployerKey(contract, companyById) === candidateEmployerKey) {
         conflicts.push({
           type: 'overlapping_contract_same_company',
           contract_id: contract.id,
           company_id: contract.company_id,
           duplicate_function_keys: duplicateFunctions,
-          message: 'Bij dezelfde juridische werkgever mag in deze periode niet nog een afzonderlijk overlappend contract worden gebruikt; voeg de functies samen in één contract.'
+          duplicate_task_type_keys: duplicateTaskTypes,
+          message: 'Bij dezelfde juridische werkgever mag in deze periode niet nog een afzonderlijk overlappend contract worden gebruikt; voeg functies en taaksoorten samen in één contract.'
         });
-      } else if (duplicateFunctions.length > 0) {
+      } else if (duplicateTaskTypes.length > 0) {
         conflicts.push({
-          type: 'duplicate_function_across_companies',
+          type: 'duplicate_task_type_across_companies',
           contract_id: contract.id,
           company_id: contract.company_id,
           duplicate_function_keys: duplicateFunctions,
-          message: `Dezelfde functie is in een overlappende periode al aan een ander bedrijf gekoppeld: ${duplicateFunctions.join(', ')}.`
+          duplicate_task_type_keys: duplicateTaskTypes,
+          message: `Dezelfde taaksoort is in een overlappende periode al aan een andere werkgever gekoppeld: ${duplicateTaskTypes.join(', ')}.`
         });
       }
     });
 
   return {
     status: conflicts.length > 0 ? 'blocked' : 'unique',
-    policy_version: FUNCTION_POLICY_VERSION,
+    policy_version: TASK_ROUTING_POLICY_VERSION,
     function_keys: candidateFunctions,
+    task_type_keys: candidateTaskTypes,
     conflicts,
     blocking_reasons: conflicts.map(conflict => conflict.message)
   };
@@ -678,6 +736,7 @@ function requiredContext(candidate) {
   if (!candidate.contract_start_date) missing.push('contract_start_date');
   if (candidate.duration_type === 'fixed' && !candidate.contract_end_date) missing.push('contract_end_date');
   if (contractFunctionKeys(candidate).length === 0) missing.push('function_assignments');
+  if (contractTaskTypeKeys(candidate).length === 0) missing.push('allowed_task_types');
   if (candidate.legal_document_type !== 'internship_agreement' && candidate.contract_form !== 'zzp' && !candidate.probation_agreed && candidate.probation_agreed !== false) {
     missing.push('probation_agreed');
   }
@@ -765,7 +824,10 @@ async function evaluateContract(base44, candidateInput) {
   const candidate = {
     ...normalizedInput,
     function_assignments: buildFunctionAssignments(normalizedInput),
-    allowed_function_types: contractFunctionKeys(normalizedInput)
+    allowed_function_types: contractFunctionKeys(normalizedInput),
+    allowed_task_types: unique(normalizeArray(normalizedInput.allowed_task_types)
+      .map(value => String(value || '').trim())
+      .filter(Boolean))
   };
 
   const [contracts, companies, personnel, companyCaoAssignments, companyWpbrLicenses] = await Promise.all([
@@ -857,6 +919,7 @@ async function evaluateContract(base44, candidateInput) {
       statutory_conversion_reason: chain.statutory_conversion?.reasons?.join(' ') || null,
       function_type: candidate.function_type || null,
       allowed_function_types: candidate.allowed_function_types,
+      allowed_task_types: candidate.allowed_task_types,
       function_assignments: candidate.function_assignments,
       function_assignment_policy_version: FUNCTION_POLICY_VERSION,
       primary_function_status: candidate.primary_function_status || null,
@@ -871,12 +934,14 @@ async function evaluateContract(base44, candidateInput) {
         company_id: candidate.company_id || null,
         cao_key: candidate.cao_key || null,
         function_keys: candidate.allowed_function_types,
+        task_type_keys: contractTaskTypeKeys(candidate),
         primary_function_key: candidate.primary_function_status === 'determined'
           ? (candidate.function_type || null)
           : null,
         primary_function_status: candidate.primary_function_status || null,
         primary_function_source: candidate.primary_function_source || null,
-        policy_version: FUNCTION_POLICY_VERSION
+        function_policy_version: FUNCTION_POLICY_VERSION,
+        task_routing_policy_version: TASK_ROUTING_POLICY_VERSION
       }
     },
     evaluated_at: nowIso()
@@ -1313,3 +1378,10 @@ Deno.serve(async (req) => {
     return Response.json({ error: error?.message || 'Contractactie is mislukt.' }, { status: 500 });
   }
 });
+
+export {
+  canonicalTaskTypeKey,
+  contractTaskTypeKeys,
+  evaluateFunctionConflicts,
+  requiredContext
+};

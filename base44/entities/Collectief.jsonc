@@ -42,6 +42,25 @@
     "notes": {
       "type": "string",
       "description": "Opmerkingen"
+    },
+    "version": {
+      "type": "number",
+      "description": "Versienummer voor conflictveilige wijzigingen",
+      "default": 1
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Unieke sleutel voor herstelbare server-side aanmaak; niet rechtstreeks vanuit de browser wijzigen."
+    },
+    "creation_request_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Server-side vingerafdruk waarmee hergebruik van een aanmaaksleutel met andere inhoud wordt geweigerd."
     }
   },
   "required": [

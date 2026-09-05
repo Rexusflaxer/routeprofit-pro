@@ -21,12 +21,16 @@ class ApiError extends Error {
 
 const SHIFT_COPY_FIELDS = [
   'company_id',
+  'selling_company_id',
+  'selling_company_ids',
+  'service_responsible_company_id',
   'customer_id',
   'customer_ids',
   'object_id',
   'object_ids',
   'route_id',
   'task_id',
+  'customer_contract_id',
   'customer_contract_line_id',
   'customer_name_snapshot',
   'object_name_snapshot',
@@ -555,11 +559,17 @@ async function listAllRecords(entity: LooseRecord, sort?: string) {
   throw new ApiError(503, 'De dataset is te groot om veilig in één planningactie te verwerken');
 }
 
-async function filterAllRecords(entity: LooseRecord, query: LooseRecord, sort?: string) {
+async function filterAllRecords(
+  entity: LooseRecord,
+  query: LooseRecord,
+  sort?: string,
+  beforePage?: () => Promise<void>,
+) {
   const records = new Map<string, LooseRecord>();
   const pageSize = 5000;
   const stableSort = sort || 'created_date';
   for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (beforePage) await beforePage();
     const page = await entity.filter(query, stableSort, pageSize, pageIndex * pageSize);
     page.forEach((record: LooseRecord) => records.set(String(record.id), record));
     if (page.length < pageSize) return [...records.values()];
@@ -572,6 +582,7 @@ async function filterRecordsByValues(
   field: string,
   values: unknown,
   sort?: string,
+  beforeChunk?: () => Promise<void>,
 ) {
   const ids = uniqueStrings(values);
   if (!ids.length) return [];
@@ -582,6 +593,7 @@ async function filterRecordsByValues(
       entity,
       { [field]: { $in: ids.slice(index, index + chunkSize) } },
       sort,
+      beforeChunk,
     ));
   }
   return uniqueRecords(records, item => String(item.id));
@@ -2018,6 +2030,64 @@ function warning(
   return { code, severity, message, source, details };
 }
 
+const EMPLOYMENT_ROUTING_DRAFT_WARNING_CODES = new Set([
+  'contract_missing',
+  'contract_ambiguous',
+]);
+
+function employmentRoutingCodes(status: unknown) {
+  const normalized = compact(status);
+  if (normalized === 'resolved') return [];
+  if (normalized === 'missing_contract') return ['contract_missing'];
+  if (normalized === 'ambiguous') return ['contract_ambiguous'];
+  if (normalized === 'blocked') return ['contract_routing_blocked'];
+  if (normalized === 'manual_review_required') return ['contract_routing_manual_review_required'];
+  return ['contract_routing_stale'];
+}
+
+function employmentRoutingDecisionWarning(
+  decision: LooseRecord | null | undefined,
+  serviceDate: string,
+) {
+  const status = compact(decision?.employment_routing_status) || 'stale';
+  const code = employmentRoutingCodes(status)[0];
+  if (!code) return null;
+  const descriptions: Record<string, { severity: 'warning' | 'critical'; message: string }> = {
+    missing_contract: {
+      severity: 'warning',
+      message: 'Geen uniek actief arbeidscontract dekt deze taaksoort en datum. De conceptplanning blijft alleen mogelijk op basis van deze actuele servercontrole.',
+    },
+    ambiguous: {
+      severity: 'critical',
+      message: 'Meerdere arbeidscontracten kunnen deze inzet routeren. Koppel de taaksoort in deze periode aan precies één werkgever; een concepttoewijzing blijft alleen mogelijk als de actuele servercontrole dat expliciet toestaat.',
+    },
+    blocked: {
+      severity: 'critical',
+      message: 'De arbeidscontract-, werkgever- of loon-CAO-routering blokkeert deze inzet.',
+    },
+    manual_review_required: {
+      severity: 'critical',
+      message: 'De arbeidscontractroutering vereist handmatige beoordeling voordat deze medewerker kan worden ingepland.',
+    },
+    stale: {
+      severity: 'critical',
+      message: 'De arbeidscontractroutering is niet actueel of niet volledig bewezen.',
+    },
+  };
+  const description = descriptions[status] || descriptions.stale;
+  return warning(
+    code,
+    description.severity,
+    description.message,
+    'employment_contract_routing',
+    {
+      service_date: serviceDate,
+      employment_routing_status: status,
+      draft_assignment_allowed: decision?.draft_assignment_allowed === true,
+    },
+  );
+}
+
 function normalizeSuppliedWarnings(body: LooseRecord) {
   return normalizeArray<LooseRecord>(body.warning_snapshot || body.warnings)
     .map((item, index) => {
@@ -2255,6 +2325,7 @@ function occurrenceBlueprints(definition: LooseRecord, periodStart: string, peri
         definition_version: positiveInteger(definition.version || 1, 'definition_version'),
         schedule_period_key: periodKey,
         task_type: definition.task_type,
+        task_type_key: planningTaskTypeKey(definition),
         custom_task_type: compact(definition.custom_task_type) || null,
         execution_mode: definition.execution_mode,
         service_date: serviceDate,
@@ -2269,6 +2340,373 @@ function occurrenceBlueprints(definition: LooseRecord, periodStart: string, peri
     });
   }
   return results;
+}
+
+function commercialPlanningDateMatches(
+  serviceDate: string,
+  validFrom: unknown,
+  validUntil: unknown,
+  requireStart = false,
+) {
+  const from = compact(validFrom);
+  const until = compact(validUntil);
+  if (requireStart && !from) return false;
+  return (!from || from <= serviceDate) && (!until || serviceDate <= until);
+}
+
+const LEGACY_COMMERCIAL_TASK_TYPE_ALIASES: Record<string, string> = {
+  objectbeveiliging: 'object_security',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  externe_sluitronde: 'external_closing_round',
+  externe_controleronde: 'external_control_round',
+  openingsronde: 'opening_round',
+  mobiele_controleronde: 'mobile_control_round',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  sluitbegeleiding: 'closing_assistance',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  concierge: 'concierge',
+  portier_concierge: 'concierge',
+};
+const CUSTOM_COMMERCIAL_TASK_TYPE_KEY_PATTERN = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
+
+function explicitCommercialTaskTypeKey(value: unknown) {
+  const key = compact(value);
+  if (!key || key === 'other') return null;
+  if (OBJECT_TASK_TYPES.has(key) || CUSTOM_COMMERCIAL_TASK_TYPE_KEY_PATTERN.test(key)) return key;
+  return null;
+}
+
+function legacyCommercialTaskTypeKey(value: unknown) {
+  const normalized = compact(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!normalized) return null;
+  if (OBJECT_TASK_TYPES.has(normalized) && normalized !== 'other') return normalized;
+  return LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[normalized] || null;
+}
+
+function commercialContractLineTaskTypeKey(line: LooseRecord) {
+  const explicit = compact(line.task_type_key);
+  if (explicit) return explicitCommercialTaskTypeKey(explicit);
+  // Older contract lines only had service_code. Only known task aliases may
+  // participate: an arbitrary SKU must never become a planning wildcard.
+  return legacyCommercialTaskTypeKey(line.service_code);
+}
+
+function resolveCommercialPlanningRoute(
+  occurrence: LooseRecord,
+  contracts: LooseRecord[],
+  lines: LooseRecord[],
+  collectives: LooseRecord[] = [],
+) {
+  const customerId = compact(occurrence.customer_id);
+  const objectId = compact(occurrence.object_id);
+  const taskTypeKey = explicitCommercialTaskTypeKey(occurrence.task_type_key || (
+    occurrence.task_type && occurrence.task_type !== 'other' ? occurrence.task_type : null
+  ));
+  const serviceDate = compact(occurrence.service_date);
+  const serviceEndDate = compact(occurrence.end_date) || serviceDate;
+  const baseSnapshot = {
+    schema_version: 1,
+    customer_id: customerId || null,
+    object_id: objectId || null,
+    task_type_key: taskTypeKey || null,
+    service_date: serviceDate || null,
+    end_date: serviceEndDate || null,
+  };
+  const unresolved = (status: string, reason: string, candidates: LooseRecord[] = []) => ({
+    selling_company_id: null,
+    customer_contract_id: null,
+    customer_contract_line_id: null,
+    commercial_routing_status: status,
+    commercial_routing_snapshot: {
+      ...baseSnapshot,
+      status,
+      reason,
+      candidate_count: candidates.length,
+      candidates: candidates.map(item => ({
+        customer_contract_id: item.contract.id,
+        customer_contract_line_id: item.line.id,
+        selling_company_id: item.contract.company_id,
+      })),
+    },
+  });
+  if (!customerId || !objectId || !serviceDate || !serviceEndDate || serviceEndDate < serviceDate || !taskTypeKey || taskTypeKey === 'other') {
+    return unresolved('manual_review_required', 'invalid_commercial_route_context');
+  }
+
+  const contractById = new Map(
+    contracts
+      .filter(contract => (
+        contract.status === 'active'
+        && String(contract.customer_id) === customerId
+        && commercialPlanningDateMatches(serviceDate, contract.start_date, contract.end_date, true)
+        && commercialPlanningDateMatches(serviceEndDate, contract.start_date, contract.end_date, true)
+      ))
+      .map(contract => [String(contract.id), contract]),
+  );
+  const collectiveIds = new Set(collectives.filter(collective => (
+    String(collective.customer_id) === customerId
+    && normalizeArray(collective.object_ids).map(String).includes(objectId)
+  )).map(collective => String(collective.id)));
+  const scopedLines = lines.filter(line => (
+    line.status === 'active'
+    && String(line.customer_id) === customerId
+    && (
+      line.scope_type === 'customer'
+      || (line.scope_type === 'object' && String(line.object_id) === objectId)
+      || (line.scope_type === 'collective' && collectiveIds.has(String(line.collective_id)))
+    )
+    && commercialContractLineTaskTypeKey(line) === taskTypeKey
+    && commercialPlanningDateMatches(serviceDate, line.valid_from, line.valid_until)
+    && commercialPlanningDateMatches(serviceEndDate, line.valid_from, line.valid_until)
+    && contractById.has(String(line.contract_id))
+  ));
+  const integrityConflicts: LooseRecord[] = [];
+  const matches = new Map<string, LooseRecord>();
+  for (const line of scopedLines) {
+    const contract = contractById.get(String(line.contract_id));
+    if (
+      !contract
+      || !compact(contract.company_id)
+      || String(line.company_id) !== String(contract.company_id)
+      || String(line.customer_account_id) !== String(contract.customer_account_id)
+    ) {
+      if (contract) integrityConflicts.push({ contract, line });
+      continue;
+    }
+    matches.set(String(line.id), { contract, line });
+  }
+  const candidates = [...matches.values()].sort((left, right) => (
+    String(left.line.id).localeCompare(String(right.line.id))
+  ));
+  if (integrityConflicts.length) {
+    return unresolved('manual_review_required', 'commercial_route_data_mismatch', integrityConflicts);
+  }
+  if (!candidates.length) return unresolved('missing_contract', 'no_matching_customer_contract_line');
+  if (candidates.length > 1) return unresolved('ambiguous', 'multiple_matching_customer_contract_lines', candidates);
+
+  const selected = candidates[0];
+  return {
+    selling_company_id: selected.contract.company_id,
+    customer_contract_id: selected.contract.id,
+    customer_contract_line_id: selected.line.id,
+    commercial_routing_status: 'resolved',
+    commercial_routing_snapshot: {
+      ...baseSnapshot,
+      status: 'resolved',
+      reason: null,
+      candidate_count: 1,
+      selling_company_id: selected.contract.company_id,
+      customer_contract_id: selected.contract.id,
+      customer_contract_version: versionOf(selected.contract),
+      customer_contract_line_id: selected.line.id,
+      customer_contract_line_version: versionOf(selected.line),
+      customer_billable: true,
+    },
+  };
+}
+
+function publicationCommercialExemption(
+  occurrence: LooseRecord,
+  linkedSegments: LooseRecord[] = [],
+  shiftById: Map<string, LooseRecord> = new Map(),
+) {
+  const customerEvidence = (record: LooseRecord | null | undefined) => uniqueStrings([
+    record?.customer_id,
+    ...normalizeArray(record?.customer_ids),
+    record?.service_context_snapshot?.customer_id,
+    ...normalizeArray(record?.service_context_snapshot?.customer_ids),
+    record?.commercial_routing_snapshot?.customer_id,
+    ...normalizeArray<LooseRecord>(record?.service_context_snapshot?.segment_contexts)
+      .flatMap(item => [item?.customer_id, ...normalizeArray(item?.customer_ids)]),
+  ]);
+  const hasCustomerContext = (record: LooseRecord | null | undefined) => (
+    customerEvidence(record).length > 0
+    || uniqueStrings([
+      record?.customer_name,
+      record?.customer_name_snapshot,
+      record?.service_context_snapshot?.customer_name,
+      record?.commercial_routing_snapshot?.customer_name,
+      ...normalizeArray<LooseRecord>(record?.service_context_snapshot?.segment_contexts)
+        .flatMap(item => [item?.customer_name, item?.customer_name_snapshot]),
+    ]).length > 0
+  );
+  const hasCommercialIdentity = (record: LooseRecord | null | undefined) => uniqueStrings([
+    record?.selling_company_id,
+    record?.customer_contract_id,
+    record?.customer_contract_line_id,
+    record?.commercial_routing_snapshot?.selling_company_id,
+    record?.commercial_routing_snapshot?.customer_contract_id,
+    record?.commercial_routing_snapshot?.customer_contract_line_id,
+  ]).length > 0;
+  const occurrenceCustomerIds = customerEvidence(occurrence);
+  if (hasCustomerContext(occurrence) || hasCommercialIdentity(occurrence)) {
+    return {
+      exempt: false,
+      reason: hasCustomerContext(occurrence)
+        ? 'customer_context_present'
+        : 'commercial_identity_present',
+      customer_ids: occurrenceCustomerIds,
+      shift_ids: [],
+      segment_ids: [],
+      integrity_issues: [],
+    };
+  }
+
+  const segments = normalizeArray<LooseRecord>(linkedSegments)
+    .filter(segment => segment?.status !== 'removed');
+  if (segments.length === 0) {
+    return {
+      exempt: false,
+      reason: 'missing_internal_segment_evidence',
+      customer_ids: [],
+      shift_ids: [],
+      segment_ids: [],
+      integrity_issues: [{ reason: 'active_segment_missing' }],
+    };
+  }
+
+  const shiftIds: string[] = [];
+  const segmentIds: string[] = [];
+  const integrityIssues: LooseRecord[] = [];
+  for (const segment of segments) {
+    const segmentId = compact(segment.id);
+    const shiftId = compact(segment.shift_id);
+    const parentShift = shiftId ? shiftById.get(shiftId) || null : null;
+    const segmentCustomerIds = customerEvidence(segment);
+    const shiftCustomerIds = customerEvidence(parentShift);
+    if (segmentId) segmentIds.push(segmentId);
+    else integrityIssues.push({ reason: 'segment_id_missing' });
+    if (String(segment.task_occurrence_id || '') !== String(occurrence.id || '')) {
+      integrityIssues.push({
+        reason: 'segment_occurrence_mismatch',
+        segment_id: segmentId || null,
+        task_occurrence_id: segment.task_occurrence_id || null,
+      });
+    }
+    if (!parentShift) {
+      integrityIssues.push({
+        reason: 'parent_shift_missing',
+        segment_id: segmentId || null,
+        shift_id: shiftId || null,
+      });
+      continue;
+    }
+    shiftIds.push(shiftId);
+    if (hasCustomerContext(segment) || hasCustomerContext(parentShift)) {
+      integrityIssues.push({
+        reason: 'customer_context_present',
+        segment_id: segmentId || null,
+        shift_id: shiftId,
+        customer_ids: uniqueStrings([...segmentCustomerIds, ...shiftCustomerIds]),
+      });
+    }
+    if (hasCommercialIdentity(segment) || hasCommercialIdentity(parentShift)) {
+      integrityIssues.push({
+        reason: 'commercial_identity_present',
+        segment_id: segmentId || null,
+        shift_id: shiftId,
+      });
+    }
+    if (parentShift.customer_billable !== false) {
+      integrityIssues.push({
+        reason: 'non_billable_not_explicit',
+        segment_id: segmentId || null,
+        shift_id: shiftId,
+        customer_billable: parentShift.customer_billable ?? null,
+      });
+    }
+  }
+
+  const uniqueShiftIds = uniqueStrings(shiftIds);
+  const uniqueSegmentIds = uniqueStrings(segmentIds);
+  const exempt = integrityIssues.length === 0
+    && uniqueShiftIds.length > 0
+    && uniqueSegmentIds.length === segments.length;
+  return {
+    exempt,
+    reason: exempt ? 'explicit_internal_non_billable' : 'internal_non_billable_evidence_incomplete',
+    customer_ids: [],
+    shift_ids: uniqueShiftIds,
+    segment_ids: uniqueSegmentIds,
+    integrity_issues: integrityIssues,
+  };
+}
+
+function publicationCommercialExemptionRoute(
+  occurrence: LooseRecord,
+  evidence: ReturnType<typeof publicationCommercialExemption>,
+) {
+  return {
+    selling_company_id: null,
+    customer_contract_id: null,
+    customer_contract_line_id: null,
+    commercial_routing_status: 'not_applicable',
+    commercial_routing_snapshot: {
+      schema_version: 1,
+      status: 'not_applicable',
+      reason: 'explicit_internal_non_billable',
+      customer_id: null,
+      object_id: compact(occurrence.object_id) || null,
+      task_type_key: compact(occurrence.task_type_key || (
+        occurrence.task_type && occurrence.task_type !== 'other' ? occurrence.task_type : null
+      )) || null,
+      service_date: compact(occurrence.service_date) || null,
+      end_date: compact(occurrence.end_date) || compact(occurrence.service_date) || null,
+      customer_billable: false,
+      candidate_count: 0,
+      selling_company_id: null,
+      customer_contract_id: null,
+      customer_contract_line_id: null,
+      evidence_shift_ids: evidence.shift_ids,
+      evidence_segment_ids: evidence.segment_ids,
+    },
+  };
+}
+
+async function loadCommercialPlanningContext(base44: LooseRecord, customerIds: unknown) {
+  const relevantCustomerIds = uniqueStrings(customerIds);
+  const [contracts, lines, collectives] = await Promise.all([
+    base44.asServiceRole.entities.CustomerContract
+      ? filterRecordsByValues(base44.asServiceRole.entities.CustomerContract, 'customer_id', relevantCustomerIds, '-start_date')
+      : Promise.resolve([]),
+    base44.asServiceRole.entities.CustomerContractLine
+      ? filterRecordsByValues(base44.asServiceRole.entities.CustomerContractLine, 'customer_id', relevantCustomerIds, '+sequence')
+      : Promise.resolve([]),
+    base44.asServiceRole.entities.Collectief
+      ? filterRecordsByValues(base44.asServiceRole.entities.Collectief, 'customer_id', relevantCustomerIds)
+      : Promise.resolve([]),
+  ]);
+  const contractsByCustomerId = new Map<string, LooseRecord[]>();
+  const linesByCustomerId = new Map<string, LooseRecord[]>();
+  for (const contract of contracts.filter(item => item.status === 'active')) {
+    const key = String(contract.customer_id || '');
+    contractsByCustomerId.set(key, [...(contractsByCustomerId.get(key) || []), contract]);
+  }
+  for (const line of lines.filter(item => item.status === 'active')) {
+    const key = String(line.customer_id || '');
+    linesByCustomerId.set(key, [...(linesByCustomerId.get(key) || []), line]);
+  }
+  return { contractsByCustomerId, linesByCustomerId, collectives };
+}
+
+async function resolveCommercialPlanningRouteForOccurrence(base44: LooseRecord, occurrence: LooseRecord) {
+  const customerId = compact(occurrence.customer_id);
+  const context = await loadCommercialPlanningContext(base44, customerId ? [customerId] : []);
+  return resolveCommercialPlanningRoute(
+    occurrence,
+    context.contractsByCustomerId.get(customerId) || [],
+    context.linesByCustomerId.get(customerId) || [],
+    context.collectives,
+  );
 }
 
 const OBJECT_TASK_TYPES = new Set([
@@ -2513,6 +2951,11 @@ function scheduleSeriesBlueprints(
         definition_version: versionOf(definition),
         schedule_period_key: item.series_key,
         task_type: taskSnapshot.task_type || definition.task_type,
+        task_type_key: planningTaskTypeKey({
+          ...definition,
+          ...taskSnapshot,
+          object_task_definition_id: definition.id,
+        }),
         custom_task_type: compact(taskSnapshot.custom_task_type || definition.custom_task_type) || null,
         execution_mode: executionMode,
         service_date: serviceDate,
@@ -2539,11 +2982,18 @@ const TASK_OCCURRENCE_COMPARABLE_FIELDS = [
   'schedule_revision_number',
   'schedule_period_key',
   'company_id',
+  'service_responsible_company_id',
+  'selling_company_id',
+  'customer_contract_id',
+  'customer_contract_line_id',
+  'commercial_routing_status',
+  'commercial_routing_snapshot',
   'customer_id',
   'object_id',
   'security_plan_id',
   'security_plan_revision_id',
   'task_type',
+  'task_type_key',
   'custom_task_type',
   'execution_mode',
   'service_date',
@@ -2565,12 +3015,19 @@ function taskOccurrenceSourceSnapshot(value: LooseRecord | null | undefined) {
 
 const TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS = [
   'company_id',
+  'service_responsible_company_id',
+  'selling_company_id',
+  'customer_contract_id',
+  'customer_contract_line_id',
+  'commercial_routing_status',
+  'commercial_routing_snapshot',
   'customer_id',
   'object_id',
   'security_plan_id',
   'security_plan_revision_id',
   'security_plan_checksum',
   'task_type',
+  'task_type_key',
   'custom_task_type',
   'execution_mode',
   'service_date',
@@ -2587,6 +3044,72 @@ const TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS = [
 
 function taskOccurrencePlanningImpactSnapshot(value: LooseRecord | null | undefined) {
   return value ? pick(value, TASK_OCCURRENCE_PLANNING_IMPACT_FIELDS) : null;
+}
+
+function commercialRoutingEvidenceStatus(value: LooseRecord | null | undefined) {
+  const status = compact(value?.commercial_routing_status);
+  if (status === 'not_applicable') {
+    const snapshot = value?.commercial_routing_snapshot;
+    const hasNoCustomerOrCommercialIdentity = !compact(value?.customer_id)
+      && uniqueStrings(value?.customer_ids).length === 0
+      && !compact(snapshot?.customer_id)
+      && !compact(value?.selling_company_id)
+      && !compact(value?.customer_contract_id)
+      && !compact(value?.customer_contract_line_id)
+      && !compact(snapshot?.selling_company_id)
+      && !compact(snapshot?.customer_contract_id)
+      && !compact(snapshot?.customer_contract_line_id);
+    return Number(snapshot?.schema_version) === 1
+      && snapshot?.status === 'not_applicable'
+      && snapshot?.reason === 'explicit_internal_non_billable'
+      && snapshot?.customer_billable === false
+      && Number(snapshot?.candidate_count) === 0
+      && uniqueStrings(snapshot?.evidence_shift_ids).length > 0
+      && uniqueStrings(snapshot?.evidence_segment_ids).length > 0
+      && hasNoCustomerOrCommercialIdentity
+      ? 'not_applicable'
+      : 'stale';
+  }
+  if (status !== 'resolved') return status || 'stale';
+  const snapshot = value?.commercial_routing_snapshot;
+  return Number(snapshot?.schema_version) === 1
+    && snapshot?.status === 'resolved'
+    && snapshot?.customer_billable === true
+    && compact(value?.selling_company_id)
+    && compact(value?.customer_contract_id)
+    && compact(value?.customer_contract_line_id)
+    ? 'resolved'
+    : 'stale';
+}
+
+function commercialRoutingServiceContext(segments: LooseRecord[]) {
+  const statuses = segments.map(commercialRoutingEvidenceStatus);
+  const uniqueStatuses = uniqueStrings(statuses);
+  const everySegmentAccountedFor = statuses.length > 0 && statuses.every(status => (
+    status === 'resolved' || status === 'not_applicable'
+  ));
+  const billability = segments.map((segment, index) => (
+    statuses[index] === 'resolved'
+      ? segment?.commercial_routing_snapshot?.customer_billable === true ? true : null
+      : statuses[index] === 'not_applicable'
+      ? segment?.commercial_routing_snapshot?.customer_billable === false ? false : null
+      : null
+  ));
+  const uniqueBillability = [...new Set(billability.filter(value => typeof value === 'boolean'))];
+  const customerBillable = everySegmentAccountedFor
+    && billability.every(value => typeof value === 'boolean')
+    && uniqueBillability.length === 1
+      ? uniqueBillability[0]
+      : null;
+  return {
+    commercial_routing_status: everySegmentAccountedFor
+      ? statuses.every(status => status === 'not_applicable') ? 'not_applicable' : 'resolved'
+      : uniqueStatuses.length === 1
+      ? uniqueStatuses[0]
+      : 'manual_review_required',
+    commercial_routing_statuses: uniqueStatuses,
+    customer_billable: customerBillable,
+  };
 }
 
 async function objectTaskOccurrenceContext(
@@ -2643,6 +3166,7 @@ async function objectTaskOccurrenceContext(
   } : null;
   return {
     company_id: object.default_operating_company_id || null,
+    service_responsible_company_id: object.default_operating_company_id || null,
     customer_id: customer.id,
     object_id: object.id,
     security_plan_id: securityPlan?.id || definition.security_plan_id || null,
@@ -2733,7 +3257,14 @@ async function migrateTaskBoundaryImpact(base44: LooseRecord, user: LooseRecord,
     const updated = await casUpdate(base44, 'PlanningShiftTaskSegment', segment, revisionOf(segment), {
       task_occurrence_id: replacement.id, object_task_definition_id: replacement.object_task_definition_id,
       start_date: startPart.date, end_date: endPart.date, start_time: startPart.time, end_time: endPart.time, duration_minutes: end - start,
-      task_type: replacement.task_type, task_name_snapshot: replacement.task_name_snapshot,
+      company_id: replacement.company_id || null,
+      selling_company_id: replacement.selling_company_id || null,
+      service_responsible_company_id: replacement.service_responsible_company_id || replacement.company_id || null,
+      customer_contract_id: replacement.customer_contract_id || null,
+      customer_contract_line_id: replacement.customer_contract_line_id || null,
+      commercial_routing_status: commercialRoutingEvidenceStatus(replacement),
+      commercial_routing_snapshot: replacement.commercial_routing_snapshot || null,
+      task_type: replacement.task_type, task_type_key: planningTaskTypeKey(replacement), task_name_snapshot: replacement.task_name_snapshot,
       customer_name_snapshot: replacement.customer_name_snapshot || null, object_name_snapshot: replacement.object_name_snapshot || null,
       instructions_snapshot: replacement.instructions_snapshot || null, status: 'draft', last_modified_by_user_id: user.id || null, last_modified_at: nowIso(),
       metadata: { ...(segment.metadata || {}), source_task_occurrence_id: source.id, migrated_by_task_boundary_change: true },
@@ -2749,9 +3280,49 @@ async function migrateTaskBoundaryImpact(base44: LooseRecord, user: LooseRecord,
   }
   const start = Math.min(...intervals.map(item => item.start)), end = Math.max(...intervals.map(item => item.end));
   const startPart = minuteParts(start), endPart = minuteParts(end);
+  const sellingCompanyIds = uniqueStrings(remaining.map(item => item.selling_company_id));
+  const serviceResponsibleCompanyIds = uniqueStrings(remaining.map(item => item.service_responsible_company_id));
+  const customerContractIds = uniqueStrings(remaining.map(item => item.customer_contract_id));
+  const customerContractLineIds = uniqueStrings(remaining.map(item => item.customer_contract_line_id));
+  const everySegmentHasCommercialRoute = remaining.every(item => (
+    compact(item.selling_company_id)
+    && compact(item.customer_contract_id)
+    && compact(item.customer_contract_line_id)
+  ));
+  const commercialServiceContext = commercialRoutingServiceContext(remaining);
   const updatedShift = await casUpdate(base44, 'PlanningShift', shift, revisionOf(shift), {
     service_date: startPart.date, end_date: endPart.date === startPart.date ? null : endPart.date,
     start_time: startPart.time, end_time: endPart.time, duration_minutes: end - start,
+    selling_company_id: everySegmentHasCommercialRoute && sellingCompanyIds.length === 1
+      ? sellingCompanyIds[0]
+      : null,
+    selling_company_ids: sellingCompanyIds,
+    service_responsible_company_id: serviceResponsibleCompanyIds.length === 1
+      ? serviceResponsibleCompanyIds[0]
+      : null,
+    customer_contract_id: everySegmentHasCommercialRoute && customerContractIds.length === 1
+      ? customerContractIds[0]
+      : null,
+    customer_contract_line_id: everySegmentHasCommercialRoute && customerContractLineIds.length === 1
+      ? customerContractLineIds[0]
+      : null,
+    service_context_snapshot: {
+      ...(shift.service_context_snapshot || {}),
+      ...commercialServiceContext,
+      segment_contexts: remaining.map(item => ({
+        task_occurrence_id: item.task_occurrence_id,
+        customer_id: item.customer_id,
+        object_id: item.object_id,
+        task_type: item.task_type,
+        task_type_key: item.task_type_key,
+        selling_company_id: item.selling_company_id || null,
+        service_responsible_company_id: item.service_responsible_company_id || null,
+        customer_contract_id: item.customer_contract_id || null,
+        customer_contract_line_id: item.customer_contract_line_id || null,
+        commercial_routing_status: commercialRoutingEvidenceStatus(item),
+        commercial_routing_snapshot: item.commercial_routing_snapshot || null,
+      })),
+    },
     task_occurrence_ids: uniqueStrings(remaining.map(item => item.task_occurrence_id)), task_segment_count: remaining.length, status: 'draft',
     last_modified_by_user_id: user.id || null, last_modified_at: nowIso(),
     metadata: { ...(shift.metadata || {}), task_boundary_migrated_at: nowIso(), source_task_occurrence_id: source.id, replacement_task_occurrence_id: replacement?.id || null },
@@ -2774,6 +3345,11 @@ async function migrateTaskBoundaryImpact(base44: LooseRecord, user: LooseRecord,
     await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
       status: 'draft',
       personnel_contract_id: eligibility.personnel_contract_id,
+      employing_company_id: eligibility.employing_company_id,
+      payroll_cao_key: eligibility.payroll_cao_key,
+      employment_routing_status: eligibility.employment_routing_status,
+      employment_routing_codes: eligibility.employment_routing_codes,
+      draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
       warning_codes: eligibility.warning_codes,
       warning_snapshot: eligibility.warning_snapshot,
       has_critical_warnings: eligibility.has_critical_warnings,
@@ -2796,6 +3372,24 @@ async function replaceTaskOccurrenceSnapshot(
   let replacement = candidates.filter(item => item.lifecycle_status === 'active').sort(coordinatorOrder)[0] || null;
   if (replacement) {
     const expectedReplacement = { ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null };
+    const additiveBackfillFields = [
+      'service_responsible_company_id',
+      'task_type_key',
+      'commercial_routing_status',
+      'commercial_routing_snapshot',
+    ];
+    const additiveBackfill = Object.fromEntries(additiveBackfillFields
+      .filter(field => replacement[field] == null && expectedReplacement[field] != null)
+      .map(field => [field, expectedReplacement[field]]));
+    if (Object.keys(additiveBackfill).length) {
+      replacement = await casUpdate(
+        base44,
+        'PlanningTaskOccurrence',
+        replacement,
+        revisionOf(replacement),
+        additiveBackfill,
+      );
+    }
     const mismatchedFields = TASK_OCCURRENCE_COMPARABLE_FIELDS.filter(field => stableStringify(replacement[field] ?? null) !== stableStringify(expectedReplacement[field] ?? null));
     if (mismatchedFields.length) throw new ApiError(409, 'De vervangende taakuitvoering wijkt af van de gewenste bronsnapshot', { source_key: desiredPayload.source_key, task_occurrence_id: replacement.id, mismatched_fields: mismatchedFields });
   } else replacement = await base44.asServiceRole.entities.PlanningTaskOccurrence.create({ ...desiredPayload, supersedes_task_occurrence_id: sourceOccurrence.id, superseded_by_task_occurrence_id: null, revision: 1, published_revision: 0, last_published_correlation_id: null });
@@ -2926,6 +3520,7 @@ async function reconcileSeriesMaterializedOccurrences(
   const segments: LooseRecord[] = normalizeArray<LooseRecord>(impact.segments);
   const shifts: LooseRecord[] = normalizeArray<LooseRecord>(impact.shifts);
   const contextPayload = await objectTaskOccurrenceContext(base44, definition, object, customer);
+  const commercialContext = await loadCommercialPlanningContext(base44, [customer.id]);
   const shiftById = new Map<string, LooseRecord>(shifts.map(item => [String(item.id), item]));
   const occurrenceById = new Map<string, LooseRecord>(occurrences.map(item => [String(item.id), item]));
   const result = {
@@ -3020,6 +3615,12 @@ async function reconcileSeriesMaterializedOccurrences(
     const desired = {
       ...blueprint,
       ...contextPayload,
+      ...resolveCommercialPlanningRoute(
+        { ...blueprint, customer_id: customer.id, object_id: object.id },
+        commercialContext.contractsByCustomerId.get(String(customer.id)) || [],
+        commercialContext.linesByCustomerId.get(String(customer.id)) || [],
+        commercialContext.collectives,
+      ),
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
       metadata: {
@@ -3346,6 +3947,10 @@ function dateInRange(date: string, start: unknown, end: unknown) {
 }
 
 function serviceContextFromShift(shift: LooseRecord, personnelId?: string) {
+  const segmentContexts = normalizeArray<LooseRecord>(shift.service_context_snapshot?.segment_contexts);
+  const requiredTaskTypes = uniqueStrings(segmentContexts.map(item => (
+    item.task_type_key || item.task_type
+  )));
   return {
     ...(shift.service_context_snapshot || {}),
     personnel_id: personnelId || null,
@@ -3360,6 +3965,9 @@ function serviceContextFromShift(shift: LooseRecord, personnelId?: string) {
     task_id: shift.task_id || null,
     task_occurrence_ids: shift.task_occurrence_ids || [],
     task_segment_count: Number(shift.task_segment_count || 0),
+    task_type: requiredTaskTypes.length === 1 ? requiredTaskTypes[0] : null,
+    task_type_key: requiredTaskTypes.length === 1 ? requiredTaskTypes[0] : null,
+    required_task_types: requiredTaskTypes,
     composition_warnings: normalizeArray(shift.service_context_snapshot?.composition_warnings),
     cao_key: shift.cao_key || null,
     function_type: shift.service_function_type || null,
@@ -3423,7 +4031,11 @@ function restrictionMatches(restriction: LooseRecord, shift: LooseRecord) {
     .some(value => value === label || value.includes(label) || label.includes(value));
 }
 
-function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: LooseRecord[]) {
+function assignmentSecurityPassWarnings(
+  shift: LooseRecord,
+  securityPasses: LooseRecord[],
+  employingCompanyId: string | null,
+) {
   if (
     shift.requires_security_pass === false
     || shift.security_pass_required === false
@@ -3433,12 +4045,11 @@ function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: Loos
     .map(normalizeToken)
     .filter(Boolean);
   if (!requiredTypes.length) return [];
-  const companyId = compact(shift.company_id);
+  const companyId = compact(employingCompanyId);
   const coveredDates = planningIntervalDates(shift);
   const scopedPasses = securityPasses.filter(pass => (
     !compact(pass.company_id)
-    || !companyId
-    || String(pass.company_id) === String(companyId)
+    || (!!companyId && String(pass.company_id) === String(companyId))
   ));
   const warnings: LooseRecord[] = [];
   for (const requiredType of requiredTypes) {
@@ -3447,9 +4058,15 @@ function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: Loos
       warnings.push(warning(
         'security_pass_missing',
         'critical',
-        `Beveiligingspas ${requiredType.replaceAll('_', ' ')} ontbreekt voor deze dienst.`,
+        companyId
+          ? `Beveiligingspas ${requiredType.replaceAll('_', ' ')} ontbreekt voor de juridische werkgever uit het arbeidscontract.`
+          : `Beveiligingspas ${requiredType.replaceAll('_', ' ')} kan zonder eenduidige juridische werkgever niet company-scoped worden bewezen.`,
         'personnel_security_pass',
-        { required_pass_type: requiredType, company_id: companyId || null },
+        {
+          required_pass_type: requiredType,
+          employing_company_id: companyId || null,
+          operating_company_id: compact(shift.company_id) || null,
+        },
       ));
       continue;
     }
@@ -3484,7 +4101,11 @@ function assignmentSecurityPassWarnings(shift: LooseRecord, securityPasses: Loos
           ? `Beveiligingspas ${requiredType.replaceAll('_', ' ')} is nog niet geldig.`
           : `Beveiligingspas ${requiredType.replaceAll('_', ' ')} is niet actief voor de volledige dienst.`,
       'personnel_security_pass',
-      { required_pass_type: requiredType, company_id: companyId || null },
+      {
+        required_pass_type: requiredType,
+        employing_company_id: companyId || null,
+        operating_company_id: compact(shift.company_id) || null,
+      },
     ));
   }
   return warnings;
@@ -3593,14 +4214,22 @@ async function evaluateAssignmentWarnings(
 ) {
   const warnings: LooseRecord[] = [...suppliedWarnings];
   const coveredDates = planningIntervalDates(shift);
+  const serverDraftBlockingCodes: string[] = [];
   let routingSnapshot: LooseRecord | null = null;
   let personnelContractId: string | null = null;
 
-  if (personnel.status !== 'active' || personnel.is_active === false) {
+  const personnelStatus = compact(personnel.status).toLowerCase();
+  if (
+    (personnelStatus ? personnelStatus !== 'active' : personnel.is_active !== true)
+    || personnel.is_active === false
+    || personnel.available_for_planning === false
+    || personnel.planning_available === false
+  ) {
+    serverDraftBlockingCodes.push('personnel_not_available');
     warnings.push(warning(
       'personnel_not_active',
       'critical',
-      `Medewerker ${personnel.name || personnel.id} staat niet actief.`,
+      `Medewerker ${personnel.name || personnel.id} staat niet actief of beschikbaar voor planning.`,
       'personnel',
     ));
   }
@@ -3635,24 +4264,33 @@ async function evaluateAssignmentWarnings(
         : await base44.asServiceRole.functions.invoke('resolveCaoPlanningAssignmentDecision', routingPayload);
       const decision = response?.data || response || null;
       const dateCode = serviceDate.replaceAll('-', '_');
-      normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
-        dateWarnings.push(warning(
-          `contract_cao_blocking_${dateCode}_${index + 1}`,
-          'critical',
-          compact(message),
-          'resolveCaoPlanningAssignmentDecision',
-          { service_date: serviceDate },
-        ));
-      });
-      normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
-        dateWarnings.push(warning(
-          `contract_cao_review_${dateCode}_${index + 1}`,
-          'warning',
-          compact(message),
-          'resolveCaoPlanningAssignmentDecision',
-          { service_date: serviceDate },
-        ));
-      });
+      const routingWarning = employmentRoutingDecisionWarning(decision, serviceDate);
+      if (routingWarning) dateWarnings.push(routingWarning);
+      // A pure missing/ambiguous employment route deliberately carries raw
+      // resolver blocking text (for example the absent payroll CAO). The
+      // resolver is the sole authority that may label that exact situation as
+      // draft-safe. Collapse those derivative messages into the standardized
+      // routing warning; every other resolver block remains critical.
+      if (decision?.draft_assignment_allowed !== true) {
+        normalizeArray(decision?.blocking_reasons).forEach((message, index) => {
+          dateWarnings.push(warning(
+            `contract_cao_blocking_${dateCode}_${index + 1}`,
+            'critical',
+            compact(message),
+            'resolveCaoPlanningAssignmentDecision',
+            { service_date: serviceDate },
+          ));
+        });
+        normalizeArray(decision?.manual_review_reasons).forEach((message, index) => {
+          dateWarnings.push(warning(
+            `contract_cao_review_${dateCode}_${index + 1}`,
+            'warning',
+            compact(message),
+            'resolveCaoPlanningAssignmentDecision',
+            { service_date: serviceDate },
+          ));
+        });
+      }
       normalizeArray(decision?.warnings).forEach((message, index) => {
         dateWarnings.push(warning(
           `contract_cao_warning_${dateCode}_${index + 1}`,
@@ -3662,7 +4300,21 @@ async function evaluateAssignmentWarnings(
           { service_date: serviceDate },
         ));
       });
-      return { service_date: serviceDate, decision, warnings: dateWarnings, resolved: true };
+      if (!decision || typeof decision !== 'object') {
+        dateWarnings.push(warning(
+          `assignment_validation_unavailable_${dateCode}`,
+          'critical',
+          `Contract-/CAO-controle voor ${serviceDate} gaf geen geldige beslissing terug.`,
+          'resolveCaoPlanningAssignmentDecision',
+          { service_date: serviceDate },
+        ));
+      }
+      return {
+        service_date: serviceDate,
+        decision,
+        warnings: dateWarnings,
+        resolved: Boolean(decision && typeof decision === 'object'),
+      };
     } catch (error) {
       dateWarnings.push(warning(
         `assignment_validation_unavailable_${serviceDate.replaceAll('-', '_')}`,
@@ -3687,7 +4339,15 @@ async function evaluateAssignmentWarnings(
     // both complete touched weeks in this same existing shift query.
     ...(!prefetched ? planningContractWeekQueryDates(coveredDates) : []),
   ]);
-  const [candidateShifts, absences, restrictions, securityPasses] = prefetched
+  const hasPrefetchedEligibilityFacts = Boolean(
+    prefetched
+    && Array.isArray(prefetched.candidateShifts)
+    && Array.isArray(prefetched.absences)
+    && Array.isArray(prefetched.restrictions)
+    && Array.isArray(prefetched.securityPasses)
+    && Array.isArray(prefetched.personnelAssignments)
+  );
+  const [candidateShifts, absences, restrictions, securityPasses] = hasPrefetchedEligibilityFacts
     ? [
         normalizeArray<LooseRecord>(prefetched.candidateShifts),
         normalizeArray<LooseRecord>(prefetched.absences),
@@ -3706,11 +4366,11 @@ async function evaluateAssignmentWarnings(
     candidate.status !== 'cancelled'
     && !ignoredShiftIdSet.has(String(candidate.id))
   ));
-  const personnelAssignments: LooseRecord[] = prefetched
+  const personnelAssignments: LooseRecord[] = hasPrefetchedEligibilityFacts
     ? normalizeArray<LooseRecord>(prefetched.personnelAssignments)
     : [];
   const candidateShiftIds = uniqueStrings(consideredCandidateShifts.map((item: LooseRecord) => item.id));
-  for (let index = 0; !prefetched && index < candidateShiftIds.length; index += 200) {
+  for (let index = 0; !hasPrefetchedEligibilityFacts && index < candidateShiftIds.length; index += 200) {
     personnelAssignments.push(...await filterAllRecords(
       base44.asServiceRole.entities.PlanningAssignment,
       {
@@ -3730,6 +4390,7 @@ async function evaluateAssignmentWarnings(
   ));
   const overlapping = assignedCandidateShifts.filter((other: LooseRecord) => intervalsOverlap(shift, other));
   if (overlapping.length) {
+    serverDraftBlockingCodes.push('shift_overlap');
     warnings.push(warning(
       'shift_overlap',
       'critical',
@@ -3763,13 +4424,12 @@ async function evaluateAssignmentWarnings(
     ));
   }
 
-  warnings.push(...assignmentSecurityPassWarnings(shift, securityPasses));
-
   for (const absence of absences) {
     if (absence.status === 'rejected' || absence.status === 'closed') continue;
     const matchingDates = coveredDates.filter(date => dateInRange(date, absence.start_date, absence.end_date));
     if (!matchingDates.length) continue;
     const critical = absence.status === 'approved' || absence.status === 'active';
+    if (critical) serverDraftBlockingCodes.push('personnel_absence');
     warnings.push(warning(
       `personnel_absence_${absence.absence_type || 'unknown'}`,
       critical ? 'critical' : 'warning',
@@ -3782,6 +4442,7 @@ async function evaluateAssignmentWarnings(
   }
 
   for (const restriction of restrictions.filter((item: LooseRecord) => restrictionMatches(item, shift))) {
+    serverDraftBlockingCodes.push('personnel_restriction');
     warnings.push(warning(
       'personnel_restriction',
       'critical',
@@ -3801,6 +4462,30 @@ async function evaluateAssignmentWarnings(
       routingDecisions.push({ service_date: result.service_date, decision: result.decision });
     }
   }
+  const routedEmployingCompanyIds = uniqueStrings(routingDecisions.map(item => (
+    item.decision?.employing_company_id || item.decision?.selected_contract?.company_id
+  )));
+  const employingCompanyId = routingResults.length === coveredDates.length
+    && routingResults.every(result => (
+      result.resolved === true
+      && compact(result.decision?.employment_routing_status) === 'resolved'
+      && compact(
+        result.decision?.employing_company_id
+        || result.decision?.selected_contract?.company_id,
+      )
+    ))
+    && routedEmployingCompanyIds.length === 1
+    ? routedEmployingCompanyIds[0]
+    : null;
+  const securityPassWarnings = assignmentSecurityPassWarnings(
+    shift,
+    securityPasses,
+    employingCompanyId,
+  );
+  if (securityPassWarnings.some(item => item.severity === 'critical')) {
+    serverDraftBlockingCodes.push('security_pass_blocked');
+  }
+  warnings.push(...securityPassWarnings);
   const routedContractIds = uniqueStrings(routingDecisions.map(item => (
     item.decision?.contract_id || item.decision?.selected_contract?.id
   )));
@@ -3822,7 +4507,7 @@ async function evaluateAssignmentWarnings(
         contract_id: personnelContractId,
       };
 
-  if (!prefetched) {
+  if (!hasPrefetchedEligibilityFacts || prefetched?.authoritativeScheduleFacts === true) {
     const contractWeekResult = authoritativeContractWeekWarnings(
       routingResults,
       consideredCandidateShifts,
@@ -3840,13 +4525,291 @@ async function evaluateAssignmentWarnings(
   }
 
   const snapshot = dedupeWarnings(warnings);
+  const employmentRouting = employmentRoutingProjection(routingSnapshot);
+  const routingDraftAllowed = routingResults.length === coveredDates.length
+    && routingResults.every(result => (
+      result.resolved === true
+      && result.decision?.draft_assignment_allowed === true
+    ));
+  const draftAssignmentBlockingCodes = uniqueStrings(serverDraftBlockingCodes);
+  const draftAssignmentAllowed = routingDraftAllowed && draftAssignmentBlockingCodes.length === 0;
   return {
     warning_snapshot: snapshot,
     warning_codes: [...new Set(snapshot.map(item => item.code))],
     has_critical_warnings: snapshot.some(item => item.severity === 'critical'),
     contract_routing_snapshot: routingSnapshot,
     personnel_contract_id: personnelContractId,
+    ...employmentRouting,
+    routing_draft_assignment_allowed: routingDraftAllowed,
+    draft_assignment_allowed: draftAssignmentAllowed,
+    draft_assignment_blocking_codes: draftAssignmentBlockingCodes,
     validation_complete: routingResults.every(item => item.resolved),
+  };
+}
+
+function assertDraftAssignmentAllowed(
+  eligibility: LooseRecord | null | undefined,
+  details: LooseRecord = {},
+) {
+  if (eligibility?.draft_assignment_allowed === true) return;
+  const blockingWarnings = normalizeArray<LooseRecord>(eligibility?.warning_snapshot)
+    .filter(item => (
+      item.severity === 'critical'
+      || !EMPLOYMENT_ROUTING_DRAFT_WARNING_CODES.has(compact(item.code))
+    ));
+  throw new ApiError(
+    409,
+    'Medewerker kan op basis van de actuele inzetcontrole niet worden ingepland',
+    {
+      code: 'ASSIGNMENT_DRAFT_NOT_ALLOWED',
+      acknowledgement_bypass_allowed: false,
+      draft_assignment_allowed: false,
+      employment_routing_status: eligibility?.employment_routing_status || 'stale',
+      employment_routing_codes: normalizeArray(eligibility?.employment_routing_codes),
+      warning_codes: normalizeArray(eligibility?.warning_codes),
+      blocking_warnings: blockingWarnings,
+      ...details,
+    },
+  );
+}
+
+function draftAssignmentEvidence(
+  eligibility: LooseRecord,
+  identity: LooseRecord = {},
+) {
+  return {
+    ...identity,
+    personnel_contract_id: eligibility.personnel_contract_id || null,
+    employing_company_id: eligibility.employing_company_id || null,
+    payroll_cao_key: eligibility.payroll_cao_key || null,
+    employment_routing_status: eligibility.employment_routing_status || 'stale',
+    employment_routing_codes: normalizeArray(eligibility.employment_routing_codes),
+    routing_draft_assignment_allowed: eligibility.routing_draft_assignment_allowed === true,
+    draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
+    draft_assignment_blocking_codes: normalizeArray(eligibility.draft_assignment_blocking_codes),
+    warning_codes: normalizeArray(eligibility.warning_codes),
+    warning_snapshot: normalizeArray(eligibility.warning_snapshot),
+    has_critical_warnings: eligibility.has_critical_warnings === true,
+    contract_routing_snapshot: eligibility.contract_routing_snapshot || null,
+    validation_complete: eligibility.validation_complete === true,
+  };
+}
+
+function employmentRoutingProjection(routingSnapshot: LooseRecord | null | undefined) {
+  const decisionEntries = normalizeArray<LooseRecord>(routingSnapshot?.decisions);
+  const entries = decisionEntries.length > 0
+    ? decisionEntries.map(item => ({
+        service_date: compact(item?.service_date || item?.decision?.service_date) || null,
+        decision: item?.decision || null,
+      }))
+    : routingSnapshot
+    ? [{ service_date: compact(routingSnapshot.service_date) || null, decision: routingSnapshot }]
+    : [];
+  const decisions = entries.map(item => item.decision).filter(Boolean);
+  const expectedDates = uniqueStrings([
+    ...normalizeArray(routingSnapshot?.covered_service_dates),
+    ...entries.map(item => item.service_date),
+  ]);
+  const evaluatedDates = uniqueStrings(entries
+    .filter(item => item.decision)
+    .map(item => item.service_date));
+  const structurallyComplete = entries.length > 0
+    && decisions.length === entries.length
+    && entries.every(item => !!item.service_date)
+    && expectedDates.length === evaluatedDates.length
+    && evaluatedDates.length === entries.length
+    && expectedDates.every(date => evaluatedDates.includes(date));
+  const statuses = decisions.map(decision => compact(decision.employment_routing_status));
+  const contractIds = uniqueStrings(decisions.map(decision => (
+    decision?.contract_id || decision?.selected_contract?.id
+  )));
+  const employingCompanyIds = uniqueStrings(decisions.map(decision => (
+    decision?.employing_company_id
+      || decision?.selected_contract?.company_id
+  )));
+  const payrollCaoKeys = uniqueStrings(decisions.map(decision => (
+    decision?.payroll_cao_key
+      || decision?.selected_contract?.cao_key
+  )));
+  const hasMissingContractIdentity = decisions.some(decision => (
+    !compact(decision?.contract_id || decision?.selected_contract?.id)
+  ));
+  const hasIncompleteResolvedContractIdentity = decisions.some(decision => (
+    compact(decision?.contract_id || decision?.selected_contract?.id)
+    && (
+      !compact(decision?.employing_company_id || decision?.selected_contract?.company_id)
+      || !compact(decision?.payroll_cao_key || decision?.selected_contract?.cao_key)
+    )
+  ));
+  const routeEvidenceComplete = structurallyComplete
+    && statuses.length === decisions.length
+    && statuses.every(status => status === 'resolved')
+    && decisions.every(decision => (
+      compact(decision?.contract_id || decision?.selected_contract?.id)
+      && compact(decision?.employing_company_id || decision?.selected_contract?.company_id)
+      && compact(decision?.payroll_cao_key || decision?.selected_contract?.cao_key)
+    ))
+    && contractIds.length === 1
+    && employingCompanyIds.length === 1
+    && payrollCaoKeys.length === 1;
+  const hasUnknownStatus = statuses.some(status => ![
+    'resolved',
+    'stale',
+    'ambiguous',
+    'blocked',
+    'missing_contract',
+    'manual_review_required',
+  ].includes(status));
+  // Bij een meerdaagse dienst geldt één vaste fail-closed prioriteit:
+  // stale > ambiguous > blocked > missing > manual review.
+  const employmentRoutingStatus = routeEvidenceComplete
+    ? 'resolved'
+    : !structurallyComplete || hasUnknownStatus || statuses.includes('stale')
+    ? 'stale'
+    : statuses.includes('ambiguous')
+      || contractIds.length > 1
+      || employingCompanyIds.length > 1
+      || payrollCaoKeys.length > 1
+    ? 'ambiguous'
+    : statuses.includes('blocked') || hasIncompleteResolvedContractIdentity
+    ? 'blocked'
+    : statuses.includes('missing_contract') || hasMissingContractIdentity
+    ? 'missing_contract'
+    : 'manual_review_required';
+  return {
+    employment_routing_status: employmentRoutingStatus,
+    employment_routing_codes: employmentRoutingCodes(employmentRoutingStatus),
+    personnel_contract_id: routeEvidenceComplete ? contractIds[0] : null,
+    employing_company_id: routeEvidenceComplete ? employingCompanyIds[0] : null,
+    payroll_cao_key: routeEvidenceComplete ? payrollCaoKeys[0] : null,
+    employment_routing_evidence_complete: routeEvidenceComplete,
+  };
+}
+
+/**
+ * Final publication/payroll must use a freshly calculated decision snapshot.
+ * Stored route evidence deliberately does not imply that the full pay-period
+ * schedule gate has run; this helper adds that fail-closed final requirement.
+ */
+function employmentRoutingPayrollFinalEvidenceComplete(
+  routingSnapshot: LooseRecord | null | undefined,
+) {
+  const projection = employmentRoutingProjection(routingSnapshot);
+  const decisionEntries = normalizeArray<LooseRecord>(routingSnapshot?.decisions);
+  const decisions = decisionEntries.length > 0
+    ? decisionEntries.map(item => item?.decision).filter(Boolean)
+    : routingSnapshot
+    ? [routingSnapshot]
+    : [];
+  return projection.employment_routing_evidence_complete === true
+    && decisions.length > 0
+    && decisions.every(decision => (
+      decision?.decision_status === 'assignable'
+      && decision?.planning_assignment_allowed === true
+      && decision?.payroll_final_allowed === true
+      && decision?.schedule_gate?.required === true
+      && decision?.schedule_gate?.ready === true
+      && decision?.schedule_gate?.payroll_final_ready === true
+      && decision?.decision_inputs?.schedule_validation_validated === true
+      && decision?.decision_inputs?.schedule_validation_required === true
+    ));
+}
+
+function employmentRoutingPlanningEvidenceComplete(
+  routingSnapshot: LooseRecord | null | undefined,
+) {
+  const projection = employmentRoutingProjection(routingSnapshot);
+  const decisionEntries = normalizeArray<LooseRecord>(routingSnapshot?.decisions);
+  const decisions = decisionEntries.length > 0
+    ? decisionEntries.map(item => item?.decision).filter(Boolean)
+    : routingSnapshot
+    ? [routingSnapshot]
+    : [];
+  return projection.employment_routing_evidence_complete === true
+    && decisions.length > 0
+    && decisions.every(decision => (
+      decision?.decision_status === 'assignable'
+      && decision?.planning_assignment_allowed === true
+    ));
+}
+
+const PUBLICATION_EMPLOYMENT_ROUTING_CONCURRENCY = 6;
+
+/**
+ * Re-resolve only the employment contract route needed for publication.
+ * The full pay-period/schedule gate deliberately remains a separate payroll
+ * finalization concern; draft assignments and concept saves never call this.
+ */
+async function resolvePublicationEmploymentRoute(
+  base44: LooseRecord,
+  shift: LooseRecord,
+  personnel: LooseRecord,
+  runLimited: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation(),
+) {
+  const coveredDates = planningIntervalDates(shift);
+  const results = await Promise.all(coveredDates.map(serviceDate => runLimited(async () => {
+    try {
+      const routingPayload = {
+        personnel_id: personnel.id,
+        company_id: shift.company_id || null,
+        operating_company_id: shift.company_id || null,
+        task_id: shift.task_id || null,
+        object_id: shift.object_id || null,
+        route_id: shift.route_id || null,
+        service_date: serviceDate,
+        cao_key: shift.cao_key || null,
+        service_context: {
+          ...serviceContextFromShift(shift, personnel.id),
+          service_date: serviceDate,
+          covered_service_dates: coveredDates,
+        },
+        require_schedule_validation: false,
+        run_schedule_validation: false,
+        final_validation: false,
+        planning_interactive_fast_path: true,
+      };
+      const response = await base44.asServiceRole.functions.invoke(
+        'resolveCaoPlanningAssignmentDecision',
+        routingPayload,
+      );
+      const decision = response?.data || response || null;
+      if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+        throw new Error('Contract-/CAO-routering gaf geen bruikbare beslissing terug');
+      }
+      return { service_date: serviceDate, decision, resolved: true, error: null };
+    } catch (error) {
+      return {
+        service_date: serviceDate,
+        decision: null,
+        resolved: false,
+        error: (error as Error)?.message || String(error),
+      };
+    }
+  })));
+  const decisions = results
+    .filter(item => item.resolved && item.decision)
+    .map(item => ({ service_date: item.service_date, decision: item.decision }));
+  const contractIds = uniqueStrings(decisions.map(item => (
+    item.decision?.contract_id || item.decision?.selected_contract?.id
+  )));
+  const routingSnapshot = coveredDates.length === 1 && decisions.length === 1
+    ? decisions[0].decision
+    : {
+        covered_service_dates: coveredDates,
+        decisions,
+        contract_id: contractIds.length === 1 ? contractIds[0] : null,
+      };
+  return {
+    contract_routing_snapshot: routingSnapshot,
+    ...employmentRoutingProjection(routingSnapshot),
+    employment_planning_evidence_complete: employmentRoutingPlanningEvidenceComplete(routingSnapshot),
+    covered_service_dates: coveredDates,
+    blocking_reasons: uniqueStrings(decisions.flatMap(item => (
+      normalizeArray(item.decision?.blocking_reasons)
+    ))),
+    resolution_errors: results
+      .filter(item => !item.resolved)
+      .map(item => ({ service_date: item.service_date, message: item.error })),
   };
 }
 
@@ -3856,7 +4819,6 @@ const ELIGIBILITY_PREFETCH_MAX_SOURCES = 28;
 const ELIGIBILITY_PREFETCH_MAX_DATES = 14;
 const ELIGIBILITY_PREFETCH_TTL_MS = 90_000;
 const ELIGIBILITY_PREFETCH_ROUTING_CONCURRENCY = 6;
-
 function eligibilityPrefetchText(value: unknown, field: string, maximum = 512) {
   const result = compact(value);
   if (!result) throw new ApiError(400, `${field} is verplicht`);
@@ -4002,6 +4964,8 @@ function eligibilityOccurrenceShift(
         object_id: occurrence.object_id || null,
         customer_name: occurrence.customer_name_snapshot || null,
         object_name: occurrence.object_name_snapshot || object.name || null,
+        task_type: occurrence.task_type || null,
+        task_type_key: planningTaskTypeKey(occurrence),
       }],
     },
     status: 'draft',
@@ -4245,6 +5209,11 @@ async function prefetchAssignmentEligibility(
         warning_snapshot: snapshot,
         warning_codes: snapshot.map(entry => entry.code),
         has_critical_warnings: snapshot.some(entry => entry.severity === 'critical'),
+        routing_draft_assignment_allowed: false,
+        draft_assignment_allowed: false,
+        draft_assignment_blocking_codes: [error],
+        employment_routing_status: 'stale',
+        employment_routing_codes: employmentRoutingCodes('stale'),
         evaluated_at: evaluatedAt,
         expires_at: expiresAt,
         source_revision_fingerprint: sourceFingerprint,
@@ -4291,6 +5260,11 @@ async function prefetchAssignmentEligibility(
           warning_snapshot: snapshot,
           warning_codes: snapshot.map(entry => entry.code),
           has_critical_warnings: true,
+          routing_draft_assignment_allowed: false,
+          draft_assignment_allowed: false,
+          draft_assignment_blocking_codes: ['invalid_exclude_assignment'],
+          employment_routing_status: 'stale',
+          employment_routing_codes: employmentRoutingCodes('stale'),
           evaluated_at: evaluatedAt,
           expires_at: expiresAt,
           source_revision_fingerprint: sourceFingerprint,
@@ -4353,6 +5327,11 @@ async function prefetchAssignmentEligibility(
       warning_snapshot: eligibility.warning_snapshot,
       warning_codes: eligibility.warning_codes,
       has_critical_warnings: eligibility.has_critical_warnings,
+      routing_draft_assignment_allowed: eligibility.routing_draft_assignment_allowed === true,
+      draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
+      draft_assignment_blocking_codes: eligibility.draft_assignment_blocking_codes,
+      employment_routing_status: eligibility.employment_routing_status,
+      employment_routing_codes: eligibility.employment_routing_codes,
       evaluated_at: evaluatedAt,
       expires_at: expiresAt,
       source_revision_fingerprint: sourceFingerprint,
@@ -6999,6 +7978,10 @@ async function changeSingleTaskOccurrence(
       const desiredOccurrence = {
         ...targetBlueprint,
         ...occurrenceContext,
+        ...await resolveCommercialPlanningRouteForOccurrence(base44, {
+          ...targetBlueprint,
+          ...occurrenceContext,
+        }),
         last_modified_by_user_id: user.id || null,
         last_modified_at: nowIso(),
         metadata: {
@@ -7917,6 +8900,10 @@ async function migrateLegacySinglePlanningTasks(
           const desiredOccurrence: LooseRecord = {
             ...blueprint,
             ...occurrenceContext,
+            ...await resolveCommercialPlanningRouteForOccurrence(base44, {
+              ...blueprint,
+              ...occurrenceContext,
+            }),
             lifecycle_status: 'active',
             last_modified_by_user_id: user.id || null,
             last_modified_at: nowIso(),
@@ -8363,6 +9350,16 @@ async function bootstrapRange(
   const customerById = new Map<string, LooseRecord>(customers.map((item: LooseRecord) => [String(item.id), item]));
   const securityPlanById = new Map<string, LooseRecord>(securityPlans.map((item: LooseRecord) => [String(item.id), item]));
   const securityPlanRevisionById = new Map<string, LooseRecord>(securityPlanRevisions.map((item: LooseRecord) => [String(item.id), item]));
+  const commercialCustomerIds = uniqueStrings(objectTaskDefinitions
+    .filter(definition => (
+      definition.status === 'active'
+      && (!compact(definition.valid_from) || definition.valid_from <= periodEnd)
+      && (!compact(definition.valid_until) || definition.valid_until >= periodStart)
+    ))
+    .map(definition => (
+      definition.customer_id || objectById.get(String(definition.object_id))?.customer_id
+    )));
+  const commercialContext = await loadCommercialPlanningContext(base44, commercialCustomerIds);
   const shiftBySourceKey = new Map<string, LooseRecord>(
     existingShifts.map((item: LooseRecord) => [String(item.source_key), item]),
   );
@@ -8615,14 +9612,19 @@ async function bootstrapRange(
           const assignmentPayload = {
             personnel_id: execution.employee_id,
             personnel_name_snapshot: finalPersonnel?.name || execution.employee_name || 'Medewerker',
-            personnel_contract_id: eligibility?.personnel_contract_id || execution.personnel_contract_id || null,
+            personnel_contract_id: eligibility?.personnel_contract_id ?? null,
+            employing_company_id: eligibility?.employing_company_id ?? null,
+            payroll_cao_key: eligibility?.payroll_cao_key ?? null,
+            employment_routing_status: eligibility?.employment_routing_status || 'stale',
+            employment_routing_codes: eligibility?.employment_routing_codes || employmentRoutingCodes('stale'),
+            draft_assignment_allowed: eligibility?.draft_assignment_allowed === true,
             status: 'draft',
             warning_codes: warningSnapshot.map(item => item.code),
             warning_snapshot: warningSnapshot,
             has_critical_warnings: warningSnapshot.some(item => item.severity === 'critical'),
-            contract_routing_snapshot: eligibility?.contract_routing_snapshot
-              || execution.contract_routing_snapshot
-              || null,
+            contract_routing_snapshot: eligibility !== null
+              ? eligibility.contract_routing_snapshot ?? null
+              : execution.contract_routing_snapshot || null,
             assigned_by_user_id: user.id || null,
             assigned_at: nowIso(),
             removed_by_user_id: null,
@@ -8795,11 +9797,23 @@ async function bootstrapRange(
     for (const blueprint of blueprints) {
       await renewPlanningResourceLeases(base44, user, definitionLeases);
       desiredOccurrenceSourceKeys.add(blueprint.source_key);
+      const commercialRoute = resolveCommercialPlanningRoute(
+        {
+          ...blueprint,
+          customer_id: customer.id,
+          object_id: object.id,
+        },
+        commercialContext.contractsByCustomerId.get(String(customer.id)) || [],
+        commercialContext.linesByCustomerId.get(String(customer.id)) || [],
+        commercialContext.collectives,
+      );
       const payload = {
         ...blueprint,
         company_id: object.default_operating_company_id || null,
+        service_responsible_company_id: object.default_operating_company_id || null,
         customer_id: customer.id,
         object_id: object.id,
+        ...commercialRoute,
         security_plan_id: securityPlan?.id || definition.security_plan_id || null,
         security_plan_revision_id: validPublishedSecurityPlanRevision?.id || null,
         security_plan_snapshot: securityPlanSnapshot,
@@ -8852,6 +9866,51 @@ async function bootstrapRange(
       let currentOccurrence: LooseRecord = existing;
       desiredOccurrenceIds.add(String(currentOccurrence.id));
       if (hasActivePlanningCompositionReservation(currentOccurrence)) continue;
+      if (!occurrenceHasActiveSegment.has(String(currentOccurrence.id))) {
+        const additiveBackfillFields = [
+          'service_responsible_company_id',
+          'task_type_key',
+          'commercial_routing_status',
+          'commercial_routing_snapshot',
+        ];
+        const additiveBackfill = Object.fromEntries(additiveBackfillFields
+          .filter(field => currentOccurrence[field] == null && payload[field] != null)
+          .map(field => [field, payload[field]]));
+        if (Object.keys(additiveBackfill).length) {
+          currentOccurrence = await casUpdate(
+            base44,
+            'PlanningTaskOccurrence',
+            currentOccurrence,
+            revisionOf(currentOccurrence),
+            additiveBackfill,
+          );
+        }
+      }
+      const commercialIdentityUnchanged = [
+        'selling_company_id',
+        'customer_contract_id',
+        'customer_contract_line_id',
+      ].every(field => stableStringify(currentOccurrence[field] ?? null) === stableStringify(payload[field] ?? null));
+      const commercialAttentionChanged = [
+        'commercial_routing_status',
+        'commercial_routing_snapshot',
+      ].some(field => stableStringify(currentOccurrence[field] ?? null) !== stableStringify(payload[field] ?? null));
+      if (
+        commercialIdentityUnchanged
+        && commercialAttentionChanged
+        && !occurrenceHasActiveSegment.has(String(currentOccurrence.id))
+      ) {
+        currentOccurrence = await casUpdate(
+          base44,
+          'PlanningTaskOccurrence',
+          currentOccurrence,
+          revisionOf(currentOccurrence),
+          {
+            commercial_routing_status: payload.commercial_routing_status,
+            commercial_routing_snapshot: payload.commercial_routing_snapshot,
+          },
+        );
+      }
       const beforeImpact = taskOccurrencePlanningImpactSnapshot(currentOccurrence);
       const desiredImpact = taskOccurrencePlanningImpactSnapshot(payload);
       const sourceChanged = stableStringify(taskOccurrenceSourceSnapshot(currentOccurrence))
@@ -9114,6 +10173,15 @@ function commonBoolean(values: unknown[]) {
   return present.length && present.every(value => value === present[0]) ? present[0] : null;
 }
 
+function planningTaskTypeKey(source: LooseRecord) {
+  const explicit = compact(source?.task_type_key);
+  if (explicit) return explicit;
+  const taskType = compact(source?.task_type);
+  if (taskType !== 'other') return taskType || null;
+  const definitionId = compact(source?.object_task_definition_id);
+  return definitionId ? `other:${definitionId}` : 'other';
+}
+
 function normalizedCompositionSegment(input: LooseRecord, occurrence: LooseRecord) {
   const startDate = input.start_date ? asDate(input.start_date, 'segments.start_date') : occurrence.service_date;
   const startTime = asTime(input.start_time, 'segments.start_time');
@@ -9147,9 +10215,16 @@ function normalizedCompositionSegment(input: LooseRecord, occurrence: LooseRecor
     timezone: occurrence.timezone || 'Europe/Amsterdam',
     duration_minutes: interval.duration,
     company_id: occurrence.company_id || null,
+    selling_company_id: occurrence.selling_company_id || null,
+    service_responsible_company_id: occurrence.service_responsible_company_id || occurrence.company_id || null,
+    customer_contract_id: occurrence.customer_contract_id || null,
+    customer_contract_line_id: occurrence.customer_contract_line_id || null,
+    commercial_routing_status: commercialRoutingEvidenceStatus(occurrence),
+    commercial_routing_snapshot: occurrence.commercial_routing_snapshot || null,
     customer_id: occurrence.customer_id,
     object_id: occurrence.object_id,
     task_type: occurrence.task_type,
+    task_type_key: planningTaskTypeKey(occurrence),
     task_name_snapshot: occurrence.task_name_snapshot,
     customer_name_snapshot: occurrence.customer_name_snapshot || null,
     object_name_snapshot: occurrence.object_name_snapshot || null,
@@ -9988,6 +11063,30 @@ async function composeShift(
     : null;
   const firstSegment = normalizedSegments[0];
   const lastSegment = normalizedSegments.at(-1) as LooseRecord;
+  const sellingCompanyIds = uniqueStrings(normalizedSegments.map(item => item.selling_company_id));
+  const serviceResponsibleCompanyIds = uniqueStrings(normalizedSegments.map(item => item.service_responsible_company_id));
+  const customerContractIds = uniqueStrings(normalizedSegments.map(item => item.customer_contract_id));
+  const customerContractLineIds = uniqueStrings(normalizedSegments.map(item => item.customer_contract_line_id));
+  const everySegmentHasCommercialRoute = normalizedSegments.every(item => (
+    compact(item.selling_company_id)
+    && compact(item.customer_contract_id)
+    && compact(item.customer_contract_line_id)
+  ));
+  const commercialServiceContext = commercialRoutingServiceContext(normalizedSegments);
+  const hasCustomerContext = normalizedSegments.some(item => (
+    compact(item.customer_id)
+    || compact(item.customer_name_snapshot)
+    || compact(item.commercial_routing_snapshot?.customer_id)
+  ));
+  const explicitlyInternalNonBillable = !hasCustomerContext
+    && normalizedSegments.every(item => commercialRoutingEvidenceStatus(item) !== 'resolved')
+    && objects.length > 0
+    && objects.every(item => item.default_customer_billable === false);
+  const shiftCustomerBillable = typeof commercialServiceContext.customer_billable === 'boolean'
+    ? commercialServiceContext.customer_billable
+    : explicitlyInternalNonBillable
+    ? false
+    : null;
   const warnings = compositionWarnings(normalizedSegments);
   if (objectsWithoutOperatingCompany.length) {
     warnings.push(warning(
@@ -10014,6 +11113,13 @@ async function composeShift(
     source_shift_id: null,
     source_route_execution_id: null,
     company_id: resolvedCompanyId,
+    selling_company_id: everySegmentHasCommercialRoute && sellingCompanyIds.length === 1
+      ? sellingCompanyIds[0]
+      : null,
+    selling_company_ids: sellingCompanyIds,
+    service_responsible_company_id: serviceResponsibleCompanyIds.length === 1
+      ? serviceResponsibleCompanyIds[0]
+      : null,
     customer_id: customerIds.length === 1 ? customerIds[0] : null,
     customer_ids: customerIds,
     object_id: objectIds.length === 1 ? objectIds[0] : null,
@@ -10022,7 +11128,12 @@ async function composeShift(
     task_id: null,
     task_occurrence_ids: occurrenceIds,
     task_segment_count: normalizedSegments.length,
-    customer_contract_line_id: null,
+    customer_contract_id: everySegmentHasCommercialRoute && customerContractIds.length === 1
+      ? customerContractIds[0]
+      : null,
+    customer_contract_line_id: everySegmentHasCommercialRoute && customerContractLineIds.length === 1
+      ? customerContractLineIds[0]
+      : null,
     customer_name_snapshot: customers.length === 1 ? customerDisplayName(customers[0]) : null,
     object_name_snapshot: objects.length === 1 ? objects[0].name || null : null,
     route_name_snapshot: null,
@@ -10055,9 +11166,10 @@ async function composeShift(
     event_hospitality_cao_applies: commonBoolean(objects.map(item => item.default_event_hospitality_cao_applies)),
     works_airport_schiphol: commonBoolean(objects.map(item => item.default_works_airport_schiphol)),
     works_cash_value_logistics: commonBoolean(objects.map(item => item.default_works_cash_value_logistics)),
-    customer_billable: commonBoolean(objects.map(item => item.default_customer_billable)),
+    customer_billable: shiftCustomerBillable,
     counts_toward_required_staffing: commonBoolean(objects.map(item => item.default_counts_toward_required_staffing)),
     service_context_snapshot: {
+      ...commercialServiceContext,
       composition_source: 'ObjectTaskDefinition',
       task_occurrence_ids: occurrenceIds,
       object_task_definition_ids: uniqueStrings(occurrences.map(item => item.object_task_definition_id)),
@@ -10070,7 +11182,14 @@ async function composeShift(
         object_id: item.object_id,
         object_name: item.object_name_snapshot,
         task_type: item.task_type,
+        task_type_key: item.task_type_key,
         task_name: item.task_name_snapshot,
+        selling_company_id: item.selling_company_id,
+        service_responsible_company_id: item.service_responsible_company_id,
+        customer_contract_id: item.customer_contract_id,
+        customer_contract_line_id: item.customer_contract_line_id,
+        commercial_routing_status: item.commercial_routing_status,
+        commercial_routing_snapshot: item.commercial_routing_snapshot,
       })),
       composition_warnings: warnings,
     },
@@ -10142,6 +11261,99 @@ async function composeShift(
         });
       }
     }
+  }
+
+  const anticipatedAssignmentShift = {
+    ...(shift || {}),
+    ...shiftPayload,
+    status: 'draft',
+  };
+  let requestedAssignmentEligibility: LooseRecord | null = null;
+  let requestedAssignmentSuppliedWarnings: LooseRecord[] = [];
+  const compositionAssignmentEligibilityById = new Map<string, LooseRecord>();
+  if (composeAndAssignMode) {
+    requestedAssignmentSuppliedWarnings = normalizeSuppliedWarnings(body);
+    if (objectIds.length > 1) requestedAssignmentSuppliedWarnings.push(warning(
+      'multi_object_shift_review',
+      'warning',
+      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
+      'planner',
+      { object_ids: objectIds },
+    ));
+    // A compensated compose-and-assign attempt has no committed assignment
+    // whose old evidence may authorize a retry. Always re-evaluate the live
+    // personnel/schedule state before recreating that assignment.
+    requestedAssignmentEligibility = await evaluateAssignmentWarnings(
+      base44,
+      anticipatedAssignmentShift,
+      requestedPersonnel as LooseRecord,
+      requestedAssignmentBefore?.id || null,
+      requestedAssignmentSuppliedWarnings,
+    );
+    assertDraftAssignmentAllowed(requestedAssignmentEligibility, {
+      action: 'compose_and_assign',
+      personnel_id: requestedPersonnelId,
+      task_occurrence_ids: occurrenceIds,
+    });
+    shiftPayload.metadata.compose_and_assign.assignment_draft_evidence = draftAssignmentEvidence(
+      requestedAssignmentEligibility,
+      {
+        personnel_id: requestedPersonnelId,
+        slot_index: requestedSlotIndex,
+      },
+    );
+    latencyProbe?.mark('eligibility');
+  } else {
+    const storedEligibilityByAssignmentId = shift?.metadata?.planning_composition
+      ?.assignment_draft_evidence_by_assignment_id || {};
+    for (const assignment of normalizeArray<LooseRecord>(lockedUpdateAssignmentsAll)
+      .filter(item => item.status !== 'removed')) {
+      const supplied = normalizeArray<LooseRecord>(assignment.warning_snapshot)
+        .filter(item => item.source === 'planner');
+      if (objectIds.length > 1) supplied.push(warning(
+        'multi_object_shift_review',
+        'warning',
+        'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
+        'planner',
+        { object_ids: objectIds },
+      ));
+      const storedEligibility = storedEligibilityByAssignmentId[String(assignment.id)];
+      const storedEligibilityMatches = Boolean(
+        (recovering || ownedCompositionRecovery)
+        && storedEligibility?.draft_assignment_allowed === true
+        && String(storedEligibility?.personnel_id || '') === String(assignment.personnel_id)
+      );
+      const personnel = storedEligibilityMatches
+        ? null
+        : await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+      const eligibility = storedEligibilityMatches
+        ? storedEligibility
+        : await evaluateAssignmentWarnings(
+            base44,
+            anticipatedAssignmentShift,
+            personnel as LooseRecord,
+            assignment.id,
+            supplied,
+          );
+      assertDraftAssignmentAllowed(eligibility, {
+        action: 'update_shift_composition',
+        shift_id: shift?.id || null,
+        assignment_id: assignment.id,
+        personnel_id: assignment.personnel_id,
+      });
+      compositionAssignmentEligibilityById.set(String(assignment.id), eligibility);
+    }
+    shiftPayload.metadata.planning_composition.assignment_draft_evidence_by_assignment_id = Object.fromEntries(
+      normalizeArray<LooseRecord>(lockedUpdateAssignmentsAll)
+        .filter(item => item.status !== 'removed')
+        .map(assignment => [
+          String(assignment.id),
+          draftAssignmentEvidence(
+            compositionAssignmentEligibilityById.get(String(assignment.id)) as LooseRecord,
+            { personnel_id: assignment.personnel_id },
+          ),
+        ]),
+    );
   }
 
   const reservedOccurrences: LooseRecord[] = [];
@@ -10300,15 +11512,9 @@ async function composeShift(
         assignment_id: targetAssignment.id,
       });
     }
-    const finalSuppliedWarnings = normalizeSuppliedWarnings(body);
-    if (objectIds.length > 1) finalSuppliedWarnings.push(warning(
-      'multi_object_shift_review',
-      'warning',
-      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
-      'planner',
-      { object_ids: objectIds },
-    ));
-    const provisionalWarnings = dedupeWarnings(finalSuppliedWarnings);
+    if (!requestedAssignmentEligibility) {
+      throw new ApiError(500, 'Medewerkercontrole voor de samengestelde dienst ontbreekt');
+    }
     const assignmentPayload = {
       personnel_id: requestedPersonnel?.id,
       personnel_name_snapshot: requestedPersonnel?.name
@@ -10316,12 +11522,17 @@ async function composeShift(
           .filter(Boolean)
           .join(' ')
         || 'Medewerker',
-      personnel_contract_id: null,
+      personnel_contract_id: requestedAssignmentEligibility.personnel_contract_id,
+      employing_company_id: requestedAssignmentEligibility.employing_company_id,
+      payroll_cao_key: requestedAssignmentEligibility.payroll_cao_key,
+      employment_routing_status: requestedAssignmentEligibility.employment_routing_status,
+      employment_routing_codes: requestedAssignmentEligibility.employment_routing_codes,
+      draft_assignment_allowed: true,
       status: 'draft',
-      warning_codes: [...new Set(provisionalWarnings.map(item => item.code))],
-      warning_snapshot: provisionalWarnings,
-      has_critical_warnings: provisionalWarnings.some(item => item.severity === 'critical'),
-      contract_routing_snapshot: null,
+      warning_codes: requestedAssignmentEligibility.warning_codes,
+      warning_snapshot: requestedAssignmentEligibility.warning_snapshot,
+      has_critical_warnings: requestedAssignmentEligibility.has_critical_warnings,
+      contract_routing_snapshot: requestedAssignmentEligibility.contract_routing_snapshot,
       assigned_by_user_id: user.id || null,
       assigned_at: nowIso(),
       removed_by_user_id: null,
@@ -10333,9 +11544,10 @@ async function composeShift(
         compose_and_assign_idempotency_key: context.idempotencyKey,
         compose_and_assign_correlation_id: context.correlationId,
         compose_and_assign_request_hash: composeAndAssignRequestHash,
+        final_assignment_validation_at: nowIso(),
       },
     };
-    const writtenAssignment: LooseRecord = targetAssignment
+    requestedAssignment = targetAssignment
       ? await casUpdate(
           base44,
           'PlanningAssignment',
@@ -10350,39 +11562,6 @@ async function composeShift(
           revision: 1,
           published_revision: 0,
         });
-    await renewPlanningResourceLeases(base44, user, compositionLeases);
-    const finalPersonnel = await requireRecord(
-      base44,
-      'Personnel',
-      requestedPersonnelId as string,
-      'Medewerker',
-    );
-    const finalEligibility = await evaluateAssignmentWarnings(
-      base44,
-      shift,
-      finalPersonnel,
-      writtenAssignment.id,
-      finalSuppliedWarnings,
-    );
-    latencyProbe?.mark('eligibility');
-    await renewPlanningResourceLeases(base44, user, compositionLeases);
-    requestedAssignment = await casUpdate(
-      base44,
-      'PlanningAssignment',
-      writtenAssignment,
-      revisionOf(writtenAssignment),
-      {
-        personnel_contract_id: finalEligibility.personnel_contract_id,
-        warning_codes: finalEligibility.warning_codes,
-        warning_snapshot: finalEligibility.warning_snapshot,
-        has_critical_warnings: finalEligibility.has_critical_warnings,
-        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
-        metadata: {
-          ...(writtenAssignment.metadata || {}),
-          final_assignment_validation_at: nowIso(),
-        },
-      },
-    );
   }
 
   const assignmentsForRevalidation = composeAndAssignMode && requestedAssignment
@@ -10397,17 +11576,8 @@ async function composeShift(
       updatedAssignments.push(requestedAssignment);
       continue;
     }
-    const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-    const supplied = normalizeArray(assignment.warning_snapshot)
-      .filter((item: LooseRecord) => item.source === 'planner');
-    if (objectIds.length > 1) supplied.push(warning(
-      'multi_object_shift_review',
-      'warning',
-      'Deze medewerker voert binnen één dienst taken op meerdere objecten uit; controleer autorisaties en reistijd.',
-      'planner',
-      { object_ids: objectIds },
-    ));
-    const eligibility = await evaluateAssignmentWarnings(base44, shift, personnel, assignment.id, supplied);
+    const eligibility = compositionAssignmentEligibilityById.get(String(assignment.id));
+    if (!eligibility) throw new ApiError(500, 'Medewerkercontrole voor de gewijzigde dienst ontbreekt');
     await renewPlanningResourceLeases(base44, user, compositionLeases);
     updatedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
       status: 'draft',
@@ -10416,6 +11586,11 @@ async function composeShift(
       has_critical_warnings: eligibility.has_critical_warnings,
       contract_routing_snapshot: eligibility.contract_routing_snapshot,
       personnel_contract_id: eligibility.personnel_contract_id,
+      employing_company_id: eligibility.employing_company_id,
+      payroll_cao_key: eligibility.payroll_cao_key,
+      employment_routing_status: eligibility.employment_routing_status,
+      employment_routing_codes: eligibility.employment_routing_codes,
+      draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
     }));
   }
 
@@ -10711,6 +11886,11 @@ function sharedBoundaryAssignmentProjection(record: LooseRecord) {
     has_critical_warnings: Boolean(record.has_critical_warnings),
     contract_routing_snapshot: record.contract_routing_snapshot || null,
     personnel_contract_id: record.personnel_contract_id || null,
+    employing_company_id: record.employing_company_id || null,
+    payroll_cao_key: record.payroll_cao_key || null,
+    employment_routing_status: record.employment_routing_status || 'stale',
+    employment_routing_codes: normalizeArray(record.employment_routing_codes),
+    draft_assignment_allowed: record.draft_assignment_allowed === true,
   };
 }
 
@@ -11297,6 +12477,11 @@ async function resizeSharedTaskBoundary(
             supplied,
             [leftShiftId, rightShiftId],
           );
+          assertDraftAssignmentAllowed(eligibility, {
+            action: SHARED_TASK_BOUNDARY_ACTION,
+            assignment_id: assignment.id,
+            personnel_id: assignment.personnel_id,
+          });
           assignmentPatches[assignment.id] = {
             status: 'draft',
             warning_codes: eligibility.warning_codes,
@@ -11304,6 +12489,11 @@ async function resizeSharedTaskBoundary(
             has_critical_warnings: eligibility.has_critical_warnings,
             contract_routing_snapshot: eligibility.contract_routing_snapshot,
             personnel_contract_id: eligibility.personnel_contract_id,
+            employing_company_id: eligibility.employing_company_id,
+            payroll_cao_key: eligibility.payroll_cao_key,
+            employment_routing_status: eligibility.employment_routing_status,
+            employment_routing_codes: eligibility.employment_routing_codes,
+            draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
           };
         }
       }
@@ -11696,6 +12886,9 @@ function sharedBoundaryAssignmentMatches(record: LooseRecord, patch: LooseRecord
     'has_critical_warnings',
     'contract_routing_snapshot',
     'personnel_contract_id',
+    'employing_company_id',
+    'payroll_cao_key',
+    'employment_routing_status',
   ].every(key => stableStringify(record[key] ?? null) === stableStringify(patch[key] ?? null));
 }
 
@@ -12000,6 +13193,9 @@ async function repairSharedTaskBoundary(
             'has_critical_warnings',
             'contract_routing_snapshot',
             'personnel_contract_id',
+            'employing_company_id',
+            'payroll_cao_key',
+            'employment_routing_status',
           ].every(key => stableStringify(assignment[key] ?? null) === stableStringify(beforeAssignment[key] ?? null));
           if (!unchanged) sharedBoundaryRepairConflict('PlanningAssignment', assignment, lockedState);
           await renewPlanningResourceLeases(base44, recoveryUser, leases);
@@ -12632,16 +13828,33 @@ async function resizeTaskShiftPreservingCoverage(
     const anticipatedShift = { ...shift, ...shiftIntervalPatch(requestedInterval), status: 'draft' };
     const eligibilityByAssignment = new Map<string, LooseRecord>();
     for (const assignment of assignments.filter(item => item.status !== 'removed')) {
-      const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-      const suppliedWarnings = normalizeArray(assignment.warning_snapshot)
-        .filter((item: LooseRecord) => item.source === 'planner');
-      eligibilityByAssignment.set(String(assignment.id), await evaluateAssignmentWarnings(
-        base44,
-        anticipatedShift,
-        personnel,
-        assignment.id,
-        suppliedWarnings,
-      ));
+      const storedEligibility = marker?.phase === 'state_written_audit_pending'
+        ? marker.assignment_eligibility_by_id?.[String(assignment.id)]
+        : null;
+      const canReuseStoredEligibility = storedEligibility?.draft_assignment_allowed === true
+        && String(storedEligibility.assignment_id || '') === String(assignment.id)
+        && String(storedEligibility.personnel_id || '') === String(assignment.personnel_id);
+      const eligibility = canReuseStoredEligibility
+        ? storedEligibility
+        : await (async () => {
+            const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+            const suppliedWarnings = normalizeArray(assignment.warning_snapshot)
+              .filter((item: LooseRecord) => item.source === 'planner');
+            return evaluateAssignmentWarnings(
+              base44,
+              anticipatedShift,
+              personnel,
+              assignment.id,
+              suppliedWarnings,
+            );
+          })();
+      assertDraftAssignmentAllowed(eligibility, {
+        action: RESIZE_TASK_SHIFT_PRESERVING_COVERAGE_ACTION,
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        personnel_id: assignment.personnel_id,
+      });
+      eligibilityByAssignment.set(String(assignment.id), eligibility);
     }
     latencyProbe.mark('eligibility');
 
@@ -12779,6 +13992,15 @@ async function resizeTaskShiftPreservingCoverage(
       participant_segment_ids: [segment.id, ...preparedCompanions.map(item => item.segment.id)],
       companion_shift_ids: preparedCompanions.map(item => item.shift.id),
       companion_segment_ids: preparedCompanions.map(item => item.segment.id),
+      assignment_eligibility_by_id: Object.fromEntries(
+        [...eligibilityByAssignment.entries()].map(([assignmentId, eligibility]) => [
+          assignmentId,
+          draftAssignmentEvidence(eligibility, {
+            assignment_id: assignmentId,
+            personnel_id: assignments.find(item => String(item.id) === assignmentId)?.personnel_id || null,
+          }),
+        ]),
+      ),
       started_at: nowIso(),
     };
     if (!taskPartitionMarker(shift, action, context, user, requestHash) || !sameInterval(shift, requestedInterval, 'shift')) {
@@ -12827,6 +14049,11 @@ async function resizeTaskShiftPreservingCoverage(
       updatedAssignments.push(await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
         status: 'draft',
         personnel_contract_id: eligibility.personnel_contract_id,
+        employing_company_id: eligibility.employing_company_id,
+        payroll_cao_key: eligibility.payroll_cao_key,
+        employment_routing_status: eligibility.employment_routing_status,
+        employment_routing_codes: eligibility.employment_routing_codes,
+        draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
         warning_codes: eligibility.warning_codes,
         warning_snapshot: eligibility.warning_snapshot,
         has_critical_warnings: eligibility.has_critical_warnings,
@@ -12971,8 +14198,9 @@ async function resizeTaskShiftPreservingCoverage(
 }
 
 const TASK_PARTITION_COMPATIBILITY_FIELDS = [
-  'source_type', 'source_id', 'company_id', 'customer_id', 'customer_ids',
-  'object_id', 'object_ids', 'route_id', 'task_id', 'customer_contract_line_id',
+  'source_type', 'source_id', 'company_id', 'selling_company_id', 'selling_company_ids',
+  'service_responsible_company_id', 'customer_id', 'customer_ids',
+  'object_id', 'object_ids', 'route_id', 'task_id', 'customer_contract_id', 'customer_contract_line_id',
   'customer_name_snapshot', 'object_name_snapshot', 'route_name_snapshot',
   'service_name_snapshot', 'timezone',
   'required_count', 'cao_key', 'service_function_type',
@@ -13870,6 +15098,12 @@ async function assignAndMergeTaskShiftPartition(
         plannerWarnings,
         [targetShift.id],
       );
+      assertDraftAssignmentAllowed(eligibility, {
+        action: ASSIGN_AND_MERGE_TASK_SHIFT_PARTITION_ACTION,
+        shift_id: survivorShift.id,
+        assignment_id: assignment.id,
+        personnel_id: personnelId,
+      });
     }
 
     const beforeState = recovering ? null : {
@@ -13996,6 +15230,11 @@ async function assignAndMergeTaskShiftPartition(
       assignment = await casUpdate(base44, 'PlanningAssignment', assignment, revisionOf(assignment), {
         status: 'draft',
         personnel_contract_id: eligibility.personnel_contract_id,
+        employing_company_id: eligibility.employing_company_id,
+        payroll_cao_key: eligibility.payroll_cao_key,
+        employment_routing_status: eligibility.employment_routing_status,
+        employment_routing_codes: eligibility.employment_routing_codes,
+        draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
         warning_codes: eligibility.warning_codes,
         warning_snapshot: eligibility.warning_snapshot,
         has_critical_warnings: eligibility.has_critical_warnings,
@@ -14515,6 +15754,10 @@ async function copyTaskOccurrence(
     const desiredOccurrence: LooseRecord = {
       ...blueprint,
       ...occurrenceContext,
+      ...await resolveCommercialPlanningRouteForOccurrence(base44, {
+        ...blueprint,
+        ...occurrenceContext,
+      }),
       required_minutes: requiredMinutes,
       last_modified_by_user_id: user.id || null,
       last_modified_at: nowIso(),
@@ -15086,24 +16329,83 @@ async function assignPersonnel(
         assignment_id: duplicateAssignment.id,
       });
     }
+    const suppliedWarnings = dedupeWarnings(normalizeSuppliedWarnings(body));
+    const assignmentAlreadyCommitted = Boolean(
+      recovering
+      && existing
+      && existing.status === 'draft'
+      && String(existing.personnel_id) === String(personnel.id)
+      && Number(existing.slot_index || 0) === slotIndex
+      && existing.draft_assignment_allowed === true
+      && existing.metadata?.last_assign_idempotency_key === context.idempotencyKey
+      && existing.metadata?.last_assign_request_hash === requestHash
+      && existing.metadata?.last_assign_actor_user_id === (user.id || null)
+    );
+    const storedEligibility = recoveryMarker?.assignment_draft_evidence;
+    const storedEligibilityMatches = Boolean(
+      recovering
+      && storedEligibility?.draft_assignment_allowed === true
+      && String(storedEligibility?.personnel_id || '') === String(personnel.id)
+      && Number(storedEligibility?.slot_index) === slotIndex
+    );
+    const finalEligibility = assignmentAlreadyCommitted
+      ? existing
+      : storedEligibilityMatches
+      ? storedEligibility
+      : await evaluateAssignmentWarnings(
+          base44,
+          shift,
+          personnel,
+          existing?.id || null,
+          suppliedWarnings,
+        );
+    assertDraftAssignmentAllowed(finalEligibility, {
+      action: 'assign',
+      shift_id: shift.id,
+      personnel_id: personnel.id,
+      slot_index: slotIndex,
+    });
+    latencyProbe.mark('eligibility');
     await renewPlanningResourceLeases(base44, user, leases);
+    const assignMutationMetadata = planningMutationMetadata(shift, 'assign', context, user, requestHash);
+    assignMutationMetadata.planning_mutation.assignment_draft_evidence = {
+      personnel_id: personnel.id,
+      slot_index: slotIndex,
+      personnel_contract_id: finalEligibility.personnel_contract_id || null,
+      employing_company_id: finalEligibility.employing_company_id || null,
+      payroll_cao_key: finalEligibility.payroll_cao_key || null,
+      employment_routing_status: finalEligibility.employment_routing_status || 'stale',
+      employment_routing_codes: normalizeArray(finalEligibility.employment_routing_codes),
+      routing_draft_assignment_allowed: finalEligibility.routing_draft_assignment_allowed === true,
+      draft_assignment_allowed: true,
+      draft_assignment_blocking_codes: normalizeArray(finalEligibility.draft_assignment_blocking_codes),
+      warning_codes: normalizeArray(finalEligibility.warning_codes),
+      warning_snapshot: normalizeArray(finalEligibility.warning_snapshot),
+      has_critical_warnings: finalEligibility.has_critical_warnings === true,
+      contract_routing_snapshot: finalEligibility.contract_routing_snapshot || null,
+      validation_complete: finalEligibility.validation_complete === true,
+    };
     const updatedShift = recovering
       ? shift
       : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
-          metadata: planningMutationMetadata(shift, 'assign', context, user, requestHash),
+          metadata: assignMutationMetadata,
         });
-    const suppliedWarnings = dedupeWarnings(normalizeSuppliedWarnings(body));
     const assignmentPayload = {
       personnel_id: personnel.id,
       personnel_name_snapshot: personnel.name
         || [personnel.call_name || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(' ')
         || 'Medewerker',
-      personnel_contract_id: null,
+      personnel_contract_id: finalEligibility.personnel_contract_id,
+      employing_company_id: finalEligibility.employing_company_id,
+      payroll_cao_key: finalEligibility.payroll_cao_key,
+      employment_routing_status: finalEligibility.employment_routing_status,
+      employment_routing_codes: finalEligibility.employment_routing_codes,
+      draft_assignment_allowed: true,
       status: 'draft',
-      warning_codes: [...new Set(suppliedWarnings.map(item => item.code))],
-      warning_snapshot: suppliedWarnings,
-      has_critical_warnings: suppliedWarnings.some(item => item.severity === 'critical'),
-      contract_routing_snapshot: null,
+      warning_codes: finalEligibility.warning_codes,
+      warning_snapshot: finalEligibility.warning_snapshot,
+      has_critical_warnings: finalEligibility.has_critical_warnings,
+      contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
       assigned_by_user_id: user.id || null,
       assigned_at: nowIso(),
       removed_by_user_id: null,
@@ -15115,46 +16417,21 @@ async function assignPersonnel(
         last_assign_idempotency_key: context.idempotencyKey,
         last_assign_request_hash: requestHash,
         last_assign_actor_user_id: user.id || null,
+        final_assignment_validation_at: nowIso(),
       },
     };
     await renewPlanningResourceLeases(base44, user, leases);
-    const writtenAssignment = existing
-      ? await casUpdate(base44, 'PlanningAssignment', existing, revisionOf(existing), assignmentPayload)
-      : await base44.asServiceRole.entities.PlanningAssignment.create({
-          shift_id: shift.id,
-          slot_index: slotIndex,
-          ...assignmentPayload,
-          revision: 1,
-          published_revision: 0,
-        });
-    await renewPlanningResourceLeases(base44, user, leases);
-    const finalPersonnel = await requireRecord(base44, 'Personnel', personnelId, 'Medewerker');
-    const finalEligibility = await evaluateAssignmentWarnings(
-      base44,
-      updatedShift,
-      finalPersonnel,
-      writtenAssignment.id,
-      normalizeSuppliedWarnings(body),
-    );
-    latencyProbe.mark('eligibility');
-    await renewPlanningResourceLeases(base44, user, leases);
-    const assignment = await casUpdate(
-      base44,
-      'PlanningAssignment',
-      writtenAssignment,
-      revisionOf(writtenAssignment),
-      {
-        personnel_contract_id: finalEligibility.personnel_contract_id,
-        warning_codes: finalEligibility.warning_codes,
-        warning_snapshot: finalEligibility.warning_snapshot,
-        has_critical_warnings: finalEligibility.has_critical_warnings,
-        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
-        metadata: {
-          ...(writtenAssignment.metadata || {}),
-          final_assignment_validation_at: nowIso(),
-        },
-      },
-    );
+    const assignment = assignmentAlreadyCommitted
+      ? existing as LooseRecord
+      : existing
+        ? await casUpdate(base44, 'PlanningAssignment', existing, revisionOf(existing), assignmentPayload)
+        : await base44.asServiceRole.entities.PlanningAssignment.create({
+            shift_id: shift.id,
+            slot_index: slotIndex,
+            ...assignmentPayload,
+            revision: 1,
+            published_revision: 0,
+          });
     const result = { shift: updatedShift, assignment };
     await renewPlanningResourceLeases(base44, user, leases);
     const audit = await appendAudit(base44, user, {
@@ -15435,6 +16712,12 @@ async function restoreAssignment(
       assignment.id,
       normalizeSuppliedWarnings(body),
     );
+    assertDraftAssignmentAllowed(eligibility, {
+      action: 'restore_assignment',
+      shift_id: shift.id,
+      assignment_id: assignment.id,
+      personnel_id: personnel.id,
+    });
     await renewPlanningResourceLeases(base44, user, leases);
     const updatedShift = recovering
       ? shift
@@ -15449,6 +16732,11 @@ async function restoreAssignment(
       has_critical_warnings: eligibility.has_critical_warnings,
       contract_routing_snapshot: eligibility.contract_routing_snapshot,
       personnel_contract_id: eligibility.personnel_contract_id,
+      employing_company_id: eligibility.employing_company_id,
+      payroll_cao_key: eligibility.payroll_cao_key,
+      employment_routing_status: eligibility.employment_routing_status,
+      employment_routing_codes: eligibility.employment_routing_codes,
+      draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
       assigned_by_user_id: user.id || assignment.assigned_by_user_id || null,
       assigned_at: nowIso(),
       removed_by_user_id: null,
@@ -15458,38 +16746,10 @@ async function restoreAssignment(
         last_restore_idempotency_key: context.idempotencyKey,
         last_restore_request_hash: requestHash,
         last_restore_actor_user_id: user.id || null,
+        final_assignment_validation_at: nowIso(),
       },
     });
-    await renewPlanningResourceLeases(base44, user, leases);
-    const finalPersonnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-    const finalEligibility = await evaluateAssignmentWarnings(
-      base44,
-      updatedShift,
-      finalPersonnel,
-      writtenAssignment.id,
-      normalizeSuppliedWarnings(body),
-    );
-    await renewPlanningResourceLeases(base44, user, leases);
-    const updatedAssignment = await casUpdate(
-      base44,
-      'PlanningAssignment',
-      writtenAssignment,
-      revisionOf(writtenAssignment),
-      {
-        warning_codes: finalEligibility.warning_codes,
-        warning_snapshot: finalEligibility.warning_snapshot,
-        has_critical_warnings: finalEligibility.has_critical_warnings,
-        contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
-        personnel_contract_id: finalEligibility.personnel_contract_id,
-        metadata: {
-          ...(writtenAssignment.metadata || {}),
-          final_assignment_validation_at: nowIso(),
-          last_restore_idempotency_key: context.idempotencyKey,
-          last_restore_request_hash: requestHash,
-          last_restore_actor_user_id: user.id || null,
-        },
-      },
-    );
+    const updatedAssignment = writtenAssignment;
     const result = { shift: updatedShift, assignment: updatedAssignment };
     await renewPlanningResourceLeases(base44, user, leases);
     const audit = await appendAudit(base44, user, {
@@ -15592,25 +16852,87 @@ async function moveShift(
       throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw');
     }
     const timing = resolveShiftTiming(shift, body);
+    const anticipatedShift = { ...shift, ...timing, status: 'draft' };
+    const eligibilityByAssignment = new Map<string, LooseRecord>();
+    const committedAssignmentIds = new Set<string>();
+    const storedEligibilityByAssignmentId = recoveryMarker?.assignment_draft_evidence_by_assignment_id || {};
+    for (const assignment of activeAssignments) {
+      const assignmentAlreadyCommitted = Boolean(
+        recovering
+        && assignment.status === 'draft'
+        && assignment.draft_assignment_allowed === true
+        && assignment.metadata?.last_move_idempotency_key === context.idempotencyKey
+        && assignment.metadata?.last_move_request_hash === requestHash
+        && assignment.metadata?.last_move_actor_user_id === (user.id || null)
+      );
+      const storedEligibility = storedEligibilityByAssignmentId[String(assignment.id)];
+      const storedEligibilityMatches = Boolean(
+        recovering
+        && storedEligibility?.draft_assignment_allowed === true
+        && String(storedEligibility?.personnel_id || '') === String(assignment.personnel_id)
+      );
+      const personnel = assignmentAlreadyCommitted || storedEligibilityMatches
+        ? null
+        : await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
+      const eligibility = assignmentAlreadyCommitted
+        ? assignment
+        : storedEligibilityMatches
+        ? storedEligibility
+        : await evaluateAssignmentWarnings(
+            base44,
+            anticipatedShift,
+            personnel as LooseRecord,
+            assignment.id,
+            normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
+          );
+      assertDraftAssignmentAllowed(eligibility, {
+        action: 'move',
+        shift_id: shift.id,
+        assignment_id: assignment.id,
+        personnel_id: assignment.personnel_id,
+      });
+      eligibilityByAssignment.set(String(assignment.id), eligibility);
+      if (assignmentAlreadyCommitted) committedAssignmentIds.add(String(assignment.id));
+    }
+    const moveMutationMetadata = planningMutationMetadata(shift, 'move', context, user, requestHash);
+    moveMutationMetadata.planning_mutation.assignment_draft_evidence_by_assignment_id = Object.fromEntries(
+      activeAssignments.map(assignment => {
+        const eligibility = eligibilityByAssignment.get(String(assignment.id)) as LooseRecord;
+        return [String(assignment.id), {
+          personnel_id: assignment.personnel_id,
+          personnel_contract_id: eligibility.personnel_contract_id || null,
+          employing_company_id: eligibility.employing_company_id || null,
+          payroll_cao_key: eligibility.payroll_cao_key || null,
+          employment_routing_status: eligibility.employment_routing_status || 'stale',
+          employment_routing_codes: normalizeArray(eligibility.employment_routing_codes),
+          routing_draft_assignment_allowed: eligibility.routing_draft_assignment_allowed === true,
+          draft_assignment_allowed: true,
+          draft_assignment_blocking_codes: normalizeArray(eligibility.draft_assignment_blocking_codes),
+          warning_codes: normalizeArray(eligibility.warning_codes),
+          warning_snapshot: normalizeArray(eligibility.warning_snapshot),
+          has_critical_warnings: eligibility.has_critical_warnings === true,
+          contract_routing_snapshot: eligibility.contract_routing_snapshot || null,
+          validation_complete: eligibility.validation_complete === true,
+        }];
+      }),
+    );
     await renewPlanningResourceLeases(base44, user, leases);
     const updatedShift = recovering
       ? shift
       : await markShiftDraft(base44, shift, expectedShiftRevision, user, {
           ...timing,
-          metadata: planningMutationMetadata(shift, 'move', context, user, requestHash),
+          metadata: moveMutationMetadata,
         });
 
     const writtenAssignments: LooseRecord[] = [];
     for (const assignment of activeAssignments) {
+      if (committedAssignmentIds.has(String(assignment.id))) {
+        writtenAssignments.push(assignment);
+        continue;
+      }
       await renewPlanningResourceLeases(base44, user, leases);
-      const personnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-      const eligibility = await evaluateAssignmentWarnings(
-        base44,
-        updatedShift,
-        personnel,
-        assignment.id,
-        normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
-      );
+      const eligibility = eligibilityByAssignment.get(String(assignment.id));
+      if (!eligibility) throw new ApiError(500, 'Medewerkercontrole voor de verplaatste dienst ontbreekt');
       await renewPlanningResourceLeases(base44, user, leases);
       writtenAssignments.push(await casUpdate(
         base44,
@@ -15624,54 +16946,22 @@ async function moveShift(
           has_critical_warnings: eligibility.has_critical_warnings,
           contract_routing_snapshot: eligibility.contract_routing_snapshot,
           personnel_contract_id: eligibility.personnel_contract_id,
+          employing_company_id: eligibility.employing_company_id,
+          payroll_cao_key: eligibility.payroll_cao_key,
+          employment_routing_status: eligibility.employment_routing_status,
+          employment_routing_codes: eligibility.employment_routing_codes,
+          draft_assignment_allowed: eligibility.draft_assignment_allowed === true,
           metadata: {
             ...(assignment.metadata || {}),
             last_move_idempotency_key: context.idempotencyKey,
             last_move_request_hash: requestHash,
             last_move_actor_user_id: user.id || null,
-          },
-        },
-      ));
-    }
-    await renewPlanningResourceLeases(base44, user, leases);
-    const updatedAssignments: LooseRecord[] = [];
-    for (const writtenAssignment of writtenAssignments) {
-      await renewPlanningResourceLeases(base44, user, leases);
-      const finalPersonnel = await requireRecord(
-        base44,
-        'Personnel',
-        writtenAssignment.personnel_id,
-        'Medewerker',
-      );
-      const finalEligibility = await evaluateAssignmentWarnings(
-        base44,
-        updatedShift,
-        finalPersonnel,
-        writtenAssignment.id,
-        normalizeArray(writtenAssignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
-      );
-      await renewPlanningResourceLeases(base44, user, leases);
-      updatedAssignments.push(await casUpdate(
-        base44,
-        'PlanningAssignment',
-        writtenAssignment,
-        revisionOf(writtenAssignment),
-        {
-          warning_codes: finalEligibility.warning_codes,
-          warning_snapshot: finalEligibility.warning_snapshot,
-          has_critical_warnings: finalEligibility.has_critical_warnings,
-          contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
-          personnel_contract_id: finalEligibility.personnel_contract_id,
-          metadata: {
-            ...(writtenAssignment.metadata || {}),
             final_assignment_validation_at: nowIso(),
-            last_move_idempotency_key: context.idempotencyKey,
-            last_move_request_hash: requestHash,
-            last_move_actor_user_id: user.id || null,
           },
         },
       ));
     }
+    const updatedAssignments = writtenAssignments;
     const result = { shift: updatedShift, assignments: updatedAssignments };
     await renewPlanningResourceLeases(base44, user, leases);
     const audit = await appendAudit(base44, user, {
@@ -15716,6 +17006,11 @@ const ASSIGNMENT_UNDO_FIELDS = [
   'personnel_id',
   'personnel_name_snapshot',
   'personnel_contract_id',
+  'employing_company_id',
+  'payroll_cao_key',
+  'employment_routing_status',
+  'employment_routing_codes',
+  'draft_assignment_allowed',
   'status',
   'warning_codes',
   'warning_snapshot',
@@ -15866,6 +17161,115 @@ async function undoPlanning(
       user,
       requestHash,
     );
+    const previousAssignment = undoPayload.previous_assignment
+      && typeof undoPayload.previous_assignment === 'object'
+      ? undoPayload.previous_assignment
+      : null;
+    const anticipatedActiveAssignments = undoAction === 'move'
+      ? normalizeArray<LooseRecord>(undoPayload.previous_assignments)
+          .filter(item => item?.id && item.status !== 'removed')
+      : previousAssignment?.id && previousAssignment.status !== 'removed'
+      ? [previousAssignment]
+      : [];
+    const anticipatedShift = {
+      ...shift,
+      ...(previousShift ? pick(previousShift, SHIFT_UNDO_FIELDS) : { status: 'draft' }),
+    };
+    const undoEligibilityByAssignmentId = new Map<string, LooseRecord>();
+    for (const anticipatedAssignment of anticipatedActiveAssignments) {
+      const currentAssignment = await requireRecord(
+        base44,
+        'PlanningAssignment',
+        anticipatedAssignment.id,
+        'Toewijzing',
+      );
+      if (
+        String(currentAssignment.shift_id) !== String(shift.id)
+        || String(currentAssignment.personnel_id) !== String(anticipatedAssignment.personnel_id)
+      ) {
+        throw new ApiError(409, 'Undo-toewijzing is intussen gewijzigd');
+      }
+      const storedEligibility = recoveryMarker
+        ?.assignment_draft_evidence_by_assignment_id?.[String(anticipatedAssignment.id)];
+      const canReuseStoredEligibility = storedEligibility?.draft_assignment_allowed === true
+        && String(storedEligibility.assignment_id || '') === String(anticipatedAssignment.id)
+        && String(storedEligibility.personnel_id || '') === String(anticipatedAssignment.personnel_id);
+      const eligibility = canReuseStoredEligibility
+        ? storedEligibility
+        : await (async () => {
+            const personnel = await requireRecord(
+              base44,
+              'Personnel',
+              anticipatedAssignment.personnel_id,
+              'Medewerker',
+            );
+            return evaluateAssignmentWarnings(
+              base44,
+              anticipatedShift,
+              personnel,
+              anticipatedAssignment.id,
+              normalizeArray(anticipatedAssignment.warning_snapshot)
+                .filter((item: LooseRecord) => item.source === 'planner'),
+            );
+          })();
+      assertDraftAssignmentAllowed(eligibility, {
+        action: 'undo',
+        source_action: sourceEvent.action,
+        shift_id: shift.id,
+        assignment_id: anticipatedAssignment.id,
+        personnel_id: anticipatedAssignment.personnel_id,
+      });
+      undoEligibilityByAssignmentId.set(String(anticipatedAssignment.id), eligibility);
+    }
+    undoShiftMetadata.planning_mutation.assignment_draft_evidence_by_assignment_id = Object.fromEntries(
+      anticipatedActiveAssignments.map(anticipatedAssignment => {
+        const eligibility = undoEligibilityByAssignmentId.get(String(anticipatedAssignment.id)) as LooseRecord;
+        return [String(anticipatedAssignment.id), draftAssignmentEvidence(eligibility, {
+          assignment_id: anticipatedAssignment.id,
+          personnel_id: anticipatedAssignment.personnel_id,
+        })];
+      }),
+    );
+    const undoAssignmentPatch = (
+      currentAssignment: LooseRecord,
+      targetAssignment: LooseRecord | null,
+      fallbackPatch: LooseRecord,
+    ) => {
+      const eligibility = targetAssignment?.status !== 'removed'
+        ? undoEligibilityByAssignmentId.get(String(targetAssignment?.id || ''))
+        : null;
+      const basePatch = targetAssignment
+        ? assignmentUndoPatch(targetAssignment, revisionOf(currentAssignment))
+        : fallbackPatch;
+      return {
+        ...basePatch,
+        ...(eligibility ? {
+          warning_codes: eligibility.warning_codes,
+          warning_snapshot: eligibility.warning_snapshot,
+          has_critical_warnings: eligibility.has_critical_warnings,
+          contract_routing_snapshot: eligibility.contract_routing_snapshot,
+          personnel_contract_id: eligibility.personnel_contract_id,
+          employing_company_id: eligibility.employing_company_id,
+          payroll_cao_key: eligibility.payroll_cao_key,
+          employment_routing_status: eligibility.employment_routing_status,
+          employment_routing_codes: eligibility.employment_routing_codes,
+          draft_assignment_allowed: true,
+        } : {}),
+        metadata: {
+          ...(basePatch.metadata || currentAssignment.metadata || {}),
+          last_undo_idempotency_key: context.idempotencyKey,
+          last_undo_request_hash: requestHash,
+          last_undo_actor_user_id: user.id || null,
+          undo_revalidated_at: eligibility ? nowIso() : null,
+        },
+      };
+    };
+    const undoAssignmentAlreadyCommitted = (assignment: LooseRecord) => (
+      recovering
+      && assignment.metadata?.last_undo_idempotency_key === context.idempotencyKey
+      && assignment.metadata?.last_undo_request_hash === requestHash
+      && assignment.metadata?.last_undo_actor_user_id === (user.id || null)
+    );
     const beforeState: LooseRecord = { shift };
     let updatedShift: LooseRecord;
     let result: LooseRecord;
@@ -15879,33 +17283,38 @@ async function undoPlanning(
         || String(assignment.personnel_id) !== String(initialCurrentAssignments[0]?.personnel_id)
       ) throw new ApiError(409, 'Undo-toewijzing is intussen gewijzigd');
       beforeState.assignment = assignment;
-      await renewPlanningResourceLeases(base44, user, leases);
-      updatedShift = await restoreShiftForUndo(
-        base44,
-        user,
-        shift,
-        recovering ? revisionOf(shift) : expectedShiftRevision,
-        previousShift,
-        { metadata: undoShiftMetadata },
-      );
-      const previousAssignment = undoPayload.previous_assignment && typeof undoPayload.previous_assignment === 'object'
-        ? undoPayload.previous_assignment
-        : null;
-      const assignmentPatch = previousAssignment
-        ? assignmentUndoPatch(previousAssignment, revisionOf(assignment))
-        : {
+      if (!recovering) await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = recovering
+        ? shift
+        : await restoreShiftForUndo(
+            base44,
+            user,
+            shift,
+            expectedShiftRevision,
+            previousShift,
+            { metadata: undoShiftMetadata },
+          );
+      const assignmentPatch = undoAssignmentPatch(
+        assignment,
+        previousAssignment,
+        {
             status: 'removed',
             removed_by_user_id: user.id || null,
             removed_at: nowIso(),
-          };
-      await renewPlanningResourceLeases(base44, user, leases);
-      const updatedAssignment = await casUpdate(
-        base44,
-        'PlanningAssignment',
-        assignment,
-        revisionOf(assignment),
-        assignmentPatch,
+          },
       );
+      if (!undoAssignmentAlreadyCommitted(assignment)) {
+        await renewPlanningResourceLeases(base44, user, leases);
+      }
+      const updatedAssignment = undoAssignmentAlreadyCommitted(assignment)
+        ? assignment
+        : await casUpdate(
+            base44,
+            'PlanningAssignment',
+            assignment,
+            revisionOf(assignment),
+            assignmentPatch,
+          );
       result = { shift: updatedShift, assignment: updatedAssignment };
     } else if (undoAction === 'restore_assignment' || undoAction === 'assign') {
       const assignmentId = compact(undoPayload.assignment_id || sourceEvent.assignment_id);
@@ -15919,23 +17328,29 @@ async function undoPlanning(
         || String(assignment.personnel_id) !== String(initialCurrentAssignments[0]?.personnel_id)
       ) throw new ApiError(409, 'Undo-toewijzing is intussen gewijzigd');
       beforeState.assignment = assignment;
-      await renewPlanningResourceLeases(base44, user, leases);
-      updatedShift = await restoreShiftForUndo(
-        base44,
-        user,
-        shift,
-        recovering ? revisionOf(shift) : expectedShiftRevision,
-        previousShift,
-        { metadata: undoShiftMetadata },
-      );
-      await renewPlanningResourceLeases(base44, user, leases);
-      const updatedAssignment = await casUpdate(
-        base44,
-        'PlanningAssignment',
-        assignment,
-        revisionOf(assignment),
-        assignmentUndoPatch(previousAssignment, revisionOf(assignment)),
-      );
+      if (!recovering) await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = recovering
+        ? shift
+        : await restoreShiftForUndo(
+            base44,
+            user,
+            shift,
+            expectedShiftRevision,
+            previousShift,
+            { metadata: undoShiftMetadata },
+          );
+      if (!undoAssignmentAlreadyCommitted(assignment)) {
+        await renewPlanningResourceLeases(base44, user, leases);
+      }
+      const updatedAssignment = undoAssignmentAlreadyCommitted(assignment)
+        ? assignment
+        : await casUpdate(
+            base44,
+            'PlanningAssignment',
+            assignment,
+            revisionOf(assignment),
+            undoAssignmentPatch(assignment, previousAssignment, {}),
+          );
       result = { shift: updatedShift, assignment: updatedAssignment };
     } else {
       const previousAssignments = normalizeArray<LooseRecord>(undoPayload.previous_assignments)
@@ -15952,15 +17367,17 @@ async function undoPlanning(
         throw new ApiError(409, 'Dienstbezetting is intussen gewijzigd; laad het rooster opnieuw');
       }
       beforeState.assignments = currentAssignments;
-      await renewPlanningResourceLeases(base44, user, leases);
-      updatedShift = await restoreShiftForUndo(
-        base44,
-        user,
-        shift,
-        recovering ? revisionOf(shift) : expectedShiftRevision,
-        previousShift,
-        { metadata: undoShiftMetadata },
-      );
+      if (!recovering) await renewPlanningResourceLeases(base44, user, leases);
+      updatedShift = recovering
+        ? shift
+        : await restoreShiftForUndo(
+            base44,
+            user,
+            shift,
+            expectedShiftRevision,
+            previousShift,
+            { metadata: undoShiftMetadata },
+          );
       const currentById = new Map<string, LooseRecord>(
         currentAssignments.map((item: LooseRecord) => [String(item.id), item]),
       );
@@ -15968,60 +17385,21 @@ async function undoPlanning(
       for (const previousAssignment of previousAssignments) {
         const current = currentById.get(String(previousAssignment.id));
         if (!current) throw new ApiError(409, `Toewijzing ${previousAssignment.id} ontbreekt voor move-undo`);
-        await renewPlanningResourceLeases(base44, user, leases);
-        restoredAssignments.push(await casUpdate(
-          base44,
-          'PlanningAssignment',
-          current,
-          revisionOf(current),
-          assignmentUndoPatch(previousAssignment, revisionOf(current)),
-        ));
+        if (!undoAssignmentAlreadyCommitted(current)) {
+          await renewPlanningResourceLeases(base44, user, leases);
+        }
+        restoredAssignments.push(undoAssignmentAlreadyCommitted(current)
+          ? current
+          : await casUpdate(
+              base44,
+              'PlanningAssignment',
+              current,
+              revisionOf(current),
+              undoAssignmentPatch(current, previousAssignment, {}),
+            ));
       }
       result = { shift: updatedShift, assignments: restoredAssignments };
     }
-
-    const activeAssignmentsAfterUndo = (await filterAllRecords(
-      base44.asServiceRole.entities.PlanningAssignment,
-      { shift_id: updatedShift.id },
-    )).filter((item: LooseRecord) => item.status !== 'removed');
-    const revalidatedAssignments: LooseRecord[] = [];
-    for (const assignment of activeAssignmentsAfterUndo) {
-      await renewPlanningResourceLeases(base44, user, leases);
-      const finalPersonnel = await requireRecord(base44, 'Personnel', assignment.personnel_id, 'Medewerker');
-      const finalEligibility = await evaluateAssignmentWarnings(
-        base44,
-        updatedShift,
-        finalPersonnel,
-        assignment.id,
-        normalizeArray(assignment.warning_snapshot).filter((item: LooseRecord) => item.source === 'planner'),
-      );
-      await renewPlanningResourceLeases(base44, user, leases);
-      revalidatedAssignments.push(await casUpdate(
-        base44,
-        'PlanningAssignment',
-        assignment,
-        revisionOf(assignment),
-        {
-          warning_codes: finalEligibility.warning_codes,
-          warning_snapshot: finalEligibility.warning_snapshot,
-          has_critical_warnings: finalEligibility.has_critical_warnings,
-          contract_routing_snapshot: finalEligibility.contract_routing_snapshot,
-          personnel_contract_id: finalEligibility.personnel_contract_id,
-          metadata: {
-            ...(assignment.metadata || {}),
-            final_assignment_validation_at: nowIso(),
-            undo_revalidated_at: nowIso(),
-          },
-        },
-      ));
-    }
-    const revalidatedById = new Map(
-      revalidatedAssignments.map((assignment: LooseRecord) => [String(assignment.id), assignment]),
-    );
-    if (result.assignment && revalidatedById.has(String(result.assignment.id))) {
-      result.assignment = revalidatedById.get(String(result.assignment.id));
-    }
-    if (undoAction === 'move') result.assignments = revalidatedAssignments;
 
     await renewPlanningResourceLeases(base44, user, leases);
     const audit = await appendAudit(base44, user, {
@@ -16328,6 +17706,241 @@ function shiftMatchesPublicationScope(shift: LooseRecord, body: LooseRecord, shi
   return true;
 }
 
+function publicationDateScopeQuery(
+  body: LooseRecord,
+  periodStart: string,
+  periodEnd: string,
+) {
+  const query: LooseRecord = {
+    service_date: { $gte: periodStart, $lte: periodEnd },
+  };
+  if (body.company_id) query.company_id = body.company_id;
+  if (body.route_id) query.route_id = body.route_id;
+  return query;
+}
+
+async function loadPublicationShifts(
+  base44: LooseRecord,
+  body: LooseRecord,
+  requestedShiftIds: Set<string>,
+  periodStart?: string,
+  periodEnd?: string,
+  beforeChunk?: () => Promise<void>,
+) {
+  const candidates = requestedShiftIds.size
+    ? await filterRecordsByValues(
+        base44.asServiceRole.entities.PlanningShift,
+        'id',
+        [...requestedShiftIds],
+        undefined,
+        beforeChunk,
+      )
+    : await filterAllRecords(
+        base44.asServiceRole.entities.PlanningShift,
+        publicationDateScopeQuery(body, String(periodStart), String(periodEnd)),
+        undefined,
+        beforeChunk,
+      );
+  return candidates.filter((shift: LooseRecord) => (
+    shiftMatchesPublicationScope(shift, body, requestedShiftIds)
+  ));
+}
+
+async function loadPublicationTaskSegments(
+  base44: LooseRecord,
+  shiftIds: Iterable<string>,
+  beforeChunk?: () => Promise<void>,
+) {
+  return (await filterRecordsByValues(
+    base44.asServiceRole.entities.PlanningShiftTaskSegment,
+    'shift_id',
+    [...shiftIds],
+    '-start_date',
+    beforeChunk,
+  )).filter((segment: LooseRecord) => segment.status !== 'removed');
+}
+
+async function loadPublicationOccurrences(
+  base44: LooseRecord,
+  body: LooseRecord,
+  referencedOccurrenceIds: Set<string>,
+  periodStart: string,
+  periodEnd: string,
+  beforeChunk?: () => Promise<void>,
+) {
+  const exactReferenced = referencedOccurrenceIds.size
+    ? await filterRecordsByValues(
+        base44.asServiceRole.entities.PlanningTaskOccurrence,
+        'id',
+        [...referencedOccurrenceIds],
+        '-service_date',
+        beforeChunk,
+      )
+    : [];
+  if (body.route_id) return exactReferenced;
+  const scopedQuery: LooseRecord = {
+    lifecycle_status: 'active',
+    service_date: { $gte: periodStart, $lte: periodEnd },
+  };
+  if (body.company_id) scopedQuery.company_id = body.company_id;
+  if (body.customer_id) scopedQuery.customer_id = body.customer_id;
+  if (body.object_id) scopedQuery.object_id = body.object_id;
+  const scoped = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningTaskOccurrence,
+    scopedQuery,
+    '-service_date',
+    beforeChunk,
+  );
+  return uniqueRecords([...exactReferenced, ...scoped], item => String(item.id));
+}
+
+async function loadOpenPublicationSourceChanges(
+  base44: LooseRecord,
+  referencedOccurrenceIds: Set<string>,
+  shiftIds: Set<string>,
+  periodStart: string,
+  periodEnd: string,
+  beforeChunk?: () => Promise<void>,
+) {
+  const occurrenceIds = [...referencedOccurrenceIds];
+  const selectedShiftIds = [...shiftIds];
+  const exactQueries: Promise<LooseRecord[]>[] = [];
+  for (const field of [
+    'source_task_occurrence_id',
+    'task_occurrence_id',
+    'occurrence_id',
+    'replacement_task_occurrence_id',
+  ]) {
+    if (occurrenceIds.length) exactQueries.push(filterRecordsByValues(
+      base44.asServiceRole.entities.PlanningTaskSourceChange,
+      field,
+      occurrenceIds,
+      '-detected_at',
+      beforeChunk,
+    ));
+  }
+  for (const field of ['shift_id', 'shift_ids']) {
+    if (selectedShiftIds.length) exactQueries.push(filterRecordsByValues(
+      base44.asServiceRole.entities.PlanningTaskSourceChange,
+      field,
+      selectedShiftIds,
+      '-detected_at',
+      beforeChunk,
+    ));
+  }
+  const [dateScoped, ...exactResults] = await Promise.all([
+    filterAllRecords(
+      base44.asServiceRole.entities.PlanningTaskSourceChange,
+      {
+        status: 'open',
+        service_date: { $gte: periodStart, $lte: periodEnd },
+      },
+      '-detected_at',
+      beforeChunk,
+    ),
+    ...exactQueries,
+  ]);
+  return uniqueRecords([...dateScoped, ...exactResults.flat()], item => String(item.id))
+    .filter((change: LooseRecord) => (
+      change.status === 'open'
+      && (
+        referencedOccurrenceIds.has(String(
+          change.source_task_occurrence_id || change.task_occurrence_id || change.occurrence_id,
+        ))
+        || referencedOccurrenceIds.has(String(change.replacement_task_occurrence_id || ''))
+        || normalizeArray(change.shift_ids || change.shift_id)
+          .some(id => shiftIds.has(String(id)))
+      )
+    ));
+}
+
+function publicationSegmentCommercialIdentityIssues(
+  segment: LooseRecord,
+  occurrence: LooseRecord,
+) {
+  const comparisons = [
+    ['customer_id', compact(segment.customer_id), compact(occurrence.customer_id)],
+    ['object_id', compact(segment.object_id), compact(occurrence.object_id)],
+    ['task_type_key', planningTaskTypeKey(segment), planningTaskTypeKey(occurrence)],
+  ];
+  return comparisons
+    .filter(([, segmentValue, occurrenceValue]) => segmentValue !== occurrenceValue)
+    .map(([field, segmentValue, occurrenceValue]) => ({
+      field,
+      segment_value: segmentValue || null,
+      occurrence_value: occurrenceValue || null,
+    }));
+}
+
+function publicationCommercialSegmentProjection(
+  segment: LooseRecord,
+  occurrence: LooseRecord,
+) {
+  return {
+    ...segment,
+    selling_company_id: occurrence.selling_company_id || null,
+    customer_contract_id: occurrence.customer_contract_id || null,
+    customer_contract_line_id: occurrence.customer_contract_line_id || null,
+    commercial_routing_status: commercialRoutingEvidenceStatus(occurrence),
+    commercial_routing_snapshot: occurrence.commercial_routing_snapshot || null,
+  };
+}
+
+function publicationCommercialShiftPatch(shift: LooseRecord, segments: LooseRecord[]) {
+  if (!segments.length) return {};
+  const commercialServiceContext = commercialRoutingServiceContext(segments);
+  const sellingCompanyIds = uniqueStrings(segments.map(item => item.selling_company_id));
+  const serviceResponsibleCompanyIds = uniqueStrings(
+    segments.map(item => item.service_responsible_company_id),
+  );
+  const customerContractIds = uniqueStrings(segments.map(item => item.customer_contract_id));
+  const customerContractLineIds = uniqueStrings(
+    segments.map(item => item.customer_contract_line_id),
+  );
+  const everySegmentHasCommercialRoute = segments.every(item => (
+    commercialRoutingEvidenceStatus(item) === 'resolved'
+    && compact(item.selling_company_id)
+    && compact(item.customer_contract_id)
+    && compact(item.customer_contract_line_id)
+  ));
+  return {
+    selling_company_id: everySegmentHasCommercialRoute && sellingCompanyIds.length === 1
+      ? sellingCompanyIds[0]
+      : null,
+    selling_company_ids: sellingCompanyIds,
+    service_responsible_company_id: serviceResponsibleCompanyIds.length === 1
+      ? serviceResponsibleCompanyIds[0]
+      : shift.service_responsible_company_id || null,
+    customer_contract_id: everySegmentHasCommercialRoute && customerContractIds.length === 1
+      ? customerContractIds[0]
+      : null,
+    customer_contract_line_id: everySegmentHasCommercialRoute && customerContractLineIds.length === 1
+      ? customerContractLineIds[0]
+      : null,
+    customer_billable: typeof commercialServiceContext.customer_billable === 'boolean'
+      ? commercialServiceContext.customer_billable
+      : null,
+    service_context_snapshot: {
+      ...(shift.service_context_snapshot || {}),
+      ...commercialServiceContext,
+      segment_contexts: segments.map(item => ({
+        task_occurrence_id: item.task_occurrence_id,
+        customer_id: item.customer_id,
+        object_id: item.object_id,
+        task_type: item.task_type,
+        task_type_key: item.task_type_key || planningTaskTypeKey(item),
+        selling_company_id: item.selling_company_id || null,
+        service_responsible_company_id: item.service_responsible_company_id || null,
+        customer_contract_id: item.customer_contract_id || null,
+        customer_contract_line_id: item.customer_contract_line_id || null,
+        commercial_routing_status: commercialRoutingEvidenceStatus(item),
+        commercial_routing_snapshot: item.commercial_routing_snapshot || null,
+        customer_billable: item.commercial_routing_snapshot?.customer_billable ?? null,
+      })),
+    },
+  };
+}
+
 function publicationShiftSnapshot(shift: LooseRecord) {
   return {
     id: shift.id,
@@ -16335,6 +17948,9 @@ function publicationShiftSnapshot(shift: LooseRecord) {
     source_type: shift.source_type,
     source_id: shift.source_id || null,
     company_id: shift.company_id || null,
+    selling_company_id: shift.selling_company_id || null,
+    selling_company_ids: shift.selling_company_ids || [],
+    service_responsible_company_id: shift.service_responsible_company_id || null,
     customer_id: shift.customer_id || null,
     customer_ids: shift.customer_ids || [],
     object_id: shift.object_id || null,
@@ -16343,6 +17959,8 @@ function publicationShiftSnapshot(shift: LooseRecord) {
     task_id: shift.task_id || null,
     task_occurrence_ids: shift.task_occurrence_ids || [],
     task_segment_count: Number(shift.task_segment_count || 0),
+    customer_contract_id: shift.customer_contract_id || null,
+    customer_contract_line_id: shift.customer_contract_line_id || null,
     customer_name: shift.customer_name_snapshot || null,
     object_name: shift.object_name_snapshot || null,
     route_name: shift.route_name_snapshot || null,
@@ -16353,6 +17971,7 @@ function publicationShiftSnapshot(shift: LooseRecord) {
     end_time: shift.end_time,
     timezone: shift.timezone || 'Europe/Amsterdam',
     required_count: shift.required_count,
+    customer_billable: shift.customer_billable ?? null,
     company_cao_context: {
       cao_key: shift.cao_key || null,
       service_function_type: shift.service_function_type || null,
@@ -16377,6 +17996,12 @@ function publicationAssignmentSnapshot(assignment: LooseRecord) {
     personnel_id: assignment.personnel_id,
     personnel_name: assignment.personnel_name_snapshot,
     personnel_contract_id: assignment.personnel_contract_id || null,
+    employing_company_id: assignment.employing_company_id || null,
+    payroll_cao_key: assignment.payroll_cao_key || null,
+    employment_routing_status: assignment.employment_routing_status || 'stale',
+    employment_routing_codes: assignment.employment_routing_codes || [],
+    draft_assignment_allowed: assignment.draft_assignment_allowed === true,
+    contract_routing_snapshot: assignment.contract_routing_snapshot || null,
     warning_codes: assignment.warning_codes || [],
     warning_snapshot: assignment.warning_snapshot || [],
     has_critical_warnings: assignment.has_critical_warnings === true,
@@ -16399,6 +18024,12 @@ function publicationOccurrenceSnapshot(
     definition_version: occurrence.definition_version,
     schedule_period_key: occurrence.schedule_period_key,
     company_id: occurrence.company_id || null,
+    selling_company_id: occurrence.selling_company_id || null,
+    service_responsible_company_id: occurrence.service_responsible_company_id || null,
+    customer_contract_id: occurrence.customer_contract_id || null,
+    customer_contract_line_id: occurrence.customer_contract_line_id || null,
+    commercial_routing_status: occurrence.commercial_routing_status || null,
+    commercial_routing_snapshot: occurrence.commercial_routing_snapshot || null,
     customer_id: occurrence.customer_id,
     object_id: occurrence.object_id,
     security_plan_id: occurrence.security_plan_id || null,
@@ -16406,6 +18037,7 @@ function publicationOccurrenceSnapshot(
     security_plan_snapshot: occurrence.security_plan_snapshot || null,
     security_plan_checksum: occurrence.security_plan_checksum || null,
     task_type: occurrence.task_type,
+    task_type_key: occurrence.task_type_key || planningTaskTypeKey(occurrence),
     task_name: occurrence.task_name_snapshot,
     execution_mode: occurrence.execution_mode,
     service_date: occurrence.service_date,
@@ -16442,9 +18074,16 @@ function publicationTaskSegmentSnapshot(segment: LooseRecord) {
     timezone: segment.timezone || 'Europe/Amsterdam',
     duration_minutes: segment.duration_minutes,
     company_id: segment.company_id || null,
+    selling_company_id: segment.selling_company_id || null,
+    service_responsible_company_id: segment.service_responsible_company_id || null,
+    customer_contract_id: segment.customer_contract_id || null,
+    customer_contract_line_id: segment.customer_contract_line_id || null,
+    commercial_routing_status: commercialRoutingEvidenceStatus(segment),
+    commercial_routing_snapshot: segment.commercial_routing_snapshot || null,
     customer_id: segment.customer_id,
     object_id: segment.object_id,
     task_type: segment.task_type,
+    task_type_key: segment.task_type_key || planningTaskTypeKey(segment),
     task_name: segment.task_name_snapshot,
     customer_name: segment.customer_name_snapshot || null,
     object_name: segment.object_name_snapshot || null,
@@ -16679,11 +18318,46 @@ async function finalizePlanningPublication(
 async function committedExternalPublicationCoverage(
   base44: LooseRecord,
   excludedShiftIds: Set<string>,
+  relevantOccurrenceIds: Set<string>,
+  periodStart: string,
+  periodEnd: string,
+  beforeChunk?: () => Promise<void>,
 ) {
-  const [publications, audits] = await Promise.all([
-    listAllRecords(base44.asServiceRole.entities.PlanningPublication, '-published_at'),
-    listAllRecords(base44.asServiceRole.entities.PlanningAuditEvent, '-occurred_at'),
-  ]);
+  if (!relevantOccurrenceIds.size) {
+    return {
+      shifts: [],
+      segments: [],
+      evidenceBySegmentId: new Map<string, LooseRecord>(),
+    };
+  }
+  const publications = await filterAllRecords(
+    base44.asServiceRole.entities.PlanningPublication,
+    {
+      period_start: { $lte: periodEnd },
+      period_end: { $gte: periodStart },
+    },
+    '-published_at',
+    beforeChunk,
+  );
+  const publicationIds = uniqueStrings(publications.map(item => item.id));
+  const audits = publicationIds.length
+    ? uniqueRecords((await Promise.all([
+        filterRecordsByValues(
+          base44.asServiceRole.entities.PlanningAuditEvent,
+          'publication_id',
+          publicationIds,
+          '-occurred_at',
+          beforeChunk,
+        ),
+        filterRecordsByValues(
+          base44.asServiceRole.entities.PlanningAuditEvent,
+          'resource_id',
+          publicationIds,
+          '-occurred_at',
+          beforeChunk,
+        ),
+      ])).flat(), item => String(item.id))
+    : [];
   const auditByPublicationId = new Map<string, LooseRecord>();
   for (const audit of audits.filter((item: LooseRecord) => item.action === 'publish')) {
     const publicationId = compact(audit.publication_id || audit.resource_id);
@@ -16719,6 +18393,7 @@ async function committedExternalPublicationCoverage(
     const shifts = normalizeArray<LooseRecord>(publication.snapshot?.shifts);
     const shiftById = new Map(shifts.map(item => [String(item.id), item]));
     for (const segment of normalizeArray<LooseRecord>(publication.snapshot?.task_segments)) {
+      if (!relevantOccurrenceIds.has(String(segment.task_occurrence_id))) continue;
       const shift = shiftById.get(String(segment.shift_id));
       if (
         !shift
@@ -17003,9 +18678,12 @@ async function publishPlanning(
       ),
     );
   }
-  const preflightAllShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
-  const preflightShifts = preflightAllShifts.filter((shift: LooseRecord) =>
-    shiftMatchesPublicationScope(shift, body, requestedShiftIds)
+  const preflightShifts = await loadPublicationShifts(
+    base44,
+    body,
+    requestedShiftIds,
+    body.period_start,
+    body.period_end,
   );
   if (!preflightShifts.length) throw new ApiError(404, 'Geen publiceerbare diensten in deze scope');
   if (requestedShiftIds.size) {
@@ -17040,17 +18718,19 @@ async function publishPlanning(
   );
   const publicationDescriptor = await resourceCoordinatorDescriptor('publication_scope', scopeKey);
   const preflightShiftIds = new Set(preflightShifts.map(item => String(item.id)));
-  const preflightTaskSegments = (await listAllRecords(
-    base44.asServiceRole.entities.PlanningShiftTaskSegment,
-  )).filter((segment: LooseRecord) => (
-    preflightShiftIds.has(String(segment.shift_id)) && segment.status !== 'removed'
-  ));
+  const preflightTaskSegments = await loadPublicationTaskSegments(
+    base44,
+    preflightShiftIds,
+  );
   const preflightReferencedOccurrenceIds = new Set(
     uniqueStrings(preflightTaskSegments.map(item => item.task_occurrence_id)),
   );
-  const preflightOccurrences = await listAllRecords(
-    base44.asServiceRole.entities.PlanningTaskOccurrence,
-    '-service_date',
+  const preflightOccurrences = await loadPublicationOccurrences(
+    base44,
+    body,
+    preflightReferencedOccurrenceIds,
+    periodStart,
+    periodEnd,
   );
   const preflightOccurrenceIds = uniqueStrings(preflightOccurrences
     .filter((occurrence: LooseRecord) => (
@@ -17108,9 +18788,22 @@ async function publishPlanning(
         throw new ApiError(409, 'Publicatie-audit bestaat zonder bijbehorend immutable publicatierecord');
       }
 
-      const allShifts = await listAllRecords(base44.asServiceRole.entities.PlanningShift);
-      const shifts = allShifts.filter((shift: LooseRecord) =>
-        shiftMatchesPublicationScope(shift, body, requestedShiftIds)
+      let publicationReadLeaseRenewalPromise: Promise<void> | null = null;
+      const renewPublicationReadLeases = async () => {
+        if (!publicationReadLeaseRenewalPromise) {
+          publicationReadLeaseRenewalPromise = renewPlanningResourceLeases(base44, user, leases)
+            .finally(() => { publicationReadLeaseRenewalPromise = null; });
+        }
+        await publicationReadLeaseRenewalPromise;
+      };
+
+      const shifts = await loadPublicationShifts(
+        base44,
+        body,
+        requestedShiftIds,
+        periodStart,
+        periodEnd,
+        renewPublicationReadLeases,
       );
       if (!shifts.length) throw new ApiError(404, 'Geen publiceerbare diensten in deze scope');
       if (requestedShiftIds.size) {
@@ -17151,20 +18844,31 @@ async function publishPlanning(
   }
 
   const shiftIdSet = new Set(shifts.map((item: LooseRecord) => String(item.id)));
-  const [allAssignments, allTaskSegments, allOccurrences] = await Promise.all([
-    listAllRecords(base44.asServiceRole.entities.PlanningAssignment),
-    listAllRecords(base44.asServiceRole.entities.PlanningShiftTaskSegment, '-start_date'),
-    listAllRecords(base44.asServiceRole.entities.PlanningTaskOccurrence, '-service_date'),
+  const [assignments, taskSegments] = await Promise.all([
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PlanningAssignment,
+      'shift_id',
+      [...shiftIdSet],
+      undefined,
+      renewPublicationReadLeases,
+    ).then(records => records.filter((assignment: LooseRecord) => assignment.status !== 'removed')),
+    loadPublicationTaskSegments(
+      base44,
+      shiftIdSet,
+      renewPublicationReadLeases,
+    ),
   ]);
-  const assignments = allAssignments.filter((assignment: LooseRecord) =>
-    shiftIdSet.has(String(assignment.shift_id)) && assignment.status !== 'removed'
-  );
-  const taskSegments = allTaskSegments.filter((segment: LooseRecord) =>
-    shiftIdSet.has(String(segment.shift_id)) && segment.status !== 'removed'
-  );
   assertFrozenPublicationTargets('task_segment', preflightTaskSegments, taskSegments);
   const referencedOccurrenceIds = new Set(
     taskSegments.map((segment: LooseRecord) => String(segment.task_occurrence_id)),
+  );
+  const allOccurrences = await loadPublicationOccurrences(
+    base44,
+    body,
+    referencedOccurrenceIds,
+    periodStart,
+    periodEnd,
+    renewPublicationReadLeases,
   );
   const occurrenceById = new Map<string, LooseRecord>(
     allOccurrences.map((occurrence: LooseRecord) => [String(occurrence.id), occurrence]),
@@ -17172,19 +18876,14 @@ async function publishPlanning(
   // A source change is the actionable cause of a superseded referenced
   // occurrence. Report it before the generic lifecycle guard so callers can
   // route the planner to the exact shift and replacement occurrence.
-  const openTaskSourceChanges = (await listAllRecords(
-    base44.asServiceRole.entities.PlanningTaskSourceChange,
-    '-detected_at',
-  )).filter((change: LooseRecord) => (
-    change.status === 'open'
-    && (
-      referencedOccurrenceIds.has(String(
-        change.source_task_occurrence_id || change.task_occurrence_id || change.occurrence_id,
-      ))
-      || referencedOccurrenceIds.has(String(change.replacement_task_occurrence_id || ''))
-      || normalizeArray(change.shift_ids || change.shift_id).some(id => shiftIdSet.has(String(id)))
-    )
-  ));
+  const openTaskSourceChanges = await loadOpenPublicationSourceChanges(
+    base44,
+    referencedOccurrenceIds,
+    shiftIdSet,
+    periodStart,
+    periodEnd,
+    renewPublicationReadLeases,
+  );
   if (openTaskSourceChanges.length) {
     throw new ApiError(409, 'Werk eerst alle wijzigingen uit het objectrooster in de planning bij', {
       code: 'TASK_SOURCE_CHANGE_REQUIRES_REPLAN',
@@ -17251,7 +18950,340 @@ async function publishPlanning(
       task_occurrence_ids: reservedOccurrences.map(item => item.id),
     });
   }
-  const externalCommittedCoverage = await committedExternalPublicationCoverage(base44, shiftIdSet);
+
+  // A draft may deliberately carry stale/missing contract indicators. The
+  // immutable publication may not: resolve both commercial and employment
+  // routes again while the planning scope is fenced, and keep this gate
+  // separate from acknowledgeable planning warnings.
+  await renewPlanningResourceLeases(base44, user, leases);
+  const commercialContext = await loadCommercialPlanningContext(
+    base44,
+    occurrences.map(item => item.customer_id),
+  );
+  const taskSegmentsByOccurrenceId = new Map<string, LooseRecord[]>();
+  const taskSegmentsByShiftId = new Map<string, LooseRecord[]>();
+  const publicationSourceShiftById = new Map(
+    shifts.map((shift: LooseRecord) => [String(shift.id), shift]),
+  );
+  for (const segment of taskSegments) {
+    const occurrenceId = String(segment.task_occurrence_id);
+    const shiftId = String(segment.shift_id);
+    taskSegmentsByOccurrenceId.set(
+      occurrenceId,
+      [...(taskSegmentsByOccurrenceId.get(occurrenceId) || []), segment],
+    );
+    taskSegmentsByShiftId.set(
+      shiftId,
+      [...(taskSegmentsByShiftId.get(shiftId) || []), segment],
+    );
+  }
+  const publicationOccurrenceById = new Map<string, LooseRecord>();
+  const commercialRoutingIssues: LooseRecord[] = [];
+  for (const occurrence of occurrences) {
+    const customerId = compact(occurrence.customer_id);
+    const linkedSegments = taskSegmentsByOccurrenceId.get(String(occurrence.id)) || [];
+    const exemption = publicationCommercialExemption(
+      occurrence,
+      linkedSegments,
+      publicationSourceShiftById,
+    );
+    const route = exemption.exempt
+      ? publicationCommercialExemptionRoute(occurrence, exemption)
+      : resolveCommercialPlanningRoute(
+          occurrence,
+          commercialContext.contractsByCustomerId.get(customerId) || [],
+          commercialContext.linesByCustomerId.get(customerId) || [],
+          commercialContext.collectives,
+        );
+    const projectedOccurrence = { ...occurrence, ...route };
+    publicationOccurrenceById.set(String(occurrence.id), projectedOccurrence);
+    const status = commercialRoutingEvidenceStatus(projectedOccurrence);
+    if (status !== 'resolved' && status !== 'not_applicable') {
+      commercialRoutingIssues.push({
+        route_type: 'commercial',
+        entity: 'PlanningTaskOccurrence',
+        task_occurrence_id: occurrence.id,
+        shift_ids: uniqueStrings(
+          (taskSegmentsByOccurrenceId.get(String(occurrence.id)) || [])
+            .map(segment => segment.shift_id),
+        ),
+        status,
+        reason: route.commercial_routing_snapshot?.reason || 'commercial_route_not_resolved',
+        candidates: route.commercial_routing_snapshot?.candidates || [],
+      });
+    }
+  }
+
+  const publicationSegmentById = new Map<string, LooseRecord>();
+  for (const segment of taskSegments) {
+    const occurrence = publicationOccurrenceById.get(String(segment.task_occurrence_id));
+    if (!occurrence) continue;
+    const identityIssues = publicationSegmentCommercialIdentityIssues(segment, occurrence);
+    if (identityIssues.length) {
+      commercialRoutingIssues.push({
+        route_type: 'commercial',
+        entity: 'PlanningShiftTaskSegment',
+        shift_id: segment.shift_id,
+        task_segment_id: segment.id,
+        task_occurrence_id: segment.task_occurrence_id,
+        status: 'stale',
+        reason: 'segment_occurrence_identity_mismatch',
+        identity_issues: identityIssues,
+      });
+    }
+    publicationSegmentById.set(
+      String(segment.id),
+      publicationCommercialSegmentProjection(segment, occurrence),
+    );
+  }
+
+  const publicationShiftById = new Map(shifts.map((shift: LooseRecord) => {
+    const projectedSegments = (taskSegmentsByShiftId.get(String(shift.id)) || [])
+      .map(segment => publicationSegmentById.get(String(segment.id)) || segment);
+    return [
+      String(shift.id),
+      { ...shift, ...publicationCommercialShiftPatch(shift, projectedSegments) },
+    ];
+  }));
+  const commerciallyRoutedShiftIds = new Set(
+    taskSegments.map(segment => String(segment.shift_id)),
+  );
+
+  await renewPlanningResourceLeases(base44, user, leases);
+  const personnelIds = uniqueStrings(assignments.map(item => item.personnel_id));
+  const personnelRecords = personnelIds.length
+    ? await filterRecordsByValues(
+        base44.asServiceRole.entities.Personnel,
+        'id',
+        personnelIds,
+      )
+    : [];
+  const personnelById = new Map(
+    personnelRecords.map((item: LooseRecord) => [String(item.id), item]),
+  );
+  const limitEmploymentRouting = createAsyncLimiter(
+    PUBLICATION_EMPLOYMENT_ROUTING_CONCURRENCY,
+  );
+  let lastRoutingLeaseRenewalAt = Date.now();
+  let routingLeaseRenewalPromise: Promise<void> | null = null;
+  const renewRoutingLeasesIfDue = async () => {
+    if (Date.now() - lastRoutingLeaseRenewalAt < 30_000) return;
+    if (!routingLeaseRenewalPromise) {
+      routingLeaseRenewalPromise = renewPlanningResourceLeases(base44, user, leases)
+        .then(() => { lastRoutingLeaseRenewalAt = Date.now(); })
+        .finally(() => { routingLeaseRenewalPromise = null; });
+    }
+    await routingLeaseRenewalPromise;
+  };
+  const runLimitedEmploymentRouting = <T>(operation: () => Promise<T>) => (
+    limitEmploymentRouting(async () => {
+      await renewRoutingLeasesIfDue();
+      return operation();
+    })
+  );
+  const eligibilityCandidateDates = uniqueStrings(shifts.flatMap((shift: LooseRecord) => {
+    const coveredDates = planningIntervalDates(shift);
+    return [
+      ...coveredDates.flatMap(date => [
+        addDateDays(date, -1),
+        date,
+        addDateDays(date, 1),
+      ]),
+      ...planningContractWeekQueryDates(coveredDates),
+    ];
+  }));
+  // The publication gate uses one bounded, current server snapshot. Entity
+  // reads therefore grow by date/personnel chunks, never per assignment.
+  const [eligibilityCandidateShifts, eligibilityAbsences, eligibilityRestrictions, eligibilitySecurityPasses] = await Promise.all([
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PlanningShift,
+      'service_date',
+      eligibilityCandidateDates,
+      undefined,
+      renewRoutingLeasesIfDue,
+    ),
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PersonnelAbsence,
+      'personnel_id',
+      personnelIds,
+      undefined,
+      renewRoutingLeasesIfDue,
+    ),
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PersonnelRestriction,
+      'personnel_id',
+      personnelIds,
+      undefined,
+      renewRoutingLeasesIfDue,
+    ),
+    filterRecordsByValues(
+      base44.asServiceRole.entities.PersonnelSecurityPass,
+      'personnel_id',
+      personnelIds,
+      undefined,
+      renewRoutingLeasesIfDue,
+    ),
+  ]);
+  const eligibilityCandidateShiftIds = uniqueStrings(
+    eligibilityCandidateShifts.map(item => item.id),
+  );
+  const eligibilityAssignments = await filterRecordsByValues(
+    base44.asServiceRole.entities.PlanningAssignment,
+    'shift_id',
+    eligibilityCandidateShiftIds,
+    undefined,
+    renewRoutingLeasesIfDue,
+  );
+  await renewPlanningResourceLeases(base44, user, leases);
+  lastRoutingLeaseRenewalAt = Date.now();
+  const factsByPersonnelId = (records: LooseRecord[]) => {
+    const grouped = new Map<string, LooseRecord[]>();
+    for (const record of records) {
+      const personnelId = compact(record.personnel_id);
+      if (!personnelId) continue;
+      grouped.set(personnelId, [...(grouped.get(personnelId) || []), record]);
+    }
+    return grouped;
+  };
+  const eligibilityAssignmentsByPersonnelId = factsByPersonnelId(eligibilityAssignments);
+  const eligibilityAbsencesByPersonnelId = factsByPersonnelId(eligibilityAbsences);
+  const eligibilityRestrictionsByPersonnelId = factsByPersonnelId(eligibilityRestrictions);
+  const eligibilitySecurityPassesByPersonnelId = factsByPersonnelId(eligibilitySecurityPasses);
+  const employmentRouteResults = await Promise.all(assignments.map(async assignment => {
+    const shift = publicationShiftById.get(String(assignment.shift_id));
+    const personnel = personnelById.get(String(assignment.personnel_id));
+    if (!shift || !personnel) {
+      return {
+        assignment,
+        route: null,
+        eligibility: null,
+        issue: {
+          route_type: 'employment',
+          entity: 'PlanningAssignment',
+          assignment_id: assignment.id,
+          shift_id: assignment.shift_id,
+          personnel_id: assignment.personnel_id || null,
+          status: 'stale',
+          reason: !shift ? 'publication_shift_not_found' : 'personnel_not_found',
+        },
+      };
+    }
+    const route = await resolvePublicationEmploymentRoute(
+      base44,
+      shift,
+      personnel,
+      runLimitedEmploymentRouting,
+    );
+    const routingSnapshot = route.contract_routing_snapshot;
+    const routingEntries = normalizeArray<LooseRecord>(routingSnapshot?.decisions);
+    const routingDecisionForDate = async (serviceDate: string) => {
+      if (routingEntries.length > 0) {
+        return routingEntries.find(item => (
+          compact(item?.service_date || item?.decision?.service_date) === serviceDate
+        ))?.decision || null;
+      }
+      const snapshotDate = compact(routingSnapshot?.service_date);
+      return !snapshotDate || snapshotDate === serviceDate ? routingSnapshot : null;
+    };
+    // Publication never trusts the warning snapshot captured by a browser.
+    // Reuse only the just-resolved route decision, while loading current
+    // availability, shifts, absences, restrictions and security passes again.
+    const eligibility = await runLimitedEmploymentRouting(() => evaluateAssignmentWarnings(
+      base44,
+      shift,
+      personnel,
+      assignment.id || null,
+      [],
+      [],
+      {
+        candidateShifts: eligibilityCandidateShifts,
+        personnelAssignments: eligibilityAssignmentsByPersonnelId.get(String(personnel.id)) || [],
+        absences: eligibilityAbsencesByPersonnelId.get(String(personnel.id)) || [],
+        restrictions: eligibilityRestrictionsByPersonnelId.get(String(personnel.id)) || [],
+        securityPasses: eligibilitySecurityPassesByPersonnelId.get(String(personnel.id)) || [],
+        routingDecisionForDate,
+        authoritativeScheduleFacts: true,
+      },
+    ));
+    const routeReady = route.employment_routing_evidence_complete === true
+      && route.employment_planning_evidence_complete === true;
+    const localHardGateReady = normalizeArray(
+      eligibility.draft_assignment_blocking_codes,
+    ).length === 0;
+    return {
+      assignment,
+      route,
+      eligibility,
+      issue: routeReady && localHardGateReady
+        ? null
+        : {
+            route_type: 'employment',
+            entity: 'PlanningAssignment',
+            assignment_id: assignment.id,
+            shift_id: assignment.shift_id,
+            personnel_id: assignment.personnel_id,
+            status: route.employment_routing_evidence_complete === true
+              ? 'blocked'
+              : route.employment_routing_status,
+            reason: route.resolution_errors.length
+              ? 'employment_route_resolution_failed'
+              : route.employment_routing_evidence_complete !== true
+              ? 'employment_route_not_resolved'
+              : route.employment_planning_evidence_complete !== true
+              ? 'employment_assignment_not_allowed'
+              : !localHardGateReady
+              ? 'employment_assignment_hard_gate_blocked'
+              : 'employment_assignment_not_allowed',
+            covered_service_dates: route.covered_service_dates,
+            blocking_reasons: route.blocking_reasons,
+            resolution_errors: route.resolution_errors,
+            draft_assignment_blocking_codes: eligibility.draft_assignment_blocking_codes,
+            warning_codes: eligibility.warning_codes,
+          },
+    };
+  }));
+  const publicationEmploymentByAssignmentId = new Map(
+    employmentRouteResults
+      .filter(item => item.route)
+      .map(item => [String(item.assignment.id), item.route as LooseRecord]),
+  );
+  const publicationEligibilityByAssignmentId = new Map(
+    employmentRouteResults
+      .filter(item => item.eligibility)
+      .map(item => [String(item.assignment.id), item.eligibility as LooseRecord]),
+  );
+  const employmentRoutingIssues = employmentRouteResults
+    .map(item => item.issue)
+    .filter(Boolean) as LooseRecord[];
+  const contractRoutingIssues = [...commercialRoutingIssues, ...employmentRoutingIssues];
+  if (contractRoutingIssues.length) {
+    throw new ApiError(409, 'De planning mist een actuele en eenduidige contractroutering', {
+      code: 'PLANNING_CONTRACT_ROUTING_NOT_READY',
+      acknowledgement_bypass_allowed: false,
+      commercial_issue_count: commercialRoutingIssues.length,
+      employment_issue_count: employmentRoutingIssues.length,
+      issue_count: contractRoutingIssues.length,
+      routing_issues: contractRoutingIssues,
+    });
+  }
+
+  await renewPlanningResourceLeases(base44, user, leases);
+  const coveragePeriodStart = [
+    periodStart,
+    ...occurrences.map(item => compact(item.service_date)).filter(Boolean),
+  ].sort()[0];
+  const coveragePeriodEnd = [
+    periodEnd,
+    ...occurrences.map(item => compact(item.end_date || item.service_date)).filter(Boolean),
+  ].sort().at(-1);
+  const externalCommittedCoverage = await committedExternalPublicationCoverage(
+    base44,
+    shiftIdSet,
+    new Set(occurrences.map(item => String(item.id))),
+    coveragePeriodStart,
+    coveragePeriodEnd,
+    renewPublicationReadLeases,
+  );
   const externalPublishedShifts = externalCommittedCoverage.shifts;
   const externalPublishedSegments = externalCommittedCoverage.segments;
   const coverageParentShifts = [...shifts, ...externalPublishedShifts];
@@ -17312,7 +19344,8 @@ async function publishPlanning(
     return warnings;
   });
   const assignmentCriticalWarnings: LooseRecord[] = assignments.flatMap((assignment: LooseRecord) => {
-    const items: LooseRecord[] = normalizeArray<LooseRecord>(assignment.warning_snapshot)
+    const currentEligibility = publicationEligibilityByAssignmentId.get(String(assignment.id));
+    const items: LooseRecord[] = normalizeArray<LooseRecord>(currentEligibility?.warning_snapshot)
       .filter(item => item.severity === 'critical')
       .map(item => ({ assignment_id: assignment.id, shift_id: assignment.shift_id, ...item }));
     if (items.length === 0 && assignment.has_critical_warnings === true) {
@@ -17354,31 +19387,78 @@ async function publishPlanning(
   const existingIntent = scopeCoordinator?.metadata?.pending_publication_intent || null;
   const preparedAt = existingIntent?.prepared_at || nowIso();
   const publicationCorrelationId = existingIntent?.correlation_id || context.correlationId;
-  const shiftPlan = shifts.map((shift: LooseRecord) => publicationPlanEntry(shift, {
-    status: 'published',
-    published_revision: revisionOf(shift) + 1,
-    last_published_correlation_id: publicationCorrelationId,
-    last_modified_by_user_id: user.id || null,
-    last_modified_at: preparedAt,
-  }, 'shift_composition', shift.id));
-  const assignmentPlan = assignments.map((assignment: LooseRecord) => publicationPlanEntry(assignment, {
-    status: 'published',
-    published_revision: revisionOf(assignment) + 1,
-    last_published_correlation_id: publicationCorrelationId,
-  }, 'shift_composition', assignment.shift_id));
-  const taskSegmentPlan = taskSegments.map((segment: LooseRecord) => publicationPlanEntry(segment, {
-    status: 'published',
-    published_revision: revisionOf(segment) + 1,
-    last_published_correlation_id: publicationCorrelationId,
-    last_modified_by_user_id: user.id || null,
-    last_modified_at: preparedAt,
-  }, 'shift_composition', segment.shift_id));
-  const occurrencePlan = occurrences.map((occurrence: LooseRecord) => publicationPlanEntry(occurrence, {
-    published_revision: revisionOf(occurrence) + 1,
-    last_published_correlation_id: publicationCorrelationId,
-    last_modified_by_user_id: user.id || null,
-    last_modified_at: preparedAt,
-  }, 'task_occurrence', occurrence.id));
+  const shiftPlan = shifts.map((shift: LooseRecord) => {
+    const routedShift = publicationShiftById.get(String(shift.id)) || shift;
+    const commercialPatch = commerciallyRoutedShiftIds.has(String(shift.id))
+      ? {
+          selling_company_id: routedShift.selling_company_id || null,
+          selling_company_ids: routedShift.selling_company_ids || [],
+          service_responsible_company_id: routedShift.service_responsible_company_id || null,
+          customer_contract_id: routedShift.customer_contract_id || null,
+          customer_contract_line_id: routedShift.customer_contract_line_id || null,
+          customer_billable: typeof routedShift.customer_billable === 'boolean'
+            ? routedShift.customer_billable
+            : null,
+          service_context_snapshot: routedShift.service_context_snapshot || null,
+        }
+      : {};
+    return publicationPlanEntry(shift, {
+      ...commercialPatch,
+      status: 'published',
+      published_revision: revisionOf(shift) + 1,
+      last_published_correlation_id: publicationCorrelationId,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: preparedAt,
+    }, 'shift_composition', shift.id);
+  });
+  const assignmentPlan = assignments.map((assignment: LooseRecord) => {
+    const route = publicationEmploymentByAssignmentId.get(String(assignment.id));
+    const eligibility = publicationEligibilityByAssignmentId.get(String(assignment.id));
+    return publicationPlanEntry(assignment, {
+      personnel_contract_id: route?.personnel_contract_id || null,
+      employing_company_id: route?.employing_company_id || null,
+      payroll_cao_key: route?.payroll_cao_key || null,
+      employment_routing_status: route?.employment_routing_status || 'stale',
+      employment_routing_codes: route?.employment_routing_codes || employmentRoutingCodes('stale'),
+      draft_assignment_allowed: false,
+      contract_routing_snapshot: route?.contract_routing_snapshot || null,
+      warning_snapshot: normalizeArray(eligibility?.warning_snapshot),
+      warning_codes: normalizeArray(eligibility?.warning_codes),
+      has_critical_warnings: eligibility?.has_critical_warnings === true,
+      status: 'published',
+      published_revision: revisionOf(assignment) + 1,
+      last_published_correlation_id: publicationCorrelationId,
+    }, 'shift_composition', assignment.shift_id);
+  });
+  const taskSegmentPlan = taskSegments.map((segment: LooseRecord) => {
+    const routedSegment = publicationSegmentById.get(String(segment.id)) || segment;
+    return publicationPlanEntry(segment, {
+      selling_company_id: routedSegment.selling_company_id || null,
+      customer_contract_id: routedSegment.customer_contract_id || null,
+      customer_contract_line_id: routedSegment.customer_contract_line_id || null,
+      commercial_routing_status: commercialRoutingEvidenceStatus(routedSegment),
+      commercial_routing_snapshot: routedSegment.commercial_routing_snapshot || null,
+      status: 'published',
+      published_revision: revisionOf(segment) + 1,
+      last_published_correlation_id: publicationCorrelationId,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: preparedAt,
+    }, 'shift_composition', segment.shift_id);
+  });
+  const occurrencePlan = occurrences.map((occurrence: LooseRecord) => {
+    const routedOccurrence = publicationOccurrenceById.get(String(occurrence.id)) || occurrence;
+    return publicationPlanEntry(occurrence, {
+      selling_company_id: routedOccurrence.selling_company_id || null,
+      customer_contract_id: routedOccurrence.customer_contract_id || null,
+      customer_contract_line_id: routedOccurrence.customer_contract_line_id || null,
+      commercial_routing_status: commercialRoutingEvidenceStatus(routedOccurrence),
+      commercial_routing_snapshot: routedOccurrence.commercial_routing_snapshot || null,
+      published_revision: revisionOf(occurrence) + 1,
+      last_published_correlation_id: publicationCorrelationId,
+      last_modified_by_user_id: user.id || null,
+      last_modified_at: preparedAt,
+    }, 'task_occurrence', occurrence.id);
+  });
   const finalizationManifest = {
     schema_version: 1,
     shifts: shiftPlan,
@@ -17557,12 +19637,17 @@ export {
   changeSingleTaskOccurrence,
   composeAndAssign,
   composeShift,
+  commercialRoutingEvidenceStatus,
+  commercialRoutingServiceContext,
   createObjectTask,
   coordinatorOrder,
   copyTaskOccurrence,
   copyShift,
   dedupeWarnings,
   detectLegacySingleTaskMigrations,
+  employmentRoutingPayrollFinalEvidenceComplete,
+  employmentRoutingPlanningEvidenceComplete,
+  employmentRoutingProjection,
   intervalsOverlap,
   mergeMinuteIntervals,
   migrateLegacySinglePlanningTasks,
@@ -17575,12 +19660,15 @@ export {
   prefetchAssignmentEligibility,
   publishPlanning,
   publicationAssignmentSnapshot,
+  publicationCommercialExemption,
   publicationOccurrenceSnapshot,
   publicationShiftSnapshot,
   publicationTaskSegmentSnapshot,
   recoverPendingObjectTaskSeriesImpactMutations,
   releasePlanningResourceLeases,
   repairSharedTaskBoundary,
+  resolveCommercialPlanningRoute,
+  resolvePublicationEmploymentRoute,
   mutateObjectTaskSeries,
   resizeSharedTaskBoundary,
   resizeTaskShiftPreservingCoverage,

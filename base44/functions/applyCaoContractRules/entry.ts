@@ -1391,6 +1391,59 @@ function collectContractFunctionScopeTokens(contractLike = {}) {
   ].map(normalizeToken).filter(value => value && value !== 'unknown'));
 }
 
+const CONTRACT_TASK_TYPE_ALIASES = {
+  objectbeveiliging: 'object_security',
+  mobiele_controleronde: 'mobile_control_round',
+  externe_controleronde: 'external_control_round',
+  externe_sluitronde: 'external_closing_round',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  openingsronde: 'opening_round',
+  sluitbegeleiding: 'closing_assistance',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  concierge: 'concierge',
+  portier_concierge: 'concierge'
+};
+const CONTRACT_TASK_TYPE_KEYS = new Set([
+  'object_security',
+  'fire_closing_round',
+  'external_closing_round',
+  'external_control_round',
+  'opening_round',
+  'mobile_control_round',
+  'reception',
+  'closing_assistance',
+  'access_control',
+  'fire_watch',
+  'concierge'
+]);
+const CUSTOM_TASK_TYPE_KEY_PATTERN = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
+
+function canonicalContractTaskTypeKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.toLowerCase().startsWith('other:')) {
+    const definitionId = raw.slice(raw.indexOf(':') + 1).trim();
+    const customKey = definitionId ? `other:${definitionId}` : '';
+    return CUSTOM_TASK_TYPE_KEY_PATTERN.test(customKey) ? customKey : null;
+  }
+  const normalized = normalizeToken(raw)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const canonical = CONTRACT_TASK_TYPE_ALIASES[normalized] || normalized;
+  return CONTRACT_TASK_TYPE_KEYS.has(canonical) ? canonical : null;
+}
+
+function collectContractTaskScopeTokens(contractLike = {}) {
+  return uniqueValues(normalizeArray(contractLike.allowed_task_types)
+    .map(canonicalContractTaskTypeKey)
+    .filter(Boolean));
+}
+
 async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate, contractScope }) {
   const entity = base44?.asServiceRole?.entities?.CompanyCaoAssignment;
   if (!entity?.filter || !companyId || !caoKey || !referenceDate) {
@@ -1458,10 +1511,13 @@ async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate
 async function evaluateDuplicateFunctionScope(base44, { personnelId, currentContractId, contractStartDate, contractEndDate, contractScope }) {
   const entity = base44?.asServiceRole?.entities?.PersonnelContract;
   const currentTokens = collectContractFunctionScopeTokens(contractScope);
-  if (!entity?.filter || !personnelId || currentTokens.length === 0 || !contractStartDate) {
+  const currentTaskTokens = collectContractTaskScopeTokens(contractScope);
+  const currentCompanyId = contractScope?.company_id || null;
+  if (!entity?.filter || !personnelId || !currentCompanyId || currentTaskTokens.length === 0 || !contractStartDate) {
     return {
       status: 'not_checked',
       current_function_scope_tokens: currentTokens,
+      current_task_type_keys: currentTaskTokens,
       conflicts: []
     };
   }
@@ -1473,20 +1529,29 @@ async function evaluateDuplicateFunctionScope(base44, { personnelId, currentCont
     .filter(other => dateRangesOverlap(contractStartDate, contractEndDate, other.contract_start_date, other.contract_end_date))
     .map(other => {
       const otherTokens = collectContractFunctionScopeTokens(other);
-      const duplicateTokens = currentTokens.filter(token => otherTokens.includes(token));
+      const otherTaskTokens = collectContractTaskScopeTokens(other);
+      const duplicateTaskTokens = currentTaskTokens.filter(token => otherTaskTokens.includes(token));
+      const sameCompany = !!other.company_id && String(other.company_id) === String(currentCompanyId);
       return {
+        type: sameCompany
+          ? 'overlapping_contract_same_company'
+          : 'duplicate_task_type_across_companies',
         contract_id: other.id,
         company_id: other.company_id || null,
         contract_start_date: other.contract_start_date || null,
         contract_end_date: other.contract_end_date || null,
-        duplicate_function_scope_tokens: duplicateTokens
+        duplicate_function_scope_tokens: currentTokens.filter(token => otherTokens.includes(token)),
+        duplicate_task_type_keys: duplicateTaskTokens,
+        same_company: sameCompany,
+        conflicts_with_route: sameCompany || duplicateTaskTokens.length > 0
       };
     })
-    .filter(item => item.duplicate_function_scope_tokens.length > 0);
+    .filter(item => item.conflicts_with_route);
 
   return {
-    status: conflicts.length > 0 ? 'blocked_duplicate_active_function_scope' : 'unique',
+    status: conflicts.length > 0 ? 'blocked_duplicate_active_task_route' : 'unique',
     current_function_scope_tokens: currentTokens,
+    current_task_type_keys: currentTaskTokens,
     conflicts
   };
 }
@@ -2280,10 +2345,10 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     violations.push({
       rule_id: 'APP-CONTRACT-BASIS-DUPLICATE-FUNCTION-SCOPE',
       severity: 'high',
-      message: 'Deze medewerker heeft dezelfde functie/scope al onder een ander actief of overlappend arbeidscontract. Een functie mag niet dubbel onder meerdere contracten hangen.',
+      message: 'Deze medewerker heeft een overlappend contract bij dezelfde werkgever of dezelfde taaksoort bij een andere werkgever. Iedere taaksoort moet in een periode naar precies één arbeidscontract routeren.',
       payroll_impact: true,
       manual_review_required: true,
-      field: 'function_type/allowed_function_types/cao_function_group/allowed_task_types',
+      field: 'company_id/allowed_task_types',
       conflicts: duplicateFunctionScope.conflicts
     });
   }

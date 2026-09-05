@@ -11,6 +11,37 @@ const SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS = [
   CAO_SAFETY_DOMAIN_KEY
 ];
 const VERIFIED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+const STANDARD_OBJECT_TASK_TYPE_KEYS = new Set([
+  'object_security',
+  'fire_closing_round',
+  'external_closing_round',
+  'external_control_round',
+  'opening_round',
+  'mobile_control_round',
+  'reception',
+  'closing_assistance',
+  'access_control',
+  'fire_watch',
+  'concierge'
+]);
+const CUSTOM_TASK_TYPE_KEY_PATTERN = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
+const TASK_TYPE_KEY_ALIASES = {
+  objectbeveiliging: 'object_security',
+  mobiele_controleronde: 'mobile_control_round',
+  externe_controleronde: 'external_control_round',
+  externe_sluitronde: 'external_closing_round',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  openingsronde: 'opening_round',
+  sluitbegeleiding: 'closing_assistance',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  concierge: 'concierge',
+  portier_concierge: 'concierge'
+};
 
 function getCaoRuntimeSupport(caoKey, functionName) {
   const key = caoKey || null;
@@ -36,6 +67,22 @@ function todayIsoDate() {
     month: '2-digit',
     day: '2-digit'
   }).format(new Date());
+}
+
+function inclusiveIsoDateKeys(startDate, endDate) {
+  const start = String(startDate || '').trim();
+  const end = String(endDate || start).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) {
+    return start ? [start] : [];
+  }
+  const result = [];
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  const boundary = new Date(`${end}T00:00:00.000Z`);
+  while (cursor <= boundary && result.length < 3660) {
+    result.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return result;
 }
 
 function isWithinDateRange(record, date, startField = 'valid_from', endField = 'valid_until') {
@@ -164,9 +211,8 @@ function getServiceActivityTokens(serviceContext, requestedCaoKey) {
   const tokens = [];
   [
     requestedCaoKey,
-    serviceContext?.cao_key,
-    serviceContext?.cao,
     serviceContext?.task_type,
+    ...normalizeArray(serviceContext?.required_task_types),
     serviceContext?.function_type,
     serviceContext?.cao_function_group,
     serviceContext?.cao_function_level,
@@ -238,54 +284,120 @@ function isContractActive(contract, date) {
   return true;
 }
 
-function resolveCompanyScopedContractCandidates({ activeContracts, companyId, serviceDate }) {
-  const contracts = Array.isArray(activeContracts) ? activeContracts : [];
+function canonicalTaskTypeKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.toLowerCase().startsWith('other:')) {
+    const definitionId = raw.slice(raw.indexOf(':') + 1).trim();
+    const customKey = definitionId ? `other:${definitionId}` : '';
+    return CUSTOM_TASK_TYPE_KEY_PATTERN.test(customKey) ? customKey : null;
+  }
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const key = TASK_TYPE_KEY_ALIASES[normalized] || normalized;
+  if (STANDARD_OBJECT_TASK_TYPE_KEYS.has(key)) return key;
+  return null;
+}
+
+function requiredCanonicalTaskTypeKeys(serviceContext = {}) {
+  const explicitTaskTypeKey = String(serviceContext.task_type_key || '').trim();
+  const legacyTaskType = String(serviceContext.task_type || '').trim();
+  const explicitCanonicalKey = canonicalTaskTypeKey(explicitTaskTypeKey);
+  const hasSpecificCustomKey = !!explicitCanonicalKey && explicitCanonicalKey.startsWith('other:');
+  const supplied = uniq([
+    ...normalizeArray(serviceContext.required_task_types).filter(value => (
+      !hasSpecificCustomKey || String(value || '').trim().toLowerCase() !== 'other'
+    )),
+    explicitTaskTypeKey,
+    ...(
+      hasSpecificCustomKey && legacyTaskType.toLowerCase() === 'other'
+        ? []
+        : [legacyTaskType]
+    )
+  ].map(value => String(value || '').trim()).filter(Boolean));
+  const task_type_keys = uniq(supplied.map(canonicalTaskTypeKey).filter(Boolean));
+  const invalid_task_type_keys = supplied.filter(value => !canonicalTaskTypeKey(value));
+  return { task_type_keys, invalid_task_type_keys };
+}
+
+function evaluateTaskTypeMatch(contract, serviceContext = {}) {
+  const requested = requiredCanonicalTaskTypeKeys(serviceContext);
+  const suppliedAllowedTaskTypes = uniq(normalizeArray(contract?.allowed_task_types)
+    .map(value => String(value || '').trim())
+    .filter(Boolean));
+  const allowedTaskTypes = uniq(suppliedAllowedTaskTypes.map(canonicalTaskTypeKey).filter(Boolean));
+  const checks = requested.task_type_keys.map(taskTypeKey => ({
+    task_type_key: taskTypeKey,
+    matched: allowedTaskTypes.includes(taskTypeKey)
+  }));
+  return {
+    matched: requested.task_type_keys.length > 0
+      && requested.invalid_task_type_keys.length === 0
+      && checks.every(check => check.matched),
+    requested_task_type_keys: requested.task_type_keys,
+    invalid_requested_task_type_keys: requested.invalid_task_type_keys,
+    allowed_task_type_keys: allowedTaskTypes,
+    ignored_noncanonical_allowed_task_types: suppliedAllowedTaskTypes.filter(value => !canonicalTaskTypeKey(value)),
+    checks
+  };
+}
+
+function resolveTaskScopedContractCandidates({ contracts, serviceContext = {}, serviceDates = [] }) {
+  const requested = requiredCanonicalTaskTypeKeys(serviceContext);
+  const dates = uniq([
+    ...normalizeArray(serviceDates),
+    ...normalizeArray(serviceContext.covered_service_dates),
+    serviceContext.service_date
+  ].map(value => String(value || '').trim()).filter(Boolean)).sort();
   const blocking_reasons = [];
-  const manual_review_reasons = [];
-  const warnings = [];
-  const companyContracts = contracts.filter(contract => {
-    if (!companyId) return true;
-    return contract.company_id === companyId || !contract.company_id;
-  });
-  const exact_company_contracts = companyContracts.filter(contract => companyId && contract.company_id === companyId);
-  const legacy_companyless_contracts = companyContracts.filter(contract => !contract.company_id);
-  const ignored_other_company_contract_ids = contracts
-    .filter(contract => companyId && contract.company_id && contract.company_id !== companyId)
-    .map(contract => contract.id)
-    .filter(Boolean);
-  const contract_candidates = exact_company_contracts.length > 0
-    ? exact_company_contracts
-    : legacy_companyless_contracts;
+  const active_contracts = normalizeArray(contracts).filter(contract => (
+    dates.length > 0 && dates.every(date => isContractActive(contract, date))
+  ));
+  const evaluated_contracts = active_contracts.map(contract => ({
+    contract,
+    task_type_match: evaluateTaskTypeMatch(contract, serviceContext)
+  }));
+  const contract_candidates = evaluated_contracts
+    .filter(item => item.task_type_match.matched)
+    .map(item => item.contract);
+  let selection_status = 'resolved';
 
-  if (contracts.length === 0) {
-    blocking_reasons.push(`Geen actief arbeidscontract gevonden op ${serviceDate}.`);
+  if (requested.invalid_task_type_keys.length > 0) {
+    selection_status = 'blocked';
+    blocking_reasons.push(`Dienst bevat geen eenduidige canonieke task_type_key voor: ${requested.invalid_task_type_keys.join(', ')}.`);
+  } else if (requested.task_type_keys.length === 0) {
+    selection_status = 'blocked';
+    blocking_reasons.push('Dienst mist een canonieke task_type_key. Arbeidscontractroutering vereist minimaal één concrete taaksoort.');
+  } else if (active_contracts.length === 0) {
+    selection_status = 'missing_contract';
+    blocking_reasons.push(`Geen actief arbeidscontract gevonden voor de volledige dienstperiode ${dates.join(' t/m ') || 'onbekend'}.`);
   } else if (contract_candidates.length === 0) {
-    blocking_reasons.push(`Geen actief arbeidscontract gevonden voor bedrijf ${companyId || 'onbekend'} op ${serviceDate}.`);
-  }
-
-  if (exact_company_contracts.length === 0 && legacy_companyless_contracts.length > 0 && companyId) {
-    manual_review_reasons.push('Alleen legacy contract zonder company_id gevonden. Contract moet expliciet aan werkgever/bedrijf worden gekoppeld voor definitieve planning/payroll.');
-  }
-  if (exact_company_contracts.length > 0 && legacy_companyless_contracts.length > 0) {
-    warnings.push('Legacy contracten zonder company_id zijn genegeerd omdat exact bedrijfcontract beschikbaar is.');
-  }
-  if (ignored_other_company_contract_ids.length > 0) {
-    warnings.push(`Contracten van andere bedrijven zijn genegeerd voor deze dienst: ${ignored_other_company_contract_ids.join(', ')}.`);
+    selection_status = 'missing_contract';
+    blocking_reasons.push(`Geen actief arbeidscontract dekt alle taaksoorten van deze dienst: ${requested.task_type_keys.join(', ')}.`);
+  } else if (contract_candidates.length > 1) {
+    selection_status = 'ambiguous';
+    blocking_reasons.push(`Meerdere actieve arbeidscontracten dekken dezelfde taaksoorten en dienstperiode: ${contract_candidates.map(contract => contract.id).filter(Boolean).join(', ')}.`);
   }
 
   return {
+    selection_status,
     contract_candidates,
-    exact_company_contracts,
-    legacy_companyless_contracts,
-    ignored_other_company_contract_ids,
+    selected_contract: selection_status === 'resolved' && contract_candidates.length === 1
+      ? contract_candidates[0]
+      : null,
+    active_contracts,
+    evaluated_contracts,
+    required_task_type_keys: requested.task_type_keys,
+    invalid_task_type_keys: requested.invalid_task_type_keys,
+    covered_service_dates: dates,
     blocking_reasons,
-    manual_review_reasons,
-    warnings,
-    contract_selection_policy: exact_company_contracts.length > 0
-      ? 'exact_company_contracts_only'
-      : legacy_companyless_contracts.length > 0
-      ? 'legacy_companyless_contracts_manual_review'
-      : 'no_company_scoped_contract_candidates'
+    manual_review_reasons: [],
+    warnings: [],
+    contract_selection_policy: 'personnel_interval_task_scope_unique'
   };
 }
 
@@ -673,7 +785,7 @@ function getCaoPbFunctionQualificationRequirements(serviceContext, contract = nu
   const sourceRuleIds = [...QUALIFICATION_BASE_SOURCE_RULE_IDS];
   const manualReviewReasons = [];
   const warnings = [];
-  const effectiveCaoKey = serviceContext.cao_key || contract?.cao_key || null;
+  const effectiveCaoKey = contract?.cao_key || serviceContext.cao_key || null;
 
   if (effectiveCaoKey !== CAO_PB_KEY) {
     return {
@@ -1051,7 +1163,14 @@ function resolveOperatingCompanyContext({ body, input, task, object, route }) {
 
 function inferServiceContext({ body, task, route, object }) {
   const input = body.service_context || {};
-  const taskType = input.task_type || body.task_type || task?.task_type || null;
+  const serviceDate = body.service_date || input.service_date || todayIsoDate();
+  const serviceEndDate = body.end_date || input.end_date || serviceDate;
+  const taskType = input.task_type_key || input.task_type || body.task_type_key || body.task_type || task?.task_type_key || task?.task_type || null;
+  const requiredTaskTypes = uniq([
+    ...normalizeArray(input.required_task_types),
+    ...normalizeArray(body.required_task_types),
+    taskType,
+  ]);
   const functionType = input.function_type ||
     body.function_type ||
     body.service_function_type ||
@@ -1118,7 +1237,13 @@ function inferServiceContext({ body, task, route, object }) {
   const operatingCompany = resolveOperatingCompanyContext({ body, input, task, object, route });
 
   return {
-    service_date: body.service_date || input.service_date || todayIsoDate(),
+    service_date: serviceDate,
+    end_date: serviceEndDate,
+    covered_service_dates: uniq([
+      ...normalizeArray(input.covered_service_dates),
+      ...normalizeArray(body.covered_service_dates),
+      ...inclusiveIsoDateKeys(serviceDate, serviceEndDate)
+    ]).sort(),
     cao_key: caoKeyResolution.cao_key,
     cao_key_source: caoKeyResolution.cao_key_source,
     cao_key_inferred: caoKeyResolution.inferred === true,
@@ -1128,10 +1253,14 @@ function inferServiceContext({ body, task, route, object }) {
     cao: explicitCao,
     company_id: operatingCompany.company_id,
     company_id_source: operatingCompany.company_id_source,
+    service_responsible_company_id: input.service_responsible_company_id || body.service_responsible_company_id || operatingCompany.company_id,
+    selling_company_id: input.selling_company_id || body.selling_company_id || null,
     route_id: body.route_id || input.route_id || route?.id || null,
     task_id: body.task_id || input.task_id || task?.id || null,
     object_id: objectId,
     task_type: taskType,
+    task_type_key: taskType,
+    required_task_types: requiredTaskTypes,
     function_type: functionType,
     cao_function_group: caoFunctionGroup,
     cao_function_level: caoFunctionLevel,
@@ -1203,7 +1332,7 @@ function evaluateFunctionMatch(contract, serviceContext) {
   const requestedFunctionType = serviceContext.function_type || null;
   const requestedGroup = serviceContext.cao_function_group || null;
   const requestedLevel = serviceContext.cao_function_level || null;
-  const requestedTaskType = serviceContext.task_type || null;
+  const requestedTaskTypes = requiredCanonicalTaskTypeKeys(serviceContext).task_type_keys;
   const requestedSecurityRoleStatus = serviceContext.security_role_status || null;
 
   const functionTypes = uniq([
@@ -1218,7 +1347,9 @@ function evaluateFunctionMatch(contract, serviceContext) {
     ...normalizeArray(contract.allowed_cao_function_levels),
     contract.cao_function_level
   ]);
-  const taskTypes = normalizeArray(contract.allowed_task_types);
+  const taskTypes = uniq(normalizeArray(contract.allowed_task_types)
+    .map(canonicalTaskTypeKey)
+    .filter(Boolean));
   const securityRoleStatuses = uniq([
     ...normalizeArray(contract.allowed_security_role_statuses),
     contract.security_role_status
@@ -1233,8 +1364,10 @@ function evaluateFunctionMatch(contract, serviceContext) {
   const levelCheck = listAllowsCaoFunctionLevel(levels, requestedLevel);
   checks.push({ field: 'cao_function_level', requested: requestedLevel, allowed: levels, ...levelCheck });
 
-  const taskTypeCheck = listAllowsValue(taskTypes, requestedTaskType);
-  checks.push({ field: 'task_type', requested: requestedTaskType, allowed: taskTypes, ...taskTypeCheck });
+  for (const requestedTaskType of requestedTaskTypes.length ? requestedTaskTypes : [null]) {
+    const taskTypeCheck = listAllowsValue(taskTypes, requestedTaskType);
+    checks.push({ field: 'task_type', requested: requestedTaskType, allowed: taskTypes, ...taskTypeCheck });
+  }
 
   const securityRoleCheck = listAllowsValue(securityRoleStatuses, requestedSecurityRoleStatus);
   checks.push({ field: 'security_role_status', requested: requestedSecurityRoleStatus, allowed: securityRoleStatuses, ...securityRoleCheck });
@@ -1255,6 +1388,41 @@ function evaluateFunctionMatch(contract, serviceContext) {
     blocking_checks: blocking,
     missing_proof_checks: missingProof,
     checks
+  };
+}
+
+function evaluateUnroutedFunctionRequirement(serviceContext = {}) {
+  const checks = [
+    ['function_type', serviceContext.function_type],
+    ['cao_function_group', serviceContext.cao_function_group],
+    ['cao_function_level', serviceContext.cao_function_level],
+    ['security_role_status', serviceContext.security_role_status]
+  ]
+    .filter(([, requested]) => requested !== null && requested !== undefined && requested !== '')
+    .filter(([field, requested]) => field !== 'security_role_status' || normalizeToken(requested) !== 'not_applicable')
+    .map(([field, requested]) => ({
+      field,
+      requested,
+      allowed: [],
+      matched: false,
+      reason: 'employment_contract_route_not_resolved'
+    }));
+  if (checks.length === 0) return null;
+
+  return {
+    required: true,
+    status: 'not_proven',
+    matched: false,
+    resolution_dependency: 'employment_contract_route',
+    unresolved_due_to_employment_route: true,
+    manual_review_required: true,
+    blocking_checks: [],
+    missing_proof_checks: checks,
+    checks,
+    blocking_reasons: [],
+    manual_review_reasons: [
+      'De dienst bevat een expliciete functie-eis, maar zonder een unieke arbeidscontractroute kan niet worden bewezen dat die functie binnen het arbeidscontract is toegestaan.'
+    ]
   };
 }
 
@@ -1418,6 +1586,40 @@ function evaluateSecurityScopeMatch(contract, serviceContext) {
   };
 }
 
+function evaluateUnroutedSecurityScopeRequirement(serviceContext = {}) {
+  const serviceIntent = serviceSecurityIntent(serviceContext);
+  if (!['security_work', 'mixed_manual_review'].includes(serviceIntent.intent)) return null;
+  const routeDependentOnly = serviceIntent.intent === 'security_work';
+  const check = {
+    field: 'article_3_security_scope',
+    requested: serviceIntent.intent,
+    matched: false,
+    reason: routeDependentOnly
+      ? 'employment_contract_route_not_resolved'
+      : 'service_context_has_conflicting_security_scope_signals'
+  };
+  return {
+    required: true,
+    status: routeDependentOnly ? 'not_proven' : 'manual_review_required',
+    matched: false,
+    resolution_dependency: routeDependentOnly ? 'employment_contract_route' : 'service_context',
+    unresolved_due_to_employment_route: routeDependentOnly,
+    manual_review_required: true,
+    blocking_checks: [],
+    missing_proof_checks: [check],
+    source_rule_ids: ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'],
+    service_security_intent: serviceIntent,
+    contract_security_capabilities: null,
+    checks: [check],
+    blocking_reasons: [],
+    manual_review_reasons: [
+      routeDependentOnly
+        ? 'De dienst vereist beveiligingswerk, maar zonder een unieke arbeidscontractroute kan de CAO artikel-3 beveiligingsscope niet worden bewezen.'
+        : 'De dienstcontext bevat tegenstrijdige signalen over beveiligingswerk. Herstel eerst de dienstcontext voordat een concepttoewijzing mag worden gemaakt.'
+    ]
+  };
+}
+
 function evaluateServiceContextReadiness(serviceContext) {
   const missingFields = [];
   const blockingReasons = [];
@@ -1429,11 +1631,16 @@ function evaluateServiceContextReadiness(serviceContext) {
     'CAO-PB-2024-R0233'
   ];
   const contractAssignmentPolicy = normalizeContractAssignmentPolicy(serviceContext.contract_assignment_policy);
+  const taskScope = requiredCanonicalTaskTypeKeys(serviceContext);
+  const hasCanonicalTaskContext = taskScope.task_type_keys.length > 0
+    && taskScope.invalid_task_type_keys.length === 0;
   const hasFunctionContext = !!(
     serviceContext.function_type ||
     serviceContext.cao_function_group ||
     serviceContext.cao_function_level ||
-    serviceContext.task_type
+    serviceContext.task_type ||
+    serviceContext.task_type_key ||
+    serviceContext.required_task_types?.length > 0
   );
   const hasCaoResolutionContext = !!(
     serviceContext.cao_key ||
@@ -1452,26 +1659,13 @@ function evaluateServiceContextReadiness(serviceContext) {
     !!serviceContext.security_role_status ||
     !!serviceContext.cao_function_group;
 
-  if (!hasCaoResolutionContext) {
-    missingFields.push('cao_key_or_company_id');
-    manualReviewReasons.push('Dienst mist CAO-context: leg cao_key vast of koppel de dienst aan een bedrijf met geldige CompanyCaoAssignment voordat planning/payroll definitief mag zijn.');
-  }
-
-  if (!serviceContext.company_id) {
-    missingFields.push('operating_company_id');
-    if (contractAssignmentPolicy === 'strict_contract_match') {
-      blockingReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Stel operating_company_id/company_id in op taak, route of object-default voordat een arbeidscontract audit-proof gekoppeld kan worden.');
+  if (!hasCanonicalTaskContext) {
+    missingFields.push('canonical_task_type_keys');
+    if (taskScope.invalid_task_type_keys.length > 0) {
+      blockingReasons.push(`Dienst bevat niet-canonieke taaksoorten: ${taskScope.invalid_task_type_keys.join(', ')}.`);
     } else {
-      manualReviewReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Handmatige review vereist voordat de juiste bedrijf-CAO en het juiste arbeidscontract gekozen kunnen worden.');
+      blockingReasons.push('Dienst mist een canonieke task_type_key. Zonder concrete taaksoort kan geen arbeidscontract eenduidig worden gekozen.');
     }
-  }
-
-  if (!hasFunctionContext && contractAssignmentPolicy === 'strict_contract_match') {
-    missingFields.push('service_function_type_or_cao_function_group_or_task_type');
-    blockingReasons.push('Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.');
-  } else if (!hasFunctionContext && contractAssignmentPolicy === 'allow_manual_review') {
-    missingFields.push('service_function_type_or_cao_function_group_or_task_type');
-    manualReviewReasons.push('Dienst mist functiecontext. Handmatige review vereist om te bepalen welk contract bij deze dienst hoort.');
   }
 
   if (!hasSecurityScopeEvidence) {
@@ -1483,7 +1677,7 @@ function evaluateServiceContextReadiness(serviceContext) {
     warnings.push(serviceContext.cao_key_resolution_warning);
   }
   if (serviceContext.cao_key_manual_review_required) {
-    manualReviewReasons.push('Dienstcontext wijst op een mogelijke andere CAO, maar cao_key is niet definitief vastgesteld. Kies expliciet de juiste CAO voordat planning/payroll definitief mag zijn.');
+    warnings.push('De dienstcontext bevat geen definitieve service-CAO. De loon-CAO wordt uitsluitend uit het geselecteerde arbeidscontract afgeleid.');
   }
 
   const uniqueBlocking = [...new Set(blockingReasons)];
@@ -1506,6 +1700,9 @@ function evaluateServiceContextReadiness(serviceContext) {
     source_rule_ids: sourceRuleIds,
     checked_at: new Date().toISOString(),
     has_function_context: hasFunctionContext,
+    has_canonical_task_context: hasCanonicalTaskContext,
+    required_task_type_keys: taskScope.task_type_keys,
+    invalid_task_type_keys: taskScope.invalid_task_type_keys,
     has_cao_resolution_context: hasCaoResolutionContext,
     has_security_scope_evidence: hasSecurityScopeEvidence,
     contract_assignment_policy: contractAssignmentPolicy,
@@ -2102,30 +2299,46 @@ Deno.serve(async (req) => {
       })
     ]);
 
+    const coveredServiceDates = serviceContext.covered_service_dates?.length
+      ? serviceContext.covered_service_dates
+      : [serviceContext.service_date];
     const activeAssignments = assignments.filter(a =>
       a.assignment_status !== 'ended' &&
       a.available_for_planning !== false &&
-      isWithinDateRange(a, serviceContext.service_date)
+      coveredServiceDates.every(date => isWithinDateRange(a, date))
     );
+    const taskScopedContracts = resolveTaskScopedContractCandidates({
+      contracts,
+      serviceContext,
+      serviceDates: serviceContext.covered_service_dates
+    });
+    blockingReasons.push(...taskScopedContracts.blocking_reasons);
+    manualReviewReasons.push(...taskScopedContracts.manual_review_reasons);
+    warnings.push(...taskScopedContracts.warnings);
 
-    let companyId = serviceContext.company_id;
-    if (!companyId) {
-      const primary = activeAssignments.find(a => a.is_primary) || null;
-      if (primary) companyId = primary.company_id;
-      else if (activeAssignments.length === 1) companyId = activeAssignments[0].company_id;
-      else if (personnel.primary_company_id) companyId = personnel.primary_company_id;
+    const selectedContract = taskScopedContracts.selected_contract;
+    if (body.contract_id && String(selectedContract?.id || '') !== String(body.contract_id)) {
+      blockingReasons.push(
+        taskScopedContracts.selection_status === 'ambiguous'
+          ? `Opgegeven contract_id ${body.contract_id} mag een ambigue taakscope niet overrulen. Herstel eerst de overlappende arbeidscontractscope.`
+          : `Opgegeven contract_id ${body.contract_id} is niet het unieke actieve contract voor alle taaksoorten en de volledige dienstperiode.`
+      );
     }
 
-    if (!companyId) {
-      blockingReasons.push('Geen werkgever/bedrijf bepaald voor deze dienst. Geef company_id of route.operating_company_id mee.');
+    // De werkgever en loon-CAO zijn uitsluitend uit de unieke arbeidsroute
+    // afkomstig. Het verkopende, serviceverantwoordelijke of objectbedrijf is
+    // geen kandidaatfilter voor de arbeidsovereenkomst.
+    const companyId = selectedContract?.company_id || null;
+    const payrollCaoKey = selectedContract?.cao_key || null;
+    if (selectedContract && !companyId) {
+      blockingReasons.push('Het unieke arbeidscontract mist company_id. Leg de juridische werkgever expliciet vast voordat planning/payroll definitief mag zijn.');
     }
 
     const companyAssignment = companyId
       ? activeAssignments.find(a => a.company_id === companyId) || null
       : null;
-
     if (companyId && !companyAssignment) {
-      blockingReasons.push(`Medewerker heeft geen actieve personeelskoppeling met bedrijf ${companyId} op ${serviceContext.service_date}.`);
+      blockingReasons.push(`Medewerker heeft geen actieve personeelskoppeling met werkgever ${companyId} op ${serviceContext.service_date}.`);
     }
 
     let companyWpbrLicenseFetchError = null;
@@ -2144,124 +2357,99 @@ Deno.serve(async (req) => {
     const companyRequiresWpbr = configuredCompanyWpbrLicenses.length > 0;
     const activeCompanyWpbrLicense = configuredCompanyWpbrLicenses.find(license => (
       normalizeToken(license?.status) !== 'expired'
-      && isWithinDateRange(license, serviceContext.service_date)
+      && coveredServiceDates.every(date => isWithinDateRange(license, date))
     )) || null;
     if (companyWpbrLicenseFetchError) {
-      manualReviewReasons.push('De actuele Wpbr-vergunningen van het bedrijf konden niet worden gecontroleerd. Planning en definitieve loonverwerking blijven geblokkeerd totdat deze controle slaagt.');
+      manualReviewReasons.push('De actuele Wpbr-vergunningen van de werkgever konden niet worden gecontroleerd. Planning en definitieve loonverwerking blijven geblokkeerd totdat deze controle slaagt.');
     }
 
-    const activeContracts = contracts.filter(c => isContractActive(c, serviceContext.service_date));
-    const companyScopedContracts = resolveCompanyScopedContractCandidates({
-      activeContracts,
+    const selectedFunctionMatch = selectedContract
+      ? evaluateFunctionMatch(selectedContract, serviceContext)
+      : evaluateUnroutedFunctionRequirement(serviceContext);
+    const selectedSecurityScopeMatch = selectedContract
+      ? evaluateSecurityScopeMatch(selectedContract, serviceContext)
+      : evaluateUnroutedSecurityScopeRequirement(serviceContext);
+    const selectedWpbrPermission = evaluateWpbrPermissionForService(
+      selectedContract,
+      personnel,
+      serviceContext,
+      companyRequiresWpbr
+    );
+    const selectedQualificationCheck = evaluateCaoPbQualificationForService(
+      selectedContract,
+      personnelQualifications,
+      serviceContext,
       companyId,
-      serviceDate: serviceContext.service_date
-    });
-    let contractCandidates = companyScopedContracts.contract_candidates;
-    blockingReasons.push(...companyScopedContracts.blocking_reasons);
-    manualReviewReasons.push(...companyScopedContracts.manual_review_reasons);
-    warnings.push(...companyScopedContracts.warnings);
-
-    const contractsMissingCaoKey = contractCandidates.filter(c => !c.cao_key);
-    if (contractsMissingCaoKey.length > 0) {
-      blockingReasons.push('Een of meer actieve kandidaatcontracten missen cao_key. Contracten zonder expliciete CAO mogen niet worden gebruikt voor planning/payroll.');
-      contractCandidates = contractCandidates.filter(c => c.cao_key);
-    }
-
-    if (serviceContext.cao_key && contractCandidates.length > 0) {
-      const matchingCaoContracts = contractCandidates.filter(c => c.cao_key === serviceContext.cao_key);
-      const mismatchingCaoContracts = contractCandidates.filter(c => c.cao_key && c.cao_key !== serviceContext.cao_key);
-      contractCandidates = matchingCaoContracts;
-
-      if (matchingCaoContracts.length === 0 && mismatchingCaoContracts.length > 0) {
-        blockingReasons.push(`Geen actief contract met cao_key ${serviceContext.cao_key}; beschikbare contracten hebben een andere CAO.`);
-      }
-      if (matchingCaoContracts.length > 0 && mismatchingCaoContracts.length > 0) {
-        warnings.push(`Contracten met afwijkende cao_key zijn genegeerd voor deze dienst (${serviceContext.cao_key}).`);
-      }
-    }
-
-    const contractScopeRequiresWpbr = contractCandidates.some(contract => (
-      contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext, companyRequiresWpbr)
+      qualificationFetchError
+    );
+    const selectedItem = selectedContract ? {
+      contract: selectedContract,
+      task_type_match: evaluateTaskTypeMatch(selectedContract, serviceContext),
+      function_match: selectedFunctionMatch,
+      security_scope_match: selectedSecurityScopeMatch,
+      wpbr_permission_check: selectedWpbrPermission,
+      qualification_check: selectedQualificationCheck,
+      matched: true,
+      assignment_controls_passed: selectedFunctionMatch?.matched === true
+        && selectedSecurityScopeMatch?.matched === true
+        && selectedQualificationCheck?.matched === true
+    } : null;
+    const evaluatedContracts = taskScopedContracts.evaluated_contracts.map(item => (
+      selectedItem && String(item.contract.id) === String(selectedContract.id)
+        ? selectedItem
+        : {
+            contract: item.contract,
+            task_type_match: item.task_type_match,
+            function_match: null,
+            security_scope_match: null,
+            wpbr_permission_check: null,
+            qualification_check: null,
+            matched: item.task_type_match.matched,
+            assignment_controls_passed: null
+          }
     ));
+
+    const contractScopeRequiresWpbr = selectedContract
+      ? contractOrPersonnelRequiresWpbr(selectedContract, personnel, serviceContext, companyRequiresWpbr)
+      : false;
     if (contractScopeRequiresWpbr && !activeCompanyWpbrLicense && !companyWpbrLicenseFetchError) {
-      blockingReasons.push(`Het bedrijf heeft op ${serviceContext.service_date} geen aantoonbaar geldige Wpbr-vergunning. De medewerker mag daarom niet voor deze dienst worden ingepland.`);
+      blockingReasons.push(`Werkgever ${companyId || 'onbekend'} heeft op ${serviceContext.service_date} geen aantoonbaar geldige Wpbr-vergunning. De medewerker mag daarom niet definitief worden ingepland.`);
+    }
+    if (selectedFunctionMatch && !selectedFunctionMatch.matched) {
+      blockingReasons.push(selectedContract
+        ? 'Het unieke arbeidscontract dekt de taaksoort, maar staat de gevraagde dienstfunctie of functie-indeling niet toe.'
+        : 'De expliciete dienstfunctie of functie-indeling kan zonder unieke arbeidscontractroute niet aantoonbaar worden toegestaan.');
+    }
+    if (selectedSecurityScopeMatch && !selectedSecurityScopeMatch.matched) {
+      blockingReasons.push(selectedContract
+        ? 'Het unieke arbeidscontract dekt de taaksoort, maar past niet bij de CAO artikel-3 beveiligingsscope van deze dienst.'
+        : 'De vereiste CAO artikel-3 beveiligingsscope kan zonder unieke arbeidscontractroute niet worden bewezen.');
+    }
+    if (selectedQualificationCheck && !selectedQualificationCheck.matched) {
+      blockingReasons.push(selectedContract
+        ? 'Het unieke arbeidscontract dekt de taaksoort, maar het medewerkerdossier voldoet niet aan de vereiste diploma-, certificaat- of ervaringseisen.'
+        : 'Het medewerkerdossier voldoet niet aantoonbaar aan de contract-onafhankelijke diploma- of certificaateisen van deze dienst.');
     }
 
-    const evaluatedContracts = contractCandidates.map(contract => {
-      const functionMatch = evaluateFunctionMatch(contract, serviceContext);
-      const securityScopeMatch = evaluateSecurityScopeMatch(contract, serviceContext);
-      const wpbrPermission = evaluateWpbrPermissionForService(
-        contract,
-        personnel,
-        serviceContext,
-        companyRequiresWpbr
-      );
-      const qualificationCheck = evaluateCaoPbQualificationForService(
-        contract,
-        personnelQualifications,
-        serviceContext,
-        companyId,
-        qualificationFetchError
-      );
-      return {
-        contract,
-        function_match: functionMatch,
-        security_scope_match: securityScopeMatch,
-        wpbr_permission_check: wpbrPermission,
-        qualification_check: qualificationCheck,
-        matched: functionMatch.matched && securityScopeMatch.matched && qualificationCheck.matched
-      };
-    });
-
-    const matchingContracts = evaluatedContracts.filter(item => item.matched);
-    if (evaluatedContracts.length > 0 && matchingContracts.length === 0) {
-      const hasFunctionMatch = evaluatedContracts.some(item => item.function_match.matched);
-      const hasScopeMatch = evaluatedContracts.some(item => item.security_scope_match.matched);
-      const hasQualificationMatch = evaluatedContracts.some(item => item.qualification_check.matched);
-      if (!hasFunctionMatch && !hasScopeMatch) {
-        blockingReasons.push('Geen actief contract staat de gevraagde dienstfunctie en CAO artikel-3 beveiligingsscope toe.');
-      } else if (!hasFunctionMatch) {
-        blockingReasons.push('Geen actief contract staat de gevraagde dienstfunctie toe.');
-      } else if (!hasQualificationMatch) {
-        blockingReasons.push('Geen actief contract/medewerkerdossier voldoet aan de vereiste CAO PB diploma-, certificaat- en ervaringseisen voor deze dienst.');
-      } else {
-        blockingReasons.push('Geen actief contract past bij de CAO artikel-3 beveiligingsscope van deze dienst.');
-      }
+    if (selectedFunctionMatch?.manual_review_required) {
+      manualReviewReasons.push(...normalizeArray(selectedFunctionMatch.manual_review_reasons));
+      manualReviewReasons.push(selectedContract
+        ? 'Contract mist expliciete allowed_* functievelden voor de gevraagde dienst. Dit moet worden aangevuld voor definitieve planning/payroll.'
+        : 'De expliciete dienstfunctie kan pas worden gecontroleerd nadat precies één arbeidscontract voor deze taaksoort is gerouteerd.');
     }
-
-    const selected = matchingContracts.length === 1 ? matchingContracts[0] : null;
-    if (matchingContracts.length > 1 && !body.contract_id) {
-      manualReviewReasons.push('Meerdere actieve contracten matchen deze dienst. Kies expliciet contract_id in planning/payroll.');
+    if (selectedSecurityScopeMatch?.manual_review_required) {
+      manualReviewReasons.push(...normalizeArray(selectedSecurityScopeMatch.manual_review_reasons));
+      manualReviewReasons.push(selectedContract
+        ? 'Contract-/dienstkoppeling mist expliciet bewijs voor CAO artikel 3 beveiligingsscope. Leg performs_security_work, security_work_percentage, security_role_status of cao_function_group vast op contract en dienst.'
+        : 'De beveiligingsscope van de dienst kan pas aan de contractscope worden getoetst nadat precies één arbeidscontract is gerouteerd.');
     }
-
-    let selectedItem = selected;
-    let selectedContract = selected?.contract || null;
-    if (body.contract_id) {
-      const explicit = evaluatedContracts.find(item => item.contract.id === body.contract_id) || null;
-      if (!explicit) {
-        blockingReasons.push(`Opgegeven contract_id ${body.contract_id} is niet actief of hoort niet bij deze dienstcontext.`);
-      } else {
-        selectedItem = explicit;
-        selectedContract = explicit.contract;
-        if (!explicit.function_match.matched || !explicit.security_scope_match.matched || !explicit.qualification_check.matched) {
-          blockingReasons.push(`Opgegeven contract_id ${body.contract_id} staat de gevraagde dienstfunctie, beveiligingsstatus, kwalificatie-eisen of CAO artikel-3 scope niet toe.`);
-        }
-      }
-    }
-
-    if (selectedItem?.function_match?.manual_review_required) {
-      manualReviewReasons.push('Contract mist expliciete allowed_* functievelden voor de gevraagde dienst. Dit moet worden aangevuld voor definitieve planning/payroll.');
-    }
-    if (selectedItem?.security_scope_match?.manual_review_required) {
-      manualReviewReasons.push('Contract-/dienstkoppeling mist expliciet bewijs voor CAO artikel 3 beveiligingsscope. Leg performs_security_work, security_work_percentage, security_role_status of cao_function_group vast op contract en dienst.');
-    }
-    if (selectedItem?.security_scope_match?.blocking_checks?.length > 0) {
+    if (selectedSecurityScopeMatch?.blocking_checks?.length > 0) {
       blockingReasons.push('Contract-/dienstkoppeling heeft een tegenstrijdige CAO artikel 3 beveiligingsscope.');
     }
-    if (selectedItem?.qualification_check?.manual_review_required) {
+    if (selectedQualificationCheck?.manual_review_required) {
       manualReviewReasons.push('Medewerker-/contractdossier mist verified bewijs voor een of meer CAO PB bijlage-2/bijlage-3 kwalificatie- of ervaringseisen.');
     }
-    if (selectedItem?.qualification_check?.blocking_reasons?.length > 0) {
+    if (selectedQualificationCheck?.blocking_reasons?.length > 0) {
       blockingReasons.push('Medewerker-/contractdossier voldoet niet aan de vereiste CAO PB bijlage-2/bijlage-3 kwalificatie- of ervaringseisen.');
     }
 
@@ -2294,13 +2482,13 @@ Deno.serve(async (req) => {
       manualReviewReasons.push(...hiredWorkerServiceCheck.manual_review_reasons);
       warnings.push(...hiredWorkerServiceCheck.warnings);
     }
-    const wpbrPermissionCheck = selectedItem?.wpbr_permission_check || null;
+    const wpbrPermissionCheck = selectedWpbrPermission;
     if (wpbrPermissionCheck) {
       blockingReasons.push(...wpbrPermissionCheck.blocking_reasons);
       manualReviewReasons.push(...wpbrPermissionCheck.manual_review_reasons);
       warnings.push(...wpbrPermissionCheck.warnings);
     }
-    const qualificationCheck = selectedItem?.qualification_check || null;
+    const qualificationCheck = selectedQualificationCheck;
     if (qualificationCheck) {
       blockingReasons.push(...qualificationCheck.blocking_reasons);
       manualReviewReasons.push(...qualificationCheck.manual_review_reasons);
@@ -2322,14 +2510,14 @@ Deno.serve(async (req) => {
         company,
         companyCaoAssignments,
         serviceDate: serviceContext.service_date,
-        requestedCaoKey: serviceContext.cao_key,
+        requestedCaoKey: payrollCaoKey,
         serviceContext
       });
       if (caoResolution.warning) warnings.push(caoResolution.warning);
       if (Array.isArray(caoResolution.warnings)) warnings.push(...caoResolution.warnings);
     }
 
-    if (!caoResolution.config) {
+    if (selectedContract && !caoResolution.config) {
       blockingReasons.push(`Geen geldige CAO-configuratie gevonden voor ${serviceContext.service_date}.`);
     }
 
@@ -2339,9 +2527,7 @@ Deno.serve(async (req) => {
       manualReviewReasons.push(`CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}).`);
     }
     const resolvedCaoKey = caoResolution.config?.cao_key ||
-      serviceContext.cao_key ||
       selectedContract?.cao_key ||
-      companyAssignment?.cao_key ||
       null;
     const caoRuntimeSupport = getContractResolutionRuntimeSupport(resolvedCaoKey);
     if (!caoRuntimeSupport.supported) {
@@ -2353,7 +2539,6 @@ Deno.serve(async (req) => {
     let caoApplicability = null;
     const selectedCaoKeyForApplicability = caoResolution.config?.cao_key ||
       selectedContract?.cao_key ||
-      serviceContext.cao_key ||
       null;
     if (selectedContract && selectedCaoKeyForApplicability === CAO_PB_KEY) {
       try {
@@ -2384,11 +2569,23 @@ Deno.serve(async (req) => {
 
     const hasBlocking = blockingReasons.length > 0;
     const manualReviewRequired = manualReviewReasons.length > 0;
-    const planningAllowed = !hasBlocking && !manualReviewRequired;
+    const planningAllowed = !!selectedContract && !hasBlocking && !manualReviewRequired;
     const payrollFinalAllowed = planningAllowed &&
       selectedContractReadiness?.payroll_final_allowed === true &&
       caoPayrollReadiness.ready &&
       caoRuntimeSupport.payroll_runtime_supported;
+
+    const employmentRoutingStatus = taskScopedContracts.selection_status === 'missing_contract'
+      ? 'missing_contract'
+      : taskScopedContracts.selection_status === 'ambiguous'
+      ? 'ambiguous'
+      : taskScopedContracts.selection_status === 'blocked'
+      ? 'blocked'
+      : hasBlocking
+      ? 'blocked'
+      : manualReviewRequired || !planningAllowed
+      ? 'manual_review_required'
+      : 'resolved';
 
     const status = hasBlocking
       ? 'blocked'
@@ -2408,9 +2605,16 @@ Deno.serve(async (req) => {
       personnel_id,
       personnel_name: personnel.name || null,
       company_id: companyId || null,
+      employing_company_id: companyId || null,
+      payroll_cao_key: payrollCaoKey || null,
+      employment_routing_status: employmentRoutingStatus,
+      service_responsible_company_id: serviceContext.service_responsible_company_id || serviceContext.company_id || null,
+      selling_company_id: serviceContext.selling_company_id || null,
       company_assignment_id: companyAssignment?.id || null,
-      contract_selection_policy: companyScopedContracts.contract_selection_policy,
-      ignored_other_company_contract_ids: companyScopedContracts.ignored_other_company_contract_ids,
+      contract_selection_policy: taskScopedContracts.contract_selection_policy,
+      contract_candidate_ids: taskScopedContracts.contract_candidates.map(contract => contract.id).filter(Boolean),
+      required_task_type_keys: taskScopedContracts.required_task_type_keys,
+      covered_service_dates: taskScopedContracts.covered_service_dates,
       contract_id: selectedContract?.id || null,
       selected_contract: selectedContract ? {
         id: selectedContract.id,
@@ -2484,8 +2688,8 @@ Deno.serve(async (req) => {
       qualification_check: qualificationCheck,
       selected_contract_readiness: selectedContractReadiness,
       cao_applicability: caoApplicability,
-      function_match: selectedItem?.function_match || null,
-      security_scope_match: selectedItem?.security_scope_match || null,
+      function_match: selectedFunctionMatch,
+      security_scope_match: selectedSecurityScopeMatch,
       evaluated_contracts: evaluatedContracts.map(item => ({
         contract_id: item.contract.id,
         company_id: item.contract.company_id || null,
@@ -2513,13 +2717,15 @@ Deno.serve(async (req) => {
         qualification_check_status: item.qualification_check?.status || null,
         cao_scope_profile: item.contract.cao_scope_profile || null,
         stored_contract_readiness: evaluateStoredContractReadiness(item.contract),
+        task_type_match: item.task_type_match,
         function_match: item.function_match,
         security_scope_match: item.security_scope_match,
         qualification_check: item.qualification_check,
-        matched: item.matched
+        matched: item.matched,
+        assignment_controls_passed: item.assignment_controls_passed
       })),
       cao_configuration_id: caoResolution.config?.id || null,
-      cao_key: caoResolution.config?.cao_key || serviceContext.cao_key || selectedContract?.cao_key || companyAssignment?.cao_key || null,
+      cao_key: caoResolution.config?.cao_key || payrollCaoKey || null,
       cao_resolution_source: caoResolution.source,
       cao_resolution_candidate_configuration_ids: caoResolution.candidate_configuration_ids || [],
       cao_resolution_candidate_company_cao_assignment_ids: caoResolution.candidate_company_cao_assignment_ids || [],
@@ -2531,6 +2737,21 @@ Deno.serve(async (req) => {
       cao_runtime_support: caoRuntimeSupport
     });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({
+      error: error.message,
+      employment_routing_status: 'stale',
+      employing_company_id: null,
+      payroll_cao_key: null
+    }, { status: 500 });
   }
 });
+
+export {
+  canonicalTaskTypeKey,
+  evaluateFunctionMatch,
+  evaluateServiceContextReadiness,
+  evaluateTaskTypeMatch,
+  inferServiceContext,
+  requiredCanonicalTaskTypeKeys,
+  resolveTaskScopedContractCandidates,
+};

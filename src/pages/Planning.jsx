@@ -748,6 +748,9 @@ const PLANNING_MANUAL_MOVE_CONTEXT_FIELDS = Object.freeze([
   "source_shift_id",
   "source_route_execution_id",
   "company_id",
+  "selling_company_id",
+  "selling_company_ids",
+  "service_responsible_company_id",
   "customer_id",
   "customer_ids",
   "object_id",
@@ -756,6 +759,7 @@ const PLANNING_MANUAL_MOVE_CONTEXT_FIELDS = Object.freeze([
   "task_id",
   "task_occurrence_ids",
   "task_segment_count",
+  "customer_contract_id",
   "customer_contract_line_id",
   "timezone",
   "required_count",
@@ -818,9 +822,14 @@ const PLANNING_EDITOR_SEGMENT_SEMANTIC_FIELDS = Object.freeze([
   "end_time",
   "timezone",
   "company_id",
+  "selling_company_id",
+  "service_responsible_company_id",
+  "customer_contract_id",
+  "customer_contract_line_id",
   "customer_id",
   "object_id",
   "task_type",
+  "task_type_key",
   "task_name_snapshot",
   "customer_name_snapshot",
   "object_name_snapshot",
@@ -2726,6 +2735,9 @@ export default function Planning() {
         criticalCount: candidateWarnings.filter(item => item.severity === "critical").length,
         warningCount: candidateWarnings.filter(item => item.severity !== "critical").length,
         eligibilityStatus: eligibilityVerdict.status,
+        draftAssignmentAllowed: eligibilityVerdict.draftAssignmentAllowed === true,
+        employmentRoutingStatus: eligibilityVerdict.employmentRoutingStatus,
+        employmentRoutingCodes: eligibilityVerdict.employmentRoutingCodes,
         eligibilityNotices: eligibilityVerdict.notices,
         eligibilityCandidate,
         assignedToSelectedShift: assignedPersonnelIds.has(String(candidate.personnel.id)),
@@ -3357,6 +3369,17 @@ export default function Planning() {
       }
       const description = "De volledige CAO- en inzetcontrole is nog niet actueel. De medewerker is nog niet ingepland.";
       toast({ title: "Voorcontrole nog niet actueel", description });
+      setLiveMessage(description);
+      return Promise.resolve(null);
+    }
+    if (candidate?.draftAssignmentAllowed !== true) {
+      const warningSummary = (candidate?.warnings || [])
+        .slice(0, 2)
+        .map(item => item.title || item.detail || item.message)
+        .filter(Boolean)
+        .join(" · ");
+      const description = warningSummary || "De actuele inzetcontrole blokkeert deze medewerker voor deze dienst.";
+      toast({ variant: "destructive", title: "Medewerker niet ingepland", description });
       setLiveMessage(description);
       return Promise.resolve(null);
     }
@@ -4749,14 +4772,33 @@ export default function Planning() {
     setLiveMessage(description);
   };
 
+  const reportBlockedPlanningDrop = preview => {
+    const warningSummary = (preview?.verdict?.warnings || [])
+      .slice(0, 2)
+      .map(item => item.title || item.detail || item.message)
+      .filter(Boolean)
+      .join(" · ");
+    const description = warningSummary || "De actuele CAO- en inzetcontrole blokkeert deze medewerker voor deze taak of dienst.";
+    toast({ variant: "destructive", title: "Medewerker niet ingepland", description });
+    setLiveMessage(description);
+  };
+
   const processPlanningDrop = (result, eligibilityPreview = null, { allowDeferred = true } = {}) => {
     if (!editing) return;
     const drop = resolvePlanningDrop(result);
     if (!drop) return;
     const preview = eligibilityPreview || resolveDropEligibilityPreview(drop);
     if (preview?.verdict?.status !== "ready") {
-      if (allowDeferred && preview?.eligibilityCandidate && holdPlanningDropForEligibility(result, preview)) return;
+      if (
+        allowDeferred
+        && preview?.eligibilityCandidate
+        && holdPlanningDropForEligibility(result, preview)
+      ) return;
       reportUnavailablePlanningDrop(preview);
+      return;
+    }
+    if (preview?.verdict?.draftAssignmentAllowed !== true) {
+      reportBlockedPlanningDrop(preview);
       return;
     }
     const candidateWarnings = preview?.verdict?.warnings || null;
@@ -4884,6 +4926,16 @@ export default function Planning() {
           ? `${warningSummary} De medewerker is nog niet ingepland; de waarschuwing is vóór de planningactie getoond.`
           : "De actuele inzetcontrole bevat een nieuwe waarschuwing. De medewerker is nog niet ingepland.",
         resolution.newWarnings.some(item => item.severity === "critical") ? "destructive" : "default",
+      );
+    } else if (resolution.status === "blocked") {
+      const warningSummary = resolution.newWarnings
+        .slice(0, 2)
+        .map(item => item.title || item.detail || item.message)
+        .filter(Boolean)
+        .join(" · ");
+      finishWithoutWrite(
+        "Medewerker niet ingepland",
+        warningSummary || "De actuele CAO- en inzetcontrole blokkeert deze medewerker voor deze taak of dienst.",
       );
     } else if (resolution.status === "request") {
       const requestDelayMs = Math.min(

@@ -80,6 +80,165 @@ function isDateInRange(date: string, from: unknown, until: unknown) {
   return (!lower || lower <= date) && (!upper || upper >= date);
 }
 
+const COMMERCIAL_TASK_TYPE_KEYS = new Set([
+  'object_security', 'fire_closing_round', 'external_closing_round',
+  'external_control_round', 'opening_round', 'mobile_control_round',
+  'reception', 'closing_assistance', 'access_control', 'fire_watch', 'concierge',
+]);
+const LEGACY_COMMERCIAL_TASK_TYPE_ALIASES: Record<string, string> = {
+  objectbeveiliging: 'object_security',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  externe_sluitronde: 'external_closing_round',
+  externe_controleronde: 'external_control_round',
+  openingsronde: 'opening_round',
+  mobiele_controleronde: 'mobile_control_round',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  sluitbegeleiding: 'closing_assistance',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  portier_concierge: 'concierge',
+  concierge: 'concierge',
+};
+
+function normalizedCommercialTaskToken(value: unknown) {
+  return asString(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function legacyCommercialTaskTypeKey(value: unknown) {
+  const normalized = normalizedCommercialTaskToken(value);
+  if (!normalized) return null;
+  if (COMMERCIAL_TASK_TYPE_KEYS.has(normalized) && normalized !== 'other') return normalized;
+  return LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[normalized] || null;
+}
+
+function isCanonicalCommercialTaskTypeKey(value: unknown) {
+  const key = asString(value);
+  return COMMERCIAL_TASK_TYPE_KEYS.has(key)
+    || /^other:[a-z0-9][a-z0-9._:-]{0,159}$/.test(key);
+}
+
+function canonicalContractLineTaskTypeKey(line: LooseRecord) {
+  const explicit = asString(line.task_type_key);
+  if (explicit) return isCanonicalCommercialTaskTypeKey(explicit) ? explicit : null;
+  return legacyCommercialTaskTypeKey(line.service_code);
+}
+
+function uniqueCommercialValues(values: unknown[]) {
+  return [...new Set(values.map(asString).filter(Boolean))];
+}
+
+function canonicalExecutionTaskType(
+  execution: LooseRecord,
+  sourceTask: LooseRecord | null,
+) {
+  const explicitKeys = uniqueCommercialValues([
+    execution.task_type_key,
+    execution.commercial_routing_snapshot?.task_type_key,
+    sourceTask?.task_type_key,
+  ]);
+  const invalidExplicit = explicitKeys.filter(key => !isCanonicalCommercialTaskTypeKey(key));
+  if (invalidExplicit.length) {
+    return { key: null, blocked: ['invalid_task_type_key', 'De uitvoering bevat een ongeldige canonieke taaksoort'] };
+  }
+  const hasSpecificCustomKey = explicitKeys.some(key => key.startsWith('other:'));
+  const legacyValues = uniqueCommercialValues([execution.task_type, sourceTask?.task_type]);
+  const invalidLegacy = legacyValues.filter(value => (
+    !(hasSpecificCustomKey && normalizedCommercialTaskToken(value) === 'other')
+    && !legacyCommercialTaskTypeKey(value)
+  ));
+  if (invalidLegacy.length) {
+    return { key: null, blocked: ['invalid_task_type_key', 'De legacy taaksoort kan niet veilig canoniek worden gemaakt'] };
+  }
+  const canonicalKeys = uniqueCommercialValues([
+    ...explicitKeys,
+    ...legacyValues.map(value => (
+      hasSpecificCustomKey && normalizedCommercialTaskToken(value) === 'other'
+        ? null
+        : legacyCommercialTaskTypeKey(value)
+    )),
+  ]);
+  if (canonicalKeys.length !== 1) {
+    return {
+      key: null,
+      blocked: canonicalKeys.length
+        ? ['task_type_mismatch', 'Taaksoort en canonieke taaksoortsleutel spreken elkaar tegen']
+        : ['missing_task_type_key', 'De uitvoering mist een canonieke taaksoortsleutel'],
+    };
+  }
+  return { key: canonicalKeys[0], blocked: null };
+}
+
+function frozenCommercialRouteEvidence(
+  execution: LooseRecord,
+  taskTypeKey: string,
+  serviceDate: string,
+) {
+  const status = asString(execution.commercial_routing_status);
+  if (!status) return { frozen: false, snapshot: null, blocked: null };
+  if (status !== 'resolved') {
+    return {
+      frozen: false,
+      snapshot: execution.commercial_routing_snapshot || null,
+      blocked: ['commercial_route_not_resolved', `De commerciële uitvoeringsroute heeft status ${status}`],
+    };
+  }
+  const snapshot = execution.commercial_routing_snapshot;
+  const requiredMatches = [
+    [snapshot?.task_type_key, taskTypeKey],
+    [snapshot?.customer_id, execution.customer_id],
+    [snapshot?.customer_account_id, execution.customer_account_id],
+    [snapshot?.selling_company_id, execution.selling_company_id],
+    [snapshot?.customer_contract_id, execution.customer_contract_id],
+    [snapshot?.customer_contract_line_id, execution.customer_contract_line_id],
+    [snapshot?.object_id, execution.object_id],
+    [snapshot?.service_date, serviceDate],
+  ];
+  const valid = Number(snapshot?.schema_version) === 1
+    && snapshot?.status === 'resolved'
+    && snapshot?.customer_billable === true
+    && requiredMatches.every(([left, right]) => asString(left) && asString(left) === asString(right))
+    && Number.isInteger(Number(snapshot?.customer_contract_version))
+    && Number(snapshot.customer_contract_version) > 0
+    && Number.isInteger(Number(snapshot?.customer_contract_line_version))
+    && Number(snapshot.customer_contract_line_version) > 0;
+  return valid
+    ? { frozen: true, snapshot, blocked: null }
+    : {
+        frozen: false,
+        snapshot: snapshot || null,
+        blocked: ['commercial_route_snapshot_invalid', 'De bevroren commerciële uitvoeringsroute mist sluitend publicatiebewijs'],
+      };
+}
+
+function commercialLineScopeMatches(
+  line: LooseRecord,
+  execution: LooseRecord,
+  collectiveById: Map<string, LooseRecord>,
+) {
+  if (line.scope_type === 'customer') return !line.object_id && !line.collective_id;
+  if (line.scope_type === 'object') {
+    return !line.collective_id && asString(line.object_id) === asString(execution.object_id);
+  }
+  if (line.scope_type === 'collective') {
+    const collective = collectiveById.get(asString(line.collective_id));
+    return !line.object_id
+      && Boolean(collective)
+      && asString(collective?.customer_id) === asString(line.customer_id)
+      && (Array.isArray(collective?.object_ids) ? collective.object_ids : [])
+        .map(asString)
+        .includes(asString(execution.object_id));
+  }
+  return false;
+}
+
 function rangesOverlap(
   firstFrom: unknown,
   firstUntil: unknown,
@@ -418,7 +577,7 @@ function blockedCandidateData(
   idempotencyKey: string,
 ) {
   return {
-    company_id: context.company_id || execution.selling_company_id || execution.operating_company_id || 'unresolved',
+    company_id: context.company_id || execution.selling_company_id || 'unresolved',
     customer_id: context.customer_id || execution.customer_id || 'unresolved',
     customer_account_id: context.customer_account_id || execution.customer_account_id || 'unresolved',
     source_type: 'task_execution',
@@ -453,7 +612,7 @@ function blockedCandidateData(
   };
 }
 
-async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord) {
+export async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord) {
   const context: LooseRecord = {};
   const [routeExecution, sourceTask, object] = await Promise.all([
     execution.route_execution_id ? getRecord(base44, 'RouteExecution', execution.route_execution_id) : null,
@@ -481,117 +640,130 @@ async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord)
   if (!context.customer_id) {
     return { context, blocked: ['missing_customer', 'De uitvoering heeft geen klant-snapshot'] };
   }
-  if (!context.company_id) {
-    return { context, blocked: ['missing_selling_company', 'De verkopende BV ontbreekt'] };
-  }
-
-  const accounts = context.customer_account_id
-    ? [await getRecord(base44, 'CustomerAccount', context.customer_account_id)].filter(Boolean)
-    : await getEntity(base44, 'CustomerAccount').filter({
-      customer_id: context.customer_id,
-      company_id: context.company_id,
-      status: 'active',
-    }, '-is_primary', 10);
-  if (accounts.length !== 1) {
-    return {
-      context,
-      blocked: [
-        accounts.length ? 'ambiguous_customer_account' : 'missing_customer_account',
-        accounts.length ? 'Meerdere klantrelaties passen bij deze uitvoering' : 'Geen actieve klantrelatie gevonden',
-      ],
-    };
-  }
-  const account = accounts[0];
-  context.customer_account_id = account.id;
-  if (account.customer_id !== context.customer_id || account.company_id !== context.company_id) {
-    return { context, blocked: ['company_mismatch', 'Klantrelatie, klant en verkopende BV komen niet overeen'] };
-  }
-  if (account.finance_hold) {
-    return { context, blocked: ['finance_hold', account.finance_hold_reason || 'Klantrelatie staat op financiële blokkade'] };
-  }
-
-  let contracts: LooseRecord[] = [];
-  if (execution.customer_contract_id) {
-    const selected = await getRecord(base44, 'CustomerContract', execution.customer_contract_id);
-    if (!selected) return { context, blocked: ['missing_contract', 'Geselecteerd contract bestaat niet'] };
-    if (
-      selected.company_id !== context.company_id ||
-      selected.customer_id !== context.customer_id ||
-      selected.customer_account_id !== account.id
-    ) {
-      return { context, blocked: ['company_mismatch', 'Geselecteerd contract hoort bij een andere klant, relatie of BV'] };
-    }
-    if (selected.status !== 'active') {
-      return { context, blocked: ['invalid_contract_status', `Geselecteerd contract heeft status ${selected.status}`] };
-    }
-    contracts = [selected];
-  } else {
-    contracts = await getEntity(base44, 'CustomerContract').filter({
-      customer_account_id: account.id,
-      company_id: context.company_id,
-      customer_id: context.customer_id,
-      status: 'active',
-    }, '-start_date', 100);
-  }
-  contracts = contracts.filter(contract =>
-    contract.status === 'active' &&
-    contract.company_id === context.company_id &&
-    contract.customer_id === context.customer_id &&
-    contract.customer_account_id === account.id &&
-    isDateInRange(context.service_date, contract.start_date, contract.end_date));
-  if (contracts.length !== 1) {
-    return {
-      context,
-      blocked: [
-        contracts.length ? 'overlapping_contract' : 'invalid_contract_status',
-        contracts.length ? 'Meerdere actieve contracten passen bij de uitvoeringsdatum' : 'Geen actief contract voor de uitvoeringsdatum',
-      ],
-    };
-  }
-  context.contract = contracts[0];
+  const executionTaskType = canonicalExecutionTaskType(execution, sourceTask);
+  if (executionTaskType.blocked) return { context, blocked: executionTaskType.blocked };
+  context.task_type_key = executionTaskType.key;
+  const frozenRoute = frozenCommercialRouteEvidence(execution, context.task_type_key, context.service_date);
+  if (frozenRoute.blocked) return { context, blocked: frozenRoute.blocked };
+  const frozenCommercialRoute = frozenRoute.frozen;
+  context.commercial_routing_snapshot = frozenRoute.snapshot;
 
   let lines: LooseRecord[] = [];
   if (execution.customer_contract_line_id) {
     const selected = await getRecord(base44, 'CustomerContractLine', execution.customer_contract_line_id);
     if (!selected) return { context, blocked: ['missing_contract_line', 'Geselecteerde contractregel bestaat niet'] };
-    if (selected.contract_id !== context.contract.id) {
-      return { context, blocked: ['contract_line_mismatch', 'Geselecteerde contractregel hoort bij een ander contract'] };
-    }
-    if (selected.status !== 'active') {
-      return { context, blocked: ['invalid_contract_line_status', `Geselecteerde contractregel heeft status ${selected.status}`] };
-    }
     lines = [selected];
   } else {
     lines = await getEntity(base44, 'CustomerContractLine').filter({
-      contract_id: context.contract.id,
+      customer_id: context.customer_id,
       status: 'active',
     }, '+sequence', 500);
   }
-  lines = lines.filter(line => {
+  if (!execution.customer_contract_line_id && lines.length >= 500) {
+    return { context, blocked: ['contract_line_lookup_truncated', 'Te veel contractregels om de taakroutering volledig te bewijzen'] };
+  }
+
+  const needsCollectives = lines.some(line => line.scope_type === 'collective');
+  const collectives = needsCollectives
+    ? await getEntity(base44, 'Collectief').filter({ customer_id: context.customer_id }, '+name', 1000)
+    : [];
+  if (needsCollectives && collectives.length >= 1000) {
+    return { context, blocked: ['collective_lookup_truncated', 'Te veel collectieven om de objectscope volledig te bewijzen'] };
+  }
+  const collectiveById = new Map(collectives.map((item: LooseRecord) => [String(item.id), item]));
+  const scopedTaskLines: LooseRecord[] = [];
+  for (const line of lines) {
+    const historicalSelectedLine = frozenCommercialRoute
+      && String(line.id) === String(execution.customer_contract_line_id);
+    if (!['active', ...(historicalSelectedLine ? ['ended'] : [])].includes(line.status)) continue;
+    if (!isDateInRange(context.service_date, line.valid_from, line.valid_until)) continue;
+    if (!commercialLineScopeMatches(line, execution, collectiveById)) continue;
+    const lineTaskTypeKey = canonicalContractLineTaskTypeKey(line);
+    if (!lineTaskTypeKey) {
+      if (execution.customer_contract_line_id) {
+        return { context, blocked: ['invalid_contract_line_task_type', 'De geselecteerde contractregel heeft geen veilige canonieke taaksoort'] };
+      }
+      continue;
+    }
+    if (lineTaskTypeKey !== context.task_type_key) continue;
     if (
-      line.contract_id !== context.contract.id ||
-      line.status !== 'active' ||
-      !isDateInRange(context.service_date, line.valid_from, line.valid_until)
-    ) return false;
-    if (line.service_code && line.service_code !== sourceTask?.task_type && line.service_code !== execution.task_type) {
-      return false;
+      String(line.customer_id) !== String(context.customer_id)
+      || !asString(line.company_id)
+      || (context.company_id && String(line.company_id) !== String(context.company_id))
+      || !asString(line.customer_account_id)
+      || (execution.customer_account_id && String(line.customer_account_id) !== String(execution.customer_account_id))
+    ) {
+      return { context, blocked: ['contract_line_context_mismatch', 'Contractregel, klantrelatie en verkopende BV komen niet overeen'] };
     }
-    if (line.scope_type === 'object') return line.object_id === execution.object_id;
-    if (line.scope_type === 'collective') {
-      return Boolean(sourceTask?.collectief_id && line.collective_id === sourceTask.collectief_id);
+    if (execution.customer_contract_id && String(line.contract_id) !== String(execution.customer_contract_id)) {
+      return { context, blocked: ['contract_line_mismatch', 'Geselecteerde contractregel hoort bij een ander contract'] };
     }
-    return line.scope_type === 'customer';
-  });
-  if (lines.length !== 1) {
+    scopedTaskLines.push(line);
+  }
+  if (scopedTaskLines.length !== 1) {
     return {
       context,
       blocked: [
-        lines.length ? 'overlapping_contract_line' : 'missing_contract_line',
-        lines.length ? 'Meerdere contractregels passen bij deze uitvoering' : 'Geen contractregel past bij dienst en objectscope',
+        scopedTaskLines.length ? 'overlapping_contract_line' : 'missing_contract_line',
+        scopedTaskLines.length ? 'Meerdere contractregels passen bij taaksoort, datum en objectscope' : 'Geen contractregel past bij taaksoort, datum en objectscope',
       ],
     };
   }
-  context.line = lines[0];
+  context.line = scopedTaskLines[0];
+  if (
+    frozenCommercialRoute
+    && versionOf(context.line) < Number(frozenRoute.snapshot.customer_contract_line_version)
+  ) {
+    return { context, blocked: ['commercial_route_snapshot_version_mismatch', 'De contractregel is ouder dan het bevroren publicatiebewijs'] };
+  }
+
+  const contract = await getRecord(base44, 'CustomerContract', context.line.contract_id);
+  if (!contract) return { context, blocked: ['missing_contract', 'Het hoofdcontract van de contractregel bestaat niet'] };
+  const historicalSelectedContract = frozenCommercialRoute
+    && String(contract.id) === String(execution.customer_contract_id)
+    && String(context.line.id) === String(execution.customer_contract_line_id);
+  const allowedContractStatuses = historicalSelectedContract
+    ? ['active', 'ended', 'superseded']
+    : ['active'];
+  if (!allowedContractStatuses.includes(contract.status)) {
+    return { context, blocked: ['invalid_contract_status', `Hoofdcontract heeft status ${contract.status}`] };
+  }
+  if (
+    String(contract.id) !== String(context.line.contract_id)
+    || !asString(contract.company_id)
+    || (context.company_id && String(contract.company_id) !== String(context.company_id))
+    || String(contract.customer_id) !== String(context.customer_id)
+    || String(context.line.company_id) !== String(contract.company_id)
+    || String(context.line.customer_id) !== String(contract.customer_id)
+    || String(context.line.customer_account_id) !== String(contract.customer_account_id)
+  ) {
+    return { context, blocked: ['contract_context_mismatch', 'Hoofdcontract en contractregel bevatten tegenstrijdige klant- of BV-gegevens'] };
+  }
+  if (!asString(contract.start_date) || !isDateInRange(context.service_date, contract.start_date, contract.end_date)) {
+    return { context, blocked: ['invalid_contract_period', 'Hoofdcontract dekt de uitvoeringsdatum niet'] };
+  }
+  if (
+    frozenCommercialRoute
+    && versionOf(contract) < Number(frozenRoute.snapshot.customer_contract_version)
+  ) {
+    return { context, blocked: ['commercial_route_snapshot_version_mismatch', 'Het hoofdcontract is ouder dan het bevroren publicatiebewijs'] };
+  }
+  context.contract = contract;
+  context.company_id = contract.company_id;
+  const account = await getRecord(base44, 'CustomerAccount', contract.customer_account_id);
+  if (!account) return { context, blocked: ['missing_customer_account', 'De klantrelatie van het hoofdcontract bestaat niet'] };
+  if (
+    String(account.id) !== String(context.line.customer_account_id)
+    || (execution.customer_account_id && String(account.id) !== String(execution.customer_account_id))
+    || String(account.customer_id) !== String(context.customer_id)
+    || String(account.company_id) !== String(context.company_id)
+  ) {
+    return { context, blocked: ['company_mismatch', 'Klantrelatie, contractregel en verkopende BV komen niet overeen'] };
+  }
+  if (account.finance_hold) {
+    return { context, blocked: ['finance_hold', account.finance_hold_reason || 'Klantrelatie staat op financiële blokkade'] };
+  }
+  context.customer_account_id = account.id;
   context.unit = billingModelUnit(context.line.billing_model);
   if (!context.unit) {
     return { context, blocked: ['unsupported_billing_model', 'Facturatiemodel wordt niet ondersteund'] };
@@ -610,24 +782,33 @@ async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord)
     ) {
       return { context, blocked: ['company_mismatch', 'Geselecteerd tarief hoort bij een andere contractregel, klantrelatie of BV'] };
     }
-    if (!['active', 'superseded', 'ended'].includes(selected.status)) {
+    const allowedSelectedRateStatuses = frozenCommercialRoute
+      ? ['active', 'superseded', 'ended']
+      : ['active'];
+    if (!allowedSelectedRateStatuses.includes(selected.status)) {
       return { context, blocked: ['invalid_rate_status', `Geselecteerd tarief heeft status ${selected.status}`] };
     }
     rates = [selected];
   } else {
+    const allowedRateStatuses = frozenCommercialRoute
+      ? ['active', 'superseded', 'ended']
+      : ['active'];
     rates = await getEntity(base44, 'CustomerContractRate').filter({
       contract_line_id: context.line.id,
-      status: { $in: ['active', 'superseded', 'ended'] },
+      status: { $in: allowedRateStatuses },
       unit: context.unit,
     }, '-priority', 500);
   }
+  const allowedRateStatuses = frozenCommercialRoute
+    ? ['active', 'superseded', 'ended']
+    : ['active'];
   rates = rates.filter(rate =>
     rate.contract_id === context.contract.id &&
     rate.company_id === context.company_id &&
     rate.customer_id === context.customer_id &&
     rate.customer_account_id === account.id &&
     rate.unit === context.unit &&
-    ['active', 'superseded', 'ended'].includes(rate.status) &&
+    allowedRateStatuses.includes(rate.status) &&
     isDateInRange(context.service_date, rate.valid_from, rate.valid_until));
   if (rates.length !== 1) {
     return {
@@ -2142,4 +2323,5 @@ export async function handleCommercialAutomationRequest(req: Request) {
   }
 }
 
+export { canonicalContractLineTaskTypeKey, canonicalExecutionTaskType };
 export default handleCommercialAutomationRequest;

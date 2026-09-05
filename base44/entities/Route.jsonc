@@ -34,6 +34,27 @@
             "type": "string",
             "description": "ID van de taak"
           },
+          "planning_shift_task_segment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact gepubliceerd planningssegment waarop deze route-opdracht is gebaseerd."
+          },
+          "planning_task_occurrence_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact gepubliceerde taakoccurrence waarop deze route-opdracht is gebaseerd."
+          },
+          "planning_shift_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact gepubliceerde dienst waarop deze route-opdracht is gebaseerd."
+          },
           "days": {
             "type": "array",
             "description": "Dagen waarop deze taak voor deze route wordt uitgevoerd",

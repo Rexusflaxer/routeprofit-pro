@@ -10,6 +10,11 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import CollectiefForm from "../components/collectief/CollectiefForm";
 import CollectiefTaskList from "../components/collectief/CollectiefTaskList";
+import {
+  createCustomerMutationKey,
+  invokeCustomerPlatformMutation,
+} from "@/components/customers/customerDossierUtils";
+import { useToast } from "@/components/ui/use-toast";
 
 const TYPE_LABELS = {
   regio_groep: "Regio / Groep",
@@ -33,7 +38,7 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
       alert(`Dit collectief bevat nog ${childCollectieven.length} sub-collectief(en). Verwijder deze eerst.`);
       return;
     }
-    if (confirm(`Collectief "${collectief.name}" verwijderen?`)) onDelete(collectief.id);
+    if (confirm(`Collectief "${collectief.name}" verwijderen?`)) onDelete(collectief);
   };
 
   return (
@@ -104,6 +109,7 @@ export default function CollectiefPage() {
   const [editing, setEditing] = useState(null);
   const [selectedCollectief, setSelectedCollectief] = useState(null);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: collectieven = [], isLoading } = useQuery({
     queryKey: ["collectieven"],
@@ -121,23 +127,57 @@ export default function CollectiefPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.Collectief.create(data),
+    mutationFn: (data) => invokeCustomerPlatformMutation({
+      action: "create_collective",
+      customer_id: data.customer_id,
+      data,
+      expected_version: 0,
+      idempotency_key: createCustomerMutationKey("create_collective"),
+    }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["collectieven"] }); setShowForm(false); setEditing(null); },
+    onError: (error) => toast({
+      variant: "destructive",
+      title: "Collectief niet toegevoegd",
+      description: error?.message || "De klant- en objectkoppelingen konden niet veilig worden gecontroleerd.",
+    }),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Collectief.update(id, data),
+    mutationFn: ({ id, data, version }) => invokeCustomerPlatformMutation({
+      action: "update_collective",
+      collective_id: id,
+      customer_id: data.customer_id,
+      data,
+      expected_version: Number(version || 1),
+      idempotency_key: createCustomerMutationKey("update_collective"),
+    }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["collectieven"] }); setShowForm(false); setEditing(null); },
+    onError: (error) => toast({
+      variant: "destructive",
+      title: "Collectief niet opgeslagen",
+      description: error?.message || "De objectkoppelingen konden niet veilig worden gecontroleerd.",
+    }),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Collectief.delete(id),
+    mutationFn: (collectief) => invokeCustomerPlatformMutation({
+      action: "delete_collective",
+      collective_id: collectief.id,
+      customer_id: collectief.customer_id,
+      expected_version: Number(collectief.version || 1),
+      idempotency_key: createCustomerMutationKey("delete_collective"),
+    }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["collectieven"] }),
+    onError: (error) => toast({
+      variant: "destructive",
+      title: "Collectief niet verwijderd",
+      description: error?.message || "Het collectief is nog gekoppeld of kon niet veilig worden verwijderd.",
+    }),
   });
 
   const handleSave = (data) => {
     if (editing) {
-      updateMutation.mutate({ id: editing.id, data });
+      updateMutation.mutate({ id: editing.id, data, version: editing.version });
     } else {
       createMutation.mutate(data);
     }
@@ -210,7 +250,7 @@ export default function CollectiefPage() {
                     objects={objects}
                     allCollectieven={collectieven}
                     onEdit={handleEdit}
-                    onDelete={(id) => deleteMutation.mutate(id)}
+                    onDelete={(collectief) => deleteMutation.mutate(collectief)}
                     onSelect={handleSelect}
                     selected={selectedCollectief?.id === c.id}
                   />
@@ -235,7 +275,7 @@ export default function CollectiefPage() {
                           objects={objects}
                           allCollectieven={collectieven}
                           onEdit={handleEdit}
-                          onDelete={(id) => deleteMutation.mutate(id)}
+                          onDelete={(collectief) => deleteMutation.mutate(collectief)}
                           onSelect={handleSelect}
                           selected={selectedCollectief?.id === sub.id}
                         />

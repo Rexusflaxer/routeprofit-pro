@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getISOWeek } from "date-fns";
 import { Droppable } from "@hello-pangea/dnd";
 import {
+  AlertTriangle,
   Check,
   Clock3,
   Cloud,
@@ -98,6 +99,539 @@ function shiftWarningCount(shift, assignments) {
     ? shift.service_context_snapshot.composition_warnings.length
     : 0;
   return assignmentWarnings + compositionWarnings;
+}
+
+function present(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+const STANDARD_CONTRACT_TASK_TYPE_KEYS = new Set([
+  "object_security",
+  "fire_closing_round",
+  "external_closing_round",
+  "external_control_round",
+  "opening_round",
+  "mobile_control_round",
+  "reception",
+  "closing_assistance",
+  "access_control",
+  "fire_watch",
+  "concierge",
+]);
+const CONTRACT_TASK_TYPE_ALIASES = {
+  objectbeveiliging: "object_security",
+  brand_en_sluitronde: "fire_closing_round",
+  brand_sluitronde: "fire_closing_round",
+  externe_sluitronde: "external_closing_round",
+  externe_controleronde: "external_control_round",
+  openingsronde: "opening_round",
+  mobiele_controleronde: "mobile_control_round",
+  receptie: "reception",
+  receptiedienst: "reception",
+  sluitbegeleiding: "closing_assistance",
+  toegangscontrole: "access_control",
+  brandwacht: "fire_watch",
+  portier: "concierge",
+  portier_concierge: "concierge",
+  concierge: "concierge",
+};
+const CUSTOM_CONTRACT_TASK_TYPE_KEY = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
+
+function canonicalContractTaskTypeKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (CUSTOM_CONTRACT_TASK_TYPE_KEY.test(raw)) return raw;
+  const token = raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const canonical = CONTRACT_TASK_TYPE_ALIASES[token] || token;
+  return STANDARD_CONTRACT_TASK_TYPE_KEYS.has(canonical) ? canonical : null;
+}
+
+function recordContractTaskTypeKeys(record) {
+  const values = [
+    record?.task_type_key,
+    record?.task_type,
+    ...(Array.isArray(record?.required_task_types) ? record.required_task_types : []),
+    record?.service_context_snapshot?.task_type_key,
+    record?.service_context_snapshot?.task_type,
+    ...(Array.isArray(record?.service_context_snapshot?.required_task_types)
+      ? record.service_context_snapshot.required_task_types
+      : []),
+    ...(Array.isArray(record?.service_context_snapshot?.segment_contexts)
+      ? record.service_context_snapshot.segment_contexts.flatMap(item => [
+          item?.task_type_key,
+          item?.task_type,
+          ...(Array.isArray(item?.required_task_types) ? item.required_task_types : []),
+        ])
+      : []),
+  ].filter(present);
+  const mapped = values.map(canonicalContractTaskTypeKey);
+  const canonical = [...new Set(mapped.filter(Boolean))];
+  const hasSpecificCustomKey = canonical.some(value => value.startsWith("other:"));
+  const hasInvalidValue = mapped.some((value, index) => (
+    !value
+    && !(hasSpecificCustomKey && String(values[index]).trim().toLowerCase() === "other")
+  ));
+  return values.length > 0 && !hasInvalidValue && canonical.length === 1 ? canonical : [];
+}
+
+function inclusivePlanningDates(startValue, endValue = startValue) {
+  const start = String(startValue || "").slice(0, 10);
+  const end = String(endValue || start).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return [];
+  const dates = [];
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  const boundary = new Date(`${end}T00:00:00.000Z`);
+  while (cursor <= boundary && dates.length < 32) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return cursor <= boundary ? [] : dates;
+}
+
+function positiveEvidenceVersion(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0;
+}
+
+function commercialSnapshotMatchesRecord(record, snapshot) {
+  const taskTypeKeys = recordContractTaskTypeKeys(record);
+  const objectId = record?.object_id;
+  const recordStart = record?.service_date || record?.start_date;
+  const recordEnd = record?.end_date || recordStart;
+  const snapshotStart = snapshot?.service_date;
+  const snapshotEnd = snapshot?.end_date || snapshotStart;
+  const intervalContainsRecord = present(recordStart)
+    && present(recordEnd)
+    && present(snapshotStart)
+    && present(snapshotEnd)
+    && String(snapshotStart) <= String(recordStart)
+    && String(recordEnd) <= String(snapshotEnd);
+  const intervalMatches = present(record?.service_date)
+    ? intervalContainsRecord
+      && String(snapshotStart) === String(recordStart)
+      && String(snapshotEnd) === String(recordEnd)
+    : intervalContainsRecord;
+  return taskTypeKeys.length === 1
+    && sameRoutingValue(taskTypeKeys[0], snapshot?.task_type_key)
+    && sameRoutingValue(objectId, snapshot?.object_id)
+    && intervalMatches;
+}
+
+function routingWarnings(record) {
+  return [
+    ...(Array.isArray(record?.warning_snapshot) ? record.warning_snapshot : []),
+    ...(Array.isArray(record?.warnings) ? record.warnings : []),
+    ...(Array.isArray(record?.routing_warnings) ? record.routing_warnings : []),
+    ...(Array.isArray(record?.commercial_routing_warnings) ? record.commercial_routing_warnings : []),
+    ...(Array.isArray(record?.blocking_reasons) ? record.blocking_reasons : []),
+    ...(Array.isArray(record?.manual_review_reasons) ? record.manual_review_reasons : []),
+  ];
+}
+
+const SERIOUS_ROUTING_SIGNAL = /(ambig|conflict|blocked|mismatch|multiple|duplicate|manual[_ -]?review|not[_ -]?final|stale|tegenstrijd|niet eenduidig|geen eenduidige)/i;
+const MISSING_ROUTING_SIGNAL = /((^|[_ -])(missing|not[_ -]?found|unresolved)($|[_ -]))|\bkoppelen\b/i;
+const CUSTOMER_ROUTING_SIGNAL = /(customer[_ -]?contract|klantcontract|commercial|commercieel|selling[_ -]?company|factur|billing|tariff|tarief)/i;
+const EMPLOYMENT_ROUTING_SIGNAL = /(personnel[_ -]?contract|arbeidscontract|employment|employing[_ -]?company|werkgever|payroll|loon|contract[_ -]?cao|cao[_ -]?routing|(^|[_ -])contract[_ -]?(missing|ambiguous|not[_ -]?final))/i;
+
+function routingSignalRecords(record, kind) {
+  const snapshots = (kind === "customer"
+    ? [
+        record?.commercial_routing_snapshot,
+        record?.customer_contract_routing_snapshot,
+        record?.routing_snapshot,
+      ]
+    : [
+        record?.contract_routing_snapshot,
+        record?.employment_routing_snapshot,
+        record?.routing_snapshot,
+      ]).filter(Boolean);
+  const nestedDecisions = snapshots.flatMap(snapshot => (
+    Array.isArray(snapshot?.decisions)
+      ? snapshot.decisions.flatMap(item => [item, item?.decision]).filter(Boolean)
+      : []
+  ));
+  return { snapshots, records: [record, ...snapshots, ...nestedDecisions] };
+}
+
+function routingStatusSignals(record, kind) {
+  if (!record) return false;
+  const { snapshots, records } = routingSignalRecords(record, kind);
+  return [
+    record.routing_status,
+    record.decision_status,
+    ...(kind === "customer" ? [
+      record.customer_contract_routing_status,
+      record.commercial_routing_status,
+    ] : [
+      record.contract_routing_status,
+      record.employment_routing_status,
+      record.planning_context_status,
+      record.cao_runtime_status,
+    ]),
+    ...snapshots.concat(records.slice(1 + snapshots.length)).flatMap(item => [
+      item?.status,
+      item?.decision_status,
+      item?.routing_status,
+      ...(kind === "customer" ? [
+        item?.customer_contract_routing_status,
+        item?.commercial_routing_status,
+      ] : [
+        item?.contract_routing_status,
+        item?.employment_routing_status,
+        item?.planning_context_status,
+        item?.cao_runtime_status,
+      ]),
+    ]),
+  ].filter(present);
+}
+
+function explicitRoutingIndicatorState(record, kind) {
+  if (!record) return null;
+  const { records } = routingSignalRecords(record, kind);
+  const statuses = records.flatMap(item => kind === "customer"
+    ? [item?.customer_contract_routing_status, item?.commercial_routing_status]
+    : [item?.employment_routing_status, item?.contract_routing_status]
+  ).filter(present);
+  if (statuses.some(status => SERIOUS_ROUTING_SIGNAL.test(String(status)))) return "attention";
+  if (statuses.some(status => MISSING_ROUTING_SIGNAL.test(String(status)))) return "missing";
+  return null;
+}
+
+function routingWarningSignals(record, kind) {
+  if (!record) return [];
+  const { records } = routingSignalRecords(record, kind);
+  const relevantSignal = kind === "customer" ? CUSTOMER_ROUTING_SIGNAL : EMPLOYMENT_ROUTING_SIGNAL;
+  return records.flatMap(routingWarnings).map(item => {
+    const code = typeof item === "string" ? item : item?.code;
+    const title = typeof item === "string" ? "" : item?.title;
+    const detail = typeof item === "string" ? "" : item?.detail;
+    const message = typeof item === "string" ? item : item?.message;
+    return {
+      item,
+      signal: `${code || ""} ${title || ""} ${detail || ""} ${message || ""}`,
+    };
+  }).filter(({ signal }) => relevantSignal.test(signal));
+}
+
+function routingHasSeriousSignal(record, kind) {
+  const statuses = routingStatusSignals(record, kind);
+  if (!statuses) return false;
+  if (statuses.some(status => SERIOUS_ROUTING_SIGNAL.test(String(status)))) return true;
+
+  return routingWarningSignals(record, kind).some(({ item, signal }) => {
+    if (SERIOUS_ROUTING_SIGNAL.test(signal)) return true;
+    if (MISSING_ROUTING_SIGNAL.test(signal)) return false;
+    return String(item?.severity || "").toLowerCase() === "critical";
+  });
+}
+
+function routingHasMissingSignal(record, kind) {
+  const statuses = routingStatusSignals(record, kind);
+  if (!statuses) return false;
+  if (statuses.some(status => MISSING_ROUTING_SIGNAL.test(String(status)))) return true;
+  return routingWarningSignals(record, kind).some(({ signal }) => (
+    MISSING_ROUTING_SIGNAL.test(signal) && !SERIOUS_ROUTING_SIGNAL.test(signal)
+  ));
+}
+
+function customerContractLineId(record) {
+  return record?.customer_contract_line_id
+    || record?.commercial_routing_snapshot?.customer_contract_line_id
+    || record?.commercial_routing_snapshot?.contract_line_id
+    || record?.routing_snapshot?.customer_contract_line_id
+    || record?.service_context_snapshot?.customer_contract_line_id
+    || null;
+}
+
+function customerContractId(record) {
+  return record?.customer_contract_id
+    || record?.commercial_routing_snapshot?.customer_contract_id
+    || record?.commercial_routing_snapshot?.contract_id
+    || record?.routing_snapshot?.customer_contract_id
+    || record?.routing_snapshot?.contract_id
+    || record?.service_context_snapshot?.customer_contract_id
+    || null;
+}
+
+function customerSellingCompanyId(record) {
+  return record?.selling_company_id
+    || record?.commercial_routing_snapshot?.selling_company_id
+    || record?.commercial_routing_snapshot?.company_id
+    || record?.routing_snapshot?.selling_company_id
+    || record?.service_context_snapshot?.selling_company_id
+    || null;
+}
+
+function customerCommercialRouteComplete(record) {
+  return present(customerContractId(record))
+    && present(customerContractLineId(record))
+    && present(customerSellingCompanyId(record));
+}
+
+function sameRoutingValue(left, right) {
+  return present(left) && present(right) && String(left) === String(right);
+}
+
+function customerCommercialEvidenceState(record) {
+  if (!record) return null;
+  const status = String(record.commercial_routing_status || "").trim();
+  const snapshot = record.commercial_routing_snapshot;
+  const snapshotStatus = String(snapshot?.status || "").trim();
+  const claimsEvidence = ["resolved", "not_applicable"].includes(status)
+    || ["resolved", "not_applicable"].includes(snapshotStatus);
+  if (!claimsEvidence) return null;
+
+  if (status === "resolved") {
+    const valid = Number(snapshot?.schema_version) === 1
+      && snapshotStatus === "resolved"
+      && Number(snapshot?.candidate_count) === 1
+      && positiveEvidenceVersion(snapshot?.customer_contract_version)
+      && positiveEvidenceVersion(snapshot?.customer_contract_line_version)
+      && commercialSnapshotMatchesRecord(record, snapshot)
+      && customerCommercialRouteComplete(record)
+      && sameRoutingValue(record.customer_id, snapshot?.customer_id)
+      && sameRoutingValue(record.selling_company_id, snapshot?.selling_company_id)
+      && sameRoutingValue(record.customer_contract_id, snapshot?.customer_contract_id)
+      && sameRoutingValue(record.customer_contract_line_id, snapshot?.customer_contract_line_id);
+    return valid ? "resolved" : "invalid";
+  }
+
+  const segmentContexts = Array.isArray(record?.service_context_snapshot?.segment_contexts)
+    ? record.service_context_snapshot.segment_contexts
+    : [];
+  const hasCustomerOrCommercialIdentity = customerIdentityPresent(record) || [
+    record.selling_company_id,
+    record.customer_contract_id,
+    record.customer_contract_line_id,
+    snapshot?.customer_id,
+    snapshot?.customer_name,
+    snapshot?.selling_company_id,
+    snapshot?.customer_contract_id,
+    snapshot?.customer_contract_line_id,
+    record?.service_context_snapshot?.selling_company_id,
+    record?.service_context_snapshot?.customer_contract_id,
+    record?.service_context_snapshot?.customer_contract_line_id,
+    ...segmentContexts.flatMap(segment => [
+      segment?.selling_company_id,
+      segment?.customer_contract_id,
+      segment?.customer_contract_line_id,
+    ]),
+  ].some(present);
+  const valid = status === "not_applicable"
+    && Number(snapshot?.schema_version) === 1
+    && snapshotStatus === "not_applicable"
+    && snapshot?.reason === "explicit_internal_non_billable"
+    && snapshot?.customer_billable === false
+    && Number(snapshot?.candidate_count) === 0
+    && Array.isArray(snapshot?.evidence_shift_ids)
+    && snapshot.evidence_shift_ids.some(present)
+    && Array.isArray(snapshot?.evidence_segment_ids)
+    && snapshot.evidence_segment_ids.some(present)
+    && commercialSnapshotMatchesRecord(record, snapshot)
+    && (!present(record?.id) || !present(record?.task_occurrence_id)
+      || snapshot.evidence_segment_ids.map(String).includes(String(record.id)))
+    && (!present(record?.shift_id)
+      || snapshot.evidence_shift_ids.map(String).includes(String(record.shift_id)))
+    && !hasCustomerOrCommercialIdentity;
+  return valid ? "not_applicable" : "invalid";
+}
+
+function customerTaskRecord(record) {
+  return Boolean(
+    record?.task_occurrence_id
+    || record?.object_task_definition_id
+    || record?.source_type === "task"
+    || record?.source_type === "route"
+    || record?.task_id,
+  );
+}
+
+function customerIdentityPresent(record) {
+  return present(record?.customer_id)
+    || (Array.isArray(record?.customer_ids) && record.customer_ids.some(present))
+    || present(record?.customer_name)
+    || present(record?.customer_name_snapshot)
+    || present(record?.service_context_snapshot?.customer_id)
+    || (Array.isArray(record?.service_context_snapshot?.customer_ids)
+      && record.service_context_snapshot.customer_ids.some(present))
+    || present(record?.service_context_snapshot?.customer_name)
+    || (Array.isArray(record?.service_context_snapshot?.segment_contexts)
+      && record.service_context_snapshot.segment_contexts.some(segment => (
+        present(segment?.customer_id)
+        || (Array.isArray(segment?.customer_ids) && segment.customer_ids.some(present))
+        || present(segment?.customer_name)
+        || present(segment?.customer_name_snapshot)
+      )));
+}
+
+function customerCommercialContextPresent(record) {
+  return customerIdentityPresent(record)
+    || customerCommercialRouteComplete(record)
+    || present(record?.selling_company_id)
+    || present(record?.customer_contract_id)
+    || present(record?.customer_contract_line_id)
+    || present(record?.commercial_routing_status)
+    || Boolean(record?.commercial_routing_snapshot);
+}
+
+export function customerTaskContractIndicatorState({
+  occurrence = null,
+  shift = null,
+  segments = [],
+  hasOpenDemand = false,
+} = {}) {
+  const taskSegments = segments.filter(item => item?.status !== "removed" && customerTaskRecord(item));
+  const records = [occurrence, shift, ...taskSegments].filter(Boolean);
+  const explicitState = records.map(record => explicitRoutingIndicatorState(record, "customer"));
+  if (explicitState.includes("attention")) return "attention";
+  if (explicitState.includes("missing")) return "missing";
+  if (records.some(record => routingHasSeriousSignal(record, "customer"))) return "attention";
+  if (records.some(record => routingHasMissingSignal(record, "customer"))) return "missing";
+
+  const proofRecords = occurrence ? [occurrence, ...taskSegments] : taskSegments;
+  const evidenceStates = proofRecords.map(customerCommercialEvidenceState);
+  if (evidenceStates.includes("invalid")) return "attention";
+  if (
+    evidenceStates.length > 0
+    && evidenceStates.every(state => state === "resolved" || state === "not_applicable")
+  ) return "resolved";
+
+  if (records.some(customerCommercialRouteComplete)) return "attention";
+  const hasPartialCommercialIdentity = records.some(record => (
+    present(record?.selling_company_id)
+    || present(record?.customer_contract_id)
+    || present(record?.customer_contract_line_id)
+  ));
+  if (hasPartialCommercialIdentity) return "missing";
+  // An uncovered part still needs an occurrence-level commercial route: a
+  // contract line on an already planned segment cannot prove the open part.
+  if (hasOpenDemand) return "missing";
+  if (records.some(customerCommercialContextPresent)) return "missing";
+  // Zonder expliciet not_applicable-bewijs is een ogenschijnlijk interne taak
+  // nog niet betrouwbaar van corrupte of onvolledige klantcontext te onderscheiden.
+  return "attention";
+}
+
+function employmentEvidenceContext({ shift = null, segments = [], serviceDate = null } = {}) {
+  const activeSegments = segments.filter(item => item?.status !== "removed");
+  const taskTypeKeys = [...new Set([
+    ...recordContractTaskTypeKeys(shift),
+    ...activeSegments.flatMap(recordContractTaskTypeKeys),
+  ])];
+  const objectIds = [...new Set([
+    shift?.object_id,
+    ...(Array.isArray(shift?.object_ids) ? shift.object_ids : []),
+    ...activeSegments.map(item => item?.object_id),
+  ].filter(present).map(String))];
+  const startDate = shift?.service_date || serviceDate;
+  const endDate = shift?.end_date || startDate;
+  return {
+    task_type_keys: taskTypeKeys,
+    object_ids: objectIds,
+    covered_service_dates: inclusivePlanningDates(startDate, endDate),
+  };
+}
+
+function decisionTaskTypeKeys(decision) {
+  const values = decision?.service_context_readiness?.required_task_type_keys;
+  if (!Array.isArray(values) || values.length === 0) return [];
+  const canonical = values.map(canonicalContractTaskTypeKey);
+  return canonical.every(Boolean) ? [...new Set(canonical)] : [];
+}
+
+function sameStringSet(left, right) {
+  const leftValues = [...new Set(left.map(String))].sort();
+  const rightValues = [...new Set(right.map(String))].sort();
+  return leftValues.length === rightValues.length
+    && leftValues.every((value, index) => value === rightValues[index]);
+}
+
+export function employmentContractIndicatorState(assignment, context = {}) {
+  if (!assignment) return "resolved";
+  const explicitState = explicitRoutingIndicatorState(assignment, "employment");
+  if (explicitState) return explicitState;
+  if (routingHasSeriousSignal(assignment, "employment")) return "attention";
+  if (routingHasMissingSignal(assignment, "employment")) return "missing";
+  const routeIds = [
+    assignment.personnel_contract_id,
+    assignment.employing_company_id,
+    assignment.payroll_cao_key,
+  ];
+  const snapshot = assignment.contract_routing_snapshot;
+  const decisionEntries = Array.isArray(snapshot?.decisions)
+    ? snapshot.decisions.map(item => ({ service_date: item?.service_date, decision: item?.decision })).filter(item => item.decision)
+    : snapshot
+      ? [{ service_date: snapshot.service_date, decision: snapshot }]
+      : [];
+  const evidenceContext = employmentEvidenceContext(context);
+  const expectedDates = evidenceContext.covered_service_dates;
+  const evaluatedDates = decisionEntries.map(item => String(item.service_date || item.decision?.service_date || "")).filter(Boolean);
+  const contextComplete = evidenceContext.task_type_keys.length > 0
+    && expectedDates.length > 0
+    && evidenceContext.object_ids.length === 1
+    && sameStringSet(expectedDates, evaluatedDates);
+  const resolvedEvidence = assignment.employment_routing_status === "resolved"
+    && routeIds.every(present)
+    && contextComplete
+    && decisionEntries.length > 0
+    && decisionEntries.every(({ decision }) => (
+      decision?.employment_routing_status === "resolved"
+      && decision?.contract_selection_policy === "personnel_interval_task_scope_unique"
+      && decision?.contract_resolution_status === "resolved"
+      && decision?.decision_inputs?.contract_resolution_validated === true
+      && decision?.service_context_readiness?.has_canonical_task_context === true
+      && sameStringSet(decisionTaskTypeKeys(decision), evidenceContext.task_type_keys)
+      && sameRoutingValue(decision?.object_id, evidenceContext.object_ids[0])
+      && sameRoutingValue(
+        assignment.personnel_contract_id,
+        decision?.contract_id || decision?.selected_contract?.id,
+      )
+      && sameRoutingValue(
+        assignment.employing_company_id,
+        decision?.employing_company_id || decision?.selected_contract?.company_id,
+      )
+      && sameRoutingValue(
+        assignment.payroll_cao_key,
+        decision?.payroll_cao_key || decision?.selected_contract?.cao_key,
+      )
+    ));
+  if (resolvedEvidence) return "resolved";
+  return routeIds.some(present) || assignment.employment_routing_status === "resolved"
+    ? "attention"
+    : "missing";
+}
+
+function ContractRoutingIndicator({ kind, state, className }) {
+  if (state === "resolved") return null;
+  const needsAttention = state === "attention";
+  const customer = kind === "customer";
+  const label = needsAttention
+    ? customer ? "Klantcontract controleren" : "Arbeidscontract controleren"
+    : customer ? "Klantcontract koppelen" : "Arbeidscontract koppelen";
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[8px] font-semibold leading-tight shadow-sm",
+        needsAttention
+          ? "border-rose-300/70 bg-rose-100/95 text-rose-900 dark:border-rose-500/40 dark:bg-rose-400/15 dark:text-rose-100"
+          : "border-amber-300/70 bg-amber-100/95 text-amber-900 dark:border-amber-500/40 dark:bg-amber-400/15 dark:text-amber-100",
+        className,
+      )}
+      data-contract-routing-indicator={kind}
+      data-routing-state={state}
+      title={needsAttention
+        ? `${label}: de geladen planning bevat een ambigue of tegenstrijdige routering.`
+        : `${label}. Dit ontbrekende gegeven blokkeert de conceptplanning niet.`}
+    >
+      <AlertTriangle className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{label}</span>
+    </span>
+  );
 }
 
 function timeValue(value) {
@@ -212,6 +746,10 @@ function OpenTaskIntervalCard({
     && clipboardEndMinute <= gap.endMinute
     && clipboardEndMinute > clipboardStartMinute,
   );
+  const customerContractState = customerTaskContractIndicatorState({
+    occurrence,
+    hasOpenDemand: true,
+  });
 
   const renderCard = ({ provided = null, isDraggingOver = false } = {}) => (
     <PlanningClipboardContextMenu
@@ -260,6 +798,13 @@ function OpenTaskIntervalCard({
               )}>
                 {embeddedInLane ? "Open taak" : occurrence.task_name_snapshot || "Open taak"}
               </span>
+              {!embeddedInLane && (
+                <ContractRoutingIndicator
+                  kind="customer"
+                  state={customerContractState}
+                  className="mt-1"
+                />
+              )}
               <span className={cn("mt-1 flex items-center gap-1 text-[10px] font-semibold tabular-nums text-muted-foreground", embeddedInLane && "sr-only")}>
                 <Clock3 className="h-3 w-3 shrink-0" />
                 {gap.startTime}–{gap.endTime}
@@ -334,9 +879,11 @@ function ShiftSlot({
   editable = false,
   compact = false,
   visualVariant = "default",
+  segments = [],
 }) {
   const droppableId = `slot:${shift.id}:${slotIndex}:${serviceDate}:${encodeURIComponent(resourceKey)}`;
   const identity = assignment ? assignmentIdentity(assignment, personnelById) : null;
+  const employmentContractState = employmentContractIndicatorState(assignment, { shift, segments, serviceDate });
   const renderSlot = ({ provided = null, isDraggingOver = false } = {}) => (
     <div
       ref={provided?.innerRef}
@@ -358,7 +905,7 @@ function ShiftSlot({
       )}
     >
       {assignment ? (
-        <>
+        <div className="min-w-0 flex-1">
           <CompactEmployeeIdentity
             name={identity.name}
             photoUrl={identity.photoUrl}
@@ -367,9 +914,13 @@ function ShiftSlot({
             onClick={onSelect}
             warningCount={assignmentWarningCount(assignment)}
             variant={visualVariant}
-            />
-
-        </>
+          />
+          <ContractRoutingIndicator
+            kind="employment"
+            state={employmentContractState}
+            className="mt-0.5"
+          />
+        </div>
       ) : (
         <button
           type="button"
@@ -738,6 +1289,14 @@ function MatrixShiftBlock({
     ? assignmentIdentity(assignmentsBySlot.get(0), personnelById)
     : null;
   const activeSegments = segments.filter(item => item.status !== "removed");
+  const hasCustomerTask = Boolean(
+    occurrence
+    || customerTaskRecord(shift)
+    || activeSegments.some(customerTaskRecord),
+  );
+  const customerContractState = hasCustomerTask
+    ? customerTaskContractIndicatorState({ occurrence, shift, segments: activeSegments })
+    : "resolved";
   const linkedObjectCount = new Set([
     ...(shift.object_ids || []),
     ...activeSegments.map(item => item.object_id),
@@ -966,6 +1525,13 @@ function MatrixShiftBlock({
               ))}
             </span>
           )}
+          {!embeddedInLane && hasCustomerTask && (
+            <ContractRoutingIndicator
+              kind="customer"
+              state={customerContractState}
+              className="mt-1"
+            />
+          )}
         </button>
 
       </div>
@@ -1001,6 +1567,7 @@ function MatrixShiftBlock({
             editable={editable}
             compact={embeddedInLane}
             visualVariant={embeddedInLane ? "timeline" : "portrait"}
+            segments={activeSegments}
           />
         ))}
       </div>
@@ -1226,6 +1793,12 @@ function TaskCoverageLane({
   const isLaneActionPending = actionPending || isLaneBusy;
   const isLaneDeletePending = deletePending || isLaneBusy;
   const openMinutes = gaps.reduce((sum, gap) => sum + Number(gap.durationMinutes || 0), 0);
+  const customerContractState = customerTaskContractIndicatorState({
+    occurrence,
+    segments: baseServices.map(service => service.segment),
+    shift: baseServices.length === 1 ? baseServices[0].shift : null,
+    hasOpenDemand: openMinutes > 0,
+  });
 
   const segmentPayload = (service, interval) => {
     const slice = service.projections[0]?.slice;
@@ -1310,7 +1883,11 @@ function TaskCoverageLane({
           <span className="block break-words text-[11px] font-semibold leading-tight text-foreground">
             {occurrence.task_name_snapshot || "Taak"}
           </span>
-
+          <ContractRoutingIndicator
+            kind="customer"
+            state={customerContractState}
+            className="mt-1"
+          />
         </span>
         <span className={cn(
           "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold",
@@ -1433,6 +2010,11 @@ function EmployeeAssignmentBlock({
   const warnings = shiftWarningCount(shift, [assignment]);
   const activeSegments = segments.filter(item => item.status !== "removed");
   const identity = assignmentIdentity(assignment, null, personnel);
+  const employmentContractState = employmentContractIndicatorState(assignment, { shift, segments: activeSegments });
+  const hasCustomerTask = customerTaskRecord(shift) || activeSegments.some(customerTaskRecord);
+  const customerContractState = hasCustomerTask
+    ? customerTaskContractIndicatorState({ shift, segments: activeSegments })
+    : "resolved";
   const startTime = projectionSlice?.startTime || shift.start_time || "--:--";
   const endTime = projectionSlice?.endTime || shift.end_time || "--:--";
   return (
@@ -1450,15 +2032,22 @@ function EmployeeAssignmentBlock({
     <article aria-busy={disabled ? "true" : "false"} className="relative overflow-hidden rounded-[10px] border border-slate-400/25 bg-[radial-gradient(circle_at_18%_90%,rgba(91,141,239,0.58),transparent_42%),linear-gradient(145deg,#0F172A_0%,#11294A_58%,#16335C_100%)] p-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.22),inset_0_1px_0_rgba(255,255,255,0.10)] transition-[top,height,padding,filter,box-shadow,transform] duration-300 ease-out motion-reduce:transition-none hover:-translate-y-px hover:brightness-110" data-shift-id={shift.id} data-editable={editable ? "true" : "false"}>
       <PlanningEmployeePortraitOverlay photoUrl={identity.photoUrl} />
       <div className="relative z-10 flex items-start gap-2">
-        <CompactEmployeeIdentity
-          name={identity.name}
-          photoUrl={identity.photoUrl}
-          disabled={disabled}
-          onClick={onSelect}
-          warningCount={warnings}
-          variant="portrait"
-        />
-
+        <div className="min-w-0 flex-1">
+          <CompactEmployeeIdentity
+            name={identity.name}
+            photoUrl={identity.photoUrl}
+            disabled={disabled}
+            onClick={onSelect}
+            warningCount={warnings}
+            variant="portrait"
+          />
+          <span className="mt-1 flex flex-wrap gap-1">
+            <ContractRoutingIndicator kind="employment" state={employmentContractState} />
+            {hasCustomerTask && (
+              <ContractRoutingIndicator kind="customer" state={customerContractState} />
+            )}
+          </span>
+        </div>
       </div>
       <button type="button" disabled={disabled} onClick={onSelect} className="relative z-10 mt-1 block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait">
         <span className="block text-[10px] font-semibold tabular-nums text-white">

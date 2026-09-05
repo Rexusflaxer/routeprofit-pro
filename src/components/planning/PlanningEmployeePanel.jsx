@@ -75,6 +75,7 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
   const critical = Number(candidate.criticalCount || 0);
   const warnings = Number(candidate.warningCount || 0);
   const eligibilityReady = candidate.eligibilityStatus === "ready";
+  const eligibilityAllowed = eligibilityReady && candidate.draftAssignmentAllowed === true;
   const assignedToSelectedShift = candidate.assignedToSelectedShift === true;
   const scheduledHours = Number(candidate.scheduledMinutes || 0) / 60;
   const contractHours = Number(candidate.contractMinutes || 0) / 60;
@@ -154,6 +155,10 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
                   <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
                     <AlertTriangle className="h-2.5 w-2.5" /> controle voorbereiden
                   </span>
+                ) : selectedShift && !eligibilityAllowed ? (
+                  <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                    <AlertOctagon className="h-2.5 w-2.5" /> inzet geblokkeerd
+                  </span>
                 ) : selectedShift ? (
                   <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                     <CheckCircle2 className="h-2.5 w-2.5" /> voorcontrole actueel
@@ -176,7 +181,7 @@ const CandidateCard = React.memo(function CandidateCard({ candidate, index, sele
                 <Button
                   variant={shiftTiming.crossesCalendarDay ? "outline" : "ghost"}
                   size={shiftTiming.crossesCalendarDay ? "sm" : "icon"}
-                  disabled={disabled || !eligibilityReady}
+                  disabled={disabled || !eligibilityAllowed}
                   className={cn("h-7 text-primary", shiftTiming.crossesCalendarDay ? "gap-1 px-2 text-[9px]" : "w-7")}
                   onClick={() => {
                     onPrefetch?.(candidate);

@@ -19,10 +19,26 @@
     },
     "timezone": { "type": "string", "default": "Europe/Amsterdam" },
     "duration_minutes": { "type": "number", "minimum": 1 },
-    "company_id": { "type": ["string", "null"] },
-    "customer_id": { "type": "string" },
+    "company_id": {
+      "type": ["string", "null"],
+      "description": "Legacy dienstbedrijf; niet gebruiken als arbeidscontract- of facturatiebron zodra de expliciete rollen zijn gevuld."
+    },
+    "selling_company_id": { "type": ["string", "null"] },
+    "service_responsible_company_id": { "type": ["string", "null"] },
+    "customer_contract_id": { "type": ["string", "null"] },
+    "customer_contract_line_id": { "type": ["string", "null"] },
+    "commercial_routing_status": {
+      "type": ["string", "null"],
+      "enum": ["resolved", "not_applicable", "missing_contract", "ambiguous", "manual_review_required", "stale", null]
+    },
+    "commercial_routing_snapshot": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "customer_id": { "type": ["string", "null"] },
     "object_id": { "type": "string" },
     "task_type": { "type": "string" },
+    "task_type_key": { "type": ["string", "null"] },
     "task_name_snapshot": { "type": "string" },
     "customer_name_snapshot": { "type": ["string", "null"] },
     "object_name_snapshot": { "type": ["string", "null"] },

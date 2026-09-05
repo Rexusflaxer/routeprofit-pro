@@ -40,7 +40,27 @@
         "string",
         "null"
       ],
-      "description": "Uitvoerend bedrijf/werkgever voor contract- en CAO-routering."
+      "description": "Legacy samenvatting van het dienstbedrijf. Dit veld mag niet tegelijk verkoper en werkgever betekenen; gebruik de expliciete rollen en assignmentroutering."
+    },
+    "selling_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Verkopende/facturerende BV wanneer alle taaksegmenten dezelfde commerciële route hebben."
+    },
+    "selling_company_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Alle verkopende BV's van de taaksegmenten; commerciële bron blijft per segment."
+    },
+    "service_responsible_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Operationeel/juridisch verantwoordelijke dienst-BV wanneer eenduidig; niet de werkgever van iedere assignment."
     },
     "customer_id": {
       "type": [
@@ -93,11 +113,19 @@
       "minimum": 0,
       "default": 0
     },
+    "customer_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Alleen gevuld als alle taaksegmenten naar hetzelfde klantcontract routeren; de bron staat per segment."
+    },
     "customer_contract_line_id": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Alleen gevuld als alle taaksegmenten naar dezelfde klantcontractregel routeren; de bron staat per segment."
     },
     "customer_name_snapshot": {
       "type": [

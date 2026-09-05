@@ -21,7 +21,15 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Commerciële artikel-/dienstcode. Legacyrecords kunnen deze code tijdelijk ook als taaksoort gebruiken."
+    },
+    "task_type_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke planningstaaksoort die deze contractregel factureert, bijvoorbeeld reception of fire_closing_round. Bij maatwerk is een stabiele specifieke sleutel verplicht; alleen other is onvoldoende."
     },
     "name": {
       "type": "string"

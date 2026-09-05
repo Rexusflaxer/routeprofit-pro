@@ -205,6 +205,9 @@ function getObjectTaskSpacingRules(object = {}, objectTaskTypes = []) {
 function relevantAssignedTasksForRoute(route) {
   return (route.assigned_tasks || []).map(item => ({
     task_id: String(item.task_id),
+    planning_shift_task_segment_id: item.planning_shift_task_segment_id || item.task_segment_id || null,
+    planning_task_occurrence_id: item.planning_task_occurrence_id || item.task_occurrence_id || null,
+    planning_shift_id: item.planning_shift_id || null,
     locked_to_route: !!item.locked_to_route,
     locked_occurrence_count: item.locked_occurrence_count ?? null,
     repeat_index: item.repeat_index ?? null,
@@ -378,3 +381,5 @@ Deno.serve(async (req) => {
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
+
+export { relevantAssignedTasksForRoute };

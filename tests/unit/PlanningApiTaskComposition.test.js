@@ -25,10 +25,23 @@ beforeAll(async () => {
 
 function entity(initial = [], prefix = "record") {
   const records = initial.map(item => structuredClone(item));
+  const matchesValue = (actual, expected) => {
+    if (!expected || typeof expected !== "object" || Array.isArray(expected)) {
+      return actual === expected;
+    }
+    if (Object.hasOwn(expected, "$in")) {
+      const actualValues = Array.isArray(actual) ? actual : [actual];
+      if (!actualValues.some(value => expected.$in.includes(value))) return false;
+    }
+    if (Object.hasOwn(expected, "$gte") && !(actual >= expected.$gte)) return false;
+    if (Object.hasOwn(expected, "$lte") && !(actual <= expected.$lte)) return false;
+    if (Object.hasOwn(expected, "$ne") && actual === expected.$ne) return false;
+    return true;
+  };
   const matches = (record, query = {}) => Object.entries(query).every(([key, value]) => (
-    value && typeof value === "object" && Object.hasOwn(value, "$in")
-      ? value.$in.some(candidate => candidate === record[key])
-      : record[key] === value
+    key === "$or"
+      ? value.some(part => matches(record, part))
+      : matchesValue(record[key], value)
   ));
   return {
     records,
@@ -95,7 +108,50 @@ function withPublishedSecurityPlan(record) {
   };
 }
 
+function assignableEmploymentDecision(payload = {}, overrides = {}) {
+  return {
+    service_date: payload?.service_date || null,
+    decision_status: "assignable",
+    planning_assignment_allowed: true,
+    draft_assignment_allowed: true,
+    payroll_final_allowed: false,
+    employment_routing_status: "resolved",
+    contract_id: "personnel-contract-1",
+    employing_company_id: "employer-company-1",
+    payroll_cao_key: "cao_particuliere_beveiliging",
+    selected_contract: {
+      id: "personnel-contract-1",
+      company_id: "employer-company-1",
+      cao_key: "cao_particuliere_beveiliging",
+    },
+    ...overrides,
+  };
+}
+
 function setup(occurrences) {
+  const commercialContract = {
+    id: "customer-contract-1",
+    customer_id: "customer-1",
+    customer_account_id: "customer-account-1",
+    company_id: "seller-company-1",
+    status: "active",
+    start_date: "2020-01-01",
+    end_date: null,
+    version: 1,
+  };
+  const commercialTaskTypes = [
+    "reception",
+    "external_control_round",
+    "fire_closing_round",
+    "external_closing_round",
+    "opening_round",
+    "mobile_control_round",
+    "closing_assistance",
+    "access_control",
+    "fire_watch",
+    "concierge",
+    "object_security",
+  ];
   const entities = {
     PlanningTaskOccurrence: entity(occurrences, "occurrence"),
     PlanningShiftTaskSegment: entity([], "segment"),
@@ -123,9 +179,30 @@ function setup(occurrences) {
     PersonnelAbsence: entity([], "absence"),
     PersonnelRestriction: entity([], "restriction"),
     PersonnelSecurityPass: entity([], "security-pass"),
+    CustomerContract: entity([commercialContract], "customer-contract"),
+    CustomerContractLine: entity(commercialTaskTypes.map((taskTypeKey, index) => ({
+      id: `customer-contract-line-${index + 1}`,
+      contract_id: commercialContract.id,
+      customer_id: commercialContract.customer_id,
+      customer_account_id: commercialContract.customer_account_id,
+      company_id: commercialContract.company_id,
+      scope_type: "customer",
+      task_type_key: taskTypeKey,
+      status: "active",
+      sequence: index + 1,
+      version: 1,
+    })), "customer-contract-line"),
+    Collectief: entity([], "collective"),
   };
   return {
-    base44: { asServiceRole: { entities, functions: { invoke: async () => ({}) } } },
+    base44: {
+      asServiceRole: {
+        entities,
+        functions: {
+          invoke: async (_name, payload) => assignableEmploymentDecision(payload),
+        },
+      },
+    },
     entities,
   };
 }
@@ -575,6 +652,261 @@ function addCarryInPublicationFixture(entities, externalShiftStatus) {
   }
   return demand;
 }
+
+describe("planningApi arbeidscontract-taakscope", () => {
+  const resolvedEmploymentDecision = ({
+    serviceDate,
+    contractId = "contract-employer-b",
+    employerId = "employer-b",
+    payrollCaoKey = "cao_particuliere_beveiliging",
+    payrollFinalAllowed = false,
+  }) => ({
+    service_date: serviceDate,
+    decision_status: "assignable",
+    planning_assignment_allowed: true,
+    draft_assignment_allowed: true,
+    payroll_final_allowed: payrollFinalAllowed,
+    employment_routing_status: "resolved",
+    contract_id: contractId,
+    employing_company_id: employerId,
+    payroll_cao_key: payrollCaoKey,
+    selected_contract: {
+      id: contractId,
+      company_id: employerId,
+      cao_key: payrollCaoKey,
+    },
+    schedule_gate: {
+      required: payrollFinalAllowed,
+      ready: true,
+      payroll_final_ready: payrollFinalAllowed,
+    },
+    decision_inputs: {
+      schedule_validation_validated: payrollFinalAllowed,
+      schedule_validation_required: payrollFinalAllowed,
+    },
+  });
+
+  it("geeft alle canonieke segmenttaaksoorten door aan de arbeidscontractcontrole", () => {
+    const context = backend.serviceContextFromShift({
+      service_date: "2026-09-05",
+      start_time: "06:30",
+      end_time: "15:30",
+      service_context_snapshot: {
+        segment_contexts: [
+          { task_type: "reception", task_type_key: "reception" },
+          { task_type: "fire_closing_round", task_type_key: "fire_closing_round" },
+          { task_type: "reception", task_type_key: "reception" },
+        ],
+      },
+    }, "person-1");
+
+    expect(context.task_type).toBeNull();
+    expect(context.task_type_key).toBeNull();
+    expect(context.required_task_types).toEqual(["reception", "fire_closing_round"]);
+  });
+
+  it("zet bij één taaksoort ook de enkelvoudige compatibiliteitsvelden", () => {
+    const context = backend.serviceContextFromShift({
+      service_date: "2026-09-05",
+      start_time: "06:30",
+      end_time: "15:30",
+      service_context_snapshot: {
+        segment_contexts: [{ task_type: "other", task_type_key: "other:definition-42" }],
+      },
+    });
+
+    expect(context.task_type).toBe("other:definition-42");
+    expect(context.task_type_key).toBe("other:definition-42");
+    expect(context.required_task_types).toEqual(["other:definition-42"]);
+  });
+
+  it("bewaart een unieke interactieve arbeidsroute zonder die als loonperiode-final te markeren", () => {
+    const routingSnapshot = {
+      covered_service_dates: ["2026-09-05", "2026-09-06"],
+      decisions: ["2026-09-05", "2026-09-06"].map(serviceDate => ({
+        service_date: serviceDate,
+        decision: resolvedEmploymentDecision({ serviceDate }),
+      })),
+    };
+
+    expect(backend.employmentRoutingProjection(routingSnapshot)).toEqual({
+      employment_routing_status: "resolved",
+      employment_routing_codes: [],
+      personnel_contract_id: "contract-employer-b",
+      employing_company_id: "employer-b",
+      payroll_cao_key: "cao_particuliere_beveiliging",
+      employment_routing_evidence_complete: true,
+    });
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(routingSnapshot)).toBe(false);
+  });
+
+  it("bewaart routebewijs wanneer een andere inzetcontrole de planning blokkeert", () => {
+    const routingSnapshot = {
+      covered_service_dates: ["2026-09-05", "2026-09-06"],
+      decisions: ["2026-09-05", "2026-09-06"].map(serviceDate => ({
+        service_date: serviceDate,
+        decision: {
+          ...resolvedEmploymentDecision({ serviceDate }),
+          decision_status: "blocked",
+          planning_assignment_allowed: false,
+          payroll_final_allowed: false,
+          blocking_reasons: ["Vereist kwalificatiebewijs ontbreekt."],
+        },
+      })),
+    };
+
+    expect(backend.employmentRoutingProjection(routingSnapshot)).toEqual({
+      employment_routing_status: "resolved",
+      employment_routing_codes: [],
+      personnel_contract_id: "contract-employer-b",
+      employing_company_id: "employer-b",
+      payroll_cao_key: "cao_particuliere_beveiliging",
+      employment_routing_evidence_complete: true,
+    });
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(routingSnapshot)).toBe(false);
+  });
+
+  it("accepteert loonperiode-final bewijs pas als iedere kalenderdag exact dezelfde route én final-gate heeft", () => {
+    const fullyValidated = {
+      covered_service_dates: ["2026-09-05", "2026-09-06"],
+      decisions: ["2026-09-05", "2026-09-06"].map(serviceDate => ({
+        service_date: serviceDate,
+        decision: resolvedEmploymentDecision({ serviceDate, payrollFinalAllowed: true }),
+      })),
+    };
+    const missingSecondDay = {
+      covered_service_dates: ["2026-09-05", "2026-09-06"],
+      decisions: fullyValidated.decisions.slice(0, 1),
+    };
+
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(fullyValidated)).toBe(true);
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(missingSecondDay)).toBe(false);
+    expect(backend.employmentRoutingProjection(missingSecondDay)).toMatchObject({
+      employment_routing_status: "stale",
+      personnel_contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      employment_routing_evidence_complete: false,
+    });
+  });
+
+  it("vertrouwt een los payroll-final vinkje niet zonder verse verplichte roostercontrole", () => {
+    const decision = resolvedEmploymentDecision({
+      serviceDate: "2026-09-05",
+      payrollFinalAllowed: true,
+    });
+    decision.schedule_gate.required = false;
+    decision.decision_inputs.schedule_validation_validated = false;
+    decision.decision_inputs.schedule_validation_required = false;
+
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(decision)).toBe(false);
+  });
+
+  it("wist bewijsvelden wanneer kalenderdagen naar verschillende arbeidsroutes wijzen", () => {
+    const routingSnapshot = {
+      covered_service_dates: ["2026-09-05", "2026-09-06"],
+      decisions: [
+        {
+          service_date: "2026-09-05",
+          decision: resolvedEmploymentDecision({ serviceDate: "2026-09-05", contractId: "contract-a" }),
+        },
+        {
+          service_date: "2026-09-06",
+          decision: resolvedEmploymentDecision({ serviceDate: "2026-09-06", contractId: "contract-b" }),
+        },
+      ],
+    };
+
+    expect(backend.employmentRoutingProjection(routingSnapshot)).toEqual({
+      employment_routing_status: "ambiguous",
+      employment_routing_codes: ["contract_ambiguous"],
+      personnel_contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      employment_routing_evidence_complete: false,
+    });
+    expect(backend.employmentRoutingPayrollFinalEvidenceComplete(routingSnapshot)).toBe(false);
+  });
+
+  it("projecteert een ontbrekend contract expliciet zonder oude route-ID's", () => {
+    const projection = backend.employmentRoutingProjection({
+      covered_service_dates: ["2026-09-05"],
+      decisions: [{
+        service_date: "2026-09-05",
+        decision: {
+          service_date: "2026-09-05",
+          decision_status: "blocked",
+          planning_assignment_allowed: false,
+          payroll_final_allowed: false,
+          employment_routing_status: "missing_contract",
+          contract_id: null,
+          employing_company_id: null,
+          payroll_cao_key: null,
+        },
+      }],
+    });
+
+    expect(projection).toEqual({
+      employment_routing_status: "missing_contract",
+      employment_routing_codes: ["contract_missing"],
+      personnel_contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      employment_routing_evidence_complete: false,
+    });
+  });
+
+  it("kiest bij meerdaagse routeproblemen steeds de zwaarste arbeidsrouteringsstatus", () => {
+    const cases = [
+      {
+        statuses: ["manual_review_required", "missing_contract"],
+        expected: "missing_contract",
+      },
+      {
+        statuses: ["missing_contract", "blocked"],
+        expected: "blocked",
+      },
+      {
+        statuses: ["blocked", "ambiguous"],
+        expected: "ambiguous",
+      },
+      {
+        statuses: ["ambiguous", "stale"],
+        expected: "stale",
+      },
+    ];
+
+    for (const { statuses, expected } of cases) {
+      const decisions = statuses.map((status, index) => {
+        const serviceDate = `2026-09-${String(index + 5).padStart(2, "0")}`;
+        return {
+          service_date: serviceDate,
+          decision: {
+            service_date: serviceDate,
+            decision_status: "blocked",
+            planning_assignment_allowed: false,
+            payroll_final_allowed: false,
+            employment_routing_status: status,
+            contract_id: null,
+            employing_company_id: null,
+            payroll_cao_key: null,
+          },
+        };
+      });
+
+      expect(backend.employmentRoutingProjection({
+        covered_service_dates: decisions.map(item => item.service_date),
+        decisions,
+      })).toMatchObject({
+        employment_routing_status: expected,
+        personnel_contract_id: null,
+        employing_company_id: null,
+        payroll_cao_key: null,
+        employment_routing_evidence_complete: false,
+      });
+    }
+  });
+});
 
 describe("planningApi occurrence-generatie", () => {
   it("materialiseert meerdere weekperioden en normaliseert 24:00 naar de volgende dag", () => {
@@ -2652,7 +2984,7 @@ describe("planningApi dienstsamenstelling", () => {
         && item.personnel_contract_id == null
         && item.revision === 1
       ));
-      return {};
+      return assignableEmploymentDecision(payload);
     };
     const calls = instrumentBackendCalls(base44, entities);
 
@@ -2676,7 +3008,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningShiftTaskSegment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toHaveLength(1);
     expect(assignmentValidationCalls).toBe(1);
-    expect(assignmentValidationSawProvisionalWrite).toBe(true);
+    expect(assignmentValidationSawProvisionalWrite).toBe(false);
     expect(assignmentValidationPayload).toMatchObject({
       planning_interactive_fast_path: true,
       require_schedule_validation: false,
@@ -2684,10 +3016,10 @@ describe("planningApi dienstsamenstelling", () => {
       final_validation: false,
     });
     expect(calls.count("PlanningAssignment.create")).toBe(1);
-    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(0);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(16);
-    expect(calls.total()).toBe(65);
+    expect(calls.total()).toBe(63);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -2698,7 +3030,82 @@ describe("planningApi dienstsamenstelling", () => {
     ]);
   });
 
-  it("legt beveiligingspas- en 11-uurs-rustwaarschuwingen vast bij de finale servertoewijzing", async () => {
+  it.each([
+    ["missing_contract", "contract_missing", "warning"],
+    ["ambiguous", "contract_ambiguous", "critical"],
+  ])("staat een pure arbeidsroute %s als zichtbaar concept toe", async (routingStatus, routingCode, severity) => {
+    const demand = occurrence(`occurrence-${routingStatus}`, "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    const personnelId = `personnel-${routingStatus}`;
+    entities.Personnel.records.push({ id: personnelId, name: "Conceptbeveiliger", status: "active" });
+    base44.asServiceRole.functions.invoke = async (_name, payload) => ({
+      service_date: payload.service_date,
+      decision_status: "blocked",
+      planning_assignment_allowed: false,
+      draft_assignment_allowed: true,
+      payroll_final_allowed: false,
+      employment_routing_status: routingStatus,
+      contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      blocking_reasons: ["Arbeidscontractroutering vereist aandacht."],
+    });
+
+    const result = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context(`compose-${routingStatus}-draft`));
+
+    expect(result.assignment).toMatchObject({
+      status: "draft",
+      draft_assignment_allowed: true,
+      employment_routing_status: routingStatus,
+      employment_routing_codes: [routingCode],
+      personnel_contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      warning_snapshot: [expect.objectContaining({ code: routingCode, severity })],
+    });
+    expect(entities.PlanningAuditEvent.records).toHaveLength(1);
+  });
+
+  it("blokkeert een echte resolverblokkade vóór iedere compose-write", async () => {
+    const demand = occurrence("occurrence-resolver-hard-block", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({ id: "personnel-resolver-hard-block", name: "Geblokkeerde beveiliger", status: "active" });
+    base44.asServiceRole.functions.invoke = async (_name, payload) => ({
+      ...assignableEmploymentDecision(payload),
+      decision_status: "blocked",
+      planning_assignment_allowed: false,
+      draft_assignment_allowed: false,
+      blocking_reasons: ["Vereist kwalificatiebewijs ontbreekt."],
+    });
+
+    await expect(backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-resolver-hard-block",
+      warning_snapshot: [{
+        code: "client_only_notice",
+        severity: "info",
+        message: "Clientmeldingen mogen de resolver niet overrulen.",
+      }],
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-resolver-hard-block"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        draft_assignment_allowed: false,
+        warning_codes: expect.arrayContaining(["contract_cao_blocking_2026_08_17_1"]),
+      },
+    });
+    expect(entities.PlanningShift.records).toHaveLength(0);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(0);
+    expect(entities.PlanningAssignment.records).toHaveLength(0);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(0);
+  });
+
+  it("blokkeert een verlopen beveiligingspas vóór de write, ook als daarnaast een rustwaarschuwing geldt", async () => {
     const demand = occurrence("occurrence-final-authority", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
     const personnelId = "personnel-final-authority";
@@ -2708,7 +3115,7 @@ describe("planningApi dienstsamenstelling", () => {
     entities.PersonnelSecurityPass.records.push({
       id: "security-pass-final-authority",
       personnel_id: personnelId,
-      company_id: "company-1",
+      company_id: "employer-company-1",
       pass_type: "green",
       status: "expired",
       valid_until: "2026-08-15",
@@ -2735,21 +3142,24 @@ describe("planningApi dienstsamenstelling", () => {
       published_revision: 1,
     });
 
-    const result = await backend.composeAndAssign(base44, user, {
+    await expect(backend.composeAndAssign(base44, user, {
       personnel_id: personnelId,
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
-    }, context("compose-final-server-authority"));
-
-    expect(result.assignment.warning_codes).toEqual(expect.arrayContaining([
-      "security_pass_expired",
-      "insufficient_rest",
-    ]));
-    expect(result.assignment.has_critical_warnings).toBe(true);
-    expect(result.assignment.warning_snapshot).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "security_pass_expired", severity: "critical" }),
-      expect.objectContaining({ code: "insufficient_rest", severity: "warning" }),
-    ]));
+    }, context("compose-final-server-authority"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        draft_assignment_allowed: false,
+        warning_codes: expect.arrayContaining(["security_pass_expired", "insufficient_rest"]),
+      },
+    });
+    expect(entities.PlanningShift.records.filter(item => item.id !== "shift-before-final-authority"))
+      .toHaveLength(0);
+    expect(entities.PlanningAssignment.records.filter(item => item.id !== "assignment-before-final-authority"))
+      .toHaveLength(0);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(0);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(0);
   });
 
   it("herberekent contractweekuren finaal met het geroute contract en de actuele assignment-write", async () => {
@@ -2786,37 +3196,42 @@ describe("planningApi dienstsamenstelling", () => {
         published_revision: 1,
       });
     });
-    const originalAssignmentCreate = entities.PlanningAssignment.create.bind(entities.PlanningAssignment);
-    entities.PlanningAssignment.create = async data => {
-      const created = await originalAssignmentCreate(data);
-      entities.PlanningShift.records.push({
-        id: "shift-contract-week-concurrent",
-        source_key: "manual:shift-contract-week-concurrent",
-        source_type: "manual",
-        service_name_snapshot: "Gelijktijdig toegevoegde weekdienst",
-        service_date: "2026-08-20",
-        start_time: "08:00",
-        end_time: "16:00",
-        required_count: 1,
-        status: "draft",
-        revision: 1,
-        published_revision: 0,
-      });
-      entities.PlanningAssignment.records.push({
-        id: "assignment-contract-week-concurrent",
-        shift_id: "shift-contract-week-concurrent",
-        slot_index: 0,
-        personnel_id: personnelId,
-        status: "draft",
-        revision: 1,
-        published_revision: 0,
-      });
-      return created;
-    };
-    base44.asServiceRole.functions.invoke = async () => ({
+    entities.PlanningShift.records.push({
+      id: "shift-contract-week-concurrent",
+      source_key: "manual:shift-contract-week-concurrent",
+      source_type: "manual",
+      service_name_snapshot: "Vlak voor de mutatie toegevoegde weekdienst",
+      service_date: "2026-08-20",
+      start_time: "08:00",
+      end_time: "16:00",
+      required_count: 1,
+      status: "draft",
+      revision: 1,
+      published_revision: 0,
+    });
+    entities.PlanningAssignment.records.push({
+      id: "assignment-contract-week-concurrent",
+      shift_id: "shift-contract-week-concurrent",
+      slot_index: 0,
+      personnel_id: personnelId,
+      status: "draft",
+      revision: 1,
+      published_revision: 0,
+    });
+    base44.asServiceRole.functions.invoke = async (_name, payload) => ({
+      decision_status: "assignable",
+      planning_assignment_allowed: true,
+      draft_assignment_allowed: true,
+      payroll_final_allowed: false,
+      employment_routing_status: "resolved",
+      service_date: payload.service_date,
       contract_id: "contract-final-week",
+      employing_company_id: "employer-final-week",
+      payroll_cao_key: "cao_particuliere_beveiliging",
       selected_contract: {
         id: "contract-final-week",
+        company_id: "employer-final-week",
+        cao_key: "cao_particuliere_beveiliging",
         contract_hours_per_week: 36,
         max_hours_per_week: null,
       },
@@ -2939,10 +3354,17 @@ describe("planningApi dienstsamenstelling", () => {
       if (enteredCount === 2) resolveBothEntered();
       await validationReleased;
       return {
-        data: {
+        data: assignableEmploymentDecision(payload, {
           contract_id: "contract-night",
+          employing_company_id: "employer-night",
+          payroll_cao_key: "cao_particuliere_beveiliging",
+          selected_contract: {
+            id: "contract-night",
+            company_id: "employer-night",
+            cao_key: "cao_particuliere_beveiliging",
+          },
           warnings: [`Controle ${payload.service_date}`],
-        },
+        }),
       };
     };
 
@@ -3004,13 +3426,13 @@ describe("planningApi dienstsamenstelling", () => {
       status: "active",
     });
     let assignmentValidationSawProvisionalWrite = false;
-    base44.asServiceRole.functions.invoke = async () => {
+    base44.asServiceRole.functions.invoke = async (_functionName, payload) => {
       assignmentValidationSawProvisionalWrite = entities.PlanningAssignment.records.some(item => (
         item.personnel_id === "personnel-assign-lease-callcount"
         && item.personnel_contract_id == null
         && item.revision === 1
       ));
-      return {};
+      return assignableEmploymentDecision(payload);
     };
     const calls = instrumentBackendCalls(base44, entities);
 
@@ -3025,10 +3447,10 @@ describe("planningApi dienstsamenstelling", () => {
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(10);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningAssignment.create")).toBe(1);
-    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(0);
     expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
-    expect(calls.total()).toBe(42);
-    expect(assignmentValidationSawProvisionalWrite).toBe(true);
+    expect(calls.total()).toBe(40);
+    expect(assignmentValidationSawProvisionalWrite).toBe(false);
     expect(entities.PlanningMutationCoordinator.records.every(item => item.lease === null)).toBe(true);
   });
 
@@ -3051,6 +3473,39 @@ describe("planningApi dienstsamenstelling", () => {
     }, context("compose-open-full-day"));
 
     expect(result.shift).toMatchObject({ duration_minutes: 1440, start_time: "00:00", end_time: "00:00" });
+  });
+
+  it("projecteert commerciële IDs zonder actuele resolver-snapshot als stale naar segment en dienstcontext", async () => {
+    const demand = {
+      ...occurrence("occurrence-commercial-legacy-evidence", "object-1", "08:00", "16:00", 480),
+      selling_company_id: "company-selling",
+      customer_contract_id: "contract-legacy",
+      customer_contract_line_id: "line-legacy",
+      commercial_routing_status: "resolved",
+      commercial_routing_snapshot: null,
+    };
+    const { base44 } = setup([demand]);
+
+    const result = await backend.composeShift(base44, user, {
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-commercial-legacy-evidence"));
+
+    expect(result.segments[0]).toMatchObject({
+      selling_company_id: "company-selling",
+      customer_contract_id: "contract-legacy",
+      customer_contract_line_id: "line-legacy",
+      commercial_routing_status: "stale",
+      commercial_routing_snapshot: null,
+    });
+    expect(result.shift.service_context_snapshot).toMatchObject({
+      commercial_routing_status: "stale",
+      commercial_routing_statuses: ["stale"],
+      segment_contexts: [expect.objectContaining({
+        task_occurrence_id: demand.id,
+        commercial_routing_status: "stale",
+      })],
+    });
   });
 
   it("stelt een taakdienst samen en wijzigt die zonder globale segment- of dienstlijsten", async () => {
@@ -3405,6 +3860,55 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningAuditEvent.records).toHaveLength(1);
     const finalizedOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
     expect(finalizedOccurrence.metadata?.last_compose_and_assign_recovery_status).toBeUndefined();
+  });
+
+  it("hergebruikt na compensatie geen oud inzetbewijs als de medewerker intussen niet beschikbaar is", async () => {
+    const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({
+      id: "personnel-1",
+      name: "Sam Beveiliger",
+      status: "active",
+      available_for_planning: true,
+    });
+    const originalAssignmentCreate = entities.PlanningAssignment.create.bind(entities.PlanningAssignment);
+    let failAssignmentOnce = true;
+    entities.PlanningAssignment.create = async data => {
+      if (failAssignmentOnce) {
+        failAssignmentOnce = false;
+        throw new Error("tijdelijke assignment-writefout");
+      }
+      return originalAssignmentCreate(data);
+    };
+    const payload = {
+      personnel_id: "personnel-1",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    };
+    const retryContext = context("compose-and-assign-compensated-evidence-invalidated");
+
+    await expect(backend.composeAndAssign(base44, user, payload, retryContext))
+      .rejects.toThrow("tijdelijke assignment-writefout");
+    entities.Personnel.records[0].available_for_planning = false;
+
+    await expect(backend.composeAndAssign(base44, user, payload, retryContext))
+      .rejects.toMatchObject({
+        status: 409,
+        details: {
+          code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+          warning_codes: expect.arrayContaining(["personnel_not_active"]),
+        },
+      });
+    expect(entities.PlanningShift.records).toEqual([
+      expect.objectContaining({
+        status: "cancelled",
+        metadata: expect.objectContaining({
+          compose_and_assign: expect.objectContaining({ phase: "compensated" }),
+        }),
+      }),
+    ]);
+    expect(entities.PlanningAssignment.records.filter(item => item.status !== "removed")).toEqual([]);
+    expect(entities.PlanningAuditEvent.records).toEqual([]);
   });
 
   it("laat een half opgeschoonde compensatie niet meetellen en herstelt dezelfde opdracht direct", async () => {
@@ -4104,10 +4608,13 @@ describe("planningApi dienstsamenstelling", () => {
     const { base44, entities } = setup([mondayDemand, fridayDemand]);
     const personnelId = "personnel-week-lease";
     entities.Personnel.records.push({ id: personnelId, name: "Weekgrens Beveiliger", status: "active" });
-    base44.asServiceRole.functions.invoke = async () => ({
+    base44.asServiceRole.functions.invoke = async (_name, payload) => assignableEmploymentDecision(payload, {
       contract_id: "contract-week-lease",
+      employing_company_id: "employer-week-lease",
       selected_contract: {
         id: "contract-week-lease",
+        company_id: "employer-week-lease",
+        cao_key: "cao_particuliere_beveiliging",
         contract_hours_per_week: 12,
         max_hours_per_week: null,
       },
@@ -4281,14 +4788,11 @@ describe("planningApi dienstsamenstelling", () => {
       .toBeUndefined();
   });
 
-  it("legt een overlap vast die pas tijdens de assignment-write ontstaat", async () => {
+  it("blokkeert een actuele overlap vóór compose-writes", async () => {
     const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
     entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
-    const originalAssignmentCreate = entities.PlanningAssignment.create.bind(entities.PlanningAssignment);
-    entities.PlanningAssignment.create = async data => {
-      const created = await originalAssignmentCreate(data);
-      entities.PlanningShift.records.push({
+    entities.PlanningShift.records.push({
         id: "shift-concurrent",
         source_key: "manual-concurrent",
         source_type: "manual",
@@ -4301,7 +4805,7 @@ describe("planningApi dienstsamenstelling", () => {
         revision: 1,
         published_revision: 0,
       });
-      entities.PlanningAssignment.records.push({
+    entities.PlanningAssignment.records.push({
         id: "assignment-concurrent",
         shift_id: "shift-concurrent",
         slot_index: 0,
@@ -4314,48 +4818,97 @@ describe("planningApi dienstsamenstelling", () => {
         revision: 1,
         published_revision: 0,
       });
-      return created;
-    };
     const calls = instrumentBackendCalls(base44, entities);
 
-    const result = await backend.composeAndAssign(base44, user, {
+    await expect(backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
-    }, context("compose-and-assign-final-validation"));
-
-    expect(result.assignment.has_critical_warnings).toBe(true);
-    expect(result.assignment.warning_codes).toContain("shift_overlap");
-    expect(result.assignment.metadata?.final_assignment_validation_at).toBeTruthy();
-    expect(calls.count("PlanningAssignment.create")).toBe(1);
-    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
+    }, context("compose-and-assign-final-validation"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        warning_codes: expect.arrayContaining(["shift_overlap"]),
+      },
+    });
+    expect(entities.PlanningShift.records).toHaveLength(1);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(0);
+    expect(entities.PlanningAssignment.records).toHaveLength(1);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(0);
+    expect(calls.count("PlanningAssignment.create")).toBe(0);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(0);
     expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
   });
 
-  it("herlaadt de medewerker na de assignment-write voor de definitieve geschiktheidscontrole", async () => {
+  it("blokkeert een inactieve medewerker vóór compose-writes", async () => {
     const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
     const { base44, entities } = setup([demand]);
-    entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "active" });
-    const originalAssignmentCreate = entities.PlanningAssignment.create.bind(entities.PlanningAssignment);
-    entities.PlanningAssignment.create = async data => {
-      const created = await originalAssignmentCreate(data);
-      entities.Personnel.records[0].status = "inactive";
-      return created;
-    };
+    entities.Personnel.records.push({ id: "personnel-1", name: "Sam Beveiliger", status: "inactive" });
     const calls = instrumentBackendCalls(base44, entities);
+
+    await expect(backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-1",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("compose-and-assign-final-personnel-reload"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        warning_codes: expect.arrayContaining(["personnel_not_active"]),
+      },
+    });
+    expect(entities.PlanningShift.records).toHaveLength(0);
+    expect(entities.PlanningShiftTaskSegment.records).toHaveLength(0);
+    expect(entities.PlanningAssignment.records).toHaveLength(0);
+    expect(entities.PlanningAuditEvent.records).toHaveLength(0);
+    expect(calls.count("PlanningAssignment.create")).toBe(0);
+    expect(calls.count("PlanningAssignment.updateMany")).toBe(0);
+    expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
+  });
+
+  it("accepteert een legacy medewerker zonder status alleen met expliciet is_active=true", async () => {
+    const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({
+      id: "personnel-1",
+      name: "Legacy Beveiliger",
+      is_active: true,
+    });
 
     const result = await backend.composeAndAssign(base44, user, {
       personnel_id: "personnel-1",
       segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
       expected_occurrence_revisions: { [demand.id]: 1 },
-    }, context("compose-and-assign-final-personnel-reload"));
+    }, context("compose-and-assign-legacy-active"));
 
-    expect(result.assignment.has_critical_warnings).toBe(true);
-    expect(result.assignment.warning_codes).toContain("personnel_not_active");
-    expect(result.assignment.metadata?.final_assignment_validation_at).toBeTruthy();
-    expect(calls.count("PlanningAssignment.create")).toBe(1);
-    expect(calls.count("PlanningAssignment.updateMany")).toBe(1);
-    expect(calls.count("functions.invoke:resolveCaoPlanningAssignmentDecision")).toBe(1);
+    expect(result.assignment).toMatchObject({ personnel_id: "personnel-1", status: "draft" });
+  });
+
+  it.each([
+    [{ status: "inactive", is_active: true }, "expliciet niet-actieve status"],
+    [{ status: "active", is_active: false }, "expliciet is_active=false"],
+    [{ status: undefined, is_active: undefined }, "ontbrekend actiefbewijs"],
+  ])("blokkeert %s ook als het andere legacy veld niet blokkeert", async (personnelState) => {
+    const demand = occurrence("occurrence-reception", "object-1", "08:00", "16:00", 480);
+    const { base44, entities } = setup([demand]);
+    entities.Personnel.records.push({
+      id: "personnel-1",
+      name: "Niet inzetbare beveiliger",
+      ...personnelState,
+    });
+
+    await expect(backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-1",
+      segments: [{ task_occurrence_id: demand.id, start_time: "08:00", end_time: "16:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context(`compose-and-assign-inactive-${JSON.stringify(personnelState)}`))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        warning_codes: expect.arrayContaining(["personnel_not_active"]),
+      },
+    });
+    expect(entities.PlanningAssignment.records).toEqual([]);
   });
 
   it("laat bij twee gelijktijdige composities met dezelfde occurrence-revision exact één request slagen", async () => {
@@ -4631,9 +5184,9 @@ describe("planningApi dienstsamenstelling", () => {
       prefix: "shared-boundary-success",
     });
     let validationCalls = 0;
-    base44.asServiceRole.functions.invoke = async () => {
+    base44.asServiceRole.functions.invoke = async (_name, payload) => {
       validationCalls += 1;
-      return {};
+      return assignableEmploymentDecision(payload);
     };
     const shiftCount = entities.PlanningShift.records.length;
     const segmentCount = entities.PlanningShiftTaskSegment.records.length;
@@ -5413,6 +5966,64 @@ describe("planningApi dienstsamenstelling", () => {
     expect(entities.PlanningAuditEvent.records.filter(item => item.action === "update_shift_composition")).toHaveLength(1);
   });
 
+  it("hergebruikt afgerond inzetbewijs nooit voor een nieuwe dienstsamenstelling", async () => {
+    const demand = occurrence("occurrence-reception-fresh-composition-evidence", "object-1", "06:00", "18:00", 720);
+    const { base44, entities } = setup([demand]);
+    const personnel = {
+      id: "personnel-fresh-composition-evidence",
+      name: "Actuele Beveiliger",
+      status: "active",
+      available_for_planning: true,
+    };
+    entities.Personnel.records.push(personnel);
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnel.id,
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("fresh-composition-evidence-compose"));
+
+    const firstOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const firstUpdate = await backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: composed.shift.id,
+      expected_shift_revision: composed.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: firstOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "16:00" }],
+    }, context("fresh-composition-evidence-first-update"));
+    expect(firstUpdate.shift.metadata?.planning_composition?.assignment_draft_evidence_by_assignment_id)
+      .toMatchObject({
+        [composed.assignment.id]: {
+          personnel_id: personnel.id,
+          draft_assignment_allowed: true,
+        },
+      });
+
+    personnel.available_for_planning = false;
+    const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
+    const businessStateBefore = structuredClone({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    });
+    await expect(backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: firstUpdate.shift.id,
+      expected_shift_revision: firstUpdate.shift.revision,
+      expected_occurrence_revisions: { [demand.id]: currentOccurrence.revision },
+      segments: [{ task_occurrence_id: demand.id, start_time: "06:00", end_time: "12:00" }],
+    }, context("fresh-composition-evidence-second-update"))).rejects.toMatchObject({
+      status: 409,
+      details: expect.objectContaining({ code: "ASSIGNMENT_DRAFT_NOT_ALLOWED" }),
+    });
+    expect({
+      shifts: entities.PlanningShift.records,
+      segments: entities.PlanningShiftTaskSegment.records,
+      assignments: entities.PlanningAssignment.records,
+      occurrences: entities.PlanningTaskOccurrence.records,
+    }).toEqual(businessStateBefore);
+  });
+
   it("laat alleen de oorspronkelijke actor een pending update_shift_composition herstellen", async () => {
     const demand = occurrence("occurrence-reception-actor-recovery", "object-1", "06:00", "20:00", 840);
     const { base44, entities } = setup([demand]);
@@ -5644,9 +6255,9 @@ describe("planningApi dienstsamenstelling", () => {
     }, context("partition-resize-compose"));
     const currentOccurrence = await entities.PlanningTaskOccurrence.get(demand.id);
     let validationCalls = 0;
-    base44.asServiceRole.functions.invoke = async () => {
+    base44.asServiceRole.functions.invoke = async (_name, resolverPayload) => {
       validationCalls += 1;
-      return {};
+      return assignableEmploymentDecision(resolverPayload);
     };
     const calls = instrumentBackendCalls(base44, entities);
     const payload = {
@@ -6115,6 +6726,84 @@ describe("planningApi dienstsamenstelling", () => {
     )).toHaveLength(1);
   });
 
+  it("rondt een geautoriseerde resize-auditretry af met opgeslagen inzetbewijs", async () => {
+    const demand = occurrence("occurrence-partition-evidence-recovery", "object-1", "10:00", "18:00", 480);
+    const { base44, entities } = setup([demand]);
+    const personnelId = "personnel-partition-evidence-recovery";
+    entities.Personnel.records.push({
+      id: personnelId,
+      name: "Herstelbeveiliger",
+      status: "active",
+      available_for_planning: true,
+    });
+    const composed = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{ task_occurrence_id: demand.id, start_time: "10:00", end_time: "18:00" }],
+      expected_occurrence_revisions: { [demand.id]: 1 },
+    }, context("partition-evidence-recovery-compose"));
+    const payload = {
+      shift_id: composed.shift.id,
+      segment_id: composed.segments[0].id,
+      start_time: "10:00",
+      end_time: "14:00",
+      expected_shift_revision: composed.shift.revision,
+      expected_segment_revision: composed.segments[0].revision,
+      expected_occurrence_revision: (await entities.PlanningTaskOccurrence.get(demand.id)).revision,
+      expected_assignment_revisions: { [composed.assignment.id]: composed.assignment.revision },
+    };
+    let validationCalls = 0;
+    base44.asServiceRole.functions.invoke = async (_name, resolverPayload) => {
+      validationCalls += 1;
+      return assignableEmploymentDecision(resolverPayload);
+    };
+    const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
+    let failOnce = true;
+    entities.PlanningAuditEvent.create = async data => {
+      if (failOnce && data.action === "resize_task_shift_preserving_coverage") {
+        failOnce = false;
+        throw new Error("tijdelijke resize-auditfout na opgeslagen inzetbewijs");
+      }
+      return originalAuditCreate(data);
+    };
+    const mutation = context("partition-evidence-recovery-resize");
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(base44, user, payload, mutation))
+      .rejects.toThrow("tijdelijke resize-auditfout na opgeslagen inzetbewijs");
+    expect(validationCalls).toBe(1);
+    const pendingShift = await entities.PlanningShift.get(composed.shift.id);
+    expect(pendingShift.metadata?.task_partition_mutation).toMatchObject({
+      phase: "state_written_audit_pending",
+      assignment_eligibility_by_id: {
+        [composed.assignment.id]: {
+          assignment_id: composed.assignment.id,
+          personnel_id: personnelId,
+          draft_assignment_allowed: true,
+        },
+      },
+    });
+
+    entities.Personnel.records.find(item => item.id === personnelId).available_for_planning = false;
+    base44.asServiceRole.functions.invoke = async () => {
+      validationCalls += 1;
+      return {
+        decision_status: "blocked",
+        planning_assignment_allowed: false,
+        draft_assignment_allowed: false,
+        employment_routing_status: "resolved",
+        contract_id: "personnel-contract-1",
+        employing_company_id: "employer-company-1",
+        payroll_cao_key: "cao_particuliere_beveiliging",
+      };
+    };
+    const recovered = await backend.resizeTaskShiftPreservingCoverage(base44, user, payload, mutation);
+
+    expect(recovered.shift).toMatchObject({ start_time: "10:00", end_time: "14:00" });
+    expect(validationCalls).toBe(1);
+    expect(entities.PlanningAuditEvent.records.filter(item => (
+      item.action === "resize_task_shift_preserving_coverage"
+    ))).toHaveLength(1);
+  });
+
   it("finaliseert een geaudite resize na final-markercrash automatisch bij bootstrap", async () => {
     const demand = occurrence("occurrence-partition-bootstrap-recovery", "object-1", "10:00", "18:00", 480);
     const { base44, entities } = setup([demand]);
@@ -6535,9 +7224,9 @@ describe("planningApi dienstsamenstelling", () => {
       payload,
     } = fixture;
     let validationCalls = 0;
-    base44.asServiceRole.functions.invoke = async () => {
+    base44.asServiceRole.functions.invoke = async (_name, resolverPayload) => {
       validationCalls += 1;
-      return {};
+      return assignableEmploymentDecision(resolverPayload);
     };
     const assignmentCountBefore = entities.PlanningAssignment.records.length;
 
@@ -6682,9 +7371,9 @@ describe("planningApi dienstsamenstelling", () => {
     const fixture = await prepareAssignedTaskPartition({ key: "partition-assign-merge-recovery" });
     const { base44, entities, targetShift, adjacentShift, adjacentAssignment, payload } = fixture;
     let validationCalls = 0;
-    base44.asServiceRole.functions.invoke = async () => {
+    base44.asServiceRole.functions.invoke = async (_name, resolverPayload) => {
       validationCalls += 1;
-      return {};
+      return assignableEmploymentDecision(resolverPayload);
     };
     const originalAuditCreate = entities.PlanningAuditEvent.create.bind(entities.PlanningAuditEvent);
     let failOnce = true;
@@ -6845,9 +7534,9 @@ describe("planningApi dienstsamenstelling", () => {
       splitTime: "02:00",
     });
     let validationCalls = 0;
-    fixture.base44.asServiceRole.functions.invoke = async () => {
+    fixture.base44.asServiceRole.functions.invoke = async (_name, resolverPayload) => {
       validationCalls += 1;
-      return {};
+      return assignableEmploymentDecision(resolverPayload);
     };
 
     const result = await backend.assignAndMergeTaskShiftPartition(
@@ -7278,7 +7967,7 @@ describe("planningApi dienstsamenstelling", () => {
 });
 
 describe("planningApi medewerker/dag-reserveringen", () => {
-  it("herstelt een nachtdienst onder beide dagleases en ververst de medewerkerstatus finaal", async () => {
+  it("blokkeert herstel van een nachtdienst voor een inactieve medewerker onder beide dagleases", async () => {
     const { base44, entities } = setup([]);
     entities.PlanningShift.records.push({
       id: "shift-night-restore",
@@ -7307,29 +7996,24 @@ describe("planningApi medewerker/dag-reserveringen", () => {
       revision: 1,
       published_revision: 0,
     });
-    entities.Personnel.records.push({ id: "personnel-night", name: "Nacht Beveiliger", status: "active" });
-    const originalAssignmentUpdateMany = entities.PlanningAssignment.updateMany.bind(entities.PlanningAssignment);
-    let deactivateAfterRestoreWrite = true;
-    entities.PlanningAssignment.updateMany = async (query, update) => {
-      const response = await originalAssignmentUpdateMany(query, update);
-      if (deactivateAfterRestoreWrite && update.$set?.status === "draft") {
-        deactivateAfterRestoreWrite = false;
-        entities.Personnel.records[0].status = "inactive";
-      }
-      return response;
-    };
+    entities.Personnel.records.push({ id: "personnel-night", name: "Nacht Beveiliger", status: "inactive" });
 
-    const result = await backend.restoreAssignment(base44, user, {
+    await expect(backend.restoreAssignment(base44, user, {
       assignment_id: "assignment-night-restore",
       expected_shift_revision: 1,
-    }, context("restore-night-assignment"));
-
-    expect(result.assignment).toMatchObject({
-      status: "draft",
-      has_critical_warnings: true,
-      warning_codes: expect.arrayContaining(["personnel_not_active"]),
+    }, context("restore-night-assignment"))).rejects.toMatchObject({
+      status: 409,
+      details: {
+        code: "ASSIGNMENT_DRAFT_NOT_ALLOWED",
+        warning_codes: expect.arrayContaining(["personnel_not_active"]),
+      },
     });
-    expect(result.assignment.metadata?.final_assignment_validation_at).toBeTruthy();
+
+    expect(await entities.PlanningAssignment.get("assignment-night-restore")).toMatchObject({
+      status: "removed",
+      revision: 1,
+    });
+    expect(entities.PlanningAuditEvent.records).toHaveLength(0);
     expect(entities.PlanningMutationCoordinator.records
       .filter(item => item.resource_type === "personnel_day")
       .map(item => item.resource_id)
@@ -7466,6 +8150,73 @@ describe("planningApi medewerker/dag-reserveringen", () => {
 });
 
 describe("planningApi bootstrap snapshots", () => {
+  it("wist verouderde arbeidsroutevelden wanneer de actuele contractcontrole expliciet geen contract vindt", async () => {
+    const { base44, entities } = setup([]);
+    entities.Route.records.push({
+      id: "route-bootstrap-routing",
+      name: "Route arbeidsrouting",
+      time_window_start: "08:00",
+      time_window_end: "09:00",
+      task_ids: [],
+    });
+    entities.RouteExecution.records.push({
+      id: "execution-bootstrap-routing",
+      source_route_id: "route-bootstrap-routing",
+      route_id: "route-bootstrap-routing",
+      route_name: "Route arbeidsrouting",
+      service_date: "2099-09-05",
+      shift_start_time: "08:00",
+      shift_end_time: "09:00",
+      employee_id: "personnel-bootstrap-routing",
+      employee_name: "Route medewerker",
+      personnel_contract_id: "legacy-contract",
+      employing_company_id: "legacy-employer",
+      payroll_cao_key: "legacy-cao",
+      contract_routing_snapshot: {
+        employment_routing_status: "resolved",
+        contract_id: "legacy-contract",
+        employing_company_id: "legacy-employer",
+        payroll_cao_key: "legacy-cao",
+      },
+      status: "planned",
+    });
+    entities.Personnel.records.push({
+      id: "personnel-bootstrap-routing",
+      name: "Route medewerker",
+      status: "active",
+    });
+    base44.asServiceRole.functions.invoke = async (_name, payload) => ({
+      service_date: payload.service_date,
+      decision_status: "blocked",
+      planning_assignment_allowed: false,
+      payroll_final_allowed: false,
+      employment_routing_status: "missing_contract",
+      contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      blocking_reasons: ["Geen actief arbeidscontract gevonden."],
+      manual_review_reasons: [],
+      warnings: [],
+    });
+
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-09-05",
+      period_end: "2099-09-05",
+    }, context("bootstrap-clears-stale-employment-route"));
+
+    expect(entities.PlanningAssignment.records).toHaveLength(1);
+    expect(entities.PlanningAssignment.records[0]).toMatchObject({
+      personnel_contract_id: null,
+      employing_company_id: null,
+      payroll_cao_key: null,
+      employment_routing_status: "missing_contract",
+      contract_routing_snapshot: expect.objectContaining({
+        employment_routing_status: "missing_contract",
+        contract_id: null,
+      }),
+    });
+  });
+
   it("leest occurrence-, segment- en dienstsnapshot aan het einde gelijktijdig", async () => {
     const { base44, entities } = setup([]);
     let enteredFinalReadCount = 0;

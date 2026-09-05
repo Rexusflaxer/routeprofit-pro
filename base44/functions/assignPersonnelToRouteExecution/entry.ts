@@ -4,6 +4,103 @@ function nowIso() { return new Date().toISOString(); }
 function unwrapFunctionData(response) { return response?.data || response || null; }
 function unique(values) { return [...new Set((values || []).filter(Boolean).map(String))]; }
 
+const COMMERCIAL_TASK_TYPE_KEYS = new Set([
+  'object_security', 'fire_closing_round', 'external_closing_round',
+  'external_control_round', 'opening_round', 'mobile_control_round',
+  'reception', 'closing_assistance', 'access_control', 'fire_watch', 'concierge',
+]);
+const LEGACY_COMMERCIAL_TASK_TYPE_ALIASES = {
+  objectbeveiliging: 'object_security',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  externe_sluitronde: 'external_closing_round',
+  externe_controleronde: 'external_control_round',
+  openingsronde: 'opening_round',
+  mobiele_controleronde: 'mobile_control_round',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  sluitbegeleiding: 'closing_assistance',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  portier_concierge: 'concierge',
+  concierge: 'concierge',
+};
+function compactRoutingValue(value) { return String(value ?? '').trim(); }
+function normalizedCommercialTaskToken(value) {
+  return compactRoutingValue(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+function legacyCommercialTaskTypeKey(value) {
+  const normalized = normalizedCommercialTaskToken(value);
+  if (!normalized) return null;
+  if (COMMERCIAL_TASK_TYPE_KEYS.has(normalized) && normalized !== 'other') return normalized;
+  return LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[normalized] || null;
+}
+function isCanonicalCommercialTaskTypeKey(value) {
+  const key = compactRoutingValue(value);
+  return COMMERCIAL_TASK_TYPE_KEYS.has(key) || /^other:[a-z0-9][a-z0-9._:-]{0,159}$/.test(key);
+}
+function routingProjectionError(code, message, details = {}) {
+  const error = new Error(message);
+  error.status = 409;
+  error.code = code;
+  error.details = details;
+  return error;
+}
+function projectedTaskTypeKey(taskExecution, sourceTask = {}) {
+  const savedContext = taskExecution?.contract_routing_snapshot?.service_context || {};
+  const explicitKeys = unique([
+    taskExecution?.task_type_key,
+    taskExecution?.commercial_routing_snapshot?.task_type_key,
+    savedContext.task_type_key,
+    sourceTask?.task_type_key,
+  ].map(compactRoutingValue));
+  const invalidExplicitKeys = explicitKeys.filter(key => !isCanonicalCommercialTaskTypeKey(key));
+  if (invalidExplicitKeys.length) {
+    throw routingProjectionError('TASK_EXECUTION_TASK_TYPE_INVALID', 'De taakuitvoering bevat geen geldige canonieke task_type_key.', { task_type_keys: invalidExplicitKeys });
+  }
+  const legacyKeys = unique([taskExecution?.task_type, savedContext.task_type, sourceTask?.task_type].map(legacyCommercialTaskTypeKey));
+  const candidates = unique([...explicitKeys, ...legacyKeys]);
+  if (candidates.length > 1) {
+    throw routingProjectionError('TASK_EXECUTION_TASK_TYPE_MISMATCH', 'De canonieke taaksoort komt niet overeen met de legacy taaksoort.', { task_type_keys: candidates });
+  }
+  return candidates[0] || null;
+}
+function resolvedEmploymentProjection(resolution) {
+  const personnelContractIds = unique([
+    resolution?.contract_id,
+    resolution?.selected_contract?.id,
+  ]);
+  const employerIds = unique([
+    resolution?.employing_company_id,
+    resolution?.company_id,
+    resolution?.selected_contract?.company_id,
+  ]);
+  const payrollCaoKeys = unique([
+    resolution?.payroll_cao_key,
+    resolution?.cao_key,
+    resolution?.selected_contract?.cao_key,
+  ]);
+  if (personnelContractIds.length !== 1 || employerIds.length !== 1 || payrollCaoKeys.length !== 1) {
+    throw routingProjectionError('TASK_EXECUTION_EMPLOYMENT_ROUTE_MISMATCH', 'Arbeidscontract, werkgever of loon-CAO is niet eenduidig in de taakroutering.', {
+      personnel_contract_ids: personnelContractIds,
+      employing_company_ids: employerIds,
+      payroll_cao_keys: payrollCaoKeys,
+    });
+  }
+  return {
+    personnel_contract_id: personnelContractIds[0],
+    employing_company_id: employerIds[0],
+    payroll_cao_key: payrollCaoKeys[0],
+    supplying_company_id: resolution?.supplying_company_id || null,
+  };
+}
+
 function normalizeRoutingStatus(resolution) {
   if (!resolution) return 'blocked';
   if (resolution.status === 'resolved' && resolution.planning_allowed === true) return 'resolved';
@@ -28,6 +125,8 @@ function buildTaskContext(taskExecution, sourceTask, object, sourceRoute, routeE
     service_date: routeExecution.service_date,
     operating_company_id: operatingCompanyId,
     company_id: operatingCompanyId,
+    selling_company_id: savedContext.selling_company_id || taskExecution.selling_company_id || null,
+    service_responsible_company_id: savedContext.service_responsible_company_id || taskExecution.service_responsible_company_id || null,
     cao_key: savedContext.cao_key
       || taskExecution.contract_cao_key
       || sourceTask.cao_key
@@ -40,6 +139,7 @@ function buildTaskContext(taskExecution, sourceTask, object, sourceRoute, routeE
       || object.default_service_function_type
       || null,
     task_type: savedContext.task_type || taskExecution.task_type || sourceTask.task_type || null,
+    task_type_key: projectedTaskTypeKey(taskExecution, sourceTask),
     cao_function_group: savedContext.cao_function_group
       || sourceTask.required_cao_function_group
       || object.default_cao_function_group
@@ -88,9 +188,12 @@ function contextKey(context) {
   return JSON.stringify({
     service_date: context.service_date,
     operating_company_id: context.operating_company_id,
+    selling_company_id: context.selling_company_id,
+    service_responsible_company_id: context.service_responsible_company_id,
     cao_key: context.cao_key,
     function_type: context.function_type,
     task_type: context.task_type,
+    task_type_key: context.task_type_key,
     cao_function_group: context.cao_function_group,
     cao_function_level: context.cao_function_level,
     security_role_status: context.security_role_status,
@@ -110,8 +213,10 @@ function compactRoutingSnapshot(resolution, serviceContext, source, assignedBy) 
     resolved_by: assignedBy || null,
     personnel_id: resolution?.personnel_id || null,
     company_id: resolution?.company_id || serviceContext.operating_company_id || null,
+    employing_company_id: resolution?.employing_company_id || resolution?.company_id || resolution?.selected_contract?.company_id || null,
     contract_id: resolution?.contract_id || resolution?.selected_contract?.id || null,
     cao_key: resolution?.cao_key || resolution?.selected_contract?.cao_key || serviceContext.cao_key || null,
+    payroll_cao_key: resolution?.payroll_cao_key || resolution?.cao_key || resolution?.selected_contract?.cao_key || null,
     cao_configuration_id: resolution?.cao_configuration_id || null,
     planning_allowed: resolution?.planning_allowed === true,
     payroll_final_allowed: resolution?.payroll_final_allowed === true,
@@ -173,6 +278,9 @@ async function clearAssignment(base44, routeExecution, taskExecutions, user) {
     const serviceContext = task.contract_routing_snapshot?.service_context || null;
     await base44.asServiceRole.entities.TaskExecution.update(task.id, {
       personnel_contract_id: null,
+      employing_company_id: null,
+      supplying_company_id: null,
+      payroll_cao_key: null,
       contract_function_key: serviceContext?.function_type || task.contract_function_key || null,
       contract_cao_key: serviceContext?.cao_key || task.contract_cao_key || null,
       contract_routing_status: 'not_applicable',
@@ -281,15 +389,21 @@ Deno.serve(async (req) => {
     }
 
     const resolutions = contexts.map(context => resolutionByContext.get(contextKey(context)));
-    const contractIds = unique(resolutions.map(resolution => resolution?.contract_id || resolution?.selected_contract?.id));
-    if (contractIds.length !== 1) {
+    let employmentProjections;
+    try {
+      employmentProjections = resolutions.map(resolvedEmploymentProjection);
+    } catch (error) {
       return Response.json({
         success: false,
         assignment_status: 'blocked',
-        error: 'De taken in deze route leiden niet tot precies één arbeidscontract. Splits de route of herstel functie- en bedrijfscontext.',
-        contract_ids: contractIds,
-      }, { status: 409 });
+        error: error?.message || String(error),
+        code: error?.code || 'TASK_EXECUTION_EMPLOYMENT_ROUTE_MISMATCH',
+        details: error?.details || null,
+      }, { status: Number(error?.status || 409) });
     }
+    const contractIds = unique(employmentProjections.map(projection => projection.personnel_contract_id));
+    const employingCompanyIds = unique(employmentProjections.map(projection => projection.employing_company_id));
+    const payrollCaoKeys = unique(employmentProjections.map(projection => projection.payroll_cao_key));
 
     const assignedBy = user?.email || user?.id || null;
     const snapshotsByKey = new Map(contexts.map(context => [
@@ -305,7 +419,12 @@ Deno.serve(async (req) => {
       resolved_by: assignedBy,
       personnel_id: personnelId,
       company_id: operatingCompanyIds[0],
-      contract_id: contractIds[0],
+      employing_company_id: employingCompanyIds.length === 1 ? employingCompanyIds[0] : null,
+      employing_company_ids: employingCompanyIds,
+      contract_id: contractIds.length === 1 ? contractIds[0] : null,
+      contract_ids: contractIds,
+      payroll_cao_key: payrollCaoKeys.length === 1 ? payrollCaoKeys[0] : null,
+      payroll_cao_keys: payrollCaoKeys,
       function_keys: functionKeys,
       cao_keys: caoKeys,
       task_contexts: [...new Map(contexts.map(context => [contextKey(context), snapshotsByKey.get(contextKey(context))])).values()],
@@ -315,9 +434,14 @@ Deno.serve(async (req) => {
       const task = taskExecutions[index];
       const context = contexts[index];
       const snapshot = snapshotsByKey.get(contextKey(context));
+      const employmentProjection = employmentProjections[index];
       await base44.asServiceRole.entities.TaskExecution.update(task.id, {
+        task_type_key: context.task_type_key,
         operating_company_id: context.operating_company_id,
-        personnel_contract_id: contractIds[0],
+        personnel_contract_id: employmentProjection.personnel_contract_id,
+        employing_company_id: employmentProjection.employing_company_id,
+        supplying_company_id: employmentProjection.supplying_company_id,
+        payroll_cao_key: employmentProjection.payroll_cao_key,
         contract_function_key: context.function_type || snapshot?.selected_contract?.function_type || null,
         contract_cao_key: snapshot?.cao_key || context.cao_key || null,
         contract_routing_status: 'resolved',
@@ -330,7 +454,7 @@ Deno.serve(async (req) => {
       employee_id: personnelId,
       employee_name: employeeName,
       operating_company_id: operatingCompanyIds[0],
-      personnel_contract_id: contractIds[0],
+      personnel_contract_id: contractIds.length === 1 ? contractIds[0] : null,
       contract_function_key: functionKeys.length === 1 ? functionKeys[0] : null,
       contract_cao_key: caoKeys.length === 1 ? caoKeys[0] : null,
       contract_routing_status: 'resolved',
@@ -342,12 +466,15 @@ Deno.serve(async (req) => {
       success: true,
       assignment_status: 'resolved',
       route_execution: updatedRoute,
-      personnel_contract_id: contractIds[0],
+      personnel_contract_id: contractIds.length === 1 ? contractIds[0] : null,
+      personnel_contract_ids: contractIds,
       function_keys: functionKeys,
       cao_keys: caoKeys,
       routing_snapshot: routeSnapshot,
     });
   } catch (error) {
-    return Response.json({ error: error?.message || String(error) }, { status: 500 });
+    return Response.json({ error: error?.message || String(error), code: error?.code || null, details: error?.details || null }, { status: Number(error?.status || 500) });
   }
 });
+
+export { projectedTaskTypeKey, resolvedEmploymentProjection };
