@@ -185,6 +185,55 @@ describe("Planning matrix contractkoppelingen", () => {
     expect(screen.queryByText("Klantcontract koppelen")).not.toBeInTheDocument();
   });
 
+  it("laat een actueel occurrence-bewijs leiden boven oude commerciele shift- en segmentvelden", () => {
+    const currentOccurrence = occurrence(resolvedCustomerRoute);
+    const staleShift = {
+      id: "shift-stale-commercial-snapshot",
+      source_type: "task",
+      customer_id: currentOccurrence.customer_id,
+      object_id: currentOccurrence.object_id,
+      commercial_routing_status: "missing_contract",
+    };
+    const staleSegment = {
+      id: "segment-stale-commercial-snapshot",
+      shift_id: staleShift.id,
+      task_occurrence_id: currentOccurrence.id,
+      object_task_definition_id: currentOccurrence.object_task_definition_id,
+      customer_id: currentOccurrence.customer_id,
+      object_id: currentOccurrence.object_id,
+      task_type_key: currentOccurrence.task_type_key,
+      start_date: currentOccurrence.service_date,
+      end_date: currentOccurrence.end_date,
+      status: "draft",
+      commercial_routing_status: "missing_contract",
+    };
+
+    expect(customerTaskContractIndicatorState({
+      occurrence: currentOccurrence,
+      shift: staleShift,
+      segments: [staleSegment],
+    })).toBe("resolved");
+  });
+
+  it("houdt een operationele segmentafwijking zichtbaar ondanks een geldig contractbewijs", () => {
+    const currentOccurrence = occurrence(resolvedCustomerRoute);
+    expect(customerTaskContractIndicatorState({
+      occurrence: currentOccurrence,
+      segments: [{
+        id: "segment-wrong-object",
+        task_occurrence_id: currentOccurrence.id,
+        object_task_definition_id: currentOccurrence.object_task_definition_id,
+        customer_id: currentOccurrence.customer_id,
+        object_id: "object-elsewhere",
+        task_type_key: currentOccurrence.task_type_key,
+        start_date: currentOccurrence.service_date,
+        end_date: currentOccurrence.end_date,
+        status: "draft",
+        commercial_routing_status: "missing_contract",
+      }],
+    })).toBe("attention");
+  });
+
   it("houdt een losse contractregel zonder contract en verkopend bedrijf zichtbaar onvolledig", () => {
     expect(customerTaskContractIndicatorState({
       occurrence: occurrence({ customer_contract_line_id: "contract-line-1" }),

@@ -479,6 +479,34 @@ function customerCommercialContextPresent(record) {
     || Boolean(record?.commercial_routing_snapshot);
 }
 
+function taskSegmentCommercialScopeConflicts(segment, occurrence) {
+  if (!segment || !occurrence) return false;
+  const comparisons = [
+    [segment.customer_id, occurrence.customer_id],
+    [segment.object_id, occurrence.object_id],
+    [segment.object_task_definition_id, occurrence.object_task_definition_id],
+  ];
+  if (comparisons.some(([left, right]) => (
+    present(left) && present(right) && String(left) !== String(right)
+  ))) return true;
+
+  const segmentTaskType = canonicalContractTaskTypeKey(segment.task_type_key || segment.task_type);
+  const occurrenceTaskType = canonicalContractTaskTypeKey(occurrence.task_type_key || occurrence.task_type);
+  if (segmentTaskType && occurrenceTaskType && segmentTaskType !== occurrenceTaskType) return true;
+
+  const occurrenceStart = String(occurrence.service_date || "");
+  const occurrenceEnd = String(occurrence.end_date || occurrenceStart);
+  const segmentStart = String(segment.start_date || segment.service_date || "");
+  const segmentEnd = String(segment.end_date || segmentStart);
+  return Boolean(
+    occurrenceStart
+    && occurrenceEnd
+    && segmentStart
+    && segmentEnd
+    && (segmentStart < occurrenceStart || segmentEnd > occurrenceEnd),
+  );
+}
+
 export function customerTaskContractIndicatorState({
   occurrence = null,
   shift = null,
@@ -486,14 +514,29 @@ export function customerTaskContractIndicatorState({
   hasOpenDemand = false,
 } = {}) {
   const taskSegments = segments.filter(item => item?.status !== "removed" && customerTaskRecord(item));
-  const records = [occurrence, shift, ...taskSegments].filter(Boolean);
+  const occurrenceSegments = occurrence
+    ? taskSegments.filter(item => String(item.task_occurrence_id || "") === String(occurrence.id || ""))
+    : [];
+  if (occurrenceSegments.some(segment => taskSegmentCommercialScopeConflicts(segment, occurrence))) {
+    return "attention";
+  }
+  // De occurrence is de actuele contractroutering van een objecttaak. Shift-
+  // en segmentvelden zijn publicatiesnapshots en mogen na een later gekoppeld
+  // klantcontract niet een nieuwer, geldig occurrence-bewijs overschrijven.
+  // Zonder occurrence zijn taaksegmenten specifieker dan de geaggregeerde
+  // shift; alleen een shift zonder taaksegmenten bewijst zijn eigen route.
+  const records = occurrence
+    ? [occurrence]
+    : taskSegments.length
+      ? taskSegments
+      : [shift].filter(Boolean);
   const explicitState = records.map(record => explicitRoutingIndicatorState(record, "customer"));
   if (explicitState.includes("attention")) return "attention";
   if (explicitState.includes("missing")) return "missing";
   if (records.some(record => routingHasSeriousSignal(record, "customer"))) return "attention";
   if (records.some(record => routingHasMissingSignal(record, "customer"))) return "missing";
 
-  const proofRecords = occurrence ? [occurrence, ...taskSegments] : taskSegments;
+  const proofRecords = records;
   const evidenceStates = proofRecords.map(customerCommercialEvidenceState);
   if (evidenceStates.includes("invalid")) return "attention";
   if (

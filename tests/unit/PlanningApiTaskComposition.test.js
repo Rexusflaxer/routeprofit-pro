@@ -3019,7 +3019,7 @@ describe("planningApi dienstsamenstelling", () => {
     expect(calls.count("PlanningAssignment.updateMany")).toBe(0);
     expect(calls.count("PlanningMutationCoordinator.get")).toBe(0);
     expect(calls.count("PlanningMutationCoordinator.updateMany")).toBe(16);
-    expect(calls.total()).toBe(63);
+    expect(calls.total()).toBe(64);
     expect(entities.PlanningAuditEvent.records).toEqual([
       expect.objectContaining({
         action: "compose_and_assign",
@@ -8150,6 +8150,101 @@ describe("planningApi medewerker/dag-reserveringen", () => {
 });
 
 describe("planningApi bootstrap snapshots", () => {
+  async function prepareCommercialWindowTask(key) {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key,
+      withSecurityPlan: true,
+    });
+    const serviceDate = "2099-08-24";
+    await backend.bootstrapRange(base44, user, {
+      period_start: serviceDate,
+      period_end: serviceDate,
+    }, context(`bootstrap-${key}-initial`));
+    const taskOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === serviceDate
+    ));
+    const personnelId = `personnel-${key}`;
+    entities.Personnel.records.push({
+      id: personnelId,
+      name: "Commerciële venstertest",
+      status: "active",
+    });
+    const composition = await backend.composeAndAssign(base44, user, {
+      personnel_id: personnelId,
+      segments: [{
+        task_occurrence_id: taskOccurrence.id,
+        start_date: taskOccurrence.service_date,
+        end_date: taskOccurrence.end_date,
+        start_time: taskOccurrence.window_start_time,
+        end_time: taskOccurrence.window_end_time,
+      }],
+      expected_occurrence_revisions: {
+        [taskOccurrence.id]: taskOccurrence.revision,
+      },
+    }, context(`compose-${key}`));
+    return {
+      base44,
+      entities,
+      serviceDate,
+      taskOccurrence,
+      personnelId,
+      composition,
+    };
+  }
+
+  function advanceCommercialContractVersion(entities) {
+    for (const contract of entities.CustomerContract.records) {
+      contract.version = Number(contract.version || 0) + 1;
+    }
+    for (const line of entities.CustomerContractLine.records) {
+      if (line.task_type_key === "reception") {
+        line.version = Number(line.version || 0) + 1;
+      }
+    }
+  }
+
+  async function refreshCommercialWindow(fixture, key) {
+    const before = await fixture.entities.PlanningTaskOccurrence.get(fixture.taskOccurrence.id);
+    advanceCommercialContractVersion(fixture.entities);
+    const bootstrap = await backend.bootstrapRange(fixture.base44, user, {
+      period_start: fixture.serviceDate,
+      period_end: fixture.serviceDate,
+    }, context(`bootstrap-${key}-commercial-refresh`));
+    const after = await fixture.entities.PlanningTaskOccurrence.get(fixture.taskOccurrence.id);
+    expect(bootstrap.refreshed_task_occurrence_ids).toContain(fixture.taskOccurrence.id);
+    expect(after.revision).toBe(before.revision + 1);
+    expect(after.metadata?.non_operational_revision_window).toMatchObject({
+      from_revision: before.revision,
+      to_revision: after.revision,
+    });
+    return { before, after };
+  }
+
+  async function splitCommercialWindowTask(fixture, key) {
+    const currentOccurrence = await fixture.entities.PlanningTaskOccurrence.get(
+      fixture.taskOccurrence.id,
+    );
+    return backend.resizeTaskShiftPreservingCoverage(fixture.base44, user, {
+      shift_id: fixture.composition.shift.id,
+      segment_id: fixture.composition.segments[0].id,
+      start_date: fixture.serviceDate,
+      start_time: "06:30",
+      end_date: fixture.serviceDate,
+      end_time: "15:30",
+      expected_shift_revision: fixture.composition.shift.revision,
+      expected_segment_revision: fixture.composition.segments[0].revision,
+      expected_occurrence_revision: currentOccurrence.revision,
+      expected_assignment_revisions: {
+        [fixture.composition.assignment.id]: fixture.composition.assignment.revision,
+      },
+    }, context(`resize-${key}-split`));
+  }
+
   it("wist verouderde arbeidsroutevelden wanneer de actuele contractcontrole expliciet geen contract vindt", async () => {
     const { base44, entities } = setup([]);
     entities.Route.records.push({
@@ -8215,6 +8310,664 @@ describe("planningApi bootstrap snapshots", () => {
         contract_id: null,
       }),
     });
+  });
+
+  it("vult commerciële legacyvelden van een ingeplande taak in-place aan", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "commercial-legacy-in-place",
+      withSecurityPlan: true,
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-legacy-in-place-first"));
+    const occurrenceRecord = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    entities.Personnel.records.push({
+      id: "personnel-commercial-legacy-in-place",
+      name: "Legacy beveiliger",
+      status: "active",
+    });
+    const composition = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-commercial-legacy-in-place",
+      segments: [{
+        task_occurrence_id: occurrenceRecord.id,
+        start_date: occurrenceRecord.service_date,
+        end_date: occurrenceRecord.end_date,
+        start_time: occurrenceRecord.window_start_time,
+        end_time: occurrenceRecord.window_end_time,
+      }],
+      expected_occurrence_revisions: {
+        [occurrenceRecord.id]: occurrenceRecord.revision,
+      },
+    }, context("compose-commercial-legacy-in-place"));
+    const storedOccurrence = entities.PlanningTaskOccurrence.records.find(item => (
+      item.id === occurrenceRecord.id
+    ));
+    const commercialRefreshBasisRevision = storedOccurrence.revision;
+    for (const field of [
+      "service_responsible_company_id",
+      "selling_company_id",
+      "customer_contract_id",
+      "customer_contract_line_id",
+      "commercial_routing_status",
+      "commercial_routing_snapshot",
+      "task_type_key",
+    ]) delete storedOccurrence[field];
+    const beforeSegment = structuredClone(await entities.PlanningShiftTaskSegment.get(
+      composition.segments[0].id,
+    ));
+    const beforeShift = structuredClone(await entities.PlanningShift.get(composition.shift.id));
+    const beforeAssignment = structuredClone(await entities.PlanningAssignment.get(
+      composition.assignment.id,
+    ));
+
+    const occurrenceCoordinator = entities.PlanningMutationCoordinator.records.find(item => (
+      item.resource_type === "task_occurrence" && item.resource_id === occurrenceRecord.id
+    ));
+    occurrenceCoordinator.lease = {
+      token: "foreign-planner-gesture",
+      status: "pending",
+      idempotency_key: "interactive-resize",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const deferred = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-legacy-in-place-deferred"));
+
+    expect(deferred.pending_commercial_routing_occurrence_ids).toEqual([occurrenceRecord.id]);
+    expect(entities.PlanningTaskOccurrence.records.filter(item => (
+      item.source_key === occurrenceRecord.source_key && item.lifecycle_status === "active"
+    ))).toHaveLength(1);
+    expect(await entities.PlanningTaskOccurrence.get(occurrenceRecord.id))
+      .not.toHaveProperty("commercial_routing_status");
+    occurrenceCoordinator.lease = null;
+
+    const result = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-legacy-in-place-second"));
+
+    expect(result.created_task_occurrence_ids).toEqual([]);
+    expect(result.superseded_task_occurrence_ids).toEqual([]);
+    expect(result.task_source_change_ids).toEqual([]);
+    expect(result.refreshed_task_occurrence_ids).toContain(occurrenceRecord.id);
+    expect(await entities.PlanningTaskOccurrence.get(occurrenceRecord.id)).toMatchObject({
+      lifecycle_status: "active",
+      superseded_by_task_occurrence_id: null,
+      service_responsible_company_id: "company-1",
+      selling_company_id: "seller-company-1",
+      customer_contract_id: "customer-contract-1",
+      commercial_routing_status: "resolved",
+      task_type_key: "reception",
+    });
+    expect(entities.PlanningTaskOccurrence.records.some(item => (
+      String(item.id) === String(item.superseded_by_task_occurrence_id || "")
+    ))).toBe(false);
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id))
+      .toEqual(beforeSegment);
+    expect(await entities.PlanningShift.get(composition.shift.id)).toEqual(beforeShift);
+    expect(await entities.PlanningAssignment.get(composition.assignment.id))
+      .toEqual(beforeAssignment);
+
+    const immediateResize = await backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: composition.shift.id,
+      expected_shift_revision: composition.shift.revision,
+      expected_occurrence_revisions: {
+        [occurrenceRecord.id]: commercialRefreshBasisRevision,
+      },
+      segments: [{
+        task_occurrence_id: occurrenceRecord.id,
+        start_date: occurrenceRecord.service_date,
+        end_date: occurrenceRecord.end_date,
+        start_time: occurrenceRecord.window_start_time,
+        end_time: "15:30",
+      }],
+    }, context("resize-immediately-after-commercial-refresh"));
+    expect(immediateResize.shift).toMatchObject({
+      start_time: occurrenceRecord.window_start_time,
+      end_time: "15:30",
+    });
+    await expect(backend.composeShift(base44, user, {
+      action: "update_shift_composition",
+      shift_id: immediateResize.shift.id,
+      expected_shift_revision: immediateResize.shift.revision,
+      expected_occurrence_revisions: {
+        [occurrenceRecord.id]: commercialRefreshBasisRevision,
+      },
+      segments: [{
+        task_occurrence_id: occurrenceRecord.id,
+        start_date: occurrenceRecord.service_date,
+        end_date: occurrenceRecord.end_date,
+        start_time: occurrenceRecord.window_start_time,
+        end_time: "15:00",
+      }],
+    }, context("reject-stale-revision-after-real-planning-change")))
+      .rejects.toMatchObject({ status: 409 });
+  });
+
+  it("accepteert een commercieel revisievenster in de echte taakdienst-resize", async () => {
+    const fixture = await prepareCommercialWindowTask("commercial-window-real-resize");
+    const { before } = await refreshCommercialWindow(fixture, "commercial-window-real-resize");
+
+    const resized = await backend.resizeTaskShiftPreservingCoverage(
+      fixture.base44,
+      user,
+      {
+        shift_id: fixture.composition.shift.id,
+        segment_id: fixture.composition.segments[0].id,
+        start_date: fixture.serviceDate,
+        start_time: "06:30",
+        end_date: fixture.serviceDate,
+        end_time: "15:30",
+        expected_shift_revision: fixture.composition.shift.revision,
+        expected_segment_revision: fixture.composition.segments[0].revision,
+        expected_occurrence_revision: before.revision,
+        expected_assignment_revisions: {
+          [fixture.composition.assignment.id]: fixture.composition.assignment.revision,
+        },
+      },
+      context("commercial-window-real-resize-action"),
+    );
+
+    expect(resized.shift).toMatchObject({ start_time: "06:30", end_time: "15:30" });
+    const occurrenceAfterResize = await fixture.entities.PlanningTaskOccurrence.get(
+      fixture.taskOccurrence.id,
+    );
+    await expect(backend.resizeTaskShiftPreservingCoverage(
+      fixture.base44,
+      user,
+      {
+        shift_id: resized.shift.id,
+        segment_id: resized.segment.id,
+        start_date: fixture.serviceDate,
+        start_time: "06:30",
+        end_date: fixture.serviceDate,
+        end_time: "15:00",
+        expected_shift_revision: resized.shift.revision,
+        expected_segment_revision: resized.segment.revision,
+        expected_occurrence_revision: before.revision,
+        expected_assignment_revisions: Object.fromEntries(
+          resized.assignments.map(item => [item.id, item.revision]),
+        ),
+      },
+      context("commercial-window-real-resize-reject-stale"),
+    )).rejects.toMatchObject({ status: 409 });
+    expect(occurrenceAfterResize.revision).toBeGreaterThan(before.revision);
+  });
+
+  it("accepteert een commercieel revisievenster in de echte vacate-actie", async () => {
+    const fixture = await prepareCommercialWindowTask("commercial-window-real-vacate");
+    const resized = await splitCommercialWindowTask(fixture, "commercial-window-real-vacate");
+    const assignedShift = resized.shift;
+    const assignedSegment = resized.segment;
+    const assignedAssignment = resized.assignments[0];
+    const openShift = resized.shifts.find(item => item.id !== assignedShift.id);
+    const openSegment = resized.segments.find(item => item.shift_id === openShift.id);
+    const { before } = await refreshCommercialWindow(fixture, "commercial-window-real-vacate");
+
+    const vacated = await backend.vacateTaskShiftPartition(
+      fixture.base44,
+      user,
+      {
+        shift_id: assignedShift.id,
+        segment_id: assignedSegment.id,
+        expected_shift_revision: assignedShift.revision,
+        expected_segment_revision: assignedSegment.revision,
+        expected_occurrence_revision: before.revision,
+        expected_assignment_revisions: {
+          [assignedAssignment.id]: assignedAssignment.revision,
+        },
+        expected_neighbor_shift_revisions: { [openShift.id]: openShift.revision },
+        expected_neighbor_segment_revisions: { [openSegment.id]: openSegment.revision },
+      },
+      context("commercial-window-real-vacate-action"),
+    );
+
+    expect(vacated.shift).toMatchObject({ start_time: "06:30", end_time: "18:00" });
+    expect(vacated.removed_assignment_ids).toContain(assignedAssignment.id);
+  });
+
+  it("accepteert een commercieel revisievenster in de echte assign-merge-actie", async () => {
+    const fixture = await prepareCommercialWindowTask("commercial-window-real-assign-merge");
+    const resized = await splitCommercialWindowTask(fixture, "commercial-window-real-assign-merge");
+    const assignedShift = resized.shift;
+    const assignedSegment = resized.segment;
+    const assignedAssignment = resized.assignments[0];
+    const openShift = resized.shifts.find(item => item.id !== assignedShift.id);
+    const openSegment = resized.segments.find(item => item.shift_id === openShift.id);
+    const { before } = await refreshCommercialWindow(
+      fixture,
+      "commercial-window-real-assign-merge",
+    );
+
+    const merged = await backend.assignAndMergeTaskShiftPartition(
+      fixture.base44,
+      user,
+      {
+        target_shift_id: openShift.id,
+        target_segment_id: openSegment.id,
+        adjacent_shift_id: assignedShift.id,
+        adjacent_segment_id: assignedSegment.id,
+        adjacent_assignment_id: assignedAssignment.id,
+        personnel_id: fixture.personnelId,
+        expected_target_shift_revision: openShift.revision,
+        expected_target_segment_revision: openSegment.revision,
+        expected_adjacent_shift_revision: assignedShift.revision,
+        expected_adjacent_segment_revision: assignedSegment.revision,
+        expected_adjacent_assignment_revision: assignedAssignment.revision,
+        expected_occurrence_revision: before.revision,
+      },
+      context("commercial-window-real-assign-merge-action"),
+    );
+
+    expect(merged.shift).toMatchObject({
+      id: assignedShift.id,
+      start_time: "06:30",
+      end_time: "18:00",
+    });
+    expect(merged.assignment.id).toBe(assignedAssignment.id);
+  });
+
+  it("herleest occurrences onder de lease wanneer bootstrap tussen preflight en lock wint", async () => {
+    const fixture = await prepareCommercialWindowTask("commercial-window-compose-race");
+    const staleOccurrence = await fixture.entities.PlanningTaskOccurrence.get(
+      fixture.taskOccurrence.id,
+    );
+    advanceCommercialContractVersion(fixture.entities);
+    const originalCoordinatorUpdate = fixture.entities.PlanningMutationCoordinator.updateMany
+      .bind(fixture.entities.PlanningMutationCoordinator);
+    let releaseComposeOccurrenceAcquire;
+    const composeOccurrenceAcquireReleased = new Promise(resolve => {
+      releaseComposeOccurrenceAcquire = resolve;
+    });
+    let markComposeOccurrenceAcquireEntered;
+    const composeOccurrenceAcquireEntered = new Promise(resolve => {
+      markComposeOccurrenceAcquireEntered = resolve;
+    });
+    let pauseOnce = true;
+    fixture.entities.PlanningMutationCoordinator.updateMany = async (query, update) => {
+      const coordinator = fixture.entities.PlanningMutationCoordinator.records.find(item => (
+        String(item.id) === String(query.id)
+      ));
+      if (
+        pauseOnce
+        && coordinator?.resource_type === "task_occurrence"
+        && update.$set?.lease?.idempotency_key === "commercial-window-compose-race-action"
+      ) {
+        pauseOnce = false;
+        markComposeOccurrenceAcquireEntered();
+        await composeOccurrenceAcquireReleased;
+      }
+      return originalCoordinatorUpdate(query, update);
+    };
+
+    const pendingComposition = backend.composeShift(fixture.base44, user, {
+      action: "update_shift_composition",
+      shift_id: fixture.composition.shift.id,
+      expected_shift_revision: fixture.composition.shift.revision,
+      expected_occurrence_revisions: {
+        [fixture.taskOccurrence.id]: staleOccurrence.revision,
+      },
+      segments: [{
+        task_occurrence_id: fixture.taskOccurrence.id,
+        start_date: fixture.serviceDate,
+        end_date: fixture.serviceDate,
+        start_time: "06:30",
+        end_time: "15:30",
+      }],
+    }, context("commercial-window-compose-race-action"));
+    await composeOccurrenceAcquireEntered;
+    try {
+      const bootstrap = await backend.bootstrapRange(fixture.base44, user, {
+        period_start: fixture.serviceDate,
+        period_end: fixture.serviceDate,
+      }, context("commercial-window-compose-race-bootstrap"));
+      expect(bootstrap.refreshed_task_occurrence_ids).toContain(fixture.taskOccurrence.id);
+    } finally {
+      releaseComposeOccurrenceAcquire();
+    }
+
+    await expect(pendingComposition).resolves.toMatchObject({
+      shift: expect.objectContaining({ start_time: "06:30", end_time: "15:30" }),
+    });
+  });
+
+  it("ververst een later gekoppeld klantcontract zonder occurrence of taaklijn te vervangen", async () => {
+    const { base44, entities } = setup([]);
+    entities.CustomerContract.records.length = 0;
+    entities.CustomerContractLine.records.length = 0;
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "commercial-contract-later",
+      withSecurityPlan: true,
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-contract-later-missing"));
+    const occurrenceRecord = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    expect(occurrenceRecord).toMatchObject({
+      commercial_routing_status: "missing_contract",
+      customer_contract_id: null,
+      customer_contract_line_id: null,
+    });
+    const composition = await backend.composeShift(base44, user, {
+      segments: [{
+        task_occurrence_id: occurrenceRecord.id,
+        start_time: occurrenceRecord.window_start_time,
+        end_time: occurrenceRecord.window_end_time,
+      }],
+      expected_occurrence_revisions: {
+        [occurrenceRecord.id]: occurrenceRecord.revision,
+      },
+    }, context("compose-commercial-contract-later"));
+    const segmentBeforeContract = structuredClone(await entities.PlanningShiftTaskSegment.get(
+      composition.segments[0].id,
+    ));
+    entities.CustomerContract.records.push({
+      id: "customer-contract-later",
+      customer_id: "customer-1",
+      customer_account_id: "customer-account-later",
+      company_id: "seller-company-later",
+      status: "active",
+      start_date: "2099-01-01",
+      end_date: null,
+      version: 1,
+    });
+    entities.CustomerContractLine.records.push({
+      id: "customer-contract-line-later",
+      contract_id: "customer-contract-later",
+      customer_id: "customer-1",
+      customer_account_id: "customer-account-later",
+      company_id: "seller-company-later",
+      scope_type: "customer",
+      task_type_key: "reception",
+      status: "active",
+      sequence: 1,
+      version: 1,
+    });
+
+    const linked = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-contract-later-resolved"));
+    const afterLink = await entities.PlanningTaskOccurrence.get(occurrenceRecord.id);
+
+    expect(linked.created_task_occurrence_ids).toEqual([]);
+    expect(linked.superseded_task_occurrence_ids).toEqual([]);
+    expect(linked.task_source_change_ids).toEqual([]);
+    expect(afterLink).toMatchObject({
+      id: occurrenceRecord.id,
+      lifecycle_status: "active",
+      selling_company_id: "seller-company-later",
+      customer_contract_id: "customer-contract-later",
+      customer_contract_line_id: "customer-contract-line-later",
+      commercial_routing_status: "resolved",
+      commercial_routing_snapshot: expect.objectContaining({
+        customer_contract_version: 1,
+        customer_contract_line_version: 1,
+      }),
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id))
+      .toEqual(segmentBeforeContract);
+
+    entities.CustomerContract.records[0].version = 2;
+    entities.CustomerContractLine.records[0].version = 2;
+    const scheduleSeries = created.series[0].series;
+    const versionRefresh = await backend.mutateObjectTaskSeries(base44, user, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+      task_definition_id: created.definition.id,
+      series_id: scheduleSeries.id,
+      effective_from: "2099-08-24",
+      start_time: "06:30",
+      end_time: "18:00",
+      repeat_weekly: true,
+      recurrence_end_date: null,
+      expected_version: scheduleSeries.version,
+    }, context("series-commercial-contract-later-version-two"), "schedule");
+
+    expect(versionRefresh.reconciled.created_occurrence_ids).toEqual([]);
+    expect(versionRefresh.reconciled.superseded_occurrence_ids).toEqual([]);
+    expect(versionRefresh.reconciled.source_change_ids).toEqual([]);
+    expect(versionRefresh.reconciled.refreshed_occurrence_ids).toContain(occurrenceRecord.id);
+    const afterVersionRefresh = await entities.PlanningTaskOccurrence.get(occurrenceRecord.id);
+    expect(afterVersionRefresh).toMatchObject({
+      lifecycle_status: "active",
+      commercial_routing_snapshot: expect.objectContaining({
+        customer_contract_version: 2,
+        customer_contract_line_version: 2,
+      }),
+      metadata: {
+        non_operational_revision_window: expect.objectContaining({
+          from_revision: afterLink.metadata.non_operational_revision_window.from_revision,
+          to_revision: afterVersionRefresh.revision,
+          reason: "series_source_snapshot_refresh",
+        }),
+      },
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id))
+      .toEqual(segmentBeforeContract);
+
+    const resized = await backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: composition.shift.id,
+      segment_id: composition.segments[0].id,
+      start_date: occurrenceRecord.service_date,
+      start_time: occurrenceRecord.window_start_time,
+      end_date: occurrenceRecord.end_date,
+      end_time: "15:30",
+      expected_shift_revision: composition.shift.revision,
+      expected_segment_revision: composition.segments[0].revision,
+      expected_occurrence_revision: afterLink.revision,
+      expected_assignment_revisions: {},
+    }, context("series-commercial-window-real-resize"));
+    expect(resized.shift).toMatchObject({ start_time: "06:30", end_time: "15:30" });
+
+    await expect(backend.resizeTaskShiftPreservingCoverage(base44, user, {
+      shift_id: resized.shift.id,
+      segment_id: resized.segment.id,
+      start_date: occurrenceRecord.service_date,
+      start_time: occurrenceRecord.window_start_time,
+      end_date: occurrenceRecord.end_date,
+      end_time: "15:00",
+      expected_shift_revision: resized.shift.revision,
+      expected_segment_revision: resized.segment.revision,
+      expected_occurrence_revision: afterLink.revision,
+      expected_assignment_revisions: {},
+    }, context("series-commercial-window-reject-after-real-resize")))
+      .rejects.toMatchObject({ status: 409 });
+  });
+
+  it("herstelt een bestaande commerciële self-supersede zonder planninginhoud te wijzigen", async () => {
+    const { base44, entities } = setup([]);
+    const created = await createWeeklyObjectTask({
+      base44,
+      entities,
+      key: "commercial-self-supersede-repair",
+      withSecurityPlan: true,
+    });
+    await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-self-supersede-before-corruption"));
+    const source = entities.PlanningTaskOccurrence.records.find(item => (
+      item.lifecycle_status === "active"
+      && item.object_task_definition_id === created.definition.id
+      && item.service_date === "2099-08-24"
+    ));
+    entities.Personnel.records.push({
+      id: "personnel-commercial-self-supersede",
+      name: "Herstelmedewerker",
+      status: "active",
+    });
+    const composition = await backend.composeAndAssign(base44, user, {
+      personnel_id: "personnel-commercial-self-supersede",
+      segments: [{
+        task_occurrence_id: source.id,
+        start_time: source.window_start_time,
+        end_time: source.window_end_time,
+      }],
+      expected_occurrence_revisions: { [source.id]: source.revision },
+    }, context("compose-commercial-self-supersede"));
+    const currentSource = entities.PlanningTaskOccurrence.records.find(item => item.id === source.id);
+    const sourceBeforeCorruption = structuredClone(currentSource);
+    const beforeSegment = structuredClone(await entities.PlanningShiftTaskSegment.get(
+      composition.segments[0].id,
+    ));
+    const beforeShift = structuredClone(await entities.PlanningShift.get(composition.shift.id));
+    const beforeAssignment = structuredClone(await entities.PlanningAssignment.get(
+      composition.assignment.id,
+    ));
+    Object.assign(currentSource, {
+      lifecycle_status: "superseded",
+      superseded_by_task_occurrence_id: currentSource.id,
+      revision: currentSource.revision + 1,
+    });
+    entities.PlanningTaskOccurrence.records.push({
+      ...structuredClone(sourceBeforeCorruption),
+      id: "occurrence-commercial-self-supersede-duplicate",
+      supersedes_task_occurrence_id: source.id,
+      superseded_by_task_occurrence_id: null,
+      lifecycle_status: "active",
+      revision: 1,
+      published_revision: 0,
+      metadata: { bootstrap_source: "ObjectTaskScheduleSeries" },
+    });
+    entities.PlanningTaskSourceChange.records.push({
+      id: "source-change-commercial-self-supersede",
+      change_key: `commercial-self:${source.id}:${composition.shift.id}`,
+      customer_id: source.customer_id,
+      object_id: source.object_id,
+      object_task_definition_id: source.object_task_definition_id,
+      schedule_series_id: source.object_task_schedule_series_id,
+      schedule_revision_id: source.object_task_schedule_revision_id,
+      occurrence_id: source.id,
+      task_occurrence_id: source.id,
+      source_task_occurrence_id: source.id,
+      replacement_task_occurrence_id: source.id,
+      shift_id: composition.shift.id,
+      shift_ids: [composition.shift.id],
+      segment_ids: [composition.segments[0].id],
+      service_date: source.service_date,
+      effective_from: source.service_date,
+      change_type: "schedule_changed",
+      status: "open",
+      previous_snapshot: {
+        ...structuredClone(sourceBeforeCorruption),
+        selling_company_id: null,
+        customer_contract_id: null,
+        customer_contract_line_id: null,
+        commercial_routing_status: "missing_contract",
+        commercial_routing_snapshot: null,
+      },
+      desired_snapshot: structuredClone(sourceBeforeCorruption),
+      detected_at: "2099-08-01T00:00:00.000Z",
+      detected_by_user_id: user.id,
+      resolved_at: null,
+      resolved_by_user_id: null,
+      resolution_reason: null,
+      creation_idempotency_key: "commercial-self-supersede",
+      creation_request_fingerprint: "commercial-self-supersede",
+      version: 1,
+      metadata: {},
+    });
+
+    const originalSourceChangeUpdateMany = entities.PlanningTaskSourceChange.updateMany
+      .bind(entities.PlanningTaskSourceChange);
+    let interruptResolutionOnce = true;
+    entities.PlanningTaskSourceChange.updateMany = async (query, update) => {
+      if (
+        interruptResolutionOnce
+        && query.id === "source-change-commercial-self-supersede"
+        && update.$set?.status === "resolved"
+      ) {
+        interruptResolutionOnce = false;
+        const error = new Error("tijdelijke bronwijzigingsconflict");
+        error.status = 409;
+        error.details = { code: "PLANNING_RESOURCE_BUSY", transient: true };
+        throw error;
+      }
+      return originalSourceChangeUpdateMany(query, update);
+    };
+    const interrupted = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-self-supersede-repair-interrupted"));
+    expect(interrupted.repaired_commercial_routing_occurrence_ids).toEqual([]);
+    expect(interrupted.pending_commercial_routing_occurrence_ids).toEqual([source.id]);
+    expect(await entities.PlanningTaskOccurrence.get(source.id)).toMatchObject({
+      lifecycle_status: "active",
+      superseded_by_task_occurrence_id: null,
+      metadata: expect.objectContaining({
+        commercial_routing_self_supersede_repaired_at: expect.any(String),
+      }),
+    });
+    expect(await entities.PlanningTaskSourceChange.get(
+      "source-change-commercial-self-supersede",
+    )).toMatchObject({ status: "open" });
+
+    const repaired = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-self-supersede-repair"));
+
+    expect(repaired.repaired_commercial_routing_occurrence_ids).toEqual([source.id]);
+    expect(repaired.pending_commercial_routing_occurrence_ids).toEqual([]);
+    expect(repaired.resolved_task_source_change_ids)
+      .toContain("source-change-commercial-self-supersede");
+    expect(await entities.PlanningTaskOccurrence.get(source.id)).toMatchObject({
+      lifecycle_status: "active",
+      superseded_by_task_occurrence_id: null,
+    });
+    expect(await entities.PlanningTaskOccurrence.get(
+      "occurrence-commercial-self-supersede-duplicate",
+    )).toMatchObject({
+      lifecycle_status: "superseded",
+      supersedes_task_occurrence_id: null,
+      superseded_by_task_occurrence_id: source.id,
+    });
+    expect(await entities.PlanningTaskSourceChange.get(
+      "source-change-commercial-self-supersede",
+    )).toMatchObject({
+      status: "resolved",
+      resolution_reason: "Commerciële routering bijgewerkt zonder roosterimpact",
+    });
+    expect(await entities.PlanningShiftTaskSegment.get(composition.segments[0].id))
+      .toEqual(beforeSegment);
+    expect(await entities.PlanningShift.get(composition.shift.id)).toEqual(beforeShift);
+    expect(await entities.PlanningAssignment.get(composition.assignment.id))
+      .toEqual(beforeAssignment);
+    expect(entities.PlanningTaskOccurrence.records.some(item => (
+      String(item.id) === String(item.superseded_by_task_occurrence_id || "")
+    ))).toBe(false);
+
+    const sourceAfterRepair = structuredClone(await entities.PlanningTaskOccurrence.get(source.id));
+    const duplicateAfterRepair = structuredClone(await entities.PlanningTaskOccurrence.get(
+      "occurrence-commercial-self-supersede-duplicate",
+    ));
+    const replay = await backend.bootstrapRange(base44, user, {
+      period_start: "2099-08-24",
+      period_end: "2099-08-24",
+    }, context("bootstrap-commercial-self-supersede-repair-replay"));
+    expect(replay.repaired_commercial_routing_occurrence_ids).toEqual([]);
+    expect(await entities.PlanningTaskOccurrence.get(source.id)).toEqual(sourceAfterRepair);
+    expect(await entities.PlanningTaskOccurrence.get(
+      "occurrence-commercial-self-supersede-duplicate",
+    )).toEqual(duplicateAfterRepair);
   });
 
   it("leest occurrence-, segment- en dienstsnapshot aan het einde gelijktijdig", async () => {

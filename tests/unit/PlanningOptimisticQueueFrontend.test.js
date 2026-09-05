@@ -187,6 +187,25 @@ describe("Planning queued optimistic frontend contract", () => {
     expect(source).toContain("assignments: assignmentsInRange,");
   });
 
+  it("herprobeert uitgesteld commercieel occurrence-herstel begrensd naast grensherstel", () => {
+    const recoverySource = between(
+      "useEffect(() => {\n    if (bootstrapRecoveryTimer.current)",
+      "const effectivePlanningRecords = useMemo",
+    );
+
+    expect(source).toContain("const PLANNING_COMMERCIAL_REPAIR_MAX_RETRIES = 3");
+    expect(recoverySource).toContain("pending_commercial_routing_occurrence_ids");
+    expect(recoverySource).toContain("pending_shared_boundary_repairs");
+    expect(recoverySource).toContain(
+      "commercialRoutingRecovery.current.attempts < PLANNING_COMMERCIAL_REPAIR_MAX_RETRIES",
+    );
+    expect(recoverySource).toContain("commercialRoutingRecovery.current.attempts += 1");
+    expect(recoverySource).toContain("Math.min(boundaryDelay, commercialDelay)");
+    expect(recoverySource).toContain(
+      "bootstrapMutation.mutate({ period_start: bootstrapStart, period_end: periodEnd })",
+    );
+  });
+
   it("houdt de occurrence uniek zonder de medewerker als dragbron te blokkeren", () => {
     const sliceSource = between("const composeAndAssignOccurrenceSlice", "const saveTaskEdit");
     const matrixFunctionSource = between("const composeAndAssignOccurrence =", "const openOccurrenceStaffing");
