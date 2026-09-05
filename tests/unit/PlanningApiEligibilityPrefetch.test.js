@@ -129,6 +129,261 @@ function candidate(overrides = {}) {
 }
 
 describe("planningApi bounded eligibility-prefetch", () => {
+  it.each([
+    ["missing_contract", "contract_missing"],
+    ["ambiguous", "contract_ambiguous"],
+  ])("projecteert een pure %s arbeidsroute als expliciet toegestane conceptdrop", async (routingStatus, routingCode) => {
+    const { base44, entities } = setup({
+      invoke: async (_name, payload) => ({
+        data: {
+          service_date: payload.service_date,
+          decision_status: "blocked",
+          planning_assignment_allowed: false,
+          draft_assignment_allowed: true,
+          employment_routing_status: routingStatus,
+          contract_id: null,
+          employing_company_id: null,
+          payroll_cao_key: null,
+          blocking_reasons: ["Arbeidscontractroutering vereist aandacht."],
+        },
+      }),
+    });
+    entities.PlanningShift.records.splice(1);
+    entities.PlanningAssignment.records.length = 0;
+    entities.PersonnelAbsence.records.length = 0;
+    entities.PersonnelRestriction.records.length = 0;
+
+    const result = await backend.prefetchAssignmentEligibility(base44, {
+      basis_token: `planning-${routingStatus}`,
+      candidates: [candidate()],
+    });
+
+    expect(result.results[0]).toMatchObject({
+      status: "ready",
+      routing_draft_assignment_allowed: true,
+      draft_assignment_allowed: true,
+      employment_routing_status: routingStatus,
+      employment_routing_codes: [routingCode],
+      warning_codes: [routingCode],
+    });
+  });
+
+  it("laat clientwaarschuwingen nooit een lokale harde blokkade autoriseren", async () => {
+    const { base44 } = setup({
+      invoke: async (_name, payload) => ({
+        data: {
+          service_date: payload.service_date,
+          decision_status: "assignable",
+          planning_assignment_allowed: true,
+          draft_assignment_allowed: true,
+          employment_routing_status: "resolved",
+          contract_id: "contract-1",
+          employing_company_id: "employer-1",
+          payroll_cao_key: "cao_particuliere_beveiliging",
+        },
+      }),
+    });
+
+    const result = await backend.prefetchAssignmentEligibility(base44, {
+      basis_token: "planning-hard-blocks",
+      candidates: [candidate({
+        warning_snapshot: [{
+          code: "client_says_ok",
+          severity: "info",
+          message: "Clientmelding mag serverfeiten niet overrulen.",
+        }],
+      })],
+    });
+
+    expect(result.results[0]).toMatchObject({
+      routing_draft_assignment_allowed: true,
+      draft_assignment_allowed: false,
+      draft_assignment_blocking_codes: expect.arrayContaining([
+        "shift_overlap",
+        "personnel_absence",
+        "personnel_restriction",
+      ]),
+    });
+  });
+
+  it("staat een meerdaagse pure route-ambiguiteit als concept toe maar wist de route-ID's", async () => {
+    const { base44, entities } = setup({
+      invoke: async (_name, payload) => ({
+        data: {
+          service_date: payload.service_date,
+          decision_status: "assignable",
+          planning_assignment_allowed: true,
+          draft_assignment_allowed: true,
+          employment_routing_status: "resolved",
+          contract_id: payload.service_date === "2026-08-24" ? "contract-a" : "contract-b",
+          employing_company_id: "employer-1",
+          payroll_cao_key: "cao_particuliere_beveiliging",
+        },
+      }),
+    });
+    entities.PlanningShift.records.splice(1);
+    entities.PlanningAssignment.records.length = 0;
+    entities.PersonnelAbsence.records.length = 0;
+    entities.PersonnelRestriction.records.length = 0;
+
+    const result = await backend.prefetchAssignmentEligibility(base44, {
+      basis_token: "planning-multiday-routing-ambiguity",
+      candidates: [candidate({
+        start_time: "22:00",
+        end_date: "2026-08-25",
+        end_time: "02:00",
+      })],
+    });
+
+    expect(result.results[0]).toMatchObject({
+      routing_draft_assignment_allowed: true,
+      draft_assignment_allowed: true,
+      employment_routing_status: "ambiguous",
+      employment_routing_codes: ["contract_ambiguous"],
+    });
+  });
+
+  it.each([
+    ["alleen werkgever B", ["company-b"], true],
+    ["alleen taakbedrijf A", ["company-1"], false],
+    ["taakbedrijf A en werkgever B", ["company-1", "company-b"], true],
+  ])("controleert een beveiligingspas tegen de resolved werkgever bij %s", async (_label, companyIds, allowed) => {
+    const { base44, entities } = setup({
+      invoke: async (_name, payload) => ({
+        data: {
+          service_date: payload.service_date,
+          decision_status: "assignable",
+          planning_assignment_allowed: true,
+          draft_assignment_allowed: true,
+          employment_routing_status: "resolved",
+          contract_id: "contract-b",
+          employing_company_id: "company-b",
+          payroll_cao_key: "cao_particuliere_beveiliging",
+        },
+      }),
+    });
+    entities.PlanningShift.records.splice(1);
+    entities.PlanningShift.records[0].required_security_pass_types = ["green"];
+    entities.PlanningAssignment.records.length = 0;
+    entities.PersonnelAbsence.records.length = 0;
+    entities.PersonnelRestriction.records.length = 0;
+    entities.PersonnelSecurityPass.records.push(...companyIds.map((companyId, index) => ({
+      id: `pass-${index + 1}`,
+      personnel_id: "person-1",
+      company_id: companyId,
+      pass_type: "green",
+      status: "active",
+      valid_from: "2026-01-01",
+      valid_until: "2026-12-31",
+    })));
+
+    const result = await backend.prefetchAssignmentEligibility(base44, {
+      basis_token: `planning-employer-pass-${companyIds.join("-")}`,
+      candidates: [candidate()],
+    });
+
+    expect(result.results[0].draft_assignment_allowed).toBe(allowed);
+    expect(result.results[0].draft_assignment_blocking_codes || []).toEqual(
+      allowed ? [] : expect.arrayContaining(["security_pass_blocked"]),
+    );
+  });
+
+  it.each(["missing_contract", "ambiguous"])(
+    "laat bij een %s arbeidsroute geen willekeurige company-scoped pas als bewijs gelden",
+    async routingStatus => {
+      const { base44, entities } = setup({
+        invoke: async (_name, payload) => ({
+          data: {
+            service_date: payload.service_date,
+            decision_status: "blocked",
+            planning_assignment_allowed: false,
+            draft_assignment_allowed: true,
+            employment_routing_status: routingStatus,
+            contract_id: null,
+            employing_company_id: null,
+            payroll_cao_key: null,
+          },
+        }),
+      });
+      entities.PlanningShift.records.splice(1);
+      entities.PlanningShift.records[0].required_security_pass_types = ["green"];
+      entities.PlanningAssignment.records.length = 0;
+      entities.PersonnelAbsence.records.length = 0;
+      entities.PersonnelRestriction.records.length = 0;
+      entities.PersonnelSecurityPass.records.push({
+        id: "pass-company-b",
+        personnel_id: "person-1",
+        company_id: "company-b",
+        pass_type: "green",
+        status: "active",
+        valid_from: "2026-01-01",
+        valid_until: "2026-12-31",
+      });
+
+      const result = await backend.prefetchAssignmentEligibility(base44, {
+        basis_token: `planning-unresolved-pass-${routingStatus}`,
+        candidates: [candidate()],
+      });
+
+      expect(result.results[0]).toMatchObject({
+        routing_draft_assignment_allowed: true,
+        draft_assignment_allowed: false,
+        draft_assignment_blocking_codes: expect.arrayContaining(["security_pass_blocked"]),
+      });
+    },
+  );
+
+  it("blokkeert company-scoped pasbewijs wanneer de werkgever binnen een nachtdienst wisselt", async () => {
+    const { base44, entities } = setup({
+      invoke: async (_name, payload) => ({
+        data: {
+          service_date: payload.service_date,
+          decision_status: "assignable",
+          planning_assignment_allowed: true,
+          draft_assignment_allowed: true,
+          employment_routing_status: "resolved",
+          contract_id: payload.service_date === "2026-08-24" ? "contract-b" : "contract-c",
+          employing_company_id: payload.service_date === "2026-08-24" ? "company-b" : "company-c",
+          payroll_cao_key: "cao_particuliere_beveiliging",
+        },
+      }),
+    });
+    entities.PlanningShift.records.splice(1);
+    Object.assign(entities.PlanningShift.records[0], {
+      start_time: "22:00",
+      end_date: "2026-08-25",
+      end_time: "02:00",
+      required_security_pass_types: ["green"],
+    });
+    entities.PlanningAssignment.records.length = 0;
+    entities.PersonnelAbsence.records.length = 0;
+    entities.PersonnelRestriction.records.length = 0;
+    entities.PersonnelSecurityPass.records.push(...["company-b", "company-c"].map(companyId => ({
+      id: `pass-${companyId}`,
+      personnel_id: "person-1",
+      company_id: companyId,
+      pass_type: "green",
+      status: "active",
+      valid_from: "2026-01-01",
+      valid_until: "2026-12-31",
+    })));
+
+    const result = await backend.prefetchAssignmentEligibility(base44, {
+      basis_token: "planning-multiday-employer-pass",
+      candidates: [candidate({
+        start_time: "22:00",
+        end_date: "2026-08-25",
+        end_time: "02:00",
+      })],
+    });
+
+    expect(result.results[0]).toMatchObject({
+      draft_assignment_allowed: false,
+      employment_routing_status: "ambiguous",
+      draft_assignment_blocking_codes: expect.arrayContaining(["security_pass_blocked"]),
+    });
+  });
+
   it("warmt alle waarschuwingen read-only en dedupliceert dezelfde combinatie", async () => {
     const { base44, entities, invocationCount } = setup();
     const before = Object.fromEntries(Object.entries(entities).map(([name, client]) => [name, structuredClone(client.records)]));
@@ -215,7 +470,24 @@ describe("planningApi bounded eligibility-prefetch", () => {
   });
 
   it("neemt beveiligingspas en een volgende-dagdienst mee in de servervoorcontrole", async () => {
-    const { base44, entities, invocationCount } = setup();
+    let resolverCalls = 0;
+    const { base44, entities } = setup({
+      invoke: async (_name, payload) => {
+        resolverCalls += 1;
+        return {
+          data: {
+            service_date: payload.service_date,
+            decision_status: "assignable",
+            planning_assignment_allowed: true,
+            draft_assignment_allowed: true,
+            employment_routing_status: "resolved",
+            contract_id: "contract-company-1",
+            employing_company_id: "company-1",
+            payroll_cao_key: "cao_particuliere_beveiliging",
+          },
+        };
+      },
+    });
     entities.PlanningShift.records[0].required_security_pass_types = ["green"];
     entities.PlanningShift.records.push({
       id: "shift-next-day-rest",
@@ -270,7 +542,7 @@ describe("planningApi bounded eligibility-prefetch", () => {
     });
     expect(afterPassChange.results[0].source_revision_fingerprint)
       .not.toBe(afterRestChange.results[0].source_revision_fingerprint);
-    expect(invocationCount()).toBe(3);
+    expect(resolverCalls).toBe(3);
   });
 
   it("begrensst parallelle resolvercalls tot zes en isoleert een mislukte combinatie", async () => {

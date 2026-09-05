@@ -25,6 +25,7 @@ const targetShift = {
   customer_id: "customer-1",
   object_id: "object-1",
   object_name: "Stadsmuseum",
+  task_type_key: "reception",
   required_qualification_types: ["beveiliger_2"],
 };
 
@@ -63,6 +64,12 @@ const validContract = {
   contract_start_date: "2025-01-01",
   contract_end_date: "2027-12-31",
   contract_hours_per_week: 36,
+  cao_key: "cao_particuliere_beveiliging",
+  allowed_task_types: ["reception"],
+  planning_allowed: true,
+  contract_final_allowed: true,
+  payroll_final_allowed: true,
+  legal_validation_status: "compliant",
 };
 
 function warningContext(overrides = {}) {
@@ -189,6 +196,61 @@ describe("toewijzingswaarschuwingen", () => {
     expect(warningCodes(expired)).toContain(PLANNING_WARNING_CODES.SECURITY_PASS_EXPIRED);
   });
 
+  it("scopeert beveiligingspassen op werkgever B en nooit op taakbedrijf A", () => {
+    const employerBContract = { ...validContract, company_id: "company-b" };
+    const employerBPass = { ...validPass, company_id: "company-b" };
+    const operatingCompanyAPass = { ...validPass, id: "pass-company-a", company_id: "company-1" };
+
+    const validForEmployerB = getAssignmentWarnings(warningContext({
+      contracts: [employerBContract],
+      qualifications: [validQualification],
+      securityPasses: [employerBPass],
+    }));
+    expect(warningCodes(validForEmployerB)).not.toContain(PLANNING_WARNING_CODES.QUALIFICATION_MISSING);
+    expect(warningCodes(validForEmployerB)).not.toContain(PLANNING_WARNING_CODES.SECURITY_PASS_MISSING);
+
+    const wrongOperatingCompanyOnly = getAssignmentWarnings(warningContext({
+      contracts: [employerBContract],
+      qualifications: [validQualification],
+      securityPasses: [operatingCompanyAPass],
+    }));
+    expect(warningCodes(wrongOperatingCompanyOnly)).toContain(PLANNING_WARNING_CODES.SECURITY_PASS_MISSING);
+
+    const bothCompanies = getAssignmentWarnings(warningContext({
+      contracts: [employerBContract],
+      qualifications: [validQualification],
+      securityPasses: [operatingCompanyAPass, employerBPass],
+    }));
+    expect(warningCodes(bothCompanies)).not.toContain(PLANNING_WARNING_CODES.SECURITY_PASS_MISSING);
+  });
+
+  it("gebruikt bij een ontbrekende of ambigue arbeidsroute geen willekeurige company-scoped pas", () => {
+    const companyScopedEvidence = {
+      qualifications: [validQualification],
+      securityPasses: [{ ...validPass, company_id: "company-b" }],
+    };
+    const missingRoute = getAssignmentWarnings(warningContext({
+      contracts: [],
+      ...companyScopedEvidence,
+    }));
+    expect(warningCodes(missingRoute)).toEqual(expect.arrayContaining([
+      PLANNING_WARNING_CODES.CONTRACT_MISSING,
+      PLANNING_WARNING_CODES.SECURITY_PASS_MISSING,
+    ]));
+
+    const ambiguousRoute = getAssignmentWarnings(warningContext({
+      contracts: [
+        { ...validContract, id: "contract-b-1", company_id: "company-b" },
+        { ...validContract, id: "contract-b-2", company_id: "company-b" },
+      ],
+      ...companyScopedEvidence,
+    }));
+    expect(warningCodes(ambiguousRoute)).toEqual(expect.arrayContaining([
+      PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS,
+      PLANNING_WARNING_CODES.SECURITY_PASS_MISSING,
+    ]));
+  });
+
   it("past restricties toe via scope-id en gebruikt anders het scopelabel", () => {
     const byId = getAssignmentWarnings(warningContext({
       restrictions: [{
@@ -297,6 +359,12 @@ describe("toewijzingswaarschuwingen", () => {
   it("signaleert ontbrekend contract en overschrijding van weekuren", () => {
     const noContract = getAssignmentWarnings(warningContext({ contracts: [] }));
     expect(warningCodes(noContract)).toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
+    expect(noContract.find(item => item.code === PLANNING_WARNING_CODES.CONTRACT_MISSING))
+      .toMatchObject({
+        severity: "warning",
+        title: "Arbeidscontract koppelen",
+      });
+    expect(warningCodes(noContract)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL);
 
     const shifts = Array.from({ length: 4 }, (_, index) => ({
       id: `day-${index}`,
@@ -311,6 +379,130 @@ describe("toewijzingswaarschuwingen", () => {
     }));
     const overHours = getAssignmentWarnings(warningContext({ shifts, assignments }));
     expect(warningCodes(overHours)).toContain(PLANNING_WARNING_CODES.CONTRACT_HOURS_EXCEEDED);
+  });
+
+  it("routeert lokaal op taaksoort en datum over werkgevers heen", () => {
+    const employerBContract = {
+      ...validContract,
+      company_id: "company-b",
+    };
+
+    const warnings = getAssignmentWarnings(warningContext({
+      contracts: [
+        {
+          ...validContract,
+          id: "contract-wrong-task",
+          company_id: "company-1",
+          allowed_task_types: ["mobile_control_round"],
+        },
+        employerBContract,
+        {
+          ...validContract,
+          id: "contract-future",
+          company_id: "company-c",
+          contract_start_date: "2026-02-06",
+        },
+      ],
+    }));
+
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS);
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL);
+  });
+
+  it.each([
+    ["Objectbeveiliging", "object_security"],
+    ["Brand- & sluitronde", "fire_closing_round"],
+    ["Externe sluitronde", "external_closing_round"],
+    ["Externe controleronde", "external_control_round"],
+    ["Openingsronde", "opening_round"],
+    ["Mobiele controleronde", "mobile_control_round"],
+    ["Receptiedienst", "reception"],
+    ["Sluitbegeleiding", "closing_assistance"],
+    ["Toegangscontrole", "access_control"],
+    ["Brandwacht", "fire_watch"],
+    ["Portier / concierge", "concierge"],
+    ["other:definition-42", "other:definition-42"],
+  ])("herkent lokaal het taaklabel %s direct als %s", (label, taskTypeKey) => {
+    const warnings = getAssignmentWarnings(warningContext({
+      shift: { ...targetShift, task_type_key: taskTypeKey },
+      contracts: [{ ...validContract, allowed_task_types: [label] }],
+    }));
+
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS);
+  });
+
+  it.each(["vrije niet-gecatalogiseerde dienst", "other:vrije tekst", "other:<script>"])(
+    "houdt het lokale onbekende taaklabel %s fail-closed",
+    label => {
+      const warnings = getAssignmentWarnings(warningContext({
+        shift: { ...targetShift, task_type_key: label },
+        contracts: [{ ...validContract, allowed_task_types: [label] }],
+      }));
+
+      expect(warningCodes(warnings)).toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
+    },
+  );
+
+  it("behandelt een niet-canonieke taaksoort niet lokaal als bewezen contractmatch", () => {
+    const warnings = getAssignmentWarnings(warningContext({
+      shift: { ...targetShift, task_type_key: "zelfbedachte taak" },
+      contracts: [{ ...validContract, allowed_task_types: ["zelfbedachte taak"] }],
+    }));
+
+    expect(warnings.find(item => item.code === PLANNING_WARNING_CODES.CONTRACT_MISSING))
+      .toMatchObject({ severity: "warning", title: "Arbeidscontract koppelen" });
+  });
+
+  it("waarschuwt direct als dezelfde taaksoort naar meerdere werkgevers kan routeren", () => {
+    const warnings = getAssignmentWarnings(warningContext({
+      contracts: [
+        validContract,
+        { ...validContract, id: "contract-2", company_id: "company-b" },
+      ],
+    }));
+
+    expect(warningCodes(warnings)).toContain(PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS);
+    expect(warnings.find(item => item.code === PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS))
+      .toMatchObject({ severity: "critical", title: "Arbeidscontract controleren" });
+  });
+
+  it.each([
+    ["levenscyclus", { document_status: "signed" }],
+    ["planningstoestemming", { planning_allowed: false }],
+    ["juridische beoordeling", { legal_validation_status: "pending_review" }],
+    ["contractfinalisatie", { contract_final_allowed: false }],
+    ["loonverwerking", { payroll_final_allowed: false }],
+  ])("markeert een passende route met geblokkeerde %s als niet definitief", (_label, contractOverrides) => {
+    const warnings = getAssignmentWarnings(warningContext({
+      contracts: [{ ...validContract, ...contractOverrides }],
+    }));
+
+    expect(warnings.find(item => item.code === PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL))
+      .toMatchObject({ severity: "critical", title: "Arbeidscontract controleren" });
+    expect(warningCodes(warnings)).not.toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
+  });
+
+  it.each([
+    ["planning_allowed", { planning_allowed: undefined }],
+    ["legal_validation_status", { legal_validation_status: undefined }],
+    ["contract_final_allowed", { contract_final_allowed: undefined }],
+    ["payroll_final_allowed", { payroll_final_allowed: undefined }],
+  ])("toont nooit groen wanneer serverbewijs %s ontbreekt", (_field, contractOverrides) => {
+    const warnings = getAssignmentWarnings(warningContext({
+      contracts: [{ ...validContract, ...contractOverrides }],
+    }));
+
+    expect(warningCodes(warnings)).toContain(PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL);
+  });
+
+  it("bewijst een nachtdienst alleen als het contract beide kalenderdagen dekt", () => {
+    const warnings = getAssignmentWarnings(warningContext({
+      contracts: [{ ...validContract, contract_end_date: "2026-02-04" }],
+    }));
+
+    expect(warningCodes(warnings)).toContain(PLANNING_WARNING_CODES.CONTRACT_MISSING);
   });
 });
 

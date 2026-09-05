@@ -20,8 +20,31 @@
     "superseded_by_task_occurrence_id": { "type": ["string", "null"] },
     "definition_version": { "type": "number", "minimum": 1 },
     "schedule_period_key": { "type": "string" },
-    "company_id": { "type": ["string", "null"] },
-    "customer_id": { "type": "string" },
+    "company_id": {
+      "type": ["string", "null"],
+      "description": "Legacy dienstbedrijf; niet gebruiken als arbeidscontract- of facturatiebron zodra de expliciete rollen zijn gevuld."
+    },
+    "selling_company_id": {
+      "type": ["string", "null"],
+      "description": "Verkopende/facturerende BV uit de unieke klantcontractregel."
+    },
+    "service_responsible_company_id": {
+      "type": ["string", "null"],
+      "description": "Operationeel/juridisch verantwoordelijke dienst-BV; bewust apart van verkoper en werkgever."
+    },
+    "customer_contract_id": { "type": ["string", "null"] },
+    "customer_contract_line_id": { "type": ["string", "null"] },
+    "commercial_routing_status": {
+      "type": ["string", "null"],
+      "enum": ["resolved", "not_applicable", "missing_contract", "ambiguous", "manual_review_required", "stale", null],
+      "description": "Deterministische klantcontractroutering voor deze occurrence; ontbrekend blijft concept-toegestaan, ambigu of inconsistent vereist controle."
+    },
+    "commercial_routing_snapshot": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Deterministisch bewijs van customer, objectscope, taaksoort, datum en de eventueel unieke contractregel."
+    },
+    "customer_id": { "type": ["string", "null"] },
     "object_id": { "type": "string" },
     "security_plan_id": { "type": ["string", "null"] },
     "security_plan_revision_id": { "type": ["string", "null"] },
@@ -46,6 +69,10 @@
         "concierge",
         "other"
       ]
+    },
+    "task_type_key": {
+      "type": ["string", "null"],
+      "description": "Canonieke taaksoortsleutel; gelijk aan task_type voor standaardtypen en specifiek voor maatwerk."
     },
     "custom_task_type": { "type": ["string", "null"] },
     "execution_mode": {

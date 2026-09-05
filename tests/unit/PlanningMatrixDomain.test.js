@@ -161,7 +161,7 @@ describe("planningmatrix-periodes", () => {
   });
 
   it("scheidt operationeel actieve medewerkers en objecten van concept- en legacyrecords", () => {
-    expect(isPlanningPersonnelActive({ status: "active", is_active: false })).toBe(true);
+    expect(isPlanningPersonnelActive({ status: "active", is_active: false })).toBe(false);
     expect(isPlanningPersonnelActive({ status: "draft", is_active: true })).toBe(false);
     expect(isPlanningPersonnelActive({ is_active: true })).toBe(true);
     expect(isPlanningObjectActive({ status: "active", is_active_customer_object: true })).toBe(true);

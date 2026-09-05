@@ -67,19 +67,24 @@ function collectCaoKeyEvidence({ body = {}, serviceContextValidation = null, con
     if (value) evidence.push({ source, cao_key: value });
   };
 
-  add('body.cao_key', body.cao_key);
-  add('body.service_context.cao_key', body.service_context?.cao_key);
-
-  for (const value of collectValuesFromPaths(serviceContextValidation, [
-    'service_context.cao_key',
-    'planning_contract_context.cao_key'
-  ])) add('validateTaskPlanningContext', value);
-
-  for (const value of collectValuesFromPaths(contractResolution, [
-    'cao_key',
-    'service_context.cao_key',
-    'selected_contract.cao_key'
-  ])) add('resolvePersonnelContractForService', value);
+  const selectedContractId = contractResolution?.contract_id || contractResolution?.selected_contract?.id || null;
+  if (selectedContractId) {
+    for (const value of collectValuesFromPaths(contractResolution, [
+      'payroll_cao_key',
+      'selected_contract.cao_key',
+      'cao_key'
+    ])) add('resolvePersonnelContractForService', value);
+  } else {
+    // Alleen als er nog geen arbeidscontract bestaat, blijft dienstcontext
+    // diagnostische fallback-evidence. Zodra een contract is geselecteerd mag
+    // object-/service-CAO de loon-CAO niet meer bepalen of ermee conflicteren.
+    add('body.cao_key', body.cao_key);
+    add('body.service_context.cao_key', body.service_context?.cao_key);
+    for (const value of collectValuesFromPaths(serviceContextValidation, [
+      'service_context.cao_key',
+      'planning_contract_context.cao_key'
+    ])) add('validateTaskPlanningContext', value);
+  }
 
   for (const value of collectValuesFromPaths(scheduleValidation, [
     'cao_key',
@@ -155,6 +160,147 @@ function collectSourceRuleIds({ serviceContextValidation = null, contractResolut
   appendUnique(ids, scheduleValidation?.source_rule_ids);
   appendUnique(ids, scheduleValidation?.rule_validation_summary?.source_rule_ids);
   return unique(ids);
+}
+
+function employmentRoutingIdentity(contractResolution) {
+  const contractId = contractResolution?.contract_id
+    || contractResolution?.selected_contract?.id
+    || null;
+  const employingCompanyId = contractResolution?.employing_company_id
+    || contractResolution?.company_id
+    || contractResolution?.selected_contract?.company_id
+    || null;
+  const payrollCaoKey = contractResolution?.payroll_cao_key
+    || contractResolution?.selected_contract?.cao_key
+    || null;
+  const explicitStatus = contractResolution?.employment_routing_status || null;
+  const candidateIds = unique(normalizeArray(contractResolution?.contract_candidate_ids)
+    .map(value => String(value)));
+  const selectedContractMatchesCandidates = candidateIds.length === 0
+    || (candidateIds.length === 1 && String(contractId || '') === candidateIds[0]);
+  const identityComplete = !!contractId && !!employingCompanyId && !!payrollCaoKey;
+
+  let status = 'stale';
+  if (contractResolution) {
+    if (explicitStatus === 'stale') {
+      status = 'stale';
+    } else if (explicitStatus === 'ambiguous' || candidateIds.length > 1) {
+      status = 'ambiguous';
+    } else if (explicitStatus === 'missing_contract') {
+      status = 'missing_contract';
+    } else if (!selectedContractMatchesCandidates) {
+      status = 'blocked';
+    } else if (identityComplete) {
+      // Contractselectie en inzetbaarheid zijn twee verschillende bewijzen.
+      // Een unieke arbeidsroute blijft dus resolved wanneer bijvoorbeeld een
+      // kwalificatie-, Wpbr- of CAO-runtimecontrole de inzet zelf blokkeert.
+      status = 'resolved';
+    } else if (explicitStatus === 'blocked' || contractResolution.status === 'blocked') {
+      status = 'blocked';
+    } else if (
+      explicitStatus === 'manual_review_required'
+      || contractResolution.status === 'manual_review_required'
+    ) {
+      status = 'manual_review_required';
+    } else if (!contractId) {
+      status = 'missing_contract';
+    } else {
+      status = 'blocked';
+    }
+  }
+
+  return {
+    status,
+    contract_id: contractId,
+    employing_company_id: employingCompanyId,
+    payroll_cao_key: payrollCaoKey
+  };
+}
+
+function isEmploymentRouteDependentNonProof(control) {
+  if (!control) return true;
+  const checks = normalizeArray(control.checks);
+  const missingProofChecks = normalizeArray(control.missing_proof_checks);
+  const proofChecks = missingProofChecks.length > 0 ? missingProofChecks : checks;
+  return control.resolution_dependency === 'employment_contract_route'
+    && control.unresolved_due_to_employment_route === true
+    && control.required === true
+    && control.status === 'not_proven'
+    && control.matched === false
+    && normalizeArray(control.blocking_checks).length === 0
+    && normalizeArray(control.blocking_reasons).length === 0
+    && proofChecks.length > 0
+    && proofChecks.every(check => check?.reason === 'employment_contract_route_not_resolved');
+}
+
+function independentAssignmentControlReady(control) {
+  if (!control) return true;
+  const status = String(control.status || '').trim().toLowerCase();
+  if (
+    ['blocked', 'failed', 'manual_review_required', 'not_proven', 'stale'].includes(status)
+    || control.matched === false
+    || control.planning_allowed === false
+    || control.manual_review_required === true
+    || normalizeArray(control.blocking_checks).length > 0
+    || normalizeArray(control.missing_proof_checks).length > 0
+    || normalizeArray(control.blocking_reasons).length > 0
+    || normalizeArray(control.manual_review_reasons).length > 0
+  ) {
+    return false;
+  }
+  if (control.required !== true) return true;
+
+  // Een vereiste medewerkerscontrole mag alleen passeren met expliciet
+  // positief bewijs. `required: true` is op zichzelf geen blokkade: een
+  // geldige kwalificatie of WPBR-toestemming is juist het gewenste bewijs.
+  return status === 'compliant'
+    || control.matched === true
+    || control.planning_allowed === true;
+}
+
+function routingOnlyDraftException({
+  contractResolution,
+  employmentRouting,
+  serviceReadiness,
+  scheduleGate,
+  caoKeyResolution
+}) {
+  if (!contractResolution || !['missing_contract', 'ambiguous'].includes(employmentRouting.status)) {
+    return false;
+  }
+  if (serviceReadiness?.ready !== true || scheduleGate?.ready !== true || caoKeyResolution?.has_conflict) {
+    return false;
+  }
+  if (employmentRouting.contract_id || employmentRouting.employing_company_id || employmentRouting.payroll_cao_key) {
+    return false;
+  }
+  const candidateIds = unique(normalizeArray(contractResolution.contract_candidate_ids).map(String));
+  if (
+    (employmentRouting.status === 'missing_contract' && candidateIds.length !== 0)
+    || (employmentRouting.status === 'ambiguous' && candidateIds.length < 2)
+  ) {
+    return false;
+  }
+  const routeDependentControls = [
+    contractResolution.function_match,
+    contractResolution.security_scope_match
+  ];
+  if (!routeDependentControls.every(isEmploymentRouteDependentNonProof)) return false;
+
+  const independentAssignmentControls = [
+    contractResolution.qualification_check,
+    contractResolution.wpbr_permission_check,
+    contractResolution.internship_service_check,
+    contractResolution.hired_worker_service_check
+  ];
+  if (!independentAssignmentControls.every(independentAssignmentControlReady)) return false;
+
+  // Zonder gekozen arbeidscontract bestaat er nog geen loon-CAO. Een CAO op
+  // de taak of het verkopende bedrijf is hooguit dienstcontext en mag de
+  // conceptuitzondering niet per ongeluk als loonruntimeblokkade behandelen.
+  // Zodra er wel een arbeidsroute is, komt deze uitzondering niet in beeld en
+  // blijft een niet-ondersteunde loon-CAO gewoon fail-closed.
+  return true;
 }
 
 function buildScheduleGate({ scheduleValidation = null, requireScheduleValidation = false }) {
@@ -293,19 +439,34 @@ function buildCaoPlanningAssignmentDecision({
     ? 'manual_review_required'
     : 'assignable';
   const assignmentAllowed = decisionStatus === 'assignable';
+  const payrollFinalAllowed = assignmentAllowed && scheduleGate.payroll_final_ready === true;
+  const employmentRouting = employmentRoutingIdentity(contractResolution);
+  const draftAssignmentAllowed = assignmentAllowed || routingOnlyDraftException({
+    contractResolution,
+    employmentRouting,
+    serviceReadiness,
+    scheduleGate,
+    caoKeyResolution
+  });
 
   return {
     success: assignmentAllowed,
     decision_status: decisionStatus,
     planning_assignment_allowed: assignmentAllowed,
-    draft_assignment_allowed: uniqueBlocking.length === 0,
-    payroll_final_allowed: assignmentAllowed && scheduleGate.payroll_final_ready === true,
+    // Alleen een zuiver ontbrekende of ambigue arbeidsroute mag de conceptactie
+    // passeren. Rooster-, context-, kwalificatie- en runtimeblokkades blijven
+    // ook voor concepttoewijzingen fail-closed.
+    draft_assignment_allowed: draftAssignmentAllowed,
+    payroll_final_allowed: payrollFinalAllowed,
+    employment_routing_status: employmentRouting.status,
     manual_review_required: decisionStatus !== 'assignable',
     blocking_reasons: uniqueBlocking,
     manual_review_reasons: uniqueManual,
     warnings: uniqueWarnings,
     personnel_id: personnel_id || body.personnel_id || contractResolution?.personnel_id || null,
-    company_id: contractResolution?.company_id || serviceContext.company_id || body.company_id || null,
+    company_id: employmentRouting.employing_company_id,
+    employing_company_id: employmentRouting.employing_company_id,
+    payroll_cao_key: employmentRouting.payroll_cao_key,
     service_date: serviceContext.service_date || body.service_date || body.service_context?.service_date || null,
     task_id: serviceContext.task_id || body.task_id || body.service_context?.task_id || null,
     object_id: serviceContext.object_id || body.object_id || body.service_context?.object_id || null,
@@ -318,7 +479,7 @@ function buildCaoPlanningAssignmentDecision({
     service_context_readiness: serviceReadiness,
     contract_resolution_status: contractResolution?.status || null,
     contract_selection_policy: contractResolution?.contract_selection_policy || null,
-    contract_id: contractResolution?.contract_id || contractResolution?.selected_contract?.id || body.contract_id || null,
+    contract_id: employmentRouting.contract_id,
     selected_contract: contractResolution?.selected_contract || null,
     cao_configuration_id: contractResolution?.cao_configuration_id || contractResolution?.selected_contract?.cao_configuration_id || null,
     cao_resolution_source: contractResolution?.cao_resolution_source || null,
@@ -341,10 +502,14 @@ function serviceContextValidationFromContract(
   const serviceContext = contractResolution?.service_context || null;
   const readiness = contractResolution?.service_context_readiness || null;
   if (!serviceContext || !readiness) return null;
-  const unsupportedCao = !!serviceContext.cao_key &&
-    !SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS.includes(serviceContext.cao_key);
+  const employmentCaoKey = contractResolution?.payroll_cao_key
+    || contractResolution?.selected_contract?.cao_key
+    || contractResolution?.cao_key
+    || null;
+  const unsupportedCao = !!employmentCaoKey &&
+    !SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS.includes(employmentCaoKey);
   const unsupportedMessage = unsupportedCao
-    ? `Dienst gebruikt ${serviceContext.cao_key}; automatische planning/payroll-runtime is hiervoor nog niet lokaal geverifieerd.`
+    ? `Arbeidscontract gebruikt ${employmentCaoKey}; automatische planning/payroll-runtime is hiervoor nog niet lokaal geverifieerd.`
     : null;
   const manualReviewReasons = unique([
     ...normalizeArray(readiness.manual_review_reasons),
@@ -508,7 +673,11 @@ Deno.serve(async (req) => {
       success: false,
       decision_status: 'failed',
       planning_assignment_allowed: false,
+      draft_assignment_allowed: false,
       payroll_final_allowed: false,
+      employment_routing_status: 'stale',
+      employing_company_id: null,
+      payroll_cao_key: null,
       manual_review_required: true,
       error: error.message || String(error)
     }, { status: 500 });

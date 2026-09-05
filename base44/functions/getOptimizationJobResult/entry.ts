@@ -31,6 +31,33 @@ function formatSeconds(seconds) {
   return `${String(Math.floor(value / 3600)).padStart(2, '0')}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}`;
 }
 
+const PLANNING_EVIDENCE_FIELDS = {
+  planning_shift_task_segment_id: ['planning_shift_task_segment_id', 'planning_task_segment_id', 'shift_task_segment_id', 'task_segment_id'],
+  planning_task_occurrence_id: ['planning_task_occurrence_id', 'task_occurrence_id'],
+  planning_shift_id: ['planning_shift_id'],
+};
+
+function planningEvidenceFromSources(...sources) {
+  const projection = {};
+  for (const [canonicalField, aliases] of Object.entries(PLANNING_EVIDENCE_FIELDS)) {
+    const values = [...new Set(sources.flatMap(source => aliases.map(alias => source?.[alias])).filter(Boolean).map(String))];
+    if (values.length > 1) {
+      throw new Error(`Tegenstrijdige ${canonicalField} in het optimalisatieresultaat.`);
+    }
+    projection[canonicalField] = values[0] || null;
+  }
+  return projection;
+}
+
+function exactAssignedTask(sourceRoute, taskId, step = {}) {
+  const candidates = (sourceRoute?.assigned_tasks || []).filter(item => String(item.task_id) === String(taskId));
+  if (candidates.length <= 1) return candidates[0] || null;
+  const repeatIndex = step.repeat_index ?? step.execution_index ?? null;
+  if (repeatIndex === null) return null;
+  const repeatMatches = candidates.filter(item => Number(item.repeat_index) === Number(repeatIndex));
+  return repeatMatches.length === 1 ? repeatMatches[0] : null;
+}
+
 function normalizeCompletedResult(serverResult, requestPayload = {}, debug = false) {
   const plannedResult = serverResult.best_result || {
     routes: serverResult.routes || [],
@@ -74,6 +101,7 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
     const tasks = taskSteps.map((step, stepIndex) => {
       const taskId = step.original_task_id || step.task_id;
       const sourceTask = taskId ? (taskById.get(String(taskId)) || {}) : {};
+      const assignedTask = exactAssignedTask(sourceRoute, taskId, step);
       const object = objectById.get(String(sourceTask.object_id || step.object_id || '')) || {};
       const usesDeadline = !!step.uses_arrival_deadline || !!step.use_arrival_deadline || !!sourceTask.use_arrival_deadline;
       const arrivalSeconds = Number(step.arrival_seconds || 0);
@@ -88,6 +116,7 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
 
       return {
         task_id: taskId ? String(taskId) : '',
+        ...planningEvidenceFromSources(step, assignedTask, sourceTask),
         optimizer_task_id: step.task_id,
         object_id: sourceTask.object_id || step.object_id,
         name: step.name || object.name || sourceTask.task_type || 'Taak',
@@ -281,3 +310,5 @@ Deno.serve(async (req) => {
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
+
+export { exactAssignedTask, normalizeCompletedResult, planningEvidenceFromSources };

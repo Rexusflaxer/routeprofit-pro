@@ -13,11 +13,12 @@ function preview(
   warnings = [],
   candidateKey = "candidate:employee-1:occurrence-1",
   basisToken = "basis-1",
+  draftAssignmentAllowed = status === "ready",
 ) {
   return {
     drop: { kind: "compose_occurrence_for_personnel", occurrenceId: "occurrence-1", personnelId: "employee-1" },
     eligibilityCandidate: { candidate_key: candidateKey },
-    verdict: { status, warnings, basisToken },
+    verdict: { status, warnings, basisToken, draftAssignmentAllowed },
   };
 }
 
@@ -65,6 +66,100 @@ describe("planning eligibility drop gate", () => {
 
     expect(resolution.status).toBe("warnings_changed");
     expect(resolution.newWarnings).toEqual([newWarning]);
+  });
+
+  it("rondt een koude drop af als alleen een nieuwe informatieve roosterboilerplate verschijnt", () => {
+    const pending = createPendingPlanningEligibilityDrop({
+      result: { id: "drop-1" },
+      preview: preview("checking"),
+      now: NOW,
+    });
+    const informationalWarning = {
+      code: "contract_cao_warning_2026_08_29_1",
+      severity: "info",
+      message: "Roosterperiodecontrole is niet uitgevoerd in deze interactieve voorcontrole.",
+    };
+
+    expect(resolvePendingPlanningEligibilityDrop({
+      pending,
+      preview: preview("ready", [informationalWarning]),
+      queueIdle: true,
+      now: NOW + 250,
+    })).toMatchObject({
+      status: "ready",
+      newWarnings: [informationalWarning],
+    });
+  });
+
+  it.each([undefined, false])("blokkeert een ready-verdict zonder expliciet draftbewijs (%s)", draftAllowed => {
+    const pending = createPendingPlanningEligibilityDrop({
+      result: { id: "drop-1" },
+      preview: preview("checking"),
+      now: NOW,
+    });
+    const current = preview("ready", [{
+      code: "contract_missing",
+      severity: "warning",
+      message: "Arbeidscontract ontbreekt.",
+    }]);
+    current.verdict.draftAssignmentAllowed = draftAllowed;
+
+    expect(resolvePendingPlanningEligibilityDrop({
+      pending,
+      preview: current,
+      queueIdle: true,
+      now: NOW + 250,
+    })).toMatchObject({ status: "blocked" });
+  });
+
+  it.each([
+    ["contract_missing", "warning"],
+    ["contract_ambiguous", "critical"],
+  ])("laat een nieuw toegestaan routeringssignaal %s de vastgehouden drop afronden", (code, severity) => {
+    const pending = createPendingPlanningEligibilityDrop({
+      result: { id: "drop-1" },
+      preview: preview("checking"),
+      now: NOW,
+    });
+    const routingWarning = {
+      code,
+      severity,
+      message: `Actueel routeringssignaal: ${code}`,
+    };
+
+    expect(resolvePendingPlanningEligibilityDrop({
+      pending,
+      preview: preview("ready", [routingWarning]),
+      queueIdle: true,
+      now: NOW + 250,
+    })).toMatchObject({
+      status: "ready",
+      newWarnings: [routingWarning],
+    });
+  });
+
+  it("vergelijk waarschuwingen op semantische code en niet op wisselende tekst", () => {
+    const initial = {
+      code: "contract_ambiguous",
+      severity: "critical",
+      message: "Twee passende arbeidscontracten gevonden.",
+    };
+    const pending = createPendingPlanningEligibilityDrop({
+      result: { id: "drop-1" },
+      preview: preview("checking", [initial]),
+      now: NOW,
+    });
+    const translated = {
+      ...initial,
+      message: "Meerdere arbeidscontracten passen bij deze dienst.",
+    };
+
+    expect(resolvePendingPlanningEligibilityDrop({
+      pending,
+      preview: preview("ready", [translated]),
+      queueIdle: true,
+      now: NOW + 250,
+    })).toMatchObject({ status: "ready", newWarnings: [] });
   });
 
   it("begrensd unavailable-herstel en een verdwenen of verlopen target falen dicht", () => {

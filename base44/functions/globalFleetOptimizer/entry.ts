@@ -1387,6 +1387,9 @@ Deno.serve(async (req) => {
             await base44.asServiceRole.entities.Route.update(route.id, {
               assigned_tasks: route.tasks.map((task, index) => ({
                 task_id: task.task_id,
+                planning_shift_task_segment_id: task.planning_shift_task_segment_id || task.task_segment_id || null,
+                planning_task_occurrence_id: task.planning_task_occurrence_id || task.task_occurrence_id || null,
+                planning_shift_id: task.planning_shift_id || null,
                 days: [weekday],
                 sequence_index: index,
                 locked_sequence: true,
@@ -1420,6 +1423,9 @@ Deno.serve(async (req) => {
               weekdays: [weekday],
               assigned_tasks: route.tasks.map((task, index) => ({
                 task_id: task.task_id,
+                planning_shift_task_segment_id: task.planning_shift_task_segment_id || task.task_segment_id || null,
+                planning_task_occurrence_id: task.planning_task_occurrence_id || task.task_occurrence_id || null,
+                planning_shift_id: task.planning_shift_id || null,
                 days: [weekday],
                 sequence_index: index,
                 locked_sequence: true,

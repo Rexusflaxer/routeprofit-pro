@@ -21,7 +21,7 @@ const INACTIVE_ASSIGNMENT_STATUSES = new Set([
   "removed",
   "unassigned",
 ]);
-const ACTIVE_CONTRACT_STATUSES = new Set(["active", "scheduled", "signed"]);
+const ACTIVE_CONTRACT_STATUSES = new Set(["active", "scheduled"]);
 const ACTIVE_PASS_STATUSES = new Set(["active"]);
 const ACTIVE_ABSENCE_STATUSES = new Set(["active", "approved"]);
 const REQUESTED_ABSENCE_STATUSES = new Set(["requested"]);
@@ -51,8 +51,42 @@ export const PLANNING_WARNING_CODES = Object.freeze({
   SECURITY_PASS_INACTIVE: "security_pass_inactive",
   RESTRICTION_BLOCKED: "restriction_blocked",
   CONTRACT_MISSING: "contract_missing",
+  CONTRACT_AMBIGUOUS: "contract_ambiguous",
+  CONTRACT_NOT_FINAL: "contract_not_final",
   CONTRACT_HOURS_EXCEEDED: "contract_hours_exceeded",
 });
+
+const TASK_TYPE_KEY_ALIASES = Object.freeze({
+  objectbeveiliging: "object_security",
+  mobiele_controleronde: "mobile_control_round",
+  externe_controleronde: "external_control_round",
+  externe_sluitronde: "external_closing_round",
+  brand_en_sluitronde: "fire_closing_round",
+  brand_sluitronde: "fire_closing_round",
+  openingsronde: "opening_round",
+  sluitbegeleiding: "closing_assistance",
+  receptie: "reception",
+  receptiedienst: "reception",
+  toegangscontrole: "access_control",
+  brandwacht: "fire_watch",
+  portier: "concierge",
+  concierge: "concierge",
+  portier_concierge: "concierge",
+});
+const STANDARD_TASK_TYPE_KEYS = new Set([
+  "object_security",
+  "fire_closing_round",
+  "external_closing_round",
+  "external_control_round",
+  "opening_round",
+  "mobile_control_round",
+  "reception",
+  "closing_assistance",
+  "access_control",
+  "fire_watch",
+  "concierge",
+]);
+const CUSTOM_TASK_TYPE_KEY_PATTERN = /^other:[a-z0-9][a-z0-9._:-]{0,159}$/;
 
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -82,6 +116,49 @@ function asArray(value) {
       .filter(Boolean);
   }
   return [value];
+}
+
+function canonicalTaskTypeKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.toLowerCase().startsWith("other:")) {
+    const definitionId = raw.slice(raw.indexOf(":") + 1).trim();
+    const customKey = definitionId ? `other:${definitionId}` : "";
+    return CUSTOM_TASK_TYPE_KEY_PATTERN.test(customKey) ? customKey : "";
+  }
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const key = TASK_TYPE_KEY_ALIASES[normalized] || normalized;
+  return STANDARD_TASK_TYPE_KEYS.has(key) ? key : "";
+}
+
+function contractTaskTypeKeys(contract) {
+  return [...new Set(asArray(contract?.allowed_task_types)
+    .map(canonicalTaskTypeKey)
+    .filter(value => value && !["unknown", "all", "not_applicable", "other"].includes(value)))];
+}
+
+function shiftTaskTypeKeys(shift) {
+  const context = shift?.service_context_snapshot || {};
+  const segmentContexts = asArray(context.segment_contexts);
+  return [...new Set([
+    ...asArray(shift?.required_task_types),
+    shift?.task_type_key,
+    shift?.task_type,
+    ...asArray(context.required_task_types),
+    context.task_type_key,
+    context.task_type,
+    ...segmentContexts.flatMap(segment => [
+      ...asArray(segment?.required_task_types),
+      segment?.task_type_key,
+      segment?.task_type,
+    ]),
+  ].map(canonicalTaskTypeKey)
+    .filter(value => value && value !== "other"))];
 }
 
 function localDate(year, month, day, hour = 12, minute = 0, second = 0) {
@@ -212,6 +289,7 @@ export function getPlanningTaskOccurrenceBootstrapStart(periodStart) {
 
 export function isPlanningPersonnelActive(personnel) {
   const status = String(personnel?.status || "").trim().toLowerCase();
+  if (personnel?.is_active === false) return false;
   if (status) return status === "active";
   return personnel?.is_active === true;
 }
@@ -1100,7 +1178,10 @@ function targetCompanyId(shift) {
 
 function companyScopedRecordMatches(record, companyId) {
   const recordCompanyId = String(firstValue(record, ["company_id", "employer_company_id"]) || "");
-  return !recordCompanyId || !companyId || recordCompanyId === companyId;
+  // An unscoped credential remains portable. A company-scoped credential is
+  // evidence only for the employer selected by the employment-contract route;
+  // the task/operating company must never become an implicit employer.
+  return !recordCompanyId || (!!companyId && recordCompanyId === companyId);
 }
 
 function getQualificationWarnings({ personnel, shift, qualifications }) {
@@ -1186,7 +1267,7 @@ function requiredPassTypes(shift) {
   return asArray(raw).map(normalizedText).filter(Boolean);
 }
 
-function getSecurityPassWarnings({ personnel, shift, securityPasses }) {
+function getSecurityPassWarnings({ personnel, shift, securityPasses, employingCompanyId = null }) {
   if (
     shift.requires_security_pass === false
     || shift.security_pass_required === false
@@ -1195,7 +1276,7 @@ function getSecurityPassWarnings({ personnel, shift, securityPasses }) {
     return [];
   }
   const id = personnelId(personnel);
-  const companyId = targetCompanyId(shift);
+  const companyId = String(employingCompanyId || "");
   const targetDateKey = toDateKey(getShiftInterval(shift).start);
   const requiredTypes = requiredPassTypes(shift);
   const records = asArray(securityPasses)
@@ -1209,8 +1290,8 @@ function getSecurityPassWarnings({ personnel, shift, securityPasses }) {
       "critical",
       "Beveiligingspas ontbreekt",
       companyId
-        ? "Er is geen passende beveiligingspas voor het bedrijf van deze dienst."
-        : "Er is geen passende beveiligingspas geregistreerd.",
+        ? "Er is geen passende beveiligingspas voor de juridische werkgever uit het arbeidscontract."
+        : "Zonder eenduidige juridische werkgever is geen company-scoped beveiligingspas aantoonbaar geldig.",
     )];
   }
 
@@ -1435,14 +1516,18 @@ function contractEndDate(contract) {
   return contract.effective_contract_end_date || contract.contract_end_date || contract.valid_until || null;
 }
 
-function contractActiveOn(contract, dateKey, companyId) {
-  const status = String(contract.document_status || contract.status || "").toLowerCase();
-  if (!ACTIVE_CONTRACT_STATUSES.has(status)) return false;
-  if (!companyScopedRecordMatches(contract, companyId)) return false;
+function contractCoversDate(contract, dateKey) {
   const start = contract.contract_start_date || contract.valid_from;
   const end = contractEndDate(contract);
   return (!start || String(start).slice(0, 10) <= dateKey)
     && (!end || String(end).slice(0, 10) >= dateKey);
+}
+
+function contractRouteIsActive(contract) {
+  const status = String(contract.document_status || contract.status || "").toLowerCase();
+  if (!ACTIVE_CONTRACT_STATUSES.has(status)) return false;
+  if (contract.is_current === false || contract.planning_allowed !== true) return false;
+  return contract.legal_validation_status === "compliant";
 }
 
 function contractHours(contract, personnel) {
@@ -1461,14 +1546,43 @@ function contractLimitMinutes(contract, personnel) {
   return hours === null ? 0 : Math.max(0, Math.round(hours * 60));
 }
 
-function activeContractForShift({ personnel, shift, contracts }) {
+function employmentContractRouteForShift({ personnel, shift, contracts }) {
   const id = personnelId(personnel);
-  const companyId = targetCompanyId(shift);
-  const dateKey = toDateKey(getShiftInterval(shift).start);
-  return asArray(contracts)
+  const interval = getShiftInterval(shift);
+  const endInclusive = interval.valid ? new Date(interval.end.getTime() - 1) : null;
+  const serviceDates = interval.valid
+    ? [...new Set([toDateKey(interval.start), toDateKey(endInclusive)].filter(Boolean))]
+    : [];
+  const requiredTaskTypes = shiftTaskTypeKeys(shift);
+  const dateContracts = asArray(contracts)
     .filter(record => belongsToPersonnel(record, id))
-    .filter(record => contractActiveOn(record, dateKey, companyId))
-    .sort((left, right) => String(right.contract_start_date || "").localeCompare(String(left.contract_start_date || "")))[0] || null;
+    .filter(record => serviceDates.length > 0 && serviceDates.every(date => contractCoversDate(record, date)));
+  const taskDateContracts = dateContracts
+    .filter(record => {
+      const allowedTaskTypes = contractTaskTypeKeys(record);
+      return requiredTaskTypes.length > 0
+        && requiredTaskTypes.every(taskType => allowedTaskTypes.includes(taskType));
+    });
+  const provenTaskDateContracts = taskDateContracts
+    .filter(record => record.company_id && record.cao_key);
+  const candidates = provenTaskDateContracts
+    .filter(contractRouteIsActive)
+    .sort((left, right) => String(right.contract_start_date || "").localeCompare(String(left.contract_start_date || "")));
+  return {
+    contract: candidates.length === 1 ? candidates[0] : null,
+    status: candidates.length > 1
+      ? "ambiguous"
+      : candidates.length === 1
+        ? "resolved"
+        : provenTaskDateContracts.length > 0
+          ? "not_final"
+          : "missing",
+    candidates,
+    dateContracts,
+    taskDateContracts,
+    provenTaskDateContracts,
+    requiredTaskTypes,
+  };
 }
 
 function weekBounds(shift) {
@@ -1519,7 +1633,8 @@ function getContractWarnings({
   excludeAssignmentId,
   requireActiveContract,
 }) {
-  const contract = activeContractForShift({ personnel, shift, contracts });
+  const route = employmentContractRouteForShift({ personnel, shift, contracts });
+  const contract = route.contract;
   if (!contract) {
     return {
       contract: null,
@@ -1531,16 +1646,28 @@ function getContractWarnings({
         shifts,
         excludeAssignmentId,
       }),
-      warnings: requireActiveContract === false
-        ? []
-        : [warning(
-          PLANNING_WARNING_CODES.CONTRACT_MISSING,
-          "critical",
-          "Geen actief arbeidscontract",
-          targetCompanyId(shift)
-            ? "Er is op de dienstdatum geen actief contract bij het bedrijf van deze dienst."
-            : "Er is op de dienstdatum geen actief arbeidscontract gevonden.",
-        )],
+      warnings: requireActiveContract === false ? [] : [route.status === "ambiguous"
+        ? warning(
+            PLANNING_WARNING_CODES.CONTRACT_AMBIGUOUS,
+            "critical",
+            "Arbeidscontract controleren",
+            `Meerdere arbeidscontracten dekken dezelfde taaksoort${route.requiredTaskTypes.length === 1 ? "" : "en"} (${route.requiredTaskTypes.join(", ")}). Koppel deze taaksoort in deze periode aan precies één werkgever.`,
+          )
+        : route.status === "not_final"
+          ? warning(
+              PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL,
+              "critical",
+              "Arbeidscontract controleren",
+              "Er bestaat een passend arbeidscontract voor deze taaksoort en datum, maar de contractstatus, planningstoestemming of juridische beoordeling is nog niet definitief. De conceptplanning blijft mogelijk.",
+            )
+        : warning(
+            PLANNING_WARNING_CODES.CONTRACT_MISSING,
+            "warning",
+            "Arbeidscontract koppelen",
+            route.requiredTaskTypes.length
+              ? `Geen uniek actief arbeidscontract dekt ${route.requiredTaskTypes.join(", ")} met een expliciete werkgever en loon-CAO. De conceptplanning blijft mogelijk.`
+              : "De taaksoort is nog niet eenduidig vastgelegd; daardoor kan geen arbeidscontract en loon-CAO worden bepaald. De conceptplanning blijft mogelijk.",
+          )],
     };
   }
 
@@ -1553,14 +1680,23 @@ function getContractWarnings({
   });
   const resolvedContractMinutes = contractHours(contract, personnel);
   const limitMinutes = contractLimitMinutes(contract, personnel);
-  const warnings = limitMinutes > 0 && scheduledMinutes > limitMinutes
-    ? [warning(
+  const warnings = [];
+  if (contract.payroll_final_allowed !== true || contract.contract_final_allowed !== true) {
+    warnings.push(warning(
+      PLANNING_WARNING_CODES.CONTRACT_NOT_FINAL,
+      "critical",
+      "Arbeidscontract controleren",
+      "Het passende arbeidscontract is nog niet definitief geschikt voor loonverwerking. De conceptplanning blijft mogelijk.",
+    ));
+  }
+  if (limitMinutes > 0 && scheduledMinutes > limitMinutes) {
+    warnings.push(warning(
       PLANNING_WARNING_CODES.CONTRACT_HOURS_EXCEEDED,
       "warning",
       "Contracturen overschreden",
       `Na deze dienst staat ${formatMinutesAsHours(scheduledMinutes)} gepland; de weekgrens is ${formatMinutesAsHours(limitMinutes)}.`,
-    )]
-    : [];
+    ));
+  }
 
   return {
     contract,
@@ -1620,6 +1756,20 @@ export function getAssignmentWarnings(input, shift, context = {}) {
     ));
   }
 
+  // Resolve the employment route before evaluating company-scoped personnel
+  // evidence. The shift company is the operating/selling side and may differ
+  // from the legal employer that issued qualifications and security passes.
+  const contractResult = getContractWarnings({
+    personnel,
+    shift: options.shift,
+    assignments,
+    shifts,
+    contracts,
+    excludeAssignmentId,
+    requireActiveContract,
+  });
+  const employingCompanyId = contractResult.contract?.company_id || null;
+
   warnings.push(
     ...getAbsenceWarnings({ personnel, shift: options.shift, absences }),
     ...getAssignmentConflictWarnings({
@@ -1633,20 +1783,19 @@ export function getAssignmentWarnings(input, shift, context = {}) {
           ? Number(options.minimumRestHours) * 60
           : undefined),
     }),
-    ...getQualificationWarnings({ personnel, shift: options.shift, qualifications }),
-    ...getSecurityPassWarnings({ personnel, shift: options.shift, securityPasses }),
+    ...getQualificationWarnings({
+      personnel,
+      shift: options.shift,
+      qualifications,
+    }),
+    ...getSecurityPassWarnings({
+      personnel,
+      shift: options.shift,
+      securityPasses,
+      employingCompanyId,
+    }),
     ...getRestrictionWarnings({ personnel, shift: options.shift, restrictions }),
   );
-
-  const contractResult = getContractWarnings({
-    personnel,
-    shift: options.shift,
-    assignments,
-    shifts,
-    contracts,
-    excludeAssignmentId,
-    requireActiveContract,
-  });
   warnings.push(...contractResult.warnings);
 
   return warnings.sort(warningSort);

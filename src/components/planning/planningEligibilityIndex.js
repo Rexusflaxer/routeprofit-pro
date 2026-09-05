@@ -173,6 +173,9 @@ function shiftFingerprint(shift, { includeRevision = false } = {}) {
     shift?.object_id,
     shift?.route_id,
     shift?.task_id,
+    shift?.task_type_key ?? context.task_type_key,
+    shift?.task_type ?? context.task_type,
+    records(shift?.required_task_types ?? context.required_task_types).map(text).sort().join(","),
     shift?.customer_contract_line_id,
     shift?.cao_key ?? context.cao_key,
     shift?.service_function_type ?? shift?.function_type ?? context.service_function_type,
@@ -469,6 +472,11 @@ const REMOTE_SCHEDULE_WARNING_CODES = new Set([
   "contract_hours_exceeded",
 ]);
 
+const DRAFT_ROUTING_WARNING_CODES = new Set([
+  "contract_missing",
+  "contract_ambiguous",
+]);
+
 function reusableRemoteWarnings(source) {
   return records(source).filter(item => (
     text(item?.source).toLowerCase() !== "planning"
@@ -679,6 +687,9 @@ function remoteVerdict({ remoteDecisions, candidateKey, basisToken, now, require
     status: required ? "checking" : "ready",
     reason: required ? "checking" : null,
     warnings: [],
+    routingDraftAssignmentAllowed: false,
+    employmentRoutingStatus: "stale",
+    employmentRoutingCodes: [],
   };
   const state = text(record.status || record.state || "ready").toLowerCase();
   // A server response can arrive after the planner has already changed the
@@ -690,20 +701,42 @@ function remoteVerdict({ remoteDecisions, candidateKey, basisToken, now, require
     status: required ? "unavailable" : "ready",
     reason: required ? "unavailable" : null,
     warnings,
+    routingDraftAssignmentAllowed: false,
+    employmentRoutingStatus: text(record.employment_routing_status) || "stale",
+    employmentRoutingCodes: records(record.employment_routing_codes),
   };
   if (!READY_STATES.has(state)) return {
     status: required && state === "stale" ? "stale" : required ? "checking" : "ready",
     reason: required && state === "stale" ? "stale" : required ? "checking" : null,
     warnings,
+    routingDraftAssignmentAllowed: false,
+    employmentRoutingStatus: text(record.employment_routing_status) || "stale",
+    employmentRoutingCodes: records(record.employment_routing_codes),
   };
   const recordBasis = text(record.basis_token ?? record.basisToken);
   const expiresAt = timestamp(record.expires_at ?? record.expiresAt);
-  if ((required && !recordBasis) || (recordBasis && recordBasis !== basisToken) || (expiresAt !== null && expiresAt <= now)) return {
+  if (
+    (required && !recordBasis)
+    || (recordBasis && recordBasis !== basisToken)
+    || (expiresAt !== null && expiresAt <= now)
+  ) return {
     status: required ? "stale" : "ready",
     reason: required ? "stale" : null,
     warnings,
+    routingDraftAssignmentAllowed: false,
+    employmentRoutingStatus: text(record.employment_routing_status) || "stale",
+    employmentRoutingCodes: records(record.employment_routing_codes),
   };
-  return { status: "ready", reason: null, warnings };
+  return {
+    status: "ready",
+    reason: null,
+    warnings,
+    // Missing means false. A legacy or partial ready response must never look
+    // green before the resolver has explicitly proved this exact concept drop.
+    routingDraftAssignmentAllowed: record.routing_draft_assignment_allowed === true,
+    employmentRoutingStatus: text(record.employment_routing_status) || "stale",
+    employmentRoutingCodes: records(record.employment_routing_codes),
+  };
 }
 
 function combineStatus(localStatus, remoteStatus) {
@@ -762,6 +795,9 @@ export function buildOccurrenceEligibilityShift({
     object_id: occurrence.object_id ?? context.object_id ?? null,
     task_occurrence_ids: [occurrence.id].filter(Boolean),
     task_id: context.task_id || occurrence.metadata?.task_id || null,
+    task_type: occurrence.task_type || context.task_type || null,
+    task_type_key: occurrence.task_type_key || context.task_type_key || occurrence.task_type || context.task_type || null,
+    required_task_types: records(context.required_task_types || occurrence.required_task_types),
     name: occurrence.task_name_snapshot || context.name || "Taak",
     object_name_snapshot: occurrence.object_name_snapshot || context.object_name_snapshot || null,
     customer_name_snapshot: occurrence.customer_name_snapshot || context.customer_name_snapshot || null,
@@ -836,6 +872,7 @@ export function createPlanningEligibilityIndex({
       PLANNING_ELIGIBILITY_REMOTE_FACT_DEPENDENCIES,
     );
     const currentScheduleBasisToken = basisTokenFor(currentDependencyStates);
+    const person = personnelById.get(id);
     const remote = remoteVerdict({
       remoteDecisions: remoteByKey,
       candidateKey,
@@ -843,13 +880,12 @@ export function createPlanningEligibilityIndex({
       now: queryNow,
       required: requireServerDecision,
     });
-    const cacheKey = `${currentScheduleBasisToken}|${candidateKey}|${text(excludeAssignmentId)}|${requireServerDecision ? "server" : "local"}|${remote.status}:${remote.reason || ""}`;
+    const cacheKey = `${currentScheduleBasisToken}|${candidateKey}|${text(excludeAssignmentId)}|${requireServerDecision ? "server" : "local"}|${remote.status}:${remote.reason || ""}:${remote.routingDraftAssignmentAllowed ? "draft" : "blocked"}:${remote.employmentRoutingStatus}`;
     if (cache.has(cacheKey)) {
       stats.cacheHits += 1;
       return cache.get(cacheKey);
     }
 
-    const person = personnelById.get(id);
     const knownAssignments = recordsForPersonnel(grouped.assignments, id);
     const linkedShifts = knownAssignments
       .map(item => shiftById.get(assignmentShiftId(item)))
@@ -874,6 +910,13 @@ export function createPlanningEligibilityIndex({
     const missingTargetStatus = !person || !shift ? "unavailable" : currentLocalStatus;
     const status = combineStatus(missingTargetStatus, remote.status);
     const warnings = dedupeWarnings([...localWarnings, ...remote.warnings]);
+    const hasNonRoutingCritical = warnings.some(item => (
+      item.severity === "critical"
+      && !DRAFT_ROUTING_WARNING_CODES.has(text(item.code).toLowerCase())
+    ));
+    const draftAssignmentAllowed = status === "ready"
+      && remote.routingDraftAssignmentAllowed === true
+      && !hasNonRoutingCritical;
     const notices = freshnessNotices(status, currentDependencyStates, remote.reason);
     if (!person) notices.push(notice(
       "eligibility_personnel_missing",
@@ -897,7 +940,18 @@ export function createPlanningEligibilityIndex({
       displayWarnings: dedupeWarnings([...warnings, ...notices]),
       hasCritical: warnings.some(item => item.severity === "critical"),
       hasWarnings: warnings.length > 0,
-      isClear: status === "ready" && warnings.length === 0,
+      draftAssignmentAllowed,
+      draft_assignment_allowed: draftAssignmentAllowed,
+      routingDraftAssignmentAllowed: remote.routingDraftAssignmentAllowed === true,
+      routing_draft_assignment_allowed: remote.routingDraftAssignmentAllowed === true,
+      employmentRoutingStatus: remote.employmentRoutingStatus,
+      employment_routing_status: remote.employmentRoutingStatus,
+      employmentRoutingCodes: Object.freeze([...remote.employmentRoutingCodes]),
+      employment_routing_codes: Object.freeze([...remote.employmentRoutingCodes]),
+      // Green is affirmative proof, not merely the absence of a warning. A
+      // partial/legacy ready record without the explicit draft gate remains
+      // amber so hover and drop can never disagree.
+      isClear: draftAssignmentAllowed && warnings.length === 0,
       serverFinalAuthority: true,
       dependencyStates: currentDependencyStates,
     });

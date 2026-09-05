@@ -1890,6 +1890,7 @@ describe("Planning matrix-bediening", () => {
       contractMinutes: 2_400,
       warnings: [],
       eligibilityStatus: "ready",
+      draftAssignmentAllowed: true,
     };
     const onAssign = vi.fn();
 

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { OBJECT_TASK_TYPES } from "@/components/objects/objectTaskConfig";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import { wizardRevealMotion, wizardStepMotion } from "@/components/ui-custom/wizardMotion";
@@ -106,6 +107,80 @@ const EMPLOYMENT_MODEL_OPTIONS = [
 
 const NON_SELECTABLE_FUNCTION_VALUES = new Set(["unknown", "all", "not_applicable"]);
 const FUNCTION_TYPES = FUNCTION_CATALOG_OPTIONS.filter(option => !NON_SELECTABLE_FUNCTION_VALUES.has(option.value));
+
+export const PERSONNEL_CONTRACT_TASK_TYPES = OBJECT_TASK_TYPES.filter(option => option.value !== "other");
+const PERSONNEL_CONTRACT_TASK_TYPE_KEYS = new Set(PERSONNEL_CONTRACT_TASK_TYPES.map(option => option.value));
+
+export function normalizePersonnelContractTaskTypes(value) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value || "").split(",");
+  return [...new Set(values
+    .map(item => String(item || "").trim())
+    .filter(item => PERSONNEL_CONTRACT_TASK_TYPE_KEYS.has(item)))];
+}
+
+export function unsupportedPersonnelContractTaskTypes(value) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value || "").split(",");
+  return [...new Set(values
+    .map(item => String(item || "").trim())
+    .filter(item => item && !PERSONNEL_CONTRACT_TASK_TYPE_KEYS.has(item)))];
+}
+
+export function personnelContractTaskTypesForPersistence(value) {
+  return [
+    ...normalizePersonnelContractTaskTypes(value),
+    ...unsupportedPersonnelContractTaskTypes(value),
+  ];
+}
+
+function unsupportedTaskTypeLabel(value) {
+  const catalogOption = OBJECT_TASK_TYPES.find(option => option.value === value);
+  return catalogOption ? `${catalogOption.label} (${value})` : value;
+}
+
+export function PersonnelContractTaskTypeSelector({ selectedValues = [], unsupportedValues = [], onToggle }) {
+  const selected = new Set(normalizePersonnelContractTaskTypes(selectedValues));
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {PERSONNEL_CONTRACT_TASK_TYPES.map(option => {
+          const isSelected = selected.has(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-label={option.label}
+              aria-pressed={isSelected}
+              onClick={() => onToggle(option.value)}
+              className={`flex min-h-16 items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${isSelected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary/40"}`}
+            >
+              <span>
+                <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{option.description}</span>
+              </span>
+              {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-700 dark:bg-amber-950/20">
+        <p className="font-medium text-foreground">Andere taak is nog niet beschikbaar als contractscope</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Een generieke taak zonder stabiele eigen sleutel kan niet eenduidig naar één arbeidscontract worden gerouteerd. Kies daarom voorlopig één of meer concrete taaksoorten.
+        </p>
+        {unsupportedValues.length > 0 && (
+          <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+            Dit bestaande contract bevat niet-selecteerbare waarden: {unsupportedValues.map(unsupportedTaskTypeLabel).join(", ")}. Deze blijven bij opslaan als legacywaarde bewaard, maar gelden niet als bewijs voor een eenduidige routeringsscope.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const FUNCTION_TYPE_LABELS = Object.fromEntries(FUNCTION_TYPES.map(option => [option.value, option.label]));
 const CONTRACT_FORM_LABELS = Object.fromEntries(CONTRACT_FORM_OPTIONS.map(option => [option.value, option.label]));
@@ -1053,6 +1128,7 @@ function getMissingContractFields(form) {
   if (!form.contract_start_date) missing.push("startdatum");
   if (form.duration_type === "fixed" && !form.contract_end_date) missing.push("einddatum");
   if (selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]).length === 0) missing.push("minimaal één functie");
+  if (normalizePersonnelContractTaskTypes(form.allowed_task_types_text).length === 0) missing.push("minimaal één concrete taaksoort");
   const wageRequired = form.contract_form !== "zzp" && form.contract_form !== "stage";
   const hasScale = numberOrNull(form.cao_scale) !== null;
   const hasPeriod = numberOrNull(form.cao_period) !== null;
@@ -1330,7 +1406,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     allowed_cao_function_groups: allowedGroups,
     cao_function_level: derivedPbFunctionLevel,
     allowed_cao_function_levels: allowedLevels,
-    allowed_task_types: fromArrayText(form.allowed_task_types_text),
+    allowed_task_types: personnelContractTaskTypesForPersistence(form.allowed_task_types_text),
     security_role_status: form.security_role_status || "unknown",
     allowed_security_role_statuses: hasMeaningfulSecurityRole(form.security_role_status) ? [form.security_role_status] : [],
     performs_security_work: automaticFunctionState.performsSecurityWork ?? boolOrNull(form.performs_security_work),
@@ -2388,6 +2464,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
   );
+  const selectedTaskTypeValues = useMemo(
+    () => normalizePersonnelContractTaskTypes(form.allowed_task_types_text),
+    [form.allowed_task_types_text]
+  );
+  const unsupportedTaskTypeValues = useMemo(
+    () => unsupportedPersonnelContractTaskTypes(form.allowed_task_types_text),
+    [form.allowed_task_types_text]
+  );
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
   const activeCaoAssignmentConfigurationIds = useMemo(() => companyCaoAssignments
     .filter(assignment => isDateWithinOptionRange(assignment, form.contract_start_date))
@@ -2480,7 +2564,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       && wizardStep === 10
       && !!form.company_id
       && !!form.contract_start_date
-      && selectedFunctionValues.length > 0,
+      && selectedFunctionValues.length > 0
+      && selectedTaskTypeValues.length > 0,
     retry: false,
   });
   const generatedPreview = useMemo(() => renderContractBody(personnel, effectiveContractForm, selectedCompany, selectedTemplate, selectedTemplateClauses), [effectiveContractForm, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
@@ -2913,6 +2998,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         cao_function_level: allNonSecurity
           ? "not_applicable"
           : (prev.cao_function_level === "not_applicable" ? "" : prev.cao_function_level),
+      };
+    });
+  };
+
+  const toggleAllowedTaskType = (value) => {
+    setForm(prev => {
+      if (!PERSONNEL_CONTRACT_TASK_TYPE_KEYS.has(value)) return prev;
+      const selected = normalizePersonnelContractTaskTypes(prev.allowed_task_types_text);
+      const unsupported = unsupportedPersonnelContractTaskTypes(prev.allowed_task_types_text);
+      const nextTaskTypes = selected.includes(value)
+        ? selected.filter(item => item !== value)
+        : [...selected, value];
+      return {
+        ...prev,
+        allowed_task_types_text: [...nextTaskTypes, ...unsupported].join(", "),
       };
     });
   };
@@ -3418,7 +3518,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     "Contractvorm",
     "Sjabloon",
     "Looptijd",
-    "Functies",
+    "Functies & taken",
     "Proeftijd",
     isArticle14Internship ? "Stageafspraken" : (isBblModel ? "Loon, uren & BBL" : "Loon & uren"),
     "Controle",
@@ -3467,7 +3567,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       && !!form.contract_start_date
       && (form.duration_type !== "fixed"
         || (!!form.duration_option && (form.duration_option === "pok_end_date" || !!form.contract_end_date))),
-    selectedFunctionValues.length > 0,
+    selectedFunctionValues.length > 0 && selectedTaskTypeValues.length > 0,
     isArticle14Internship || ["true", "false", "not_applicable"].includes(form.probation_agreed),
     wageAndHoursStepComplete,
     true,
@@ -4018,6 +4118,20 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Voor deze CAO zijn nog geen functies gekoppeld aan het bedrijf. Voeg de functies eerst toe via de CAO-instellingen van het bedrijf.
                   </p>
                 )}
+
+                <section className="space-y-3 border-t border-border pt-5">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Taaksoorten voor planning en loonroutering</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Kies alle concrete taaksoorten waarvoor dit arbeidscontract geldt. LOQ gebruikt deze selectie samen met werkgever en contractdatum om het juiste contract voor loon en CAO-controle te bepalen.
+                    </p>
+                  </div>
+                  <PersonnelContractTaskTypeSelector
+                    selectedValues={selectedTaskTypeValues}
+                    unsupportedValues={unsupportedTaskTypeValues}
+                    onToggle={toggleAllowedTaskType}
+                  />
+                </section>
               </div>
             )}
 
@@ -4549,6 +4663,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           const scaleLabel = contract.cao_scale
             ? `Schaal ${contract.cao_scale}${periodicValuePresent ? ` · periodiek ${contract.cao_period}` : ""}`
             : (periodicValuePresent ? `Periodiek ${contract.cao_period}` : "—");
+          const taskTypeLabels = personnelContractTaskTypesForPersistence(contract.allowed_task_types)
+            .map(unsupportedTaskTypeLabel);
           const contextMenuOpen = contractContextMenu?.contractId === contract.id;
           const actionRequired = !showArchive && (
             ["concept", "generated", "signed"].includes(contract.document_status)
@@ -4600,6 +4716,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 <div className="mt-0.5 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                   {contract.contract_start_date && <span>Vanaf: <strong className="font-medium text-foreground">{formatDate(contract.contract_start_date)}</strong></span>}
                   <span>Tot: <strong className="font-medium text-foreground">{effectiveEndDate ? formatDate(effectiveEndDate) : "Onbepaalde tijd"}</strong></span>
+                  <span>Taaksoorten: <strong className="font-medium text-foreground">{taskTypeLabels.length ? taskTypeLabels.join(", ") : "nog koppelen"}</strong></span>
                 </div>
               </div>
               <span className="min-w-0 truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</span>

@@ -155,6 +155,9 @@ const MUTATION_ACTIONS = new Set([
   'create_contract_line',
   'update_contract_line',
   'transition_contract_line',
+  'create_collective',
+  'update_collective',
+  'delete_collective',
   'create_contract_rate',
   'update_contract_rate',
   'transition_contract_rate',
@@ -274,6 +277,21 @@ const CONTACT_ROLE_PATCH_FIELDS = [
   'valid_until',
   'notes',
 ];
+const COLLECTIVE_PATCH_FIELDS = [
+  'object_code',
+  'name',
+  'collectief_type',
+  'customer_id',
+  'parent_collectief_id',
+  'object_ids',
+  'address',
+  'notes',
+];
+const COLLECTIVE_TYPES = new Set([
+  'regio_groep',
+  'bedrijventerrein',
+  'bedrijfsverzamelgebouw',
+]);
 const OBJECT_TYPES = new Set([
   'office',
   'retail_hospitality',
@@ -460,6 +478,7 @@ const CONTRACT_PATCH_FIELDS = [
 const CONTRACT_LINE_PATCH_FIELDS = [
   'sequence',
   'service_code',
+  'task_type_key',
   'name',
   'description',
   'scope_type',
@@ -470,7 +489,6 @@ const CONTRACT_LINE_PATCH_FIELDS = [
   'included_quantity_minor',
   'currency',
   'vat_rate_basis_points',
-  'status',
   'valid_from',
   'valid_until',
   'metadata',
@@ -1035,6 +1053,7 @@ function mutationTarget(action: string, body: LooseRecord) {
     'quote_id',
     'contract_id',
     'contract_line_id',
+    'collective_id',
     'contract_rate_id',
     'billing_candidate_id',
     'invoice_id',
@@ -1562,6 +1581,9 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   update_customer_object_identity: 'Objectgegevens gewijzigd',
   update_customer_object_operations: 'Operationele objectgegevens gewijzigd',
   set_customer_object_status: 'Objectstatus gewijzigd',
+  create_collective: 'Collectief toegevoegd',
+  update_collective: 'Collectief gewijzigd',
+  delete_collective: 'Collectief verwijderd',
   create_object_warning_address: 'Waarschuwingsadres toegevoegd', update_object_warning_address: 'Waarschuwingsadres gewijzigd',
   delete_object_warning_address: 'Waarschuwingsadres verwijderd', reorder_object_warning_addresses: 'Belvolgorde waarschuwingsadressen gewijzigd',
   upsert_warning_availability_overrides: 'Specifieke bereikbaarheid gewijzigd',
@@ -1656,6 +1678,7 @@ function eventContext(result: LooseRecord, body: LooseRecord) {
     result.quote ||
     result.contract ||
     result.contract_line ||
+    result.collective ||
     result.rate ||
     result.candidate ||
     result.invoice ||
@@ -2159,7 +2182,7 @@ function rawQuantityForExecution(execution: LooseRecord, unit: string) {
 
 function blockedCandidateData(execution: LooseRecord, context: LooseRecord, code: string, reason: string, idempotencyKey: string) {
   return {
-    company_id: context.company_id || execution.selling_company_id || execution.operating_company_id || 'unresolved',
+    company_id: context.company_id || execution.selling_company_id || 'unresolved',
     customer_id: context.customer_id || execution.customer_id || 'unresolved',
     customer_account_id: context.customer_account_id || execution.customer_account_id || 'unresolved',
     source_type: 'task_execution',
@@ -2194,6 +2217,127 @@ function blockedCandidateData(execution: LooseRecord, context: LooseRecord, code
   };
 }
 
+function uniqueCommercialValues(values: unknown[]) {
+  return [...new Set(values.map(asString).filter(Boolean))];
+}
+
+function isCanonicalCommercialTaskTypeKey(value: unknown) {
+  const key = asString(value);
+  return COMMERCIAL_TASK_TYPE_KEYS.has(key)
+    || /^other:[a-z0-9][a-z0-9._:-]{0,159}$/.test(key);
+}
+
+function legacyCommercialTaskTypeKey(value: unknown) {
+  const normalized = normalizedCommercialTaskToken(value);
+  if (!normalized) return null;
+  if (COMMERCIAL_TASK_TYPE_KEYS.has(normalized) && normalized !== 'other') return normalized;
+  return LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[normalized] || null;
+}
+
+function canonicalExecutionTaskType(
+  execution: LooseRecord,
+  sourceTask: LooseRecord | null,
+) {
+  const explicitKeys = uniqueCommercialValues([
+    execution.task_type_key,
+    execution.commercial_routing_snapshot?.task_type_key,
+    sourceTask?.task_type_key,
+  ]);
+  const invalidExplicit = explicitKeys.filter(key => !isCanonicalCommercialTaskTypeKey(key));
+  if (invalidExplicit.length) {
+    return { key: null, blocked: ['invalid_task_type_key', 'De uitvoering bevat een ongeldige canonieke taaksoort'] };
+  }
+  const hasSpecificCustomKey = explicitKeys.some(key => key.startsWith('other:'));
+  const legacyValues = uniqueCommercialValues([execution.task_type, sourceTask?.task_type]);
+  const invalidLegacy = legacyValues.filter(value => (
+    !(hasSpecificCustomKey && normalizedCommercialTaskToken(value) === 'other')
+    && !legacyCommercialTaskTypeKey(value)
+  ));
+  if (invalidLegacy.length) {
+    return { key: null, blocked: ['invalid_task_type_key', 'De legacy taaksoort kan niet veilig canoniek worden gemaakt'] };
+  }
+  const canonicalKeys = uniqueCommercialValues([
+    ...explicitKeys,
+    ...legacyValues.map(value => (
+      hasSpecificCustomKey && normalizedCommercialTaskToken(value) === 'other'
+        ? null
+        : legacyCommercialTaskTypeKey(value)
+    )),
+  ]);
+  if (canonicalKeys.length !== 1) {
+    return {
+      key: null,
+      blocked: canonicalKeys.length
+        ? ['task_type_mismatch', 'Taaksoort en canonieke taaksoortsleutel spreken elkaar tegen']
+        : ['missing_task_type_key', 'De uitvoering mist een canonieke taaksoortsleutel'],
+    };
+  }
+  return { key: canonicalKeys[0], blocked: null };
+}
+
+function frozenCommercialRouteEvidence(
+  execution: LooseRecord,
+  taskTypeKey: string,
+  serviceDate: string,
+) {
+  const status = asString(execution.commercial_routing_status);
+  if (!status) return { frozen: false, snapshot: null, blocked: null };
+  if (status !== 'resolved') {
+    return {
+      frozen: false,
+      snapshot: execution.commercial_routing_snapshot || null,
+      blocked: ['commercial_route_not_resolved', `De commerciële uitvoeringsroute heeft status ${status}`],
+    };
+  }
+  const snapshot = execution.commercial_routing_snapshot;
+  const requiredMatches = [
+    [snapshot?.task_type_key, taskTypeKey],
+    [snapshot?.customer_id, execution.customer_id],
+    [snapshot?.customer_account_id, execution.customer_account_id],
+    [snapshot?.selling_company_id, execution.selling_company_id],
+    [snapshot?.customer_contract_id, execution.customer_contract_id],
+    [snapshot?.customer_contract_line_id, execution.customer_contract_line_id],
+    [snapshot?.object_id, execution.object_id],
+    [snapshot?.service_date, serviceDate],
+  ];
+  const valid = Number(snapshot?.schema_version) === 1
+    && snapshot?.status === 'resolved'
+    && snapshot?.customer_billable === true
+    && requiredMatches.every(([left, right]) => asString(left) && asString(left) === asString(right))
+    && Number.isInteger(Number(snapshot?.customer_contract_version))
+    && Number(snapshot.customer_contract_version) > 0
+    && Number.isInteger(Number(snapshot?.customer_contract_line_version))
+    && Number(snapshot.customer_contract_line_version) > 0;
+  return valid
+    ? { frozen: true, snapshot, blocked: null }
+    : {
+        frozen: false,
+        snapshot: snapshot || null,
+        blocked: ['commercial_route_snapshot_invalid', 'De bevroren commerciële uitvoeringsroute mist sluitend publicatiebewijs'],
+      };
+}
+
+function commercialLineScopeMatches(
+  line: LooseRecord,
+  execution: LooseRecord,
+  collectiveById: Map<string, LooseRecord>,
+) {
+  if (line.scope_type === 'customer') return !line.object_id && !line.collective_id;
+  if (line.scope_type === 'object') {
+    return !line.collective_id && asString(line.object_id) === asString(execution.object_id);
+  }
+  if (line.scope_type === 'collective') {
+    const collective = collectiveById.get(asString(line.collective_id));
+    return !line.object_id
+      && Boolean(collective)
+      && asString(collective?.customer_id) === asString(line.customer_id)
+      && (Array.isArray(collective?.object_ids) ? collective.object_ids : [])
+        .map(asString)
+        .includes(asString(execution.object_id));
+  }
+  return false;
+}
+
 async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord) {
   const context: LooseRecord = {};
   const [routeExecution, sourceTask, object] = await Promise.all([
@@ -2222,113 +2366,135 @@ async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord)
   if (!context.customer_id) {
     return { context, blocked: ['missing_customer', 'De uitvoering heeft geen klant-snapshot'] };
   }
-  if (!context.company_id) {
-    return { context, blocked: ['missing_selling_company', 'De verkopende BV ontbreekt'] };
-  }
-
-  const accounts = context.customer_account_id
-    ? [await getRecord(base44, 'CustomerAccount', context.customer_account_id)].filter(Boolean)
-    : await getEntity(base44, 'CustomerAccount').filter({
-      customer_id: context.customer_id,
-      company_id: context.company_id,
-      status: 'active',
-    }, '-is_primary', 10);
-  if (accounts.length !== 1) {
-    return {
-      context,
-      blocked: [
-        accounts.length ? 'ambiguous_customer_account' : 'missing_customer_account',
-        accounts.length ? 'Meerdere klantrelaties passen bij deze uitvoering' : 'Geen actieve klantrelatie gevonden',
-      ],
-    };
-  }
-  const account = accounts[0];
-  context.customer_account_id = account.id;
-  if (account.customer_id !== context.customer_id || account.company_id !== context.company_id) {
-    return { context, blocked: ['company_mismatch', 'Klantrelatie, klant en verkopende BV komen niet overeen'] };
-  }
-  if (account.finance_hold) {
-    return { context, blocked: ['finance_hold', account.finance_hold_reason || 'Klantrelatie staat op financiële blokkade'] };
-  }
-
-  let contracts: LooseRecord[] = [];
-  if (execution.customer_contract_id) {
-    const selected = await getRecord(base44, 'CustomerContract', execution.customer_contract_id);
-    if (!selected) return { context, blocked: ['missing_contract', 'Geselecteerd contract bestaat niet'] };
-    if (
-      selected.company_id !== context.company_id ||
-      selected.customer_id !== context.customer_id ||
-      selected.customer_account_id !== account.id
-    ) {
-      return { context, blocked: ['company_mismatch', 'Geselecteerd contract hoort bij een andere klant, relatie of BV'] };
-    }
-    if (selected.status !== 'active') {
-      return { context, blocked: ['invalid_contract_status', `Geselecteerd contract heeft status ${selected.status}`] };
-    }
-    contracts = [selected];
-  } else {
-    contracts = await getEntity(base44, 'CustomerContract').filter({
-      customer_account_id: account.id,
-      company_id: context.company_id,
-      customer_id: context.customer_id,
-      status: 'active',
-    }, '-start_date', 100);
-  }
-  contracts = contracts.filter(contract =>
-    contract.status === 'active' &&
-    contract.company_id === context.company_id &&
-    contract.customer_id === context.customer_id &&
-    contract.customer_account_id === account.id &&
-    isDateInRange(context.service_date, contract.start_date, contract.end_date));
-  if (contracts.length !== 1) {
-    return {
-      context,
-      blocked: [
-        contracts.length ? 'overlapping_contract' : 'invalid_contract_status',
-        contracts.length ? 'Meerdere actieve contracten passen bij de uitvoeringsdatum' : 'Geen actief contract voor de uitvoeringsdatum',
-      ],
-    };
-  }
-  context.contract = contracts[0];
+  const executionTaskType = canonicalExecutionTaskType(execution, sourceTask);
+  if (executionTaskType.blocked) return { context, blocked: executionTaskType.blocked };
+  context.task_type_key = executionTaskType.key;
+  const frozenRoute = frozenCommercialRouteEvidence(execution, context.task_type_key, context.service_date);
+  if (frozenRoute.blocked) return { context, blocked: frozenRoute.blocked };
+  const frozenCommercialRoute = frozenRoute.frozen;
+  context.commercial_routing_snapshot = frozenRoute.snapshot;
 
   let lines: LooseRecord[] = [];
   if (execution.customer_contract_line_id) {
     const selected = await getRecord(base44, 'CustomerContractLine', execution.customer_contract_line_id);
     if (!selected) return { context, blocked: ['missing_contract_line', 'Geselecteerde contractregel bestaat niet'] };
-    if (selected.contract_id !== context.contract.id) {
-      return { context, blocked: ['contract_line_mismatch', 'Geselecteerde contractregel hoort bij een ander contract'] };
-    }
-    if (selected.status !== 'active') {
-      return { context, blocked: ['invalid_contract_line_status', `Geselecteerde contractregel heeft status ${selected.status}`] };
-    }
     lines = [selected];
   } else {
     lines = await getEntity(base44, 'CustomerContractLine').filter({
-      contract_id: context.contract.id,
+      customer_id: context.customer_id,
       status: 'active',
     }, '+sequence', 500);
   }
-  lines = lines.filter(line => {
+  if (!execution.customer_contract_line_id && lines.length >= 500) {
+    return { context, blocked: ['contract_line_lookup_truncated', 'Te veel contractregels om de taakroutering volledig te bewijzen'] };
+  }
+
+  const needsCollectives = lines.some(line => line.scope_type === 'collective');
+  const collectives = needsCollectives
+    ? await getEntity(base44, 'Collectief').filter({ customer_id: context.customer_id }, '+name', 1000)
+    : [];
+  if (needsCollectives && collectives.length >= 1000) {
+    return { context, blocked: ['collective_lookup_truncated', 'Te veel collectieven om de objectscope volledig te bewijzen'] };
+  }
+  const collectiveById = new Map(collectives.map((item: LooseRecord) => [String(item.id), item]));
+  const scopedTaskLines: LooseRecord[] = [];
+  for (const line of lines) {
+    const historicalSelectedLine = frozenCommercialRoute
+      && String(line.id) === String(execution.customer_contract_line_id);
+    if (!['active', ...(historicalSelectedLine ? ['ended'] : [])].includes(line.status)) continue;
+    if (!isDateInRange(context.service_date, line.valid_from, line.valid_until)) continue;
+    if (!commercialLineScopeMatches(line, execution, collectiveById)) continue;
+    let lineTaskTypeKey = null;
+    try {
+      lineTaskTypeKey = canonicalContractLineTaskTypeKey(line);
+    } catch (_error) {
+      lineTaskTypeKey = null;
+    }
+    if (!lineTaskTypeKey) {
+      if (execution.customer_contract_line_id) {
+        return { context, blocked: ['invalid_contract_line_task_type', 'De geselecteerde contractregel heeft geen veilige canonieke taaksoort'] };
+      }
+      continue;
+    }
+    if (lineTaskTypeKey !== context.task_type_key) continue;
     if (
-      line.contract_id !== context.contract.id ||
-      line.status !== 'active' ||
-      !isDateInRange(context.service_date, line.valid_from, line.valid_until)
-    ) return false;
-    if (line.service_code && line.service_code !== sourceTask?.task_type && line.service_code !== execution.task_type) return false;
-    if (line.scope_type === 'object') return line.object_id === execution.object_id;
-    if (line.scope_type === 'collective') return Boolean(sourceTask?.collectief_id && line.collective_id === sourceTask.collectief_id);
-    return line.scope_type === 'customer';
-  });
-  if (lines.length !== 1) {
+      String(line.customer_id) !== String(context.customer_id)
+      || !asString(line.company_id)
+      || (context.company_id && String(line.company_id) !== String(context.company_id))
+      || !asString(line.customer_account_id)
+      || (execution.customer_account_id && String(line.customer_account_id) !== String(execution.customer_account_id))
+    ) {
+      return { context, blocked: ['contract_line_context_mismatch', 'Contractregel, klantrelatie en verkopende BV komen niet overeen'] };
+    }
+    if (execution.customer_contract_id && String(line.contract_id) !== String(execution.customer_contract_id)) {
+      return { context, blocked: ['contract_line_mismatch', 'Geselecteerde contractregel hoort bij een ander contract'] };
+    }
+    scopedTaskLines.push(line);
+  }
+  if (scopedTaskLines.length !== 1) {
     return {
       context,
       blocked: [
-        lines.length ? 'overlapping_contract_line' : 'missing_contract_line',
-        lines.length ? 'Meerdere contractregels passen bij deze uitvoering' : 'Geen contractregel past bij dienst en objectscope',
+        scopedTaskLines.length ? 'overlapping_contract_line' : 'missing_contract_line',
+        scopedTaskLines.length ? 'Meerdere contractregels passen bij taaksoort, datum en objectscope' : 'Geen contractregel past bij taaksoort, datum en objectscope',
       ],
     };
   }
-  context.line = lines[0];
+  context.line = scopedTaskLines[0];
+  if (
+    frozenCommercialRoute
+    && versionOf(context.line) < Number(frozenRoute.snapshot.customer_contract_line_version)
+  ) {
+    return { context, blocked: ['commercial_route_snapshot_version_mismatch', 'De contractregel is ouder dan het bevroren publicatiebewijs'] };
+  }
+
+  const contract = await getRecord(base44, 'CustomerContract', context.line.contract_id);
+  if (!contract) return { context, blocked: ['missing_contract', 'Het hoofdcontract van de contractregel bestaat niet'] };
+  const historicalSelectedContract = frozenCommercialRoute
+    && String(contract.id) === String(execution.customer_contract_id)
+    && String(context.line.id) === String(execution.customer_contract_line_id);
+  const allowedContractStatuses = historicalSelectedContract
+    ? ['active', 'ended', 'superseded']
+    : ['active'];
+  if (!allowedContractStatuses.includes(contract.status)) {
+    return { context, blocked: ['invalid_contract_status', `Hoofdcontract heeft status ${contract.status}`] };
+  }
+  if (
+    String(contract.id) !== String(context.line.contract_id)
+    || !asString(contract.company_id)
+    || (context.company_id && String(contract.company_id) !== String(context.company_id))
+    || String(contract.customer_id) !== String(context.customer_id)
+    || String(context.line.company_id) !== String(contract.company_id)
+    || String(context.line.customer_id) !== String(contract.customer_id)
+    || String(context.line.customer_account_id) !== String(contract.customer_account_id)
+  ) {
+    return { context, blocked: ['contract_context_mismatch', 'Hoofdcontract en contractregel bevatten tegenstrijdige klant- of BV-gegevens'] };
+  }
+  if (!asString(contract.start_date) || !isDateInRange(context.service_date, contract.start_date, contract.end_date)) {
+    return { context, blocked: ['invalid_contract_period', 'Hoofdcontract dekt de uitvoeringsdatum niet'] };
+  }
+  if (
+    frozenCommercialRoute
+    && versionOf(contract) < Number(frozenRoute.snapshot.customer_contract_version)
+  ) {
+    return { context, blocked: ['commercial_route_snapshot_version_mismatch', 'Het hoofdcontract is ouder dan het bevroren publicatiebewijs'] };
+  }
+  context.contract = contract;
+  context.company_id = contract.company_id;
+  const account = await getRecord(base44, 'CustomerAccount', contract.customer_account_id);
+  if (!account) return { context, blocked: ['missing_customer_account', 'De klantrelatie van het hoofdcontract bestaat niet'] };
+  if (
+    String(account.id) !== String(context.line.customer_account_id)
+    || (execution.customer_account_id && String(account.id) !== String(execution.customer_account_id))
+    || String(account.customer_id) !== String(context.customer_id)
+    || String(account.company_id) !== String(context.company_id)
+  ) {
+    return { context, blocked: ['company_mismatch', 'Klantrelatie, contractregel en verkopende BV komen niet overeen'] };
+  }
+  if (account.finance_hold) {
+    return { context, blocked: ['finance_hold', account.finance_hold_reason || 'Klantrelatie staat op financiële blokkade'] };
+  }
+  context.customer_account_id = account.id;
   context.unit = billingModelUnit(context.line.billing_model);
   if (!context.unit) return { context, blocked: ['unsupported_billing_model', 'Facturatiemodel wordt niet ondersteund'] };
 
@@ -2345,24 +2511,33 @@ async function findExecutionPricing(base44: LooseRecord, execution: LooseRecord)
     ) {
       return { context, blocked: ['company_mismatch', 'Geselecteerd tarief hoort bij een andere contractregel, klantrelatie of BV'] };
     }
-    if (!['active', 'superseded', 'ended'].includes(selected.status)) {
+    const allowedSelectedRateStatuses = frozenCommercialRoute
+      ? ['active', 'superseded', 'ended']
+      : ['active'];
+    if (!allowedSelectedRateStatuses.includes(selected.status)) {
       return { context, blocked: ['invalid_rate_status', `Geselecteerd tarief heeft status ${selected.status}`] };
     }
     rates = [selected];
   } else {
+    const allowedRateStatuses = frozenCommercialRoute
+      ? ['active', 'superseded', 'ended']
+      : ['active'];
     rates = await getEntity(base44, 'CustomerContractRate').filter({
       contract_line_id: context.line.id,
-      status: { $in: ['active', 'superseded', 'ended'] },
+      status: { $in: allowedRateStatuses },
       unit: context.unit,
     }, '-priority', 500);
   }
+  const allowedRateStatuses = frozenCommercialRoute
+    ? ['active', 'superseded', 'ended']
+    : ['active'];
   rates = rates.filter(rate =>
     rate.contract_id === context.contract.id &&
     rate.company_id === context.company_id &&
     rate.customer_id === context.customer_id &&
     rate.customer_account_id === account.id &&
     rate.unit === context.unit &&
-    ['active', 'superseded', 'ended'].includes(rate.status) &&
+    allowedRateStatuses.includes(rate.status) &&
     isDateInRange(context.service_date, rate.valid_from, rate.valid_until));
   if (rates.length !== 1) {
     return {
@@ -2661,17 +2836,26 @@ async function createInvoiceFromCandidates(
 
 export {
   ApiError,
+  CONTRACT_LINE_PATCH_FIELDS,
   appendEvent,
   billingModelUnit,
   calculateAmounts,
+  canonicalContractLineTaskTypeKey,
+  canonicalExecutionTaskType,
   createInvoiceFromCandidates,
   dateOnly,
   findExecutionPricing,
+  handleCreateCollective,
+  handleDeleteCollective,
+  handleUpdateCollective,
   isDateInRange,
   plusDays,
   rangesOverlap,
   reserveCommercialNumber,
   roundQuantity,
+  validateContractLineActivationUniqueness,
+  validateCollectiveRoutingMutation,
+  validateCustomerContractActivationUniqueness,
   validateTransition,
   versionOf,
 };
@@ -10039,11 +10223,684 @@ async function handleUpdateContract(base44: LooseRecord, body: LooseRecord, expe
   return { contract: updated, resource_type: 'CustomerContract', resource_id: updated.id, category: 'commercial' };
 }
 
+const COMMERCIAL_TASK_TYPE_KEYS = new Set([
+  'object_security', 'fire_closing_round', 'external_closing_round',
+  'external_control_round', 'opening_round', 'mobile_control_round',
+  'reception', 'closing_assistance', 'access_control', 'fire_watch', 'concierge',
+]);
+const ROUTE_RESERVING_CUSTOMER_CONTRACT_STATUSES = new Set([
+  'approved',
+  'sent_for_signature',
+  'signed',
+  'active',
+  'suspended',
+]);
+const LEGACY_COMMERCIAL_TASK_TYPE_ALIASES: Record<string, string> = {
+  objectbeveiliging: 'object_security',
+  brand_en_sluitronde: 'fire_closing_round',
+  brand_sluitronde: 'fire_closing_round',
+  externe_sluitronde: 'external_closing_round',
+  externe_controleronde: 'external_control_round',
+  openingsronde: 'opening_round',
+  mobiele_controleronde: 'mobile_control_round',
+  receptie: 'reception',
+  receptiedienst: 'reception',
+  sluitbegeleiding: 'closing_assistance',
+  toegangscontrole: 'access_control',
+  brandwacht: 'fire_watch',
+  portier: 'concierge',
+  portier_concierge: 'concierge',
+  concierge: 'concierge',
+};
+
+function normalizedCommercialTaskToken(value: unknown) {
+  return asString(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function canonicalContractLineTaskTypeKey(line: LooseRecord) {
+  const explicit = asString(line.task_type_key);
+  if (explicit) {
+    if (COMMERCIAL_TASK_TYPE_KEYS.has(explicit) || /^other:[a-z0-9][a-z0-9._:-]{0,159}$/.test(explicit)) {
+      return explicit;
+    }
+    throw new ApiError(409, 'Contractregel heeft geen geldige canonieke task_type_key', {
+      code: 'CONTRACT_LINE_TASK_TYPE_INVALID',
+      contract_line_id: line.id || null,
+    });
+  }
+  const legacyToken = normalizedCommercialTaskToken(line.service_code);
+  const migrated = COMMERCIAL_TASK_TYPE_KEYS.has(legacyToken)
+    ? legacyToken
+    : LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[legacyToken] || null;
+  if (!migrated) {
+    throw new ApiError(409, 'Contractregel mist een canonieke task_type_key en de legacy dienstcode is niet eenduidig', {
+      code: 'CONTRACT_LINE_TASK_TYPE_UNKNOWN',
+      contract_line_id: line.id || null,
+    });
+  }
+  return migrated;
+}
+
+function strictCommercialDate(value: unknown, field: string) {
+  const text = asString(value);
+  if (!ISO_DATE_PATTERN.test(text) || dateOnly(text) !== text) {
+    throw new ApiError(409, `${field} bevat geen geldige datum`, { code: 'CONTRACT_LINE_PERIOD_INVALID', field });
+  }
+  return text;
+}
+
+function effectiveContractLinePeriod(line: LooseRecord, contract: LooseRecord) {
+  const contractFrom = strictCommercialDate(contract.start_date, 'contract.start_date');
+  const contractUntil = contract.end_date ? strictCommercialDate(contract.end_date, 'contract.end_date') : null;
+  const validFrom = line.valid_from ? strictCommercialDate(line.valid_from, 'contract_line.valid_from') : contractFrom;
+  const validUntil = line.valid_until
+    ? strictCommercialDate(line.valid_until, 'contract_line.valid_until')
+    : contractUntil;
+  if (
+    validFrom < contractFrom
+    || (contractUntil && (!validUntil || validUntil > contractUntil))
+    || (validUntil && validUntil < validFrom)
+  ) {
+    throw new ApiError(409, 'De effectieve contractregelperiode valt niet volledig binnen het contract', {
+      code: 'CONTRACT_LINE_PERIOD_OUTSIDE_CONTRACT',
+      contract_line_id: line.id || null,
+    });
+  }
+  return { valid_from: validFrom, valid_until: validUntil };
+}
+
+function contractLineCoveredObjectIds(
+  line: LooseRecord,
+  customerObjectIds: Set<string>,
+  collectiveById: Map<string, LooseRecord>,
+) {
+  if (line.scope_type === 'customer') {
+    if (line.object_id || line.collective_id || customerObjectIds.size === 0) {
+      throw new ApiError(409, 'Klantbrede contractregels hebben geen geldige concrete objectdekking', {
+        code: 'CONTRACT_LINE_SCOPE_INVALID', contract_line_id: line.id || null,
+      });
+    }
+    return new Set(customerObjectIds);
+  }
+  if (line.scope_type === 'object') {
+    const objectId = asString(line.object_id);
+    if (!objectId || line.collective_id || !customerObjectIds.has(objectId)) {
+      throw new ApiError(409, 'Objectscope van de contractregel is leeg of ongeldig', {
+        code: 'CONTRACT_LINE_SCOPE_INVALID', contract_line_id: line.id || null,
+      });
+    }
+    return new Set([objectId]);
+  }
+  if (line.scope_type === 'collective') {
+    const collective = collectiveById.get(asString(line.collective_id));
+    const objectIds = [...new Set((Array.isArray(collective?.object_ids) ? collective.object_ids : [])
+      .map(asString).filter(Boolean))];
+    if (line.object_id || !collective || objectIds.length === 0 || objectIds.some(id => !customerObjectIds.has(id))) {
+      throw new ApiError(409, 'Collectiefscope van de contractregel is leeg of ongeldig', {
+        code: 'CONTRACT_LINE_SCOPE_INVALID', contract_line_id: line.id || null,
+      });
+    }
+    return new Set(objectIds);
+  }
+  throw new ApiError(409, 'Contractregel heeft een onbekende scope', {
+    code: 'CONTRACT_LINE_SCOPE_INVALID', contract_line_id: line.id || null,
+  });
+}
+
+function validateContractLineActivationUniqueness(
+  line: LooseRecord,
+  contract: LooseRecord,
+  activeLines: LooseRecord[],
+  contracts: LooseRecord[],
+  customerObjects: LooseRecord[],
+  collectives: LooseRecord[],
+) {
+  if (
+    String(line.contract_id) !== String(contract.id)
+    || String(line.customer_id) !== String(contract.customer_id)
+    || String(line.company_id) !== String(contract.company_id)
+    || String(line.customer_account_id) !== String(contract.customer_account_id)
+  ) {
+    throw new ApiError(409, 'Contractregel bevat tegenstrijdige contract- of klantgegevens', {
+      code: 'CONTRACT_LINE_CONTEXT_MISMATCH', contract_line_id: line.id || null,
+    });
+  }
+  const taskTypeKey = canonicalContractLineTaskTypeKey(line);
+  const period = effectiveContractLinePeriod(line, contract);
+  const customerObjectIds = new Set(customerObjects
+    .filter(object => String(object.customer_id) === String(contract.customer_id))
+    .map(object => String(object.id)));
+  const collectiveById = new Map(collectives
+    .filter(collective => String(collective.customer_id) === String(contract.customer_id))
+    .map(collective => [String(collective.id), collective]));
+  const coveredObjectIds = contractLineCoveredObjectIds(line, customerObjectIds, collectiveById);
+  const contractById = new Map(contracts.map(item => [String(item.id), item]));
+  for (const candidate of activeLines) {
+    if (String(candidate.id) === String(line.id) || candidate.status !== 'active') continue;
+    const candidateContract = contractById.get(String(candidate.contract_id));
+    if (!candidateContract || String(candidate.customer_id) !== String(contract.customer_id)) {
+      throw new ApiError(409, 'Een actieve contractregel heeft geen controleerbare contractcontext', {
+        code: 'ACTIVE_CONTRACT_LINE_CONTEXT_UNKNOWN', contract_line_id: candidate.id || null,
+      });
+    }
+    if (!ROUTE_RESERVING_CUSTOMER_CONTRACT_STATUSES.has(candidateContract.status)) continue;
+    if (
+      String(candidate.customer_id) !== String(candidateContract.customer_id)
+      || String(candidate.company_id) !== String(candidateContract.company_id)
+      || String(candidate.customer_account_id) !== String(candidateContract.customer_account_id)
+    ) {
+      throw new ApiError(409, 'Een actieve contractregel bevat tegenstrijdige contractgegevens', {
+        code: 'ACTIVE_CONTRACT_LINE_CONTEXT_UNKNOWN', contract_line_id: candidate.id || null,
+      });
+    }
+    const candidateTaskTypeKey = canonicalContractLineTaskTypeKey(candidate);
+    if (candidateTaskTypeKey !== taskTypeKey) continue;
+    const candidatePeriod = effectiveContractLinePeriod(candidate, candidateContract);
+    if (!rangesOverlap(period.valid_from, period.valid_until, candidatePeriod.valid_from, candidatePeriod.valid_until)) continue;
+    const candidateObjects = contractLineCoveredObjectIds(candidate, customerObjectIds, collectiveById);
+    const overlappingObjectIds = [...coveredObjectIds].filter(id => candidateObjects.has(id));
+    if (!overlappingObjectIds.length) continue;
+    throw new ApiError(409, 'Deze taaksoort is voor dezelfde klant, objectdekking en periode al actief', {
+      code: 'CONTRACT_LINE_ROUTING_OVERLAP',
+      contract_line_id: line.id || null,
+      conflicting_contract_line_id: candidate.id || null,
+      overlapping_object_ids: overlappingObjectIds.sort(),
+      task_type_key: taskTypeKey,
+    });
+  }
+  return { task_type_key: taskTypeKey, ...period };
+}
+
+function validateCustomerContractActivationUniqueness(
+  contract: LooseRecord,
+  contractLines: LooseRecord[],
+  activeLines: LooseRecord[],
+  contracts: LooseRecord[],
+  customerObjects: LooseRecord[],
+  collectives: LooseRecord[],
+) {
+  return contractLines.map(line => ({
+    contract_line_id: line.id,
+    ...validateContractLineActivationUniqueness(
+      line,
+      contract,
+      activeLines,
+      contracts,
+      customerObjects,
+      collectives,
+    ),
+  }));
+}
+
+async function loadCustomerContractRoutingContextForCustomer(
+  base44: LooseRecord,
+  customerId: string,
+) {
+  const [activeLines, contracts, customerObjects, collectives] = await Promise.all([
+    getEntity(base44, 'CustomerContractLine').filter({ customer_id: customerId, status: 'active' }, '+valid_from', 5000),
+    getEntity(base44, 'CustomerContract').filter({ customer_id: customerId }, '+start_date', 5000),
+    getEntity(base44, 'SurveillanceObject').filter({ customer_id: customerId }, '+created_date', 5000),
+    getEntity(base44, 'Collectief').filter({ customer_id: customerId }, '+created_date', 5000),
+  ]);
+  if ([activeLines, contracts, customerObjects, collectives].some(items => items.length >= 5000)) {
+    throw new ApiError(503, 'Contractregeloverlap kan niet volledig en veilig worden gecontroleerd');
+  }
+  return { customer_id: customerId, activeLines, contracts, customerObjects, collectives };
+}
+
+async function loadCustomerContractRoutingActivationContext(
+  base44: LooseRecord,
+  contract: LooseRecord,
+) {
+  return loadCustomerContractRoutingContextForCustomer(base44, asString(contract.customer_id));
+}
+
+function validateCollectiveRoutingMutation(
+  currentCollective: LooseRecord,
+  projectedCollective: LooseRecord,
+  routingContexts: LooseRecord[],
+) {
+  const collectiveId = asString(currentCollective.id);
+  const projectedCustomerId = asString(projectedCollective.customer_id);
+  if (!collectiveId) {
+    throw new ApiError(409, 'Collectiefcontext kan niet veilig worden gecontroleerd', {
+      code: 'COLLECTIVE_ROUTING_CONTEXT_INVALID',
+    });
+  }
+  const validations: LooseRecord[] = [];
+  let projectedCustomerContextFound = false;
+  for (const context of routingContexts) {
+    const customerId = asString(context?.customer_id);
+    if (
+      !customerId
+      || !Array.isArray(context?.activeLines)
+      || !Array.isArray(context?.contracts)
+      || !Array.isArray(context?.customerObjects)
+      || !Array.isArray(context?.collectives)
+    ) {
+      throw new ApiError(503, 'Collectiefrouting kan niet volledig en veilig worden gecontroleerd', {
+        code: 'COLLECTIVE_ROUTING_CONTEXT_INCOMPLETE',
+      });
+    }
+    if (customerId === projectedCustomerId) {
+      projectedCustomerContextFound = true;
+      assertCollectiveMembershipContext(projectedCollective, context);
+    }
+    const projectedCollectives = context.collectives
+      .filter((collective: LooseRecord) => asString(collective.id) !== collectiveId);
+    if (asString(projectedCollective.customer_id) === customerId) {
+      projectedCollectives.push(projectedCollective);
+    }
+    const contractById = new Map(context.contracts.map((contract: LooseRecord) => [asString(contract.id), contract]));
+    const affectedLines = context.activeLines.filter((line: LooseRecord) =>
+      line.status === 'active'
+      && line.scope_type === 'collective'
+      && asString(line.collective_id) === collectiveId);
+    for (const line of affectedLines) {
+      const contract = contractById.get(asString(line.contract_id));
+      if (
+        !contract
+        || asString(line.customer_id) !== customerId
+        || asString(contract.customer_id) !== customerId
+      ) {
+        throw new ApiError(409, 'Een actieve collectiefregel heeft geen controleerbare contractcontext', {
+          code: 'ACTIVE_CONTRACT_LINE_CONTEXT_UNKNOWN',
+          contract_line_id: line.id || null,
+          collective_id: collectiveId,
+        });
+      }
+      if (!ROUTE_RESERVING_CUSTOMER_CONTRACT_STATUSES.has(contract.status)) continue;
+      validations.push({
+        customer_id: customerId,
+        contract_line_id: line.id,
+        ...validateContractLineActivationUniqueness(
+          line,
+          contract,
+          context.activeLines,
+          context.contracts,
+          context.customerObjects,
+          projectedCollectives,
+        ),
+      });
+    }
+  }
+  if (!projectedCustomerContextFound) {
+    throw new ApiError(503, 'De gekozen klantcontext ontbreekt in de collectiefcontrole', {
+      code: 'COLLECTIVE_ROUTING_CONTEXT_INCOMPLETE',
+      collective_id: collectiveId,
+      customer_id: projectedCustomerId || null,
+    });
+  }
+  return validations;
+}
+
+function normalizedCollectiveObjectIds(value: unknown) {
+  if (!Array.isArray(value)) throw new ApiError(400, 'object_ids moet een lijst zijn');
+  const objectIds = value.map((objectId, index) => {
+    if (typeof objectId !== 'string' || !objectId.trim()) {
+      throw new ApiError(400, `object_ids[${index}] is ongeldig`);
+    }
+    return objectId.trim();
+  });
+  return [...new Set(objectIds)];
+}
+
+function assertCollectiveMembershipContext(
+  projectedCollective: LooseRecord,
+  context: LooseRecord,
+) {
+  const collectiveId = asString(projectedCollective.id);
+  const customerId = asString(projectedCollective.customer_id);
+  if (!customerId || asString(context?.customer_id) !== customerId) {
+    throw new ApiError(503, 'De gekozen klantcontext ontbreekt in de collectiefcontrole', {
+      code: 'COLLECTIVE_ROUTING_CONTEXT_INCOMPLETE',
+      collective_id: collectiveId || null,
+      customer_id: customerId || null,
+    });
+  }
+  const customerObjects = Array.isArray(context.customerObjects) ? context.customerObjects : [];
+  const customerObjectById = new Map(customerObjects
+    .map(object => [asString(object.id), object]));
+  const invalidObjectIds = normalizedCollectiveObjectIds(projectedCollective.object_ids || [])
+    .filter(objectId => {
+      const object = customerObjectById.get(objectId);
+      return !object || asString(object.customer_id) !== customerId;
+    });
+  if (invalidObjectIds.length) {
+    throw new ApiError(409, 'Een of meer collectiefobjecten bestaan niet binnen de gekozen klant', {
+      code: 'COLLECTIVE_OBJECT_CUSTOMER_MISMATCH',
+      collective_id: collectiveId || null,
+      customer_id: customerId,
+      object_ids: invalidObjectIds.sort(),
+    });
+  }
+
+  const parentId = asString(projectedCollective.parent_collectief_id);
+  if (!parentId) return;
+  const collectives = Array.isArray(context.collectives) ? context.collectives : [];
+  const collectiveById = new Map(collectives
+    .map(collective => [asString(collective.id), collective]));
+  const parent = collectiveById.get(parentId);
+  if (!parent || asString(parent.customer_id) !== customerId) {
+    throw new ApiError(409, 'Het bovenliggende collectief bestaat niet binnen dezelfde klant', {
+      code: 'COLLECTIVE_PARENT_CUSTOMER_MISMATCH',
+      collective_id: collectiveId || null,
+      parent_collectief_id: parentId,
+      customer_id: customerId,
+    });
+  }
+  const visited = new Set([collectiveId].filter(Boolean));
+  let cursor: LooseRecord | undefined = parent;
+  for (let depth = 0; cursor && depth <= collectiveById.size; depth += 1) {
+    const cursorId = asString(cursor.id);
+    if (!cursorId || visited.has(cursorId)) {
+      throw new ApiError(409, 'De collectiefhiërarchie bevat een kringverwijzing', {
+        code: 'COLLECTIVE_PARENT_CYCLE',
+        collective_id: collectiveId || null,
+        parent_collectief_id: parentId,
+      });
+    }
+    visited.add(cursorId);
+    const nextId = asString(cursor.parent_collectief_id);
+    if (!nextId) return;
+    cursor = collectiveById.get(nextId);
+    if (!cursor) {
+      throw new ApiError(409, 'De collectiefhiërarchie verwijst naar een onbekend bovenliggend collectief', {
+        code: 'COLLECTIVE_PARENT_CONTEXT_INVALID',
+        collective_id: collectiveId || null,
+        parent_collectief_id: nextId,
+      });
+    }
+  }
+  throw new ApiError(409, 'De collectiefhiërarchie kon niet veilig worden gevalideerd', {
+    code: 'COLLECTIVE_PARENT_CONTEXT_INVALID',
+    collective_id: collectiveId || null,
+  });
+}
+
+function collectiveRoutingScopeChanged(currentCollective: LooseRecord, projectedCollective: LooseRecord) {
+  if (asString(currentCollective.customer_id) !== asString(projectedCollective.customer_id)) return true;
+  if (asString(currentCollective.parent_collectief_id) !== asString(projectedCollective.parent_collectief_id)) return true;
+  const currentIds = normalizedCollectiveObjectIds(currentCollective.object_ids || []).sort();
+  const projectedIds = normalizedCollectiveObjectIds(projectedCollective.object_ids || []).sort();
+  return currentIds.length !== projectedIds.length
+    || currentIds.some((objectId, index) => objectId !== projectedIds[index]);
+}
+
+function collectivePatch(currentCollective: LooseRecord, data: LooseRecord) {
+  const patch = pick(data, COLLECTIVE_PATCH_FIELDS);
+  const name = asString(Object.prototype.hasOwnProperty.call(patch, 'name') ? patch.name : currentCollective.name);
+  const customerId = asString(Object.prototype.hasOwnProperty.call(patch, 'customer_id')
+    ? patch.customer_id
+    : currentCollective.customer_id);
+  const collectiveType = asString(Object.prototype.hasOwnProperty.call(patch, 'collectief_type')
+    ? patch.collectief_type
+    : currentCollective.collectief_type);
+  if (!name) throw new ApiError(400, 'name is verplicht');
+  if (!customerId) throw new ApiError(400, 'customer_id is verplicht');
+  if (!COLLECTIVE_TYPES.has(collectiveType)) throw new ApiError(400, 'collectief_type is ongeldig');
+  if (Object.prototype.hasOwnProperty.call(patch, 'object_ids')) {
+    patch.object_ids = normalizedCollectiveObjectIds(patch.object_ids);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, 'parent_collectief_id')
+    && asString(patch.parent_collectief_id) === asString(currentCollective.id)
+  ) {
+    throw new ApiError(409, 'Een collectief kan niet onder zichzelf vallen');
+  }
+  patch.name = name;
+  patch.customer_id = customerId;
+  patch.collectief_type = collectiveType;
+  return patch;
+}
+
+async function handleCreateCollective(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+) {
+  if (expectedVersion !== 0) throw new ApiError(409, 'Nieuw collectief verwacht expected_version 0');
+  const data = requireObject(body);
+  const customerId = requireString(body, 'customer_id');
+  const patch = collectivePatch({
+    id: null,
+    customer_id: customerId,
+    object_ids: [],
+    parent_collectief_id: null,
+  }, data);
+  if (asString(patch.customer_id) !== customerId) {
+    throw new ApiError(409, 'Klantcontext van het nieuwe collectief spreekt de inhoud tegen', {
+      code: 'COLLECTIVE_CUSTOMER_CONTEXT_MISMATCH',
+    });
+  }
+  const projectedCollective = {
+    ...patch,
+    object_ids: normalizedCollectiveObjectIds(patch.object_ids || []),
+  };
+  const reservation = await reserveThirdPartyOrganizationMutation(
+    base44,
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    `contract-line-routing:collective:create:${customerId}`,
+  );
+  try {
+    const existing = await getEntity(base44, 'Collectief').filter({
+      idempotency_key: idempotencyKey,
+    }, '-created_date', 2);
+    if (existing.length > 1) {
+      throw new ApiError(409, 'Collectiefaanmaak is niet eenduidig; handmatige controle vereist');
+    }
+    if (existing[0]) {
+      if (
+        asString(existing[0].creation_request_fingerprint) !== requestFingerprint
+        || asString(existing[0].customer_id) !== customerId
+      ) rejectIdempotencyReuse();
+      return {
+        collective: existing[0],
+        replayed: true,
+        recovered_partial_creation: true,
+        resource_type: 'Collectief',
+        resource_id: existing[0].id,
+        category: 'commercial',
+      };
+    }
+    await requireRecord(base44, 'Customer', customerId, 'Klant');
+    const routingContext = await loadCustomerContractRoutingContextForCustomer(base44, customerId);
+    assertCollectiveMembershipContext(projectedCollective, routingContext);
+    await assertThirdPartyOrganizationMutation(base44, reservation);
+    const collective = await getEntity(base44, 'Collectief').create({
+      ...projectedCollective,
+      version: 1,
+      idempotency_key: idempotencyKey,
+      creation_request_fingerprint: requestFingerprint,
+    });
+    return {
+      collective,
+      resource_type: 'Collectief',
+      resource_id: collective.id,
+      category: 'commercial',
+    };
+  } finally {
+    await releaseThirdPartyOrganizationMutation(base44, reservation);
+  }
+}
+
+async function handleDeleteCollective(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+) {
+  const collectiveId = requireString(body, 'collective_id');
+  const customerId = requireString(body, 'customer_id');
+  const reservation = await reserveThirdPartyOrganizationMutation(
+    base44,
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    `contract-line-routing:collective:delete:${collectiveId}`,
+  );
+  try {
+    const collective = await requireRecord(base44, 'Collectief', collectiveId, 'Collectief');
+    if (asString(collective.customer_id) !== customerId) {
+      throw new ApiError(409, 'Klantcontext van de collectiefverwijdering spreekt het record tegen', {
+        code: 'COLLECTIVE_CUSTOMER_CONTEXT_MISMATCH',
+        collective_id: collectiveId,
+      });
+    }
+    if (versionOf(collective) !== expectedVersion) {
+      throw new ApiError(409, 'Record is intussen gewijzigd', {
+        entity: 'Collectief',
+        id: collectiveId,
+        expected_version: expectedVersion,
+        current_version: versionOf(collective),
+      });
+    }
+    const [childCollectives, contractLines, quoteLines, directTasks, selectedSubCollectiveTasks] = await Promise.all([
+      getEntity(base44, 'Collectief').filter({ parent_collectief_id: collectiveId }, '+created_date', 1),
+      getEntity(base44, 'CustomerContractLine').filter({ collective_id: collectiveId }, '+created_date', 1),
+      getEntity(base44, 'CustomerQuoteLine').filter({ collective_id: collectiveId }, '+created_date', 1),
+      getEntity(base44, 'Task').filter({ collectief_id: collectiveId }, '+created_date', 1),
+      getEntity(base44, 'Task').filter({ selected_sub_collectief_ids: { $in: [collectiveId] } }, '+created_date', 1),
+    ]);
+    const references = [
+      childCollectives[0] && { entity: 'Collectief', id: childCollectives[0].id, field: 'parent_collectief_id' },
+      contractLines[0] && { entity: 'CustomerContractLine', id: contractLines[0].id, field: 'collective_id' },
+      quoteLines[0] && { entity: 'CustomerQuoteLine', id: quoteLines[0].id, field: 'collective_id' },
+      directTasks[0] && { entity: 'Task', id: directTasks[0].id, field: 'collectief_id' },
+      selectedSubCollectiveTasks[0] && { entity: 'Task', id: selectedSubCollectiveTasks[0].id, field: 'selected_sub_collectief_ids' },
+    ].filter(Boolean);
+    if (references.length) {
+      throw new ApiError(409, 'Collectief kan niet worden verwijderd zolang andere gegevens ernaar verwijzen', {
+        code: 'COLLECTIVE_STILL_REFERENCED',
+        collective_id: collectiveId,
+        references,
+      });
+    }
+    await assertThirdPartyOrganizationMutation(base44, reservation);
+    const latest = await requireRecord(base44, 'Collectief', collectiveId, 'Collectief');
+    if (versionOf(latest) !== expectedVersion || asString(latest.customer_id) !== customerId) {
+      throw new ApiError(409, 'Collectief is intussen gewijzigd; vernieuw en probeer opnieuw');
+    }
+    await getEntity(base44, 'Collectief').delete(collectiveId);
+    return {
+      collective,
+      deleted: true,
+      resource_type: 'Collectief',
+      resource_id: collectiveId,
+      category: 'commercial',
+    };
+  } finally {
+    await releaseThirdPartyOrganizationMutation(base44, reservation);
+  }
+}
+
+async function handleUpdateCollective(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+) {
+  const collectiveId = requireString(body, 'collective_id');
+  const data = requireObject(body);
+  const initialCollective = await requireRecord(base44, 'Collectief', collectiveId, 'Collectief');
+  const initialPatch = collectivePatch(initialCollective, data);
+  const initialProjection = { ...initialCollective, ...initialPatch };
+  if (requireString(body, 'customer_id') !== asString(initialProjection.customer_id)) {
+    throw new ApiError(409, 'Klantcontext van de collectiefwijziging spreekt de inhoud tegen', {
+      code: 'COLLECTIVE_CUSTOMER_CONTEXT_MISMATCH',
+      collective_id: collectiveId,
+    });
+  }
+  if (!collectiveRoutingScopeChanged(initialCollective, initialProjection)) {
+    const updated = await casUpdate(base44, 'Collectief', initialCollective, expectedVersion, initialPatch);
+    return { collective: updated, resource_type: 'Collectief', resource_id: updated.id, category: 'commercial' };
+  }
+
+  const reservation = await reserveThirdPartyOrganizationMutation(
+    base44,
+    user,
+    idempotencyKey,
+    requestFingerprint,
+    `contract-line-routing:collective:${collectiveId}`,
+  );
+  try {
+    const currentCollective = await requireRecord(base44, 'Collectief', collectiveId, 'Collectief');
+    if (versionOf(currentCollective) !== expectedVersion) {
+      throw new ApiError(409, 'Record is intussen gewijzigd', {
+        entity: 'Collectief',
+        id: collectiveId,
+        expected_version: expectedVersion,
+        current_version: versionOf(currentCollective),
+      });
+    }
+    const patch = collectivePatch(currentCollective, data);
+    const projectedCollective = { ...currentCollective, ...patch };
+    if (requireString(body, 'customer_id') !== asString(projectedCollective.customer_id)) {
+      throw new ApiError(409, 'Klantcontext van de collectiefwijziging is intussen gewijzigd', {
+        code: 'COLLECTIVE_CUSTOMER_CONTEXT_MISMATCH',
+        collective_id: collectiveId,
+      });
+    }
+    if (!collectiveRoutingScopeChanged(currentCollective, projectedCollective)) {
+      await assertThirdPartyOrganizationMutation(base44, reservation);
+      const updated = await casUpdate(base44, 'Collectief', currentCollective, expectedVersion, patch);
+      return { collective: updated, resource_type: 'Collectief', resource_id: updated.id, category: 'commercial' };
+    }
+
+    const referencedLines = await getEntity(base44, 'CustomerContractLine').filter({
+      collective_id: collectiveId,
+      status: 'active',
+    }, '+valid_from', 5000);
+    if (referencedLines.length >= 5000) {
+      throw new ApiError(503, 'Collectiefrouting kan niet volledig en veilig worden gecontroleerd');
+    }
+    if (referencedLines.some((line: LooseRecord) => !asString(line.customer_id))) {
+      throw new ApiError(409, 'Een actieve collectiefregel mist klantcontext', {
+        code: 'ACTIVE_CONTRACT_LINE_CONTEXT_UNKNOWN',
+        collective_id: collectiveId,
+      });
+    }
+    const affectedCustomerIds = [...new Set([
+      asString(currentCollective.customer_id),
+      asString(projectedCollective.customer_id),
+      ...referencedLines.map((line: LooseRecord) => asString(line.customer_id)),
+    ].filter(Boolean))].sort();
+    if (affectedCustomerIds.length > 25) {
+      throw new ApiError(503, 'Collectiefrouting raakt te veel klantcontexten om veilig te wijzigen');
+    }
+    await Promise.all(affectedCustomerIds.map(customerId =>
+      requireRecord(base44, 'Customer', customerId, 'Klant')));
+    const routingContexts = await Promise.all(affectedCustomerIds.map(customerId =>
+      loadCustomerContractRoutingContextForCustomer(base44, customerId)));
+    validateCollectiveRoutingMutation(currentCollective, projectedCollective, routingContexts);
+    await assertThirdPartyOrganizationMutation(base44, reservation);
+    const updated = await casUpdate(base44, 'Collectief', currentCollective, expectedVersion, patch);
+    return { collective: updated, resource_type: 'Collectief', resource_id: updated.id, category: 'commercial' };
+  } finally {
+    await releaseThirdPartyOrganizationMutation(base44, reservation);
+  }
+}
+
 async function handleContractLine(
   base44: LooseRecord,
   body: LooseRecord,
   expectedVersion: number,
   mode: 'create' | 'update' | 'transition',
+  activationContext?: LooseRecord,
 ) {
   if (mode === 'create') {
     if (expectedVersion !== 0) throw new ApiError(409, 'Nieuwe contractregel verwacht expected_version 0');
@@ -10114,8 +10971,39 @@ async function handleContractLine(
     if (contract.status !== 'approved') {
       throw new ApiError(409, 'Contractregels worden na goedkeuring en vóór verzending geactiveerd');
     }
-    const rates = await getEntity(base44, 'CustomerContractRate').filter({ contract_line_id: line.id, status: 'active' }, '+valid_from', 1);
-    if (!rates.length) throw new ApiError(409, 'Contractregel heeft geen actief tarief');
+    if (!activationContext?.user || !activationContext?.idempotencyKey || !activationContext?.requestFingerprint) {
+      throw new ApiError(409, 'Contractregelactivatie mist een veilige mutatiecontext');
+    }
+    const reservation = await reserveThirdPartyOrganizationMutation(
+      base44,
+      activationContext.user,
+      activationContext.idempotencyKey,
+      activationContext.requestFingerprint,
+      `contract-line-routing:${contract.customer_id}`,
+    );
+    try {
+      const [rates, routingContext] = await Promise.all([
+        getEntity(base44, 'CustomerContractRate').filter({ contract_line_id: line.id, status: 'active' }, '+valid_from', 1),
+        loadCustomerContractRoutingActivationContext(base44, contract),
+      ]);
+      if (!rates.length) throw new ApiError(409, 'Contractregel heeft geen actief tarief');
+      const activationPatch = validateContractLineActivationUniqueness(
+        line,
+        contract,
+        routingContext.activeLines,
+        routingContext.contracts,
+        routingContext.customerObjects,
+        routingContext.collectives,
+      );
+      await assertThirdPartyOrganizationMutation(base44, reservation);
+      const updated = await casUpdate(base44, 'CustomerContractLine', line, expectedVersion, {
+        status,
+        ...activationPatch,
+      });
+      return { contract_line: updated, resource_type: 'CustomerContractLine', resource_id: updated.id, category: 'commercial' };
+    } finally {
+      await releaseThirdPartyOrganizationMutation(base44, reservation);
+    }
   }
   const updated = await casUpdate(base44, 'CustomerContractLine', line, expectedVersion, { status });
   return { contract_line: updated, resource_type: 'CustomerContractLine', resource_id: updated.id, category: 'commercial' };
@@ -10203,6 +11091,7 @@ async function handleTransitionContract(
   body: LooseRecord,
   expectedVersion: number,
   idempotencyKey: string,
+  requestFingerprint: string,
 ) {
   const contract = await requireRecord(base44, 'CustomerContract', requireString(body, 'contract_id'), 'Contract');
   const status = requireString(body, 'status');
@@ -10308,18 +11197,44 @@ async function handleTransitionContract(
   if (status === 'active') {
     if (!contract.signed_at || !contract.signed_managed_file_id) throw new ApiError(409, 'Ondertekend contractbewijs ontbreekt');
     if (!contract.start_date) throw new ApiError(409, 'Contractstartdatum ontbreekt');
-    const lines = await getEntity(base44, 'CustomerContractLine').filter({ contract_id: contract.id, status: 'active' }, '+sequence', 500);
-    if (!lines.length) throw new ApiError(409, 'Contract heeft geen actieve regels');
-    for (const line of lines) {
-      const rates = await getEntity(base44, 'CustomerContractRate').filter({
-        contract_line_id: line.id,
-        status: 'active',
-      }, '+valid_from', 1000);
-      if (!rates.length) throw new ApiError(409, `Contractregel ${line.id} heeft geen actief tarief`);
-      const validation = await rateValidation(base44, line.id);
-      if (validation.overlaps.length) throw new ApiError(409, `Contractregel ${line.id} heeft overlappende tarieven`);
+    const routingReservation = await reserveThirdPartyOrganizationMutation(
+      base44,
+      user,
+      idempotencyKey,
+      requestFingerprint,
+      `contract-line-routing:${contract.customer_id}`,
+    );
+    try {
+      const routingContext = await loadCustomerContractRoutingActivationContext(base44, contract);
+      const lines = routingContext.activeLines.filter(line => String(line.contract_id) === String(contract.id));
+      if (!lines.length) throw new ApiError(409, 'Contract heeft geen actieve regels');
+      if (lines.length > 500) {
+        throw new ApiError(503, 'Contract bevat te veel actieve regels om volledig en veilig te activeren');
+      }
+      validateCustomerContractActivationUniqueness(
+        contract,
+        lines,
+        routingContext.activeLines,
+        routingContext.contracts,
+        routingContext.customerObjects,
+        routingContext.collectives,
+      );
+      for (const line of lines) {
+        const rates = await getEntity(base44, 'CustomerContractRate').filter({
+          contract_line_id: line.id,
+          status: 'active',
+        }, '+valid_from', 1000);
+        if (!rates.length) throw new ApiError(409, `Contractregel ${line.id} heeft geen actief tarief`);
+        const validation = await rateValidation(base44, line.id);
+        if (validation.overlaps.length) throw new ApiError(409, `Contractregel ${line.id} heeft overlappende tarieven`);
+      }
+      await assertThirdPartyOrganizationMutation(base44, routingReservation);
+      patch.activated_at = nowIso();
+      const updated = await casUpdate(base44, 'CustomerContract', contract, expectedVersion, patch);
+      return { contract: updated, resource_type: 'CustomerContract', resource_id: updated.id, category: 'commercial' };
+    } finally {
+      await releaseThirdPartyOrganizationMutation(base44, routingReservation);
     }
-    patch.activated_at = nowIso();
   }
   if (['ended', 'superseded'].includes(status)) {
     patch.ended_at = nowIso();
@@ -15006,13 +15921,44 @@ async function executeMutation(
     case 'update_contract':
       return handleUpdateContract(base44, body, expectedVersion);
     case 'transition_contract':
-      return handleTransitionContract(base44, user, body, expectedVersion, idempotencyKey);
+      return handleTransitionContract(base44, user, body, expectedVersion, idempotencyKey, requestFingerprint);
     case 'create_contract_line':
       return handleContractLine(base44, body, expectedVersion, 'create');
     case 'update_contract_line':
       return handleContractLine(base44, body, expectedVersion, 'update');
     case 'transition_contract_line':
-      return handleContractLine(base44, body, expectedVersion, 'transition');
+      return handleContractLine(base44, body, expectedVersion, 'transition', {
+        user,
+        idempotencyKey,
+        requestFingerprint,
+      });
+    case 'create_collective':
+      return handleCreateCollective(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+      );
+    case 'update_collective':
+      return handleUpdateCollective(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+      );
+    case 'delete_collective':
+      return handleDeleteCollective(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+      );
     case 'create_contract_rate':
       return handleContractRate(base44, body, expectedVersion, 'create');
     case 'update_contract_rate':

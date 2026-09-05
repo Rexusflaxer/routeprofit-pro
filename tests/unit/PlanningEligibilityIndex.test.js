@@ -25,6 +25,7 @@ const shift = {
   end_time: "15:30",
   company_id: "company-1",
   object_id: "object-1",
+  task_type_key: "reception",
   required_qualification_types: ["beveiliger_2"],
 };
 const contract = {
@@ -34,6 +35,12 @@ const contract = {
   document_status: "active",
   contract_start_date: "2025-01-01",
   contract_hours_per_week: 36,
+  cao_key: "cao_particuliere_beveiliging",
+  allowed_task_types: ["reception"],
+  planning_allowed: true,
+  contract_final_allowed: true,
+  payroll_final_allowed: true,
+  legal_validation_status: "compliant",
 };
 const qualification = {
   id: "qualification-1",
@@ -220,6 +227,10 @@ describe("visible-range planning eligibility index", () => {
 
     expect(planningEligibilitySourceSemanticsEqual(beforeAck, technicalAck)).toBe(true);
     expect(planningEligibilitySourceSemanticsEqual(beforeAck, semanticEdit)).toBe(false);
+    expect(planningEligibilitySourceSemanticsEqual(beforeAck, {
+      ...technicalAck,
+      task_type_key: "mobile_control_round",
+    })).toBe(false);
     expect(mergePlanningEligibilityServerDecisions([ready], [stale], {
       now: NOW,
       retainReadySourceRevisionKeys: new Set([compositeKey]),
@@ -304,6 +315,8 @@ describe("visible-range planning eligibility index", () => {
       status: "ready",
       evaluated_at: new Date(NOW - 1_000).toISOString(),
       expires_at: expiresAt,
+      routing_draft_assignment_allowed: true,
+      employment_routing_status: "resolved",
       warning_snapshot: [],
     };
     const oldBasisDecision = {
@@ -406,15 +419,144 @@ describe("visible-range planning eligibility index", () => {
     });
   });
 
-  it("geeft direct een lokaal, actueel en groen verdict wanneer alle bronnen bekend zijn", () => {
+  it("houdt een lokaal actueel verdict amber totdat expliciet serverbewijs beschikbaar is", () => {
     const index = createPlanningEligibilityIndex(indexOptions());
     const result = index.queryShift({ personnelId: person.id, shift });
 
     expect(index.status).toBe("ready");
     expect(result.status).toBe("ready");
-    expect(result.isClear).toBe(true);
+    expect(result.isClear).toBe(false);
+    expect(result.draftAssignmentAllowed).toBe(false);
     expect(result.displayWarnings).toEqual([]);
     expect(result.serverFinalAuthority).toBe(true);
+  });
+
+  it("toont lokaal het ontbrekende arbeidscontract maar wacht fail-closed op serverbewijs", () => {
+    const index = createPlanningEligibilityIndex(indexOptions({
+      contracts: [],
+      securityPasses: [{ ...pass, company_id: null }],
+    }));
+    const result = index.queryShift({ personnelId: person.id, shift });
+
+    expect(result.status).toBe("ready");
+    expect(result.draftAssignmentAllowed).toBe(false);
+    expect(result.hasCritical).toBe(false);
+    expect(result.isClear).toBe(false);
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      code: "contract_missing",
+      severity: "warning",
+      title: "Arbeidscontract koppelen",
+    }));
+  });
+
+  it.each([
+    {
+      label: "ontbrekende route",
+      status: "missing_contract",
+      code: "contract_missing",
+      severity: "warning",
+      contracts: [],
+    },
+    {
+      label: "ambigue route",
+      status: "ambiguous",
+      code: "contract_ambiguous",
+      severity: "critical",
+      contracts: [{ ...contract, id: "contract-2" }, { ...contract, id: "contract-3" }],
+    },
+  ])("laat een warme $label alleen toe met expliciet resolverbewijs", ({ status, code, severity, contracts }) => {
+    const bootstrap = createPlanningEligibilityIndex(indexOptions({
+      contracts,
+      securityPasses: [{ ...pass, company_id: null }],
+      requireServerDecision: true,
+    }));
+    const candidateKey = planningEligibilityCandidateKey({ personnelId: person.id, shift });
+    const index = createPlanningEligibilityIndex(indexOptions({
+      contracts,
+      securityPasses: [{ ...pass, company_id: null }],
+      requireServerDecision: true,
+      serverDecisions: [{
+        candidate_key: candidateKey,
+        basis_token: bootstrap.basisToken,
+        status: "ready",
+        evaluated_at: new Date(NOW - 1_000).toISOString(),
+        expires_at: new Date(NOW + 60_000).toISOString(),
+        routing_draft_assignment_allowed: true,
+        employment_routing_status: status,
+        employment_routing_codes: [code],
+        warning_snapshot: [{ code, severity, message: `Actuele ${status}.` }],
+      }],
+    }));
+
+    expect(index.queryShift({ personnelId: person.id, shift })).toMatchObject({
+      status: "ready",
+      draftAssignmentAllowed: true,
+      routingDraftAssignmentAllowed: true,
+      employmentRoutingStatus: status,
+      employmentRoutingCodes: [code],
+    });
+  });
+
+  it("houdt een koude cache en een legacy-ready antwoord zonder draftbewijs geblokkeerd", () => {
+    const cold = createPlanningEligibilityIndex(indexOptions({ requireServerDecision: true }));
+    const candidateKey = planningEligibilityCandidateKey({ personnelId: person.id, shift });
+    expect(cold.queryShift({ personnelId: person.id, shift })).toMatchObject({
+      status: "checking",
+      draftAssignmentAllowed: false,
+    });
+    const legacyReady = createPlanningEligibilityIndex(indexOptions({
+      requireServerDecision: true,
+      serverDecisions: [{
+        candidate_key: candidateKey,
+        basis_token: cold.basisToken,
+        status: "ready",
+        evaluated_at: new Date(NOW - 1_000).toISOString(),
+        expires_at: new Date(NOW + 60_000).toISOString(),
+        employment_routing_status: "resolved",
+        warning_snapshot: [],
+      }],
+    }));
+    expect(legacyReady.queryShift({ personnelId: person.id, shift })).toMatchObject({
+      status: "ready",
+      draftAssignmentAllowed: false,
+      routingDraftAssignmentAllowed: false,
+    });
+  });
+
+  it("laat een laat ouder blokkeerantwoord een geldige missing-contractconceptactie niet terugdraaien", () => {
+    const current = {
+      candidate_key: "candidate-missing-contract",
+      basis_token: "basis-missing-contract",
+      status: "ready",
+      evaluated_at: new Date(NOW - 1_000).toISOString(),
+      expires_at: new Date(NOW + 60_000).toISOString(),
+      routing_draft_assignment_allowed: true,
+      employment_routing_status: "missing_contract",
+      employment_routing_codes: ["contract_missing"],
+    };
+    const lateOlder = {
+      ...current,
+      evaluated_at: new Date(NOW - 30_000).toISOString(),
+      routing_draft_assignment_allowed: false,
+      employment_routing_status: "stale",
+      employment_routing_codes: ["contract_routing_stale"],
+    };
+
+    expect(mergePlanningEligibilityServerDecisions([current], [lateOlder], { now: NOW }))
+      .toEqual([current]);
+  });
+
+  it("accepteert lokaal de route naar een andere werkgever maar wacht op serverbewijs voor groen", () => {
+    const index = createPlanningEligibilityIndex(indexOptions({
+      contracts: [{ ...contract, company_id: "company-b" }],
+      securityPasses: [{ ...pass, company_id: "company-b" }],
+    }));
+    const result = index.queryShift({ personnelId: person.id, shift });
+
+    expect(result.status).toBe("ready");
+    expect(result.isClear).toBe(false);
+    expect(result.draftAssignmentAllowed).toBe(false);
+    expect(result.warnings).toEqual([]);
   });
 
   it("houdt server-feiten warm wanneer alleen de optimistische planning wijzigt", () => {
@@ -448,6 +590,8 @@ describe("visible-range planning eligibility index", () => {
       status: "ready",
       evaluated_at: new Date(NOW - 1_000).toISOString(),
       expires_at: new Date(NOW + 60_000).toISOString(),
+      routing_draft_assignment_allowed: true,
+      employment_routing_status: "resolved",
       warning_snapshot: [],
     };
     const before = createPlanningEligibilityIndex(indexOptions({
@@ -495,6 +639,8 @@ describe("visible-range planning eligibility index", () => {
     expect(after.basisToken).toBe(before.basisToken);
     expect(after.scheduleBasisToken).not.toBe(before.scheduleBasisToken);
     expect(result.status).toBe("ready");
+    expect(result.routingDraftAssignmentAllowed).toBe(true);
+    expect(result.draftAssignmentAllowed).toBe(false);
     expect(result.warnings.map(item => item.code)).toEqual(expect.arrayContaining([
       "double_booking",
       "insufficient_rest",
@@ -663,6 +809,8 @@ describe("visible-range planning eligibility index", () => {
         status: "ready",
         basis_token: bootstrap.basisToken,
         expires_at: new Date(NOW + 1_000).toISOString(),
+        routing_draft_assignment_allowed: true,
+        employment_routing_status: "resolved",
         warning_snapshot: [],
       }],
     }));
@@ -712,6 +860,7 @@ describe("visible-range planning eligibility index", () => {
       window_start_time: "06:30",
       window_end_time: "18:00",
       task_name_snapshot: "Receptie",
+      task_type_key: "reception",
     };
     const preview = buildOccurrenceEligibilityShift({
       occurrence,
@@ -725,6 +874,7 @@ describe("visible-range planning eligibility index", () => {
       start_time: "06:30",
       end_time: "12:00",
       object_id: "object-1",
+      task_type_key: "reception",
       required_qualification_types: ["beveiliger_2"],
     }));
 

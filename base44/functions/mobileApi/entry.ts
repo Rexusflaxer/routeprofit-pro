@@ -30,7 +30,436 @@ function makeTaskName(task, object, repeatIndex, repeatCount) {
 function unique(values) {
   return [...new Set((values || []).filter(Boolean).map(String))];
 }
-function buildTaskContext(task, object, route, serviceDate) {
+var COMMERCIAL_TASK_TYPE_KEYS = /* @__PURE__ */ new Set([
+  "object_security",
+  "fire_closing_round",
+  "external_closing_round",
+  "external_control_round",
+  "opening_round",
+  "mobile_control_round",
+  "reception",
+  "closing_assistance",
+  "access_control",
+  "fire_watch",
+  "concierge"
+]);
+var LEGACY_COMMERCIAL_TASK_TYPE_ALIASES = {
+  objectbeveiliging: "object_security",
+  brand_en_sluitronde: "fire_closing_round",
+  brand_sluitronde: "fire_closing_round",
+  externe_sluitronde: "external_closing_round",
+  externe_controleronde: "external_control_round",
+  openingsronde: "opening_round",
+  mobiele_controleronde: "mobile_control_round",
+  receptie: "reception",
+  receptiedienst: "reception",
+  sluitbegeleiding: "closing_assistance",
+  toegangscontrole: "access_control",
+  brandwacht: "fire_watch",
+  portier: "concierge",
+  portier_concierge: "concierge",
+  concierge: "concierge"
+};
+function compactRoutingValue(value) {
+  return String(value ?? "").trim();
+}
+function normalizedCommercialTaskToken(value) {
+  return compactRoutingValue(value).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+function legacyCommercialTaskTypeKey(value) {
+  const normalized = normalizedCommercialTaskToken(value);
+  if (!normalized) return null;
+  if (COMMERCIAL_TASK_TYPE_KEYS.has(normalized) && normalized !== "other") return normalized;
+  return LEGACY_COMMERCIAL_TASK_TYPE_ALIASES[normalized] || null;
+}
+function isCanonicalCommercialTaskTypeKey(value) {
+  const key = compactRoutingValue(value);
+  return COMMERCIAL_TASK_TYPE_KEYS.has(key) || /^other:[a-z0-9][a-z0-9._:-]{0,159}$/.test(key);
+}
+function routingProjectionError(code, message, details = {}) {
+  const error = new Error(message);
+  error.status = 409;
+  error.code = code;
+  error.details = details;
+  return error;
+}
+function consistentRoutingValue(sources, field) {
+  const values = unique(sources.map((source) => compactRoutingValue(source?.[field])));
+  if (values.length > 1) {
+    throw routingProjectionError("TASK_EXECUTION_ROUTING_MISMATCH", `Tegenstrijdige ${field} in de taakroutering.`, { field, values });
+  }
+  return values[0] || null;
+}
+function publishedRoutingSources(evidence) {
+  return [
+    evidence?.segment,
+    evidence?.segment?.commercial_routing_snapshot,
+    evidence?.occurrence,
+    evidence?.occurrence?.commercial_routing_snapshot,
+    evidence?.shift,
+    evidence?.shift?.service_context_snapshot
+  ].filter(Boolean);
+}
+function projectedTaskTypeKey(task, sourceTask = {}, evidence = null) {
+  const routingSources = [
+    ...publishedRoutingSources(evidence),
+    task,
+    task?.commercial_routing_snapshot,
+    sourceTask,
+    sourceTask?.commercial_routing_snapshot
+  ].filter(Boolean);
+  const explicitKeys = unique(routingSources.map((source) => compactRoutingValue(source?.task_type_key)));
+  const invalidExplicitKeys = explicitKeys.filter((key) => !isCanonicalCommercialTaskTypeKey(key));
+  if (invalidExplicitKeys.length) {
+    throw routingProjectionError("TASK_EXECUTION_TASK_TYPE_INVALID", "De taak bevat geen geldige canonieke task_type_key.", { task_type_keys: invalidExplicitKeys });
+  }
+  const legacyKeys = unique([task?.task_type, sourceTask?.task_type].map(legacyCommercialTaskTypeKey));
+  const candidates = unique([...explicitKeys, ...legacyKeys]);
+  if (candidates.length > 1) {
+    throw routingProjectionError("TASK_EXECUTION_TASK_TYPE_MISMATCH", "De canonieke taaksoort komt niet overeen met de legacy taaksoort.", { task_type_keys: candidates });
+  }
+  return candidates[0] || null;
+}
+function projectedCustomerBillable(task, sourceTask = {}, object = {}, evidence = null) {
+  const directValues = [
+    evidence?.segment?.customer_billable,
+    evidence?.segment?.commercial_routing_snapshot?.customer_billable,
+    evidence?.occurrence?.customer_billable,
+    evidence?.occurrence?.commercial_routing_snapshot?.customer_billable,
+    evidence?.shift?.customer_billable,
+    evidence?.shift?.service_context_snapshot?.customer_billable,
+    task?.customer_billable,
+    task?.commercial_routing_snapshot?.customer_billable,
+    sourceTask?.customer_billable,
+    sourceTask?.commercial_routing_snapshot?.customer_billable
+  ].filter((value) => typeof value === "boolean");
+  const uniqueDirectValues = [...new Set(directValues)];
+  if (uniqueDirectValues.length > 1) {
+    throw routingProjectionError("TASK_EXECUTION_CUSTOMER_BILLABLE_MISMATCH", "De facturatie-indicatie van de taak is tegenstrijdig.");
+  }
+  if (evidence?.verified && !directValues.some((value) => typeof value === "boolean")) {
+    throw routingProjectionError("TASK_EXECUTION_PUBLISHED_BILLABLE_MISSING", "De gepubliceerde dienst mist een expliciete facturatie-indicatie.");
+  }
+  if (uniqueDirectValues.length === 1) return uniqueDirectValues[0];
+  if (typeof object?.default_customer_billable === "boolean") return object.default_customer_billable;
+  throw routingProjectionError("TASK_EXECUTION_CUSTOMER_BILLABLE_MISSING", "De taak mist een expliciete indicatie of deze klantfactureerbaar is.");
+}
+function buildTaskExecutionRoutingProjection(task, sourceTask = {}, object = {}, resolution = null, evidence = null) {
+  const evidenceSources = publishedRoutingSources(evidence);
+  const routingSources = [
+    ...evidenceSources,
+    task,
+    task?.commercial_routing_snapshot,
+    sourceTask,
+    sourceTask?.commercial_routing_snapshot
+  ].filter(Boolean);
+  const taskTypeKey = projectedTaskTypeKey(task, sourceTask, evidence);
+  const claimedCommercialRoutingStatus = consistentRoutingValue([
+    { commercial_routing_status: evidence?.segment?.commercial_routing_status },
+    { commercial_routing_status: evidence?.segment?.commercial_routing_snapshot?.status },
+    { commercial_routing_status: evidence?.occurrence?.commercial_routing_status },
+    { commercial_routing_status: evidence?.occurrence?.commercial_routing_snapshot?.status },
+    { commercial_routing_status: task?.commercial_routing_status },
+    { commercial_routing_status: sourceTask?.commercial_routing_status },
+    { commercial_routing_status: task?.commercial_routing_snapshot?.status },
+    { commercial_routing_status: sourceTask?.commercial_routing_snapshot?.status }
+  ], "commercial_routing_status");
+  const employingCompanyId = resolution ? consistentRoutingValue([
+    { employing_company_id: resolution?.employing_company_id },
+    { employing_company_id: resolution?.company_id },
+    { employing_company_id: resolution?.selected_contract?.company_id }
+  ], "employing_company_id") : null;
+  const payrollCaoKey = resolution ? consistentRoutingValue([
+    { payroll_cao_key: resolution?.payroll_cao_key },
+    { payroll_cao_key: resolution?.cao_key },
+    { payroll_cao_key: resolution?.selected_contract?.cao_key }
+  ], "payroll_cao_key") : null;
+  const sellingCompanyId = consistentRoutingValue([
+    ...routingSources,
+    { selling_company_id: evidence?.contract?.company_id },
+    { selling_company_id: evidence?.line?.company_id }
+  ], "selling_company_id");
+  const customerId = consistentRoutingValue([
+    ...routingSources,
+    { customer_id: evidence?.contract?.customer_id },
+    { customer_id: evidence?.line?.customer_id },
+    { customer_id: object?.customer_id }
+  ], "customer_id");
+  const customerAccountId = consistentRoutingValue([
+    ...routingSources,
+    { customer_account_id: evidence?.contract?.customer_account_id },
+    { customer_account_id: evidence?.line?.customer_account_id }
+  ], "customer_account_id");
+  const customerContractId = consistentRoutingValue([
+    ...routingSources,
+    { customer_contract_id: evidence?.contract?.id },
+    { customer_contract_id: evidence?.line?.contract_id }
+  ], "customer_contract_id");
+  const customerContractLineId = consistentRoutingValue([
+    ...routingSources,
+    { customer_contract_line_id: evidence?.line?.id }
+  ], "customer_contract_line_id");
+  const customerBillable = projectedCustomerBillable(task, sourceTask, object, evidence);
+  const verifiedSnapshot = evidence?.verified ? {
+    ...evidence.segment?.commercial_routing_snapshot || evidence.occurrence?.commercial_routing_snapshot || {},
+    schema_version: 1,
+    status: claimedCommercialRoutingStatus,
+    task_type_key: taskTypeKey,
+    customer_id: customerId,
+    customer_account_id: customerAccountId,
+    selling_company_id: sellingCompanyId,
+    customer_contract_id: customerContractId,
+    customer_contract_line_id: customerContractLineId,
+    customer_billable: customerBillable,
+    planning_shift_id: evidence.shift?.id || null,
+    planning_task_occurrence_id: evidence.occurrence?.id || null,
+    planning_shift_task_segment_id: evidence.segment?.id || null
+  } : null;
+  const commercialRoutingStatus = evidence?.verified ? claimedCommercialRoutingStatus : "stale";
+  const commercialRoutingSnapshot = verifiedSnapshot || {
+    schema_version: 1,
+    status: "stale",
+    reason: "published_commercial_route_evidence_missing",
+    task_type_key: taskTypeKey,
+    customer_id: customerId,
+    customer_account_id: customerAccountId,
+    selling_company_id: sellingCompanyId,
+    customer_contract_id: customerContractId,
+    customer_contract_line_id: customerContractLineId,
+    customer_billable: customerBillable,
+    planning_shift_id: evidence?.shift?.id || null,
+    planning_task_occurrence_id: evidence?.occurrence?.id || null,
+    planning_shift_task_segment_id: evidence?.segment?.id || null
+  };
+  const projection = {
+    task_type_key: taskTypeKey,
+    selling_company_id: sellingCompanyId,
+    service_responsible_company_id: consistentRoutingValue(routingSources, "service_responsible_company_id"),
+    supplying_company_id: resolution ? consistentRoutingValue([
+      { supplying_company_id: resolution?.supplying_company_id }
+    ], "supplying_company_id") : null,
+    customer_id: customerId,
+    customer_account_id: customerAccountId,
+    customer_contract_id: customerContractId,
+    customer_contract_line_id: customerContractLineId,
+    customer_contract_rate_id: consistentRoutingValue(routingSources, "customer_contract_rate_id"),
+    customer_snapshot: task?.customer_snapshot || sourceTask?.customer_snapshot || null,
+    operating_company_snapshot: task?.operating_company_snapshot || sourceTask?.operating_company_snapshot || null,
+    selling_company_snapshot: task?.selling_company_snapshot || sourceTask?.selling_company_snapshot || null,
+    commercial_contract_snapshot: task?.commercial_contract_snapshot || sourceTask?.commercial_contract_snapshot || commercialRoutingSnapshot,
+    commercial_rate_snapshot: task?.commercial_rate_snapshot || sourceTask?.commercial_rate_snapshot || null,
+    commercial_routing_status: commercialRoutingStatus,
+    commercial_routing_snapshot: commercialRoutingSnapshot,
+    customer_billable: customerBillable,
+    employing_company_id: employingCompanyId,
+    payroll_cao_key: payrollCaoKey
+  };
+  if (claimedCommercialRoutingStatus === "resolved" && (!projection.task_type_key || !projection.selling_company_id || !projection.customer_id || !projection.customer_account_id || !projection.customer_contract_id || !projection.customer_contract_line_id)) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_ROUTE_INCOMPLETE", "De opgeloste commerciële taakroutering mist verplichte bewijsvelden.");
+  }
+  if (claimedCommercialRoutingStatus === "not_applicable" && (
+    projection.customer_billable !== false || projection.customer_id || projection.customer_account_id || projection.selling_company_id || projection.customer_contract_id || projection.customer_contract_line_id || projection.customer_contract_rate_id
+  )) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_ROUTE_MISMATCH", "Een niet-factureerbare taak bevat toch commerciële contractroutering.");
+  }
+  return projection;
+}
+
+function routingIdFromAliases(sources, fields, label) {
+  const values = unique(sources.flatMap((source) => fields.map((field) => compactRoutingValue(source?.[field]))));
+  if (values.length > 1) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_LINK_MISMATCH", `Tegenstrijdige ${label} in de planningskoppeling.`, { label, values });
+  }
+  return values[0] || null;
+}
+function recordRevision(value) {
+  const revision = Number(value?.revision ?? value?.version ?? 0);
+  return Number.isFinite(revision) ? revision : 0;
+}
+function dateWithin(value, from, until, requireStart = false) {
+  const date = compactRoutingValue(value);
+  const start = compactRoutingValue(from);
+  const end = compactRoutingValue(until);
+  if (!date || requireStart && !start) return false;
+  return (!start || start <= date) && (!end || date <= end);
+}
+async function publishedRoutingRecord(base44, entityName, id) {
+  const entity = base44?.asServiceRole?.entities?.[entityName];
+  if (!entity?.get) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_EVIDENCE_UNAVAILABLE", `${entityName} is niet beschikbaar voor routeverificatie.`, { entity: entityName, id });
+  }
+  let record = null;
+  try {
+    record = await entity.get(id);
+  } catch (_error) {
+    record = null;
+  }
+  if (!record) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_EVIDENCE_MISSING", `Gepubliceerd planningsbewijs ${entityName} bestaat niet.`, { entity: entityName, id });
+  }
+  return record;
+}
+function requireFreshPublishedRecord(record, entityName) {
+  const revision = recordRevision(record);
+  const publishedRevision = Number(record?.published_revision || 0);
+  const statusOk = entityName === "PlanningTaskOccurrence" ? record?.lifecycle_status === "active" : record?.status === "published";
+  if (!statusOk || revision < 1 || publishedRevision !== revision) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_EVIDENCE_STALE", `${entityName} is niet meer gelijk aan de gepubliceerde revisie.`, {
+      entity: entityName,
+      id: record?.id || null,
+      revision,
+      published_revision: publishedRevision,
+      status: record?.status || record?.lifecycle_status || null
+    });
+  }
+}
+function commercialEvidenceStatus(segment, occurrence) {
+  return consistentRoutingValue([
+    { commercial_routing_status: segment?.commercial_routing_status },
+    { commercial_routing_status: segment?.commercial_routing_snapshot?.status },
+    { commercial_routing_status: occurrence?.commercial_routing_status },
+    { commercial_routing_status: occurrence?.commercial_routing_snapshot?.status }
+  ], "commercial_routing_status");
+}
+async function loadPublishedTaskRoutingEvidence(base44, task, sourceTask = {}, serviceDate = null) {
+  const linkSources = [task, sourceTask].filter(Boolean);
+  const directSegmentId = routingIdFromAliases(linkSources, [
+    "planning_shift_task_segment_id",
+    "planning_task_segment_id",
+    "shift_task_segment_id",
+    "task_segment_id"
+  ], "PlanningShiftTaskSegment-id");
+  const directOccurrenceId = routingIdFromAliases(linkSources, ["planning_task_occurrence_id", "task_occurrence_id"], "PlanningTaskOccurrence-id");
+  const directShiftId = routingIdFromAliases(linkSources, ["planning_shift_id"], "PlanningShift-id");
+  if (!directSegmentId && !directOccurrenceId && !directShiftId) return null;
+  const segment = directSegmentId ? await publishedRoutingRecord(base44, "PlanningShiftTaskSegment", directSegmentId) : null;
+  if (segment) requireFreshPublishedRecord(segment, "PlanningShiftTaskSegment");
+  const occurrenceId = routingIdFromAliases([
+    { planning_task_occurrence_id: directOccurrenceId },
+    { planning_task_occurrence_id: segment?.task_occurrence_id }
+  ], ["planning_task_occurrence_id"], "PlanningTaskOccurrence-id");
+  const shiftId = routingIdFromAliases([
+    { planning_shift_id: directShiftId },
+    { planning_shift_id: segment?.shift_id }
+  ], ["planning_shift_id"], "PlanningShift-id");
+  const [occurrence, shift] = await Promise.all([
+    occurrenceId ? publishedRoutingRecord(base44, "PlanningTaskOccurrence", occurrenceId) : null,
+    shiftId ? publishedRoutingRecord(base44, "PlanningShift", shiftId) : null
+  ]);
+  if (occurrence) requireFreshPublishedRecord(occurrence, "PlanningTaskOccurrence");
+  if (shift) requireFreshPublishedRecord(shift, "PlanningShift");
+  if (segment && occurrence && String(segment.task_occurrence_id) !== String(occurrence.id)) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_LINK_MISMATCH", "Taaksegment en taakoccurrence horen niet bij elkaar.");
+  }
+  if (segment && shift && String(segment.shift_id) !== String(shift.id)) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_LINK_MISMATCH", "Taaksegment en dienst horen niet bij elkaar.");
+  }
+  if (serviceDate && occurrence?.service_date && String(occurrence.service_date) !== String(serviceDate)) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_DATE_MISMATCH", "De taakoccurrence hoort bij een andere servicedatum.");
+  }
+  if (serviceDate && shift?.service_date && String(shift.service_date) !== String(serviceDate)) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_DATE_MISMATCH", "De gepubliceerde dienst hoort bij een andere servicedatum.");
+  }
+  if (serviceDate && segment && !dateWithin(serviceDate, segment.start_date, segment.end_date || segment.start_date)) {
+    throw routingProjectionError("TASK_EXECUTION_PLANNING_DATE_MISMATCH", "Het taaksegment dekt de servicedatum niet.");
+  }
+  const evidence = { linked: true, verified: Boolean(segment && occurrence && shift), segment, occurrence, shift, contract: null, line: null };
+  if (!evidence.verified) return evidence;
+  const status = commercialEvidenceStatus(segment, occurrence);
+  const snapshot = segment.commercial_routing_snapshot || occurrence.commercial_routing_snapshot || null;
+  if (!status || Number(snapshot?.schema_version) !== 1 || snapshot?.status !== status) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_EVIDENCE_INVALID", "Het gepubliceerde commerciële routebewijs is ongeldig of incompleet.");
+  }
+  const customerBillableValues = [
+    segment.customer_billable,
+    segment.commercial_routing_snapshot?.customer_billable,
+    occurrence.customer_billable,
+    occurrence.commercial_routing_snapshot?.customer_billable,
+    shift.customer_billable,
+    shift.service_context_snapshot?.customer_billable
+  ].filter((value) => typeof value === "boolean");
+  if (customerBillableValues.length === 0) {
+    throw routingProjectionError("TASK_EXECUTION_PUBLISHED_BILLABLE_MISSING", "Het gepubliceerde commerciële routebewijs mist een expliciete facturatie-indicatie.");
+  }
+  if (new Set(customerBillableValues).size > 1) {
+    throw routingProjectionError("TASK_EXECUTION_CUSTOMER_BILLABLE_MISMATCH", "De gepubliceerde facturatie-indicatie is tegenstrijdig.");
+  }
+  if (status === "not_applicable") {
+    const identityValues = unique([
+      segment.customer_id,
+      occurrence.customer_id,
+      shift.customer_id,
+      ...unique(shift.customer_ids),
+      segment.selling_company_id,
+      occurrence.selling_company_id,
+      shift.selling_company_id,
+      ...unique(shift.selling_company_ids),
+      segment.customer_contract_id,
+      occurrence.customer_contract_id,
+      shift.customer_contract_id,
+      segment.customer_contract_line_id,
+      occurrence.customer_contract_line_id,
+      shift.customer_contract_line_id,
+      snapshot.customer_id,
+      snapshot.customer_account_id,
+      snapshot.selling_company_id,
+      snapshot.customer_contract_id,
+      snapshot.customer_contract_line_id,
+      shift.service_context_snapshot?.customer_id,
+      ...unique(shift.service_context_snapshot?.customer_ids)
+    ]);
+    if (customerBillableValues[0] !== false || snapshot.reason !== "explicit_internal_non_billable" || snapshot.customer_billable !== false || Number(snapshot.candidate_count) !== 0 || identityValues.length > 0 || !unique(snapshot.evidence_shift_ids).includes(String(shift.id)) || !unique(snapshot.evidence_segment_ids).includes(String(segment.id))) {
+      throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_EVIDENCE_INVALID", "De interne niet-factureerbare taak mist sluitend gepubliceerd bewijs.");
+    }
+    return evidence;
+  }
+  if (status !== "resolved") {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_ROUTE_UNRESOLVED", "De gepubliceerde commerciële route is niet opgelost.", { status });
+  }
+  if (customerBillableValues[0] !== true || snapshot.customer_billable !== true) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_EVIDENCE_INVALID", "Een opgeloste commerciële route moet expliciet klantfactureerbaar zijn.");
+  }
+  const contractId = consistentRoutingValue([segment, segment.commercial_routing_snapshot, occurrence, occurrence.commercial_routing_snapshot], "customer_contract_id");
+  const lineId = consistentRoutingValue([segment, segment.commercial_routing_snapshot, occurrence, occurrence.commercial_routing_snapshot], "customer_contract_line_id");
+  if (!contractId || !lineId) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_EVIDENCE_INVALID", "Het gepubliceerde routebewijs mist contract- of regelidentiteit.");
+  }
+  const [contract, line] = await Promise.all([
+    publishedRoutingRecord(base44, "CustomerContract", contractId),
+    publishedRoutingRecord(base44, "CustomerContractLine", lineId)
+  ]);
+  const snapshotContractVersion = Number(snapshot.customer_contract_version || 0);
+  const snapshotLineVersion = Number(snapshot.customer_contract_line_version || 0);
+  const serviceEndDate = occurrence.end_date || occurrence.service_date;
+  const explicitLineTaskType = compactRoutingValue(line.task_type_key);
+  const lineTaskTypeKey = explicitLineTaskType ? isCanonicalCommercialTaskTypeKey(explicitLineTaskType) ? explicitLineTaskType : null : legacyCommercialTaskTypeKey(line.service_code);
+  const expectedTaskTypeKey = projectedTaskTypeKey(task, sourceTask, evidence);
+  let lineScopeMatches = line.scope_type === "customer" ? !compactRoutingValue(line.object_id) && !compactRoutingValue(line.collective_id) : line.scope_type === "object" ? !compactRoutingValue(line.collective_id) && String(line.object_id || "") === String(occurrence.object_id || "") : false;
+  if (line.scope_type === "collective" && !compactRoutingValue(line.object_id) && compactRoutingValue(line.collective_id)) {
+    const collective = await publishedRoutingRecord(base44, "Collectief", line.collective_id);
+    lineScopeMatches = String(collective.customer_id || "") === String(occurrence.customer_id || "") && unique(collective.object_ids).includes(String(occurrence.object_id));
+  }
+  if (!["active", "ended", "superseded"].includes(contract.status) || !["active", "ended"].includes(line.status) || String(line.contract_id) !== String(contract.id) || !compactRoutingValue(contract.company_id) || String(line.company_id) !== String(contract.company_id) || String(line.customer_id) !== String(contract.customer_id) || String(line.customer_account_id) !== String(contract.customer_account_id) || lineTaskTypeKey !== expectedTaskTypeKey || !lineScopeMatches || !dateWithin(occurrence.service_date, contract.start_date, contract.end_date, true) || !dateWithin(serviceEndDate, contract.start_date, contract.end_date, true) || !dateWithin(occurrence.service_date, line.valid_from, line.valid_until) || !dateWithin(serviceEndDate, line.valid_from, line.valid_until) || snapshotContractVersion < 1 || snapshotLineVersion < 1 || recordRevision(contract) < snapshotContractVersion || recordRevision(line) < snapshotLineVersion) {
+    throw routingProjectionError("TASK_EXECUTION_COMMERCIAL_EVIDENCE_MISMATCH", "Contract, regel en gepubliceerd routebewijs zijn niet meer aantoonbaar consistent.");
+  }
+  evidence.contract = contract;
+  evidence.line = line;
+  return evidence;
+}
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+function buildTaskContext(task, object, route, serviceDate, evidence = null) {
   const operatingCompanyId = task.operating_company_id || object.default_operating_company_id || object.operating_company_id || route.operating_company_id || null;
   return {
     service_date: serviceDate,
@@ -39,6 +468,7 @@ function buildTaskContext(task, object, route, serviceDate) {
     cao_key: task.cao_key || object.cao_key || route.cao_key || null,
     function_type: task.service_function_type || object.default_service_function_type || null,
     task_type: task.task_type || null,
+    task_type_key: projectedTaskTypeKey(task, {}, evidence),
     cao_function_group: task.required_cao_function_group || object.default_cao_function_group || null,
     cao_function_level: task.required_cao_function_level || object.default_cao_function_level || null,
     security_role_status: task.required_security_role_status || object.default_security_role_status || null,
@@ -83,13 +513,41 @@ async function handleCreateMobileRouteExecution(req) {
     const endOffice = offices.find((o) => String(o.id) === String(route.end_location_id || "")) || startOffice || null;
     const taskById = new Map(tasks.map((task) => [String(task.id), task]));
     const objectById = new Map(objects.map((object) => [String(object.id), object]));
-    const assignments = (route.assigned_tasks || []).filter((item) => isAssignmentForDay(item, weekday));
-    const assignedTaskContexts = assignments.map((assignment) => {
+    // Filter both assignment- and task-day before touching immutable planning
+    // evidence. An assignment for this route day whose source task is not due
+    // today must be skipped, not allowed to block the whole route with an old
+    // planning link that cannot apply to this service date.
+    const assignments = (route.assigned_tasks || []).filter((item) => {
+      if (!isAssignmentForDay(item, weekday)) return false;
+      const task = taskById.get(String(item.task_id));
+      return Boolean(task && isTaskForDay(task, weekday));
+    });
+    let publishedRoutingEvidence;
+    try {
+      publishedRoutingEvidence = await mapWithConcurrency(assignments, 8, async (assignment) => {
+        const task = taskById.get(String(assignment.task_id)) || {};
+        return loadPublishedTaskRoutingEvidence(base44, assignment, task, serviceDate);
+      });
+    } catch (error) {
+      return Response.json({ error: error.message, code: error.code || null, details: error.details || null }, { status: Number(error.status || 409) });
+    }
+    const assignedTaskContexts = assignments.map((assignment, index) => {
       const task = taskById.get(String(assignment.task_id));
       if (!task || !isTaskForDay(task, weekday)) return null;
       const object = objectById.get(String(task.object_id || "")) || {};
-      return buildTaskContext(task, object, route, serviceDate);
+      return buildTaskContext(task, object, route, serviceDate, publishedRoutingEvidence[index]);
     }).filter(Boolean);
+    let routingProjections;
+    try {
+      routingProjections = assignments.map((assignment, index) => {
+        const task = taskById.get(String(assignment.task_id));
+        if (!task || !isTaskForDay(task, weekday)) return null;
+        const object = objectById.get(String(task.object_id || "")) || {};
+        return buildTaskExecutionRoutingProjection(assignment, task, object, null, publishedRoutingEvidence[index]);
+      });
+    } catch (error) {
+      return Response.json({ error: error.message, code: error.code || null, details: error.details || null }, { status: Number(error.status || 409) });
+    }
     const operatingCompanyIds = unique(assignedTaskContexts.map((context) => context.operating_company_id));
     if (operatingCompanyIds.length > 1) {
       return Response.json({
@@ -138,11 +596,11 @@ async function handleCreateMobileRouteExecution(req) {
       metadata: { source: "uitvoering", copied_to_mobile: true }
     });
     const taskPayloads = [];
-    assignments.forEach((assignment) => {
+    assignments.forEach((assignment, assignmentIndex) => {
       const task = taskById.get(String(assignment.task_id));
       if (!task || !isTaskForDay(task, weekday)) return;
       const object = objectById.get(String(task.object_id || "")) || {};
-      const serviceContext = buildTaskContext(task, object, route, serviceDate);
+      const serviceContext = buildTaskContext(task, object, route, serviceDate, publishedRoutingEvidence[assignmentIndex]);
       const repeatCount = Number(task.repeat_count || 1);
       const occurrenceCount = assignment.lock_all_occurrences ? repeatCount : Number(assignment.locked_occurrence_count || 1);
       const repeatIndexes = assignment.repeat_index ? [Number(assignment.repeat_index)] : Array.from({ length: Math.max(1, occurrenceCount) }, (_, index) => index + 1);
@@ -150,6 +608,7 @@ async function handleCreateMobileRouteExecution(req) {
         const latitude = safeNumber(object.latitude);
         const longitude = safeNumber(object.longitude);
         if (latitude === null || longitude === null) return;
+        const routingProjection = routingProjections[assignmentIndex] || buildTaskExecutionRoutingProjection(assignment, task, object, null, publishedRoutingEvidence[assignmentIndex]);
         taskPayloads.push({
           route_execution_id: routeExecution.id,
           source_route_id: route.id,
@@ -159,6 +618,7 @@ async function handleCreateMobileRouteExecution(req) {
           task_name: makeTaskName(task, object, repeatIndex, repeatCount),
           object_name: object.name || "Object",
           task_type: task.task_type || "Taak",
+          ...routingProjection,
           operating_company_id: serviceContext.operating_company_id || operatingCompanyId,
           personnel_contract_id: null,
           contract_function_key: serviceContext.function_type || null,
@@ -199,7 +659,7 @@ async function handleCreateMobileRouteExecution(req) {
     if (taskPayloads.length) await base44.asServiceRole.entities.TaskExecution.bulkCreate(taskPayloads);
     return Response.json({ route_execution_id: routeExecution.id, created_tasks: taskPayloads.length, already_exists: false });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message, code: error.code || null, details: error.details || null }, { status: Number(error.status || 500) });
   }
 }
 
@@ -976,3 +1436,5 @@ Deno.serve(async (req) => {
     return json({ error: error instanceof Error ? error.message : String(error) }, 500);
   }
 });
+
+export { buildTaskExecutionRoutingProjection, loadPublishedTaskRoutingEvidence, projectedTaskTypeKey };

@@ -329,6 +329,9 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices, options = 
       skills: [1],
       assigned_tasks: (route?.assigned_tasks || []).map(item => ({
         task_id: String(item.task_id),
+        planning_shift_task_segment_id: item.planning_shift_task_segment_id || item.task_segment_id || null,
+        planning_task_occurrence_id: item.planning_task_occurrence_id || item.task_occurrence_id || null,
+        planning_shift_id: item.planning_shift_id || null,
         locked_to_route: !!item.locked_to_route,
         locked_sequence: !!item.locked_sequence,
         sequence_index: item.sequence_index ?? null,
@@ -1334,6 +1337,9 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
 
         return {
           task_id: String(taskId),
+          planning_shift_task_segment_id: step.planning_shift_task_segment_id || step.task_segment_id || null,
+          planning_task_occurrence_id: step.planning_task_occurrence_id || step.task_occurrence_id || null,
+          planning_shift_id: step.planning_shift_id || null,
           days: [Number(step.calendar_weekday || step.occurrence_weekday || selectedWeekday)],
           sequence_index: existingPinnedTaskIds.has(String(taskId)) ? null : taskIndex,
           locked_to_route: existingPinnedTaskIds.has(String(taskId)),

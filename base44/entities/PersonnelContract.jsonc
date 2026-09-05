@@ -1262,7 +1262,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Optionele taaktypes/dienstlabels die onder dit contract gepland mogen worden."
+      "description": "Canonieke taaksoortsleutels die naar dit arbeidscontract en deze werkgever/loon-CAO mogen routeren. Minimaal één concrete taaksoort is vereist voordat het contract definitief of planningsgeschikt kan worden."
     },
     "cao_scope_profile": {
       "type": [

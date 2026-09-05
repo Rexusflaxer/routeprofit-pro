@@ -21,6 +21,46 @@
         "null"
       ]
     },
+    "employing_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Juridische werkgever/loonbetaler uit PersonnelContract; nooit afleiden uit het klantcontract of de verkopende BV."
+    },
+    "payroll_cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO-snapshot uit het geselecteerde arbeidscontract voor deze assignment."
+    },
+    "employment_routing_status": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "missing_contract",
+        "ambiguous",
+        "blocked",
+        "manual_review_required",
+        "stale"
+      ],
+      "default": "stale",
+      "description": "Fail-closed status van de arbeidscontract-, werkgever- en loon-CAO-routering. Resolved bewijst alleen de eenduidige arbeidsroute; publicatie en payroll vereisen daarnaast een verse loonperiodecontrole."
+    },
+    "employment_routing_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Gestandaardiseerde codes van de laatst gecontroleerde arbeidscontractroutering."
+    },
+    "draft_assignment_allowed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Expliciet resultaat van de laatste servercontrole voor een concepttoewijzing. Ontbrekende, oude of mislukte controles zijn altijd false; publicatie hercontroleert onafhankelijk."
+    },
     "status": {
       "type": "string",
       "enum": [
