@@ -186,7 +186,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const { toast } = useToast();
   const [workspace, setWorkspace] = useState("buildings");
   const [mapView, setMapView] = useState("map");
-  const [topDown, setTopDown] = useState(false);
   const [parcelsVisible, setParcelsVisible] = useState(false);
   const [parcelSelectionEnabled, setParcelSelectionEnabled] = useState(false);
   const [form, setForm] = useState(null);
@@ -197,7 +196,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const [drawingTarget, setDrawingTarget] = useState(null);
   const [drawingPoints, setDrawingPoints] = useState([]);
   const [editingTarget, setEditingTarget] = useState(null);
-  const [focusNonce, setFocusNonce] = useState(0);
   const [overlapDialog, setOverlapDialog] = useState(false);
   const [overlapReason, setOverlapReason] = useState("");
   const [overlapFingerprint, setOverlapFingerprint] = useState(null);
@@ -243,9 +241,11 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   });
   const parcelsQuery = useInfiniteQuery({
     queryKey: ["object-card", object.id, "map-parcel-candidates", candidateConfigurationVersion],
-    queryFn: ({ pageParam }) => listObjectParcelCandidates({ customerId: object.customer_id, objectId: object.id, cursor: pageParam }),
+    queryFn: ({ pageParam }) => listObjectParcelCandidates({ customerId: object.customer_id, objectId: object.id, ...(typeof pageParam === "object" && pageParam ? pageParam : { cursor: pageParam }) }),
     initialPageParam: null,
-    getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor ? lastPage.next_cursor : undefined,
+    getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor
+      ? { cursor: lastPage.next_cursor, transport: lastPage.transport, expectedCenter: lastPage.center }
+      : undefined,
     enabled: verified && Boolean(configurationQuery.data) && workspace === "terrain" && parcelsVisible,
     retry: shouldRetryObjectParcelCandidates,
     staleTime: 5 * 60 * 1000,
@@ -282,6 +282,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
 
   const formDirty = Boolean(form && baseForm && !sameForm(form, baseForm));
   const dirty = formDirty || drawingPoints.length > 0;
+  // Previously hidden objects are activated only by an explicit save, never
+  // merely by opening this workspace or treating the saved state as dirty.
+  const needsMobileActivation = form?.show_on_mobile_map === false;
   const staleConfiguration = dirty && hasVersionDrift(baseForm, configurationQuery.data);
   const candidatePages = candidatesQuery.data?.pages || [];
   const candidateMetadata = candidatePages.at(-1) || candidatePages[0] || null;
@@ -426,6 +429,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         idempotencyKey: mutationKeyRef.current || createObjectMapMutationKey(),
         data: {
           ...persistedForm(formRef.current),
+          show_on_mobile_map: true,
           ...(reason && conflictFingerprint ? { overlap_confirmation: { confirmed: true, reason, conflict_fingerprint: conflictFingerprint } } : {}),
         },
       });
@@ -709,11 +713,10 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       <div className="flex flex-col gap-3 border-b border-border/70 bg-card/30 px-4 py-3 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold text-foreground">Kaart & terrein</h2><Badge variant="outline" className={status.className}>{status.label}</Badge>{dirty && <Badge variant="outline" className="border-blue-300/70 bg-blue-500/10 text-blue-700 dark:text-blue-300">Niet opgeslagen</Badge>}</div>
-          <p className="mt-1 text-xs text-muted-foreground">Selecteer de gebouwen die bij dit object horen en leg het te bewaken terrein vast.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Selecteer de gebouwen die bij dit object horen en leg het te bewaken terrein vast. Opgeslagen wijzigingen worden ook in de mobiele app toegepast bij de volgende synchronisatie.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setFocusNonce(value => value + 1)}><MapIcon className="h-4 w-4" /> Passend tonen</Button>
-          <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || !dirty || saveMutation.isPending || Boolean(drawingTarget) || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
+          <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || (!dirty && !needsMobileActivation) || saveMutation.isPending || Boolean(drawingTarget) || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
         </div>
       </div>
 
@@ -751,11 +754,10 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             <div className="flex gap-1 rounded-lg border border-border/70 bg-card/35 p-1" role="group" aria-label="Kaartweergave">
               <Button type="button" size="sm" variant={mapView === "map" ? "secondary" : "ghost"} aria-pressed={mapView === "map"} onClick={() => setMapView("map")}><MapIcon className="h-4 w-4" /> Kaart</Button>
               <Button type="button" size="sm" variant={mapView === "satellite" ? "secondary" : "ghost"} aria-pressed={mapView === "satellite"} onClick={() => setMapView("satellite")}><Satellite className="h-4 w-4" /> Luchtfoto</Button>
-              <Button type="button" size="sm" variant={topDown || mapView === "satellite" || drawingTarget || editingTarget ? "secondary" : "ghost"} aria-pressed={Boolean(topDown || mapView === "satellite" || drawingTarget || editingTarget)} disabled={mapView === "satellite" || Boolean(drawingTarget) || Boolean(editingTarget)} onClick={() => setTopDown(value => !value)}><MapIcon className="h-4 w-4" /> Bovenaanzicht</Button>
             </div>
             {workspace === "terrain" && <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={value => { setParcelsVisible(value); if (!value) setParcelSelectionEnabled(false); }} /> Perceelgrenzen</Label>}
           </div>}
-          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{drawingTarget ? "Je tekent tijdelijk van bovenaf, op dezelfde plek en hetzelfde zoomniveau. Klik voor ieder hoekpunt. Klik op het eerste punt of druk Enter om af te sluiten. Backspace verwijdert het laatste punt; Escape annuleert. Je kunt tussendoor van kaartweergave wisselen." : editingTarget ? "Je past de grens tijdelijk van bovenaf aan. Sleep de hoekpunten; Ongedaan herstelt je vorige wijziging. De locatie en het zoomniveau blijven gelijk." : "Je blijft op dezelfde kaart. Kies een perceel als startpunt, of teken zelf. Luchtfoto en Bovenaanzicht helpen bij het nauwkeurig bepalen van de grens."}</p>}
+          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{drawingTarget ? "Je tekent tijdelijk van bovenaf, op dezelfde plek en hetzelfde zoomniveau. Klik voor ieder hoekpunt. Klik op het eerste punt of druk Enter om af te sluiten. Backspace verwijdert het laatste punt; Escape annuleert. Je kunt tussendoor van kaartweergave wisselen." : editingTarget ? "Je past de grens tijdelijk van bovenaf aan. Sleep de hoekpunten; Ongedaan herstelt je vorige wijziging. De locatie en het zoomniveau blijven gelijk." : "Je blijft op dezelfde kaart. Kies een perceel als startpunt, of teken zelf. Met Luchtfoto kun je de grens nauwkeurig bepalen."}</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Kadastrale percelen laden…</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel optional retrying={parcelsQuery.isFetching} title={parcelCandidates.length ? "Niet alle perceelgrenzen konden worden geladen. Geladen percelen en je eigen terrein blijven beschikbaar." : "Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard; zelf tekenen blijft mogelijk."} error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage && <Button type="button" size="sm" variant="outline" disabled={parcelsQuery.isFetchingNextPage} onClick={() => parcelsQuery.fetchNextPage()}>{parcelsQuery.isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Meer percelen laden</Button>}
@@ -766,7 +768,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             object={mapObject}
             workspace={workspace}
             mapView={mapView}
-            topDown={topDown}
             parcelCandidates={parcelCandidates}
             parcelsVisible={parcelsVisible}
             parcelSelectionEnabled={parcelSelectionEnabled}
@@ -782,7 +783,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             drawingPoints={drawingPoints}
             editingTarget={editingTarget}
             disabled={readOnly}
-            focusNonce={focusNonce}
             onToggleCandidate={toggleCandidate}
             onAddDrawingPoint={coordinate => { setDrawingSaveNotice(false); setOverlapReason(""); setOverlapFingerprint(null); setServerOverlapConflicts([]); setDrawingPoints(points => [...points, coordinate]); }}
             onVertexDragStart={startVertexDrag}
@@ -797,10 +797,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         </div>
 
         <aside className="space-y-3">
-          <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-semibold">Mobiele kaart</p><p className="mt-1 text-xs text-muted-foreground">Toon dit object op de operationele kaart.</p></div><Switch aria-label="Object op mobiele kaart tonen" checked={form.show_on_mobile_map} disabled={readOnly} onCheckedChange={checked => updateWithHistory(current => ({ ...current, show_on_mobile_map: checked === true }))} /></div>
-          </section>
-
           {workspace === "buildings" ? <>
             <section className="space-y-2 rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <div><p className="text-sm font-semibold">Bepaling van gebouwen</p><p className="mt-1 text-xs text-muted-foreground">Handmatig voorkomt verkeerde markeringen bij gedeelde adressen.</p></div>

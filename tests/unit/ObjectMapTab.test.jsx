@@ -32,8 +32,9 @@ vi.mock("@/components/objects/ObjectMapCanvas", () => ({
     <button type="button" onClick={() => props.onAddDrawingPoint([[4.48, 51.92], [4.481, 51.92], [4.481, 51.921]][props.drawingPoints.length % 3])}>Hoekpunt op kaart plaatsen</button>
     <button type="button" onClick={() => props.onToggleBuildingPoint({ id: "user-point-1", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4815, latitude: 51.92 })}>Gebouw zonder BAG selecteren</button>
     <button type="button" onClick={() => props.onToggleParcel("parcel-1")}>Perceel op kaart selecteren</button>
+    <button type="button">Passend tonen</button>
     <output aria-label="Geselecteerde kaartpanden">{(props.selectedBagFeatureIds || []).join(",")}</output>
-    <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, workspace: props.workspace, topDown: props.topDown, drawingPoints: props.drawingPoints, points: props.buildingSelectionPoints, terrain: props.terrain })}</output>
+    <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, workspace: props.workspace, drawingPoints: props.drawingPoints, points: props.buildingSelectionPoints, terrain: props.terrain })}</output>
   </div>,
 }));
 
@@ -60,7 +61,7 @@ const configuration = {
   building_polygon_geojson: empty,
   manual_building_geojson: empty,
   object_area_geojson: empty,
-  show_on_mobile_map: false,
+  show_on_mobile_map: true,
   conflicts: [],
 };
 const candidate = {
@@ -105,6 +106,7 @@ describe("ObjectMapTab", () => {
       data: expect.objectContaining({
         building_selection_mode: "manual",
         selected_bag_feature_ids: ["bag-1"],
+        show_on_mobile_map: true,
       }),
     })));
   });
@@ -233,9 +235,10 @@ describe("ObjectMapTab", () => {
     expect(updateConfiguration.mock.calls[1][0].data.overlap_confirmation).toEqual({ confirmed: true, reason: "Gedeeld bedrijfsverzamelgebouw", conflict_fingerprint: "2".repeat(64) });
   });
 
-  it("vraagt niet opnieuw om een overlapreden bij een latere zichtbaarheidswijziging", async () => {
+  it("blijft serveroverlap bevestigen bij het toepassen van een eerder verborgen object", async () => {
     getConfiguration.mockResolvedValue({
       ...configuration,
+      show_on_mobile_map: false,
       building_selection_mode: "manual",
       selected_bag_feature_ids: ["bag-1"],
       building_polygon_geojson: { type: "FeatureCollection", features: [candidate] },
@@ -245,13 +248,25 @@ describe("ObjectMapTab", () => {
       items: [{ ...candidate, properties: { ...candidate.properties, conflict_count: 1, conflicts: [{ object_id: "other-1", object_name: "Andere huurder" }] } }],
       total: 1,
     });
+    updateConfiguration.mockRejectedValueOnce(Object.assign(new Error("Gebouw is al gekoppeld"), {
+      status: 409,
+      details: {
+        code: "building_assignment_overlap_confirmation_required",
+        conflict_fingerprint: "4".repeat(64),
+        conflicts: [{ source_feature_id: "bag-1", objects: [{ object_id: "other-1", object_name: "Andere huurder" }] }],
+      },
+    }));
     renderTab();
-    fireEvent.click(await screen.findByRole("switch", { name: "Object op mobiele kaart tonen" }));
-    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Opslaan en toepassen" }));
 
     await waitFor(() => expect(updateConfiguration).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("dialog", { name: "Gedeeld gebouw bevestigen" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Gedeeld gebouw bevestigen" })).toBeInTheDocument();
+    expect(updateConfiguration.mock.calls[0][0].data.show_on_mobile_map).toBe(true);
     expect(updateConfiguration.mock.calls[0][0].data.overlap_confirmation).toBeUndefined();
+    fireEvent.change(screen.getByLabelText(/Waarom wordt dit gebouw gedeeld/), { target: { value: "Gedeeld met andere huurder" } });
+    fireEvent.click(screen.getByRole("button", { name: "Bevestigen en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledTimes(2));
+    expect(updateConfiguration.mock.calls[1][0].data.overlap_confirmation).toEqual({ confirmed: true, reason: "Gedeeld met andere huurder", conflict_fingerprint: "4".repeat(64) });
   });
 
   it("maakt een ongecontroleerd adres alleen-lezen en vraagt geen BAG-kandidaten op", async () => {
@@ -286,7 +301,35 @@ describe("ObjectMapTab", () => {
     getConfiguration.mockResolvedValue({ ...configuration, show_on_mobile_map: null });
     renderTab({ ...object, show_on_mobile_map: undefined });
 
-    expect(await screen.findByRole("switch", { name: "Object op mobiele kaart tonen" })).toBeChecked();
+    await screen.findByRole("button", { name: "Opslaan en toepassen" });
+    expect(updateConfiguration).not.toHaveBeenCalled();
+    expect(guardState.mock.calls.at(-1)[0].dirty).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /Exact vastleggen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ show_on_mobile_map: true }) })));
+  });
+
+  it("activeert een eerder verborgen object alleen na expliciet opslaan en houdt de baseline schoon", async () => {
+    getConfiguration.mockResolvedValue({ ...configuration, show_on_mobile_map: false });
+    renderTab();
+
+    const save = await screen.findByRole("button", { name: "Opslaan en toepassen" });
+    expect(save).not.toBeDisabled();
+    expect(updateConfiguration).not.toHaveBeenCalled();
+    expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
+    expect(guardState.mock.calls.at(-1)[0].dirty).toBe(false);
+    fireEvent.click(screen.getByRole("tab", { name: "Terrein" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Gebouwen" }));
+    expect(updateConfiguration).not.toHaveBeenCalled();
+
+    fireEvent.click(save);
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      expectedVersion: 4,
+      data: expect.objectContaining({ show_on_mobile_map: true }),
+    })));
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
+    expect(guardState.mock.calls.at(-1)[0].dirty).toBe(false);
   });
 
   it("blijft een opgeslagen BAG-pand tonen als kandidaten tijdelijk niet laden", async () => {
@@ -507,10 +550,9 @@ describe("ObjectMapTab", () => {
     renderTab();
     await screen.findByTestId("map-canvas");
     const state = () => JSON.parse(screen.getByLabelText("Kaartstatus").textContent);
-    expect(state()).toMatchObject({ view: "map", workspace: "buildings", topDown: false });
+    expect(state()).toMatchObject({ view: "map", workspace: "buildings" });
     fireEvent.click(screen.getByRole("tab", { name: "Terrein" }));
-    expect(state()).toMatchObject({ view: "map", workspace: "terrain", topDown: false });
-    expect(screen.getByRole("button", { name: "Bovenaanzicht" })).toHaveAttribute("aria-pressed", "false");
+    expect(state()).toMatchObject({ view: "map", workspace: "terrain" });
     fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
     expect(state().view).toBe("satellite");
     fireEvent.click(screen.getByRole("tab", { name: "Gebouwen" }));
@@ -521,20 +563,22 @@ describe("ObjectMapTab", () => {
     expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
   });
 
-  it("biedt bovenaanzicht vrijwillig aan en beschermt de camera tijdens grondbewerking", async () => {
+  it("verwijdert de extra kaartbediening en behoudt alleen passend tonen binnen de kaart", async () => {
     renderTab();
+    const canvas = await screen.findByTestId("map-canvas");
+    expect(screen.getAllByRole("button", { name: "Passend tonen" })).toHaveLength(1);
+    expect(canvas).toContainElement(screen.getByRole("button", { name: "Passend tonen" }));
+    expect(screen.queryByText("Mobiele kaart")).not.toBeInTheDocument();
+    expect(screen.queryByText("Toon dit object op de operationele kaart.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Object op mobiele kaart tonen" })).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
-    const button = screen.getByRole("button", { name: "Bovenaanzicht" });
-    fireEvent.click(button);
-    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).topDown).toBe(true);
-    fireEvent.click(button);
-    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).topDown).toBe(false);
+    expect(screen.queryByRole("button", { name: "Bovenaanzicht" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bovenaanzicht/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Luchtfoto" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Annuleren" }));
-    expect(button).not.toBeDisabled();
-    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Bovenaanzicht" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Passend tonen" })).toHaveLength(1);
+    expect(screen.getByTestId("map-canvas")).toBe(canvas);
   });
 
   it("bewaart onvoltooide hoekpunten bij een poging terug naar gebouwen te wisselen", async () => {
@@ -619,6 +663,17 @@ describe("ObjectMapTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Opnieuw" }));
     await waitFor(() => expect(screen.queryByText(/Niet alle perceelgrenzen konden worden geladen/)).not.toBeInTheDocument());
     expect(listParcels).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "next-page" }));
+  });
+
+  it("onthoudt de werkende perceelverbinding voor vervolgpagina's binnen dezelfde locatie", async () => {
+    const center = { longitude: 4.48, latitude: 51.92 };
+    listParcels.mockImplementation(async ({ cursor }) => cursor
+      ? { items: [], cursor, next_cursor: null, transport: "browser", center }
+      : { items: [], next_cursor: "browser-page-2", transport: "browser", center });
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Meer percelen laden" }));
+    await waitFor(() => expect(listParcels).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "browser-page-2", transport: "browser", expectedCenter: center })));
   });
 
   it("laadt vervolgcandidaten met een opaque cursor en dedupliceert de kaartlijst", async () => {

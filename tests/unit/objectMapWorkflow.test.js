@@ -16,8 +16,7 @@ const polygon = {
 
 describe("objectkaart API-workflow", () => {
   it.each([
-    [{ code: "pdok_parcel_unavailable", reason: "timeout" }, /PDOK.*te langzaam/],
-    [{ code: "pdok_parcel_unavailable" }, /PDOK.*tijdelijk niet bereikbaar/],
+    [{ code: "pdok_parcel_unavailable", reason: "http", retryable: false }, /beschikbare verbindingen/],
     [{ code: "pdok_parcel_invalid_response" }, /PDOK.*geen bruikbaar antwoord/],
     [null, /objectgegevens of perceelgrenzen/],
   ])("maakt een perceelfout leesbaar en behoudt status en referentie (%#)", async (details, message) => {
@@ -26,6 +25,75 @@ describe("objectkaart API-workflow", () => {
     await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke })).rejects.toMatchObject({ message: expect.stringMatching(message), status: 503, requestId: "request-1", details });
     expect(invoke).toHaveBeenCalledOnce();
     expect(original.message).toBe("Klantplatformactie mislukt");
+  });
+
+  const scopedConfiguration = {
+    configuration: { object_id: "object-1", customer_id: "customer-1", version: 3,
+      object: { id: "object-1", customer_id: "customer-1", longitude: 4.48, latitude: 51.92, geocoding_status: "verified" },
+    },
+  };
+  const transportError = Object.assign(new Error("Klantplatformactie mislukt"), {
+    status: 503, requestId: "server-reference", details: { code: "pdok_parcel_unavailable", reason: "network", attempts: 2 },
+  });
+
+  it("haalt bij een serververbindingsfout publieke percelen op na een verse scopecontrole", async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(transportError).mockResolvedValueOnce(scopedConfiguration);
+    const fetchDirect = vi.fn().mockResolvedValue({ candidates: { type: "FeatureCollection", features: [{ type: "Feature", id: "parcel", properties: { source: "pdok_brk" }, geometry: polygon }] }, center: { longitude: 4.48, latitude: 51.92 }, next_cursor: "page-2" });
+    const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke, fetchDirect });
+    expect(invoke.mock.calls.map(([p]) => p.action)).toEqual(["list_object_parcel_candidates", "get_object_map_configuration"]);
+    expect(fetchDirect).toHaveBeenCalledWith({ object: scopedConfiguration.configuration.object, radiusMeters: 250, limit: 100, cursor: null });
+    expect(result).toMatchObject({ transport: "browser", next_cursor: "page-2", items: [expect.objectContaining({ id: "parcel" })] });
+  });
+
+  it("laadt vervolgpagina's via dezelfde verbinding, maar controleert opnieuw de scope", async () => {
+    const invoke = vi.fn().mockResolvedValue(scopedConfiguration);
+    const fetchDirect = vi.fn().mockResolvedValue({ candidates: { type: "FeatureCollection", features: [] } });
+    await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", cursor: "page-2", transport: "browser", expectedCenter: { longitude: 4.48, latitude: 51.92 }, invoke, fetchDirect });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ action: "get_object_map_configuration", customer_id: "customer-1", object_id: "object-1" });
+    expect(fetchDirect).toHaveBeenCalledWith(expect.objectContaining({ cursor: "page-2" }));
+  });
+
+  it("gebruikt geen browserfallback voor scope-, platform- of ongeldige bronfouten", async () => {
+    for (const error of [
+      Object.assign(new Error("Geen toegang"), { status: 403 }),
+      Object.assign(new Error("Platformstoring"), { status: 503 }),
+      Object.assign(new Error("Onbekende actie"), { status: 400 }),
+      Object.assign(new Error("Ongeldig antwoord"), { status: 503, details: { code: "pdok_parcel_invalid_response" } }),
+    ]) {
+      const invoke = vi.fn().mockRejectedValue(error);
+      const fetchDirect = vi.fn();
+      await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke, fetchDirect })).rejects.toMatchObject({ status: error.status });
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(fetchDirect).not.toHaveBeenCalled();
+    }
+  });
+
+  it("stopt bij ingetrokken toegang of een andere objectscope zonder PDOK te benaderen", async () => {
+    const denied = Object.assign(new Error("Geen toegang"), { status: 403 });
+    const fetchDirect = vi.fn();
+    const invoke = vi.fn().mockRejectedValueOnce(transportError).mockRejectedValueOnce(denied);
+    await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke, fetchDirect })).rejects.toBe(denied);
+    const wrongScope = { configuration: { ...scopedConfiguration.configuration, customer_id: "customer-2" } };
+    await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", transport: "browser", invoke: vi.fn().mockResolvedValue(wrongScope), fetchDirect })).rejects.toMatchObject({ status: 409 });
+    expect(fetchDirect).not.toHaveBeenCalled();
+  });
+
+  it("mengt geen perceelpagina's wanneer het objectadres ondertussen veranderd is", async () => {
+    const fetchDirect = vi.fn();
+    await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", transport: "browser", cursor: "page-2", expectedCenter: { longitude: 6.07, latitude: 52.45 }, invoke: vi.fn().mockResolvedValue(scopedConfiguration), fetchDirect })).rejects.toMatchObject({ status: 409, details: { code: "object_map_anchor_changed" } });
+    expect(fetchDirect).not.toHaveBeenCalled();
+    await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", cursor: "server-page-2", expectedCenter: { longitude: 6.07, latitude: 52.45 }, invoke: vi.fn().mockResolvedValue({ items: [], center: { longitude: 4.48, latitude: 51.92 } }), fetchDirect })).rejects.toMatchObject({ status: 409, details: { code: "object_map_anchor_changed" } });
+    expect(fetchDirect).not.toHaveBeenCalled();
+  });
+
+  it("bewaart bij dubbele verbindingsuitval alleen veilige diagnostiek en de serverreferentie", async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(transportError).mockResolvedValueOnce(scopedConfiguration);
+    const fetchDirect = vi.fn().mockRejectedValue(Object.assign(new Error("Verbinding mislukt"), { status: 503, details: { code: "pdok_parcel_unavailable", reason: "network", retryable: false } }));
+    let failure;
+    try { await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke, fetchDirect }); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ status: 503, requestId: "server-reference", message: expect.stringMatching(/beschikbare verbindingen/) });
+    expect(shouldRetryObjectParcelCandidates(0, failure)).toBe(false);
+    expect(JSON.stringify(failure)).not.toMatch(/longitude|latitude|bbox|coordinates|https:/);
   });
 
   it("laat scope-, autorisatie- en publicatiefouten intact", async () => {

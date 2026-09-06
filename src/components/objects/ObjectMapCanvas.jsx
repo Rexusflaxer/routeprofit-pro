@@ -312,7 +312,6 @@ export default function ObjectMapCanvas({
   drawingPoints,
   editingTarget,
   disabled,
-  focusNonce,
   onToggleCandidate,
   onAddDrawingPoint,
   onVertexDragStart,
@@ -323,7 +322,6 @@ export default function ObjectMapCanvas({
   onToggleBuildingPoint,
   workspace = "buildings",
   mapView = "map",
-  topDown = false,
   parcelCandidates = [],
   parcelsVisible = false,
   parcelSelectionEnabled = false,
@@ -409,7 +407,6 @@ export default function ObjectMapCanvas({
     onToggleBuildingPoint,
     workspace,
     mapView,
-    topDown,
     parcelsVisible,
     parcelSelectionEnabled,
     drawingPoints,
@@ -437,7 +434,7 @@ export default function ObjectMapCanvas({
       mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
       const coordinates = trustedObjectCoordinatePair(object);
       const usesGroundView = interaction => interaction.workspace === "terrain"
-        && (interaction.mapView === "satellite" || interaction.topDown || Boolean(interaction.drawingTarget) || Boolean(interaction.editingTarget));
+        && (interaction.mapView === "satellite" || Boolean(interaction.drawingTarget) || Boolean(interaction.editingTarget));
       let appliedGroundView = usesGroundView(interactionsRef.current);
       let normalMapPitch = coordinates ? 42 : 0;
       map = new mapboxgl.Map({
@@ -483,7 +480,7 @@ export default function ObjectMapCanvas({
         map.setConfigProperty("basemap", "show3dObjects", !groundView);
         map.setConfigProperty("basemap", "show3dBuildings", !groundView);
         map.setConfigProperty("basemap", "show3dFacades", !groundView);
-        // A workspace switch is not a camera action. Only explicit aerial/2D
+        // A workspace switch is not a camera action. Only explicit aerial
         // viewing or ground editing temporarily flattens this same map.
         if (appliedGroundView !== groundView) {
           if (groundView) normalMapPitch = map.getPitch();
@@ -826,7 +823,7 @@ export default function ObjectMapCanvas({
   useEffect(() => {
     if (!ready) return;
     applyWorkspaceViewRef.current?.();
-  }, [drawingTarget, editingTarget, mapView, parcelsVisible, ready, topDown, workspace]);
+  }, [drawingTarget, editingTarget, mapView, parcelsVisible, ready, workspace]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -839,18 +836,6 @@ export default function ObjectMapCanvas({
     if (workspace === "buildings" && !disabled && !drawingTarget && !editingTarget) return;
     clearStandardBuildingHoverRef.current?.();
   }, [disabled, drawingTarget, editingTarget, workspace]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !ready || !focusNonce) return;
-    const bounds = featureCollectionBounds(selectedBuildings, selectedPointCollection, terrain, mapData.anchor);
-    if (!bounds) return;
-    if (bounds.minLng === bounds.maxLng && bounds.minLat === bounds.maxLat) {
-      map.easeTo({ center: [bounds.minLng, bounds.minLat], zoom: 17, duration: 500 });
-      return;
-    }
-    map.fitBounds([[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]], { padding: 70, maxZoom: 18.5, duration: 500 });
-  }, [focusNonce, mapData.anchor, ready, selectedBuildings, selectedPointCollection, terrain]);
 
   return (
     <div className="relative h-[540px] min-h-[420px] overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-inner lg:h-[680px]">

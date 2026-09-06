@@ -103,7 +103,6 @@ function renderCanvas(overrides = {}) {
     drawingPoints: [],
     editingTarget: null,
     disabled: false,
-    focusNonce: 0,
     onToggleCandidate: vi.fn(),
     onAddDrawingPoint: vi.fn(),
     onVertexDragStart: vi.fn(),
@@ -389,17 +388,15 @@ describe("ObjectMapCanvas", () => {
     expect(mapboxState.instances).toHaveLength(1);
   });
 
-  it("maakt bovenaanzicht een expliciete keuze en herstelt na uitschakelen", async () => {
-    const rendered = renderCanvas({ workspace: "terrain" });
+  it("behoudt zonder grondbewerking de bestaande 3D-kaarthoek in terreinmodus", async () => {
+    renderCanvas({ workspace: "terrain" });
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
     const map = mapboxState.instances[0];
     act(() => map.emit("style.load"));
     expect(map.options.pitch).toBe(42);
     expect(map.easeTo).not.toHaveBeenCalled();
-    rendered.rerender(<ObjectMapCanvas {...rendered.props} topDown />);
-    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 0, duration: 350 });
-    rendered.rerender(<ObjectMapCanvas {...rendered.props} topDown={false} />);
-    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 42, duration: 350 });
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", true);
+    expect(screen.queryByRole("button", { name: "Bovenaanzicht" })).not.toBeInTheDocument();
   });
 
   it("houdt luchtfoto buiten de gebouwselectie en herstelt native 3D bij terugkeren", async () => {

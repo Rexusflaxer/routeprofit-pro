@@ -8,6 +8,7 @@ import {
   normalizeFeatureCollection,
   selectedFeatureIds,
 } from "./objectMapGeometry";
+import { fetchObjectParcelCandidatesDirect } from "./objectMapParcelTransport";
 
 function required(value, label) {
   const normalized = String(value || "").trim();
@@ -100,6 +101,7 @@ export function normalizeObjectMapCandidates(value) {
     skipped_invalid_count: Number(root.skipped_invalid_count || 0),
     source,
     source_retrieved_at: root.source?.retrieved_at || root.source_retrieved_at || root.retrieved_at || null,
+    transport: root.transport === "browser" ? "browser" : "server",
     conflicts: Array.isArray(root.conflicts) ? root.conflicts : [],
   };
 }
@@ -170,7 +172,28 @@ export async function listObjectBuildingCandidates({ customerId, objectId, radiu
   return normalizeObjectMapCandidates(result);
 }
 
-export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, invoke = invokeCustomerPlatformRead }) {
+function readableParcelError(error) {
+  const code = error?.details?.code;
+  const message = code === "pdok_parcel_unavailable"
+    ? "De perceelgrenzen konden via de beschikbare verbindingen niet worden opgehaald. Probeer opnieuw; je kunt ondertussen zelf tekenen."
+    : code === "pdok_parcel_invalid_response"
+      ? "De kadastrale perceeldienst (PDOK) gaf geen bruikbaar antwoord. Je kunt opnieuw proberen of zelf het terrein tekenen."
+      : Number(error?.status) >= 500
+        ? "Het ophalen van objectgegevens of perceelgrenzen is tijdelijk mislukt. Probeer opnieuw; je kunt ondertussen zelf tekenen."
+        : null;
+  if (!message) return error;
+  return Object.assign(new Error(message), {
+    status: error.status, requestId: error.requestId, details: error.details, action: error.action,
+  });
+}
+
+function requireUnchangedParcelCenter(expected, actual) {
+  if (expected && (Number(actual?.longitude) !== expected.longitude || Number(actual?.latitude) !== expected.latitude)) {
+    throw Object.assign(new Error("De objectlocatie is gewijzigd. Vernieuw de kaart om de juiste percelen te laden."), { status: 409, details: { code: "object_map_anchor_changed", retryable: false } });
+  }
+}
+
+export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, transport = "server", expectedCenter = null, invoke = invokeCustomerPlatformRead, fetchDirect = fetchObjectParcelCandidatesDirect }) {
   const payload = {
     action: "list_object_parcel_candidates",
     customer_id: required(customerId, "Klant-ID"),
@@ -179,31 +202,40 @@ export async function listObjectParcelCandidates({ customerId, objectId, radiusM
     limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
     ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
   };
-  let result;
+  // A public-data transport fallback, not an authorization fallback. Recheck
+  // scope and the saved address on every browser page; never use draft/prop
+  // coordinates or send platform credentials to PDOK.
+  const readDirect = async originalError => {
+    const configuration = await getObjectMapConfiguration({ customerId: payload.customer_id, objectId: payload.object_id, invoke });
+    const object = configuration.object;
+    if (configuration.customer_id !== payload.customer_id || configuration.object_id !== payload.object_id
+      || object?.id !== payload.object_id || object?.customer_id !== payload.customer_id) {
+      throw Object.assign(new Error("De actuele objectlocatie kon niet veilig worden gecontroleerd. Vernieuw de kaart."), { status: 409, details: { code: "object_map_scope_changed", retryable: false } });
+    }
+    requireUnchangedParcelCenter(expectedCenter, object);
+    try {
+      const result = await fetchDirect({ object, radiusMeters: payload.radius_meters, limit: payload.limit, cursor: payload.cursor || null });
+      return normalizeObjectMapCandidates({ ...result, transport: "browser" });
+    } catch (error) {
+      // Keep the platform reference for support, but never retain a request
+      // URL, geometry or the original fetch exception in recovery/error state.
+      throw readableParcelError(Object.assign(new Error(error.message), {
+        status: error.status, requestId: originalError?.requestId,
+        details: error.details, action: payload.action,
+      }));
+    }
+  };
+  if (transport === "browser") return readDirect(null);
   try {
-    result = await invoke(payload);
+    const result = normalizeObjectMapCandidates(await invoke(payload));
+    requireUnchangedParcelCenter(expectedCenter, result.center);
+    return result;
   } catch (error) {
-    // Older deployed functions mask every 503, but retain the safe error code.
-    // Never attribute an unclassified platform/scoping failure to PDOK.
-    const code = error?.details?.code;
-    const message = code === "pdok_parcel_unavailable"
-      ? error?.details?.reason === "timeout"
-        ? "De kadastrale perceeldienst (PDOK) reageert te langzaam. Probeer het zo opnieuw; je kunt ondertussen zelf tekenen."
-        : "De kadastrale perceeldienst (PDOK) is tijdelijk niet bereikbaar. Probeer het zo opnieuw; je kunt ondertussen zelf tekenen."
-      : code === "pdok_parcel_invalid_response"
-        ? "De kadastrale perceeldienst (PDOK) gaf geen bruikbaar antwoord. Je kunt opnieuw proberen of zelf het terrein tekenen."
-        : Number(error?.status) >= 500
-          ? "Het ophalen van objectgegevens of perceelgrenzen is tijdelijk mislukt. Probeer opnieuw; je kunt ondertussen zelf tekenen."
-          : null;
-    if (!message) throw error;
-    const readable = new Error(message);
-    readable.status = error.status;
-    readable.requestId = error.requestId;
-    readable.details = error.details;
-    readable.action = error.action;
-    throw readable;
+    if (Number(error?.status) >= 500 && error?.details?.code === "pdok_parcel_unavailable"
+      && error?.details?.retryable !== false) return readDirect(error);
+    // Never bypass scope/platform failures or invalid source data.
+    throw readableParcelError(error);
   }
-  return normalizeObjectMapCandidates(result);
 }
 
 export function shouldRetryObjectParcelCandidates(failureCount, error) {
