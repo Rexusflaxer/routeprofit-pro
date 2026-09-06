@@ -84,6 +84,7 @@ const { entities, functionInvoke, objectList, objectFilter } = vi.hoisted(() => 
 });
 
 vi.mock("@/api/base44Client", () => ({ base44: { entities, functions: { invoke: functionInvoke } } }));
+vi.mock("@/components/objects/ObjectHeaderMap", () => ({ default: () => null }));
 
 import Objects from "@/pages/Objects";
 
@@ -112,6 +113,7 @@ describe("objectnavigatie", () => {
     ));
     expect(await screen.findAllByRole("tab", { name: "Waarschuwingsadressen" })).toHaveLength(2);
     expect(screen.getAllByRole("tab", { name: "Modules" })).toHaveLength(2);
+    expect(screen.getAllByRole("tab", { name: "Kaart & terrein" })).toHaveLength(2);
     expect(screen.getAllByRole("tab", { name: "Logboek" })).toHaveLength(2);
     expect(screen.getByText("OBJ-001")).toBeInTheDocument();
 

@@ -66,6 +66,29 @@ function requiredText(value, label) {
   return normalized;
 }
 
+function overlapConfirmation(value) {
+  if (!value) return null;
+  if (value.confirmed !== true) throw new Error("Bevestig dat dit gebouw bewust wordt gedeeld.");
+  const reason = requiredText(value.reason, "Reden voor gedeeld gebouw");
+  if (reason.length < 3) throw new Error("De reden voor een gedeeld gebouw moet minimaal 3 tekens bevatten.");
+  if (reason.length > 500) throw new Error("De reden voor een gedeeld gebouw mag maximaal 500 tekens bevatten.");
+  if (typeof value.conflict_fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(value.conflict_fingerprint)) {
+    throw new Error("De conflictbevestiging is niet meer actueel. Probeer de wijziging opnieuw.");
+  }
+  return { confirmed: true, reason, conflict_fingerprint: value.conflict_fingerprint };
+}
+
+export function buildingAssignmentConflictFingerprint(error) {
+  if (!isBuildingAssignmentOverlapError(error)) return null;
+  const fingerprint = error?.details?.conflict_fingerprint;
+  return typeof fingerprint === "string" && /^[a-f0-9]{64}$/.test(fingerprint) ? fingerprint : null;
+}
+
+export function isBuildingAssignmentOverlapError(error) {
+  return Number(error?.status) === 409
+    && String(error?.details?.code || error?.code || "") === "building_assignment_overlap_confirmation_required";
+}
+
 function mutationContext({ objectId, customerId, expectedVersion, invoke }, action) {
   const normalizedObjectId = requiredText(objectId, "Object-ID");
   const normalizedCustomerId = requiredText(customerId, "Klant-ID");
@@ -219,9 +242,12 @@ export async function updateCustomerObjectIdentity(input) {
 
 export async function updateCustomerObjectOperations(input) {
   const context = mutationContext(input || {}, "update_customer_object_operations");
+  const confirmation = overlapConfirmation(input?.overlapConfirmation || input?.overlap_confirmation);
+  const data = operationsData(input?.form);
+  if (confirmation) data.overlap_confirmation = confirmation;
   return performMutation({
     ...context,
-    data: operationsData(input?.form),
+    data,
     idempotencyKey: input?.idempotencyKey,
   });
 }
@@ -233,6 +259,7 @@ export async function setCustomerObjectStatus(input) {
   const reason = String(input?.reason ?? "").trim();
   if (status === "archived" && !reason) throw new Error("Reden voor archiveren is verplicht.");
   if (reason.length > 1_000) throw new Error("Reden mag maximaal 1000 tekens bevatten.");
+  const confirmation = overlapConfirmation(input?.overlapConfirmation || input?.overlap_confirmation);
   return context.invoke({
     action: context.action,
     object_id: context.objectId,
@@ -241,5 +268,6 @@ export async function setCustomerObjectStatus(input) {
     idempotency_key: input?.idempotencyKey || createCustomerMutationKey(context.action),
     status,
     reason: reason || undefined,
+    ...(confirmation ? { overlap_confirmation: confirmation } : {}),
   });
 }

@@ -151,7 +151,7 @@ for (const functionName of fs.readdirSync(FUNCTION_DIR)) {
 const entitySchemaFiles = fs.readdirSync(ENTITY_DIR)
   .filter(file => /\.jsonc?$/.test(file))
   .sort();
-assert.equal(entitySchemaFiles.length, 119, "De verwachte 119 entiteitschemas moeten worden beveiligd");
+assert.equal(entitySchemaFiles.length, 121, "De verwachte 121 entiteitschemas moeten worden beveiligd");
 const adminOnlyRule = { user_condition: { role: "admin" } };
 const serviceOnlyObjectEntities = new Set([
   "ObjectWarningAddress.jsonc",
@@ -165,6 +165,7 @@ const serviceOnlyObjectEntities = new Set([
   "ObjectHandbookArticle.jsonc",
   "ObjectOperationalModule.jsonc",
   "ObjectOperationalModuleRevision.jsonc",
+  "ObjectMapGeometryRevision.jsonc",
   "ObjectRelationship.jsonc",
   "ObjectSecurityPlan.jsonc",
   "ObjectSecurityPlanRevision.jsonc",
@@ -173,6 +174,7 @@ const serviceOnlyObjectEntities = new Set([
 ]);
 const serviceWritePlanningEntities = new Set([
   "ObjectTaskDefinition.jsonc",
+  "ObjectTaskScheduleException.jsonc",
   "ObjectTaskScheduleRevision.jsonc",
   "ObjectTaskScheduleSeries.jsonc",
   "PlanningAssignment.jsonc",
@@ -184,15 +186,19 @@ const serviceWritePlanningEntities = new Set([
   "PlanningTaskOccurrence.jsonc",
   "PlanningShiftTaskSegment.jsonc",
 ]);
+const serviceWriteObjectEntities = new Set([
+  "SurveillanceObject.jsonc",
+]);
 for (const file of entitySchemaFiles) {
   const definition = JSON.parse(fs.readFileSync(path.join(ENTITY_DIR, file), "utf8"));
   for (const permission of ["create", "read", "update", "delete"]) {
     const immutableEvent = file === "CustomerEvent.jsonc" && ["update", "delete"].includes(permission);
     const serviceOnlyObjectEntity = serviceOnlyObjectEntities.has(file);
     const serviceWritePlanningEntity = serviceWritePlanningEntities.has(file);
+    const serviceWriteObjectEntity = serviceWriteObjectEntities.has(file);
     const expectedRule = serviceOnlyObjectEntity
       || immutableEvent
-      || (serviceWritePlanningEntity && permission !== "read")
+      || ((serviceWritePlanningEntity || serviceWriteObjectEntity) && permission !== "read")
       ? false
       : adminOnlyRule;
     assert.deepEqual(
@@ -726,5 +732,5 @@ assert.match(commercialAutomation, /status:\s*'draft'/, "Automatische facturen e
 assert.match(commercialAutomation, /status:\s*errors\.length\s*\?\s*'partial_failed'\s*:\s*'review'/);
 assert.doesNotMatch(commercialAutomation, /auto_issue:\s*true|auto_send:\s*true/);
 
-assert.equal(functionCount, 49, `Base44-functiecapaciteit wijkt af: ${functionCount}/49`);
-console.log(`Klantplatform readiness: OK (${REQUIRED_ENTITIES.length} entiteiten, ${functionCount}/49 functies)`);
+assert.equal(functionCount, 50, `Base44-functiecapaciteit wijkt af: ${functionCount}/50`);
+console.log(`Klantplatform readiness: OK (${REQUIRED_ENTITIES.length} entiteiten, ${functionCount}/50 functies)`);

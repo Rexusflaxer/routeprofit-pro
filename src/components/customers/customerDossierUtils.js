@@ -34,6 +34,9 @@ const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "update_object_handbook_article",
   "archive_object_handbook_article",
   "sync_object_installation_handbooks",
+  "get_object_map_configuration",
+  "list_object_building_candidates",
+  "update_object_map_configuration",
 ]);
 
 export const CUSTOMER_TABS = [

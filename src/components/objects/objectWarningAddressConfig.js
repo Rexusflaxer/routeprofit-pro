@@ -4,6 +4,7 @@ export const OBJECT_CARD_TABS = [
   { key: "modules", label: "Modules" },
   { key: "handbook", label: "Handboek" },
   { key: "floor-plan", label: "Plattegrond" },
+  { key: "map-area", label: "Kaart & terrein" },
   { key: "warning-addresses", label: "Waarschuwingsadressen" },
   { key: "relationships", label: "Relaties" },
   { key: "keys", label: "Sleutels" },

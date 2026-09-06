@@ -144,6 +144,39 @@ describe("objectWorkflow", () => {
     });
   });
 
+  it("retryt mobiele kaartinschakeling met bevestiging in data en een nieuwe mutatiesleutel", async () => {
+    const overlap = Object.assign(new Error("Gebouw is al gekoppeld"), {
+      status: 409,
+      details: { code: "building_assignment_overlap_confirmation_required", conflict_fingerprint: "a".repeat(64) },
+    });
+    defaultInvoke.mockRejectedValueOnce(overlap).mockResolvedValueOnce({ ok: true });
+    createKey.mockReturnValueOnce("operations:first").mockReturnValueOnce("operations:confirmed");
+    const common = {
+      objectId: "object-1",
+      customerId: "customer-1",
+      expectedVersion: 7,
+      form: { show_on_mobile_map: true },
+    };
+
+    await expect(updateCustomerObjectOperations(common)).rejects.toBe(overlap);
+    await updateCustomerObjectOperations({
+      ...common,
+      overlapConfirmation: { confirmed: true, reason: "Gedeelde bedrijfshal", conflict_fingerprint: overlap.details.conflict_fingerprint },
+    });
+
+    expect(defaultInvoke.mock.calls[0][0]).toMatchObject({
+      idempotency_key: "operations:first",
+      data: { show_on_mobile_map: true },
+    });
+    expect(defaultInvoke.mock.calls[1][0]).toMatchObject({
+      idempotency_key: "operations:confirmed",
+      data: {
+        show_on_mobile_map: true,
+        overlap_confirmation: { confirmed: true, reason: "Gedeelde bedrijfshal", conflict_fingerprint: "a".repeat(64) },
+      },
+    });
+  });
+
   it("vereist een reden voor archiveren en stuurt status buiten data", async () => {
     const invoke = vi.fn().mockResolvedValue({ ok: true });
     const common = {
@@ -167,6 +200,44 @@ describe("objectWorkflow", () => {
       status: "archived",
       reason: "Contract beëindigd",
     });
+  });
+
+  it("stuurt overlapbevestiging bij activeren top-level en valideert de reden", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true });
+    const common = {
+      objectId: "object-1",
+      customerId: "customer-1",
+      expectedVersion: 9,
+      idempotencyKey: "activate-confirmed",
+      invoke,
+      status: "active",
+    };
+
+    await expect(setCustomerObjectStatus({
+      ...common,
+      overlapConfirmation: { confirmed: true, reason: "ab", conflict_fingerprint: "b".repeat(64) },
+    })).rejects.toThrow("minimaal 3 tekens");
+
+    await setCustomerObjectStatus({
+      ...common,
+      overlapConfirmation: { confirmed: true, reason: "Gedeeld verzamelgebouw", conflict_fingerprint: "b".repeat(64) },
+    });
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
+      status: "active",
+      overlap_confirmation: { confirmed: true, reason: "Gedeeld verzamelgebouw", conflict_fingerprint: "b".repeat(64) },
+    }));
+    expect(invoke.mock.calls[0][0]).not.toHaveProperty("data");
+  });
+
+  it("weigert een bevestigde retry zonder servervingerafdruk", async () => {
+    await expect(updateCustomerObjectOperations({
+      objectId: "object-1",
+      customerId: "customer-1",
+      expectedVersion: 7,
+      form: { show_on_mobile_map: true },
+      overlapConfirmation: { confirmed: true, reason: "Gedeeld pand" },
+      invoke: vi.fn(),
+    })).rejects.toThrow("niet meer actueel");
   });
 
   it("weigert een ontbrekende of verouderingsgevoelige versie", async () => {

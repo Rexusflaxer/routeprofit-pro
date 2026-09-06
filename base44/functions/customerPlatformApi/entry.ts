@@ -81,6 +81,8 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 const READ_ACTIONS = new Set([
   'get_customer_overview',
   'search_customer_objects',
+  'get_object_map_configuration',
+  'list_object_building_candidates',
   'list_object_warning_addresses',
   'list_object_logbook',
   'list_object_keys',
@@ -110,6 +112,7 @@ const MUTATION_ACTIONS = new Set([
   'create_customer_object',
   'update_customer_object_identity',
   'update_customer_object_operations',
+  'update_object_map_configuration',
   'set_customer_object_status',
   'create_object_warning_address', 'update_object_warning_address',
   'delete_object_warning_address', 'reorder_object_warning_addresses',
@@ -304,6 +307,35 @@ const OBJECT_TYPES = new Set([
   'other',
 ]);
 const OBJECT_GEOCODING_STATUSES = new Set(['unverified', 'verified', 'manual']);
+const OBJECT_BUILDING_SELECTION_MODES = new Set(['automatic', 'manual']);
+const OBJECT_MAP_GEOMETRY_STATUSES = new Set(['unconfigured', 'configured', 'needs_review']);
+const OBJECT_MAP_LOCATION_FIELDS = new Set([
+  'address',
+  'street_name',
+  'house_number',
+  'house_number_addition',
+  'postal_code',
+  'city',
+  'country_code',
+  'country_name',
+  'latitude',
+  'longitude',
+  'geocoding_status',
+  'bag_address_id',
+]);
+const PDOK_BAG_OGC_BASE_URL = 'https://api.pdok.nl/kadaster/bag/ogc/v2';
+const OBJECT_MAP_PDOK_TIMEOUT_MS = 8_000;
+const OBJECT_MAP_DEFAULT_RADIUS_METERS = 150;
+const OBJECT_MAP_MIN_RADIUS_METERS = 25;
+const OBJECT_MAP_MAX_RADIUS_METERS = 500;
+const OBJECT_MAP_MAX_CANDIDATES = 100;
+const OBJECT_MAP_MAX_BUILDING_FEATURES = 100;
+const OBJECT_MAP_MAX_TERRAIN_FEATURES = 25;
+const OBJECT_MAP_MAX_VERTICES = 10_000;
+const OBJECT_MAP_MAX_PAYLOAD_BYTES = 750_000;
+const OBJECT_MAP_MAX_DISTANCE_METERS = 5_000;
+const OBJECT_MAP_MAX_BUILDING_AREA_SQM = 5_000_000;
+const OBJECT_MAP_MAX_TERRAIN_AREA_SQM = 100_000_000;
 const OBJECT_STATUS_TRANSITIONS: Record<string, string[]> = {
   concept: ['active', 'inactive', 'archived'],
   active: ['inactive', 'archived'],
@@ -314,11 +346,13 @@ const CUSTOMER_OBJECT_MUTATION_ACTIONS = new Set([
   'create_customer_object',
   'update_customer_object_identity',
   'update_customer_object_operations',
+  'update_object_map_configuration',
   'set_customer_object_status',
 ]);
 const CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS = new Set([
   'update_customer_object_identity',
   'update_customer_object_operations',
+  'update_object_map_configuration',
   'set_customer_object_status',
   'reorder_object_warning_addresses',
 ]);
@@ -1180,7 +1214,43 @@ async function mutationReplay(
           target,
         );
       }
-      return sanitizedCustomerObjectReplay(matching.payload.result, customerId);
+      const replayResult = sanitizedCustomerObjectReplay(matching.payload.result, customerId);
+      if (action === 'update_object_map_configuration') {
+        const { object } = await requireCustomerObjectScope(base44, body);
+        await ensureObjectMapGeometryRevisionUnderGlobalLock(
+          base44,
+          object,
+          user,
+          idempotencyKey,
+          target,
+          action,
+        );
+        const configuration = safeObjectMapConfiguration(object);
+        return {
+          ...replayResult,
+          configuration,
+          conflicts: publicBuildingAssignmentConflicts(
+            await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson),
+          ),
+          // De marker-replay bevat opnieuw live geometrie voor de client, maar
+          // CustomerEvent mag uitsluitend de eerder opgeslagen veilige uitkomst krijgen.
+          audit_result: replayResult,
+        };
+      }
+      if (action === 'update_customer_object_identity') {
+        const { object } = await requireCustomerObjectScope(base44, body);
+        if (objectHasMapConfiguration(object)) {
+          await ensureObjectMapGeometryRevisionUnderGlobalLock(
+            base44,
+            object,
+            user,
+            idempotencyKey,
+            target,
+            action,
+          );
+        }
+      }
+      return replayResult;
     } else if (HANDBOOK_ENTITY_MUTATION_ACTIONS.has(action)) {
       if (
         !storedFingerprint || matching.actor_id !== user.id || storedFingerprint !== requestFingerprint ||
@@ -1279,6 +1349,35 @@ async function customerObjectMutationMarkerReplay(
     rejectIdempotencyReuse();
   }
   await requireRecord(base44, 'Customer', customerId, 'Klant');
+  if (action === 'update_object_map_configuration') {
+    await ensureObjectMapGeometryRevisionUnderGlobalLock(
+      base44,
+      object,
+      user,
+      idempotencyKey,
+      target,
+      action,
+    );
+    const configuration = safeObjectMapConfiguration(object);
+    return {
+      ...(recovery.result as LooseRecord),
+      configuration,
+      conflicts: publicBuildingAssignmentConflicts(
+        await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson),
+      ),
+      audit_result: recovery.result,
+    };
+  }
+  if (action === 'update_customer_object_identity' && objectHasMapConfiguration(object)) {
+    await ensureObjectMapGeometryRevisionUnderGlobalLock(
+      base44,
+      object,
+      user,
+      idempotencyKey,
+      target,
+      action,
+    );
+  }
   return recovery.result as LooseRecord;
 }
 
@@ -1580,6 +1679,7 @@ const MUTATION_ACTION_SUMMARIES: Record<string, string> = {
   create_customer_object: 'Object toegevoegd',
   update_customer_object_identity: 'Objectgegevens gewijzigd',
   update_customer_object_operations: 'Operationele objectgegevens gewijzigd',
+  update_object_map_configuration: 'Kaart en terrein bijgewerkt',
   set_customer_object_status: 'Objectstatus gewijzigd',
   create_collective: 'Collectief toegevoegd',
   update_collective: 'Collectief gewijzigd',
@@ -3455,6 +3555,22 @@ function objectIdentityChanges(before: LooseRecord, after: LooseRecord, changedF
       after: after.logo_file_id || after.logo_file_url ? 'Gewijzigd' : 'Niet ingesteld',
     });
   }
+  if (fields.has('map_geometry_status') && objectMapGeometryStatus(before) !== objectMapGeometryStatus(after)) {
+    changes.push({
+      field: 'map_geometry_status',
+      label: 'Kaartcontrole',
+      before: objectMapGeometryStatus(before),
+      after: objectMapGeometryStatus(after),
+    });
+  }
+  if (fields.has('map_geometry_revision') && objectMapGeometryRevision(before) !== objectMapGeometryRevision(after)) {
+    changes.push({
+      field: 'map_geometry_revision',
+      label: 'Kaartrevisie',
+      before: objectMapGeometryRevision(before),
+      after: objectMapGeometryRevision(after),
+    });
+  }
   return changes;
 }
 
@@ -3482,8 +3598,14 @@ function safeObjectMutationSummary(object: LooseRecord, changedFields: string[])
     status: objectLifecycleStatus(object),
     version: versionOf(object),
     geocoding_status: object.geocoding_status || 'unverified',
-    show_on_mobile_map: object.show_on_mobile_map === true,
-    is_active_customer_object: object.is_active_customer_object === true,
+    show_on_mobile_map: object.show_on_mobile_map !== false,
+    is_active_customer_object: object.is_active_customer_object !== false,
+    building_selection_mode: objectBuildingSelectionMode(object),
+    map_geometry_status: objectMapGeometryStatus(object),
+    map_geometry_revision: objectMapGeometryRevision(object),
+    map_geometry_hash: object.map_geometry_hash || null,
+    map_geometry_updated_at: object.map_geometry_updated_at || null,
+    map_geometry_review_reason: object.map_geometry_review_reason || null,
     configured_instruction_count: Number.isInteger(configuredInstructionCount) && configuredInstructionCount >= 0
       ? configuredInstructionCount
       : OBJECT_INSTRUCTION_FIELDS.filter(field => Boolean(asString(object[field]))).length,
@@ -3523,18 +3645,20 @@ async function customerObjectPatchWithRecovery(
     requestFingerprint: string;
     target: string;
     extraResult?: LooseRecord;
+    resultChangedFields?: string[];
   },
 ) {
   const mutationPatch = input.object.status
     ? input.patch
     : { status: objectLifecycleStatus(input.object), ...input.patch };
   const changedFields = Object.keys(mutationPatch);
+  const resultChangedFields = input.resultChangedFields || changedFields;
   const projected = {
     ...input.object,
     ...mutationPatch,
     version: input.expectedVersion + 1,
   };
-  const result = customerObjectMutationResult(projected, changedFields, input.extraResult);
+  const result = customerObjectMutationResult(projected, resultChangedFields, input.extraResult);
   const keyHash = await sha256(input.idempotencyKey);
   const priorRecoveries = input.object.customer_platform_mutation_recoveries;
   const recoveryLog = priorRecoveries && typeof priorRecoveries === 'object' && !Array.isArray(priorRecoveries)
@@ -3600,6 +3724,1408 @@ async function requireCustomerObjectScope(base44: LooseRecord, body: LooseRecord
     throw new ApiError(409, 'Object hoort niet bij deze klant', { object_id: object.id, customer_id: customer.id });
   }
   return { customer, object };
+}
+
+function objectMapGeometryRevision(object: LooseRecord) {
+  const revision = Number(object?.map_geometry_revision);
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0;
+}
+
+function objectBuildingSelectionMode(object: LooseRecord) {
+  const explicit = asString(object?.building_selection_mode);
+  if (explicit === 'manual' || geoJsonFeatures(object?.building_polygon_geojson).length) return 'manual';
+  return explicit === 'automatic' ? explicit : 'automatic';
+}
+
+function objectMapGeometryStatus(object: LooseRecord) {
+  const explicit = asString(object?.map_geometry_status);
+  if (explicit === 'needs_review' || explicit === 'configured') return explicit;
+  return geoJsonFeatures(object?.building_polygon_geojson).length || geoJsonFeatures(object?.object_area_geojson).length
+    ? 'configured'
+    : explicit === 'unconfigured' ? explicit : 'unconfigured';
+}
+
+function geoJsonFeatures(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [] as LooseRecord[];
+  const record = value as LooseRecord;
+  if (record.type === 'FeatureCollection' && Array.isArray(record.features)) {
+    return record.features.filter(feature => feature && typeof feature === 'object' && !Array.isArray(feature));
+  }
+  if (record.type === 'Feature') return [record];
+  if (['Polygon', 'MultiPolygon'].includes(asString(record.type))) {
+    return [{ type: 'Feature', properties: {}, geometry: record }];
+  }
+  return [] as LooseRecord[];
+}
+
+function geoJsonPositionCount(value: unknown): number {
+  const walk = (node: unknown): number => {
+    if (!Array.isArray(node)) return 0;
+    if (node.length >= 2 && typeof node[0] === 'number' && typeof node[1] === 'number') return 1;
+    return node.reduce((sum, child) => sum + walk(child), 0);
+  };
+  return geoJsonFeatures(value).reduce((sum, feature) => sum + walk(feature.geometry?.coordinates), 0);
+}
+
+function allGeometryPositions(geometry: LooseRecord) {
+  const positions: number[][] = [];
+  const walk = (node: unknown) => {
+    if (!Array.isArray(node)) return;
+    if (node.length >= 2 && typeof node[0] === 'number' && typeof node[1] === 'number') {
+      positions.push([node[0], node[1]]);
+      return;
+    }
+    node.forEach(walk);
+  };
+  walk(geometry.coordinates);
+  return positions;
+}
+
+function distanceMeters(left: number[], right: number[]) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(right[1] - left[1]);
+  const longitudeDelta = radians(right[0] - left[0]);
+  const latitude1 = radians(left[1]);
+  const latitude2 = radians(right[1]);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_008.8 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)));
+}
+
+function projectedRingAreaSquareMeters(ring: number[][]) {
+  if (ring.length < 4) return 0;
+  const referenceLatitude = ring.reduce((sum, position) => sum + position[1], 0) / ring.length;
+  const longitudeScale = 111_320 * Math.cos(referenceLatitude * Math.PI / 180);
+  const latitudeScale = 110_540;
+  let twiceArea = 0;
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    const [leftLongitude, leftLatitude] = ring[index];
+    const [rightLongitude, rightLatitude] = ring[index + 1];
+    twiceArea += (leftLongitude * longitudeScale) * (rightLatitude * latitudeScale) -
+      (rightLongitude * longitudeScale) * (leftLatitude * latitudeScale);
+  }
+  return Math.abs(twiceArea) / 2;
+}
+
+function geometryAreaSquareMeters(geometry: LooseRecord) {
+  const polygonArea = (rings: number[][][]) => {
+    if (!rings.length) return 0;
+    const exterior = projectedRingAreaSquareMeters(rings[0]);
+    const holes = rings.slice(1).reduce((sum, ring) => sum + projectedRingAreaSquareMeters(ring), 0);
+    return Math.max(0, exterior - holes);
+  };
+  if (geometry.type === 'Polygon') return polygonArea(geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.reduce((sum: number, polygon: number[][][]) => sum + polygonArea(polygon), 0);
+  }
+  return 0;
+}
+
+function featureCollectionAreaSquareMeters(value: unknown) {
+  return geoJsonFeatures(value).reduce((sum, feature) => sum + geometryAreaSquareMeters(feature.geometry || {}), 0);
+}
+
+function geometryPolygons(geometry: LooseRecord) {
+  if (geometry?.type === 'Polygon' && Array.isArray(geometry.coordinates)) return [geometry.coordinates] as number[][][][];
+  if (geometry?.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) return geometry.coordinates as number[][][][];
+  return [] as number[][][][];
+}
+
+function positionInsidePolygon(position: number[], rings: number[][][]) {
+  const onRingBoundary = (ring: number[][]) => ring.slice(0, -1).some((start, index) => {
+    const end = ring[index + 1];
+    return Math.abs(orientation(start, position, end)) <= 1e-12 && pointOnSegment(start, position, end);
+  });
+  if (!rings.length || onRingBoundary(rings[0]) || !positionInsideRing(position, rings[0])) return false;
+  return !rings.slice(1).some(hole => onRingBoundary(hole) || positionInsideRing(position, hole));
+}
+
+function polygonBounds(rings: number[][][]) {
+  const positions = rings.flat();
+  return positions.reduce((bounds, position) => ({
+    minLongitude: Math.min(bounds.minLongitude, position[0]),
+    minLatitude: Math.min(bounds.minLatitude, position[1]),
+    maxLongitude: Math.max(bounds.maxLongitude, position[0]),
+    maxLatitude: Math.max(bounds.maxLatitude, position[1]),
+  }), {
+    minLongitude: Infinity,
+    minLatitude: Infinity,
+    maxLongitude: -Infinity,
+    maxLatitude: -Infinity,
+  });
+}
+
+function polygonBoundsOverlap(left: ReturnType<typeof polygonBounds>, right: ReturnType<typeof polygonBounds>) {
+  return left.minLongitude <= right.maxLongitude && left.maxLongitude >= right.minLongitude &&
+    left.minLatitude <= right.maxLatitude && left.maxLatitude >= right.minLatitude;
+}
+
+function geometriesOverlap(leftGeometry: LooseRecord, rightGeometry: LooseRecord) {
+  const segmentsProperlyIntersect = (leftStart: number[], leftEnd: number[], rightStart: number[], rightEnd: number[]) => {
+    const first = orientation(leftStart, leftEnd, rightStart);
+    const second = orientation(leftStart, leftEnd, rightEnd);
+    const third = orientation(rightStart, rightEnd, leftStart);
+    const fourth = orientation(rightStart, rightEnd, leftEnd);
+    const epsilon = 1e-12;
+    return ((first > epsilon && second < -epsilon) || (first < -epsilon && second > epsilon)) &&
+      ((third > epsilon && fourth < -epsilon) || (third < -epsilon && fourth > epsilon));
+  };
+  const polygonEdgesProperlyCross = (left: number[][][], right: number[][][]) => left.some(leftRing =>
+    right.some(rightRing => leftRing.slice(0, -1).some((leftStart, leftIndex) =>
+      rightRing.slice(0, -1).some((rightStart, rightIndex) =>
+        segmentsProperlyIntersect(leftStart, leftRing[leftIndex + 1], rightStart, rightRing[rightIndex + 1])))));
+  const interiorSamples = (rings: number[][][]) => {
+    const exterior = rings[0] || [];
+    const vertices = exterior.slice(0, -1);
+    if (!vertices.length) return [] as number[][];
+    const center = vertices.reduce((sum, position) => [sum[0] + position[0], sum[1] + position[1]], [0, 0])
+      .map(value => value / vertices.length);
+    return [center, ...vertices.map(position => [
+      position[0] + (center[0] - position[0]) * 0.01,
+      position[1] + (center[1] - position[1]) * 0.01,
+    ])].filter(position => positionInsidePolygon(position, rings));
+  };
+  for (const leftPolygon of geometryPolygons(leftGeometry)) {
+    const leftBounds = polygonBounds(leftPolygon);
+    for (const rightPolygon of geometryPolygons(rightGeometry)) {
+      if (!polygonBoundsOverlap(leftBounds, polygonBounds(rightPolygon))) continue;
+      if (polygonEdgesProperlyCross(leftPolygon, rightPolygon)) return true;
+      if (interiorSamples(leftPolygon).some(position => positionInsidePolygon(position, rightPolygon))) return true;
+      if (interiorSamples(rightPolygon).some(position => positionInsidePolygon(position, leftPolygon))) return true;
+    }
+  }
+  return false;
+}
+
+function orientation(left: number[], middle: number[], right: number[]) {
+  return (middle[1] - left[1]) * (right[0] - middle[0]) -
+    (middle[0] - left[0]) * (right[1] - middle[1]);
+}
+
+function pointOnSegment(left: number[], point: number[], right: number[]) {
+  const epsilon = 1e-12;
+  return point[0] <= Math.max(left[0], right[0]) + epsilon &&
+    point[0] >= Math.min(left[0], right[0]) - epsilon &&
+    point[1] <= Math.max(left[1], right[1]) + epsilon &&
+    point[1] >= Math.min(left[1], right[1]) - epsilon;
+}
+
+function segmentsIntersect(leftStart: number[], leftEnd: number[], rightStart: number[], rightEnd: number[]) {
+  const first = orientation(leftStart, leftEnd, rightStart);
+  const second = orientation(leftStart, leftEnd, rightEnd);
+  const third = orientation(rightStart, rightEnd, leftStart);
+  const fourth = orientation(rightStart, rightEnd, leftEnd);
+  const epsilon = 1e-12;
+  if (((first > epsilon && second < -epsilon) || (first < -epsilon && second > epsilon)) &&
+    ((third > epsilon && fourth < -epsilon) || (third < -epsilon && fourth > epsilon))) return true;
+  if (Math.abs(first) <= epsilon && pointOnSegment(leftStart, rightStart, leftEnd)) return true;
+  if (Math.abs(second) <= epsilon && pointOnSegment(leftStart, rightEnd, leftEnd)) return true;
+  if (Math.abs(third) <= epsilon && pointOnSegment(rightStart, leftStart, rightEnd)) return true;
+  return Math.abs(fourth) <= epsilon && pointOnSegment(rightStart, leftEnd, rightEnd);
+}
+
+function ringSelfIntersects(ring: number[][]) {
+  const segmentCount = ring.length - 1;
+  for (let left = 0; left < segmentCount; left += 1) {
+    for (let right = left + 1; right < segmentCount; right += 1) {
+      if (right === left + 1 || (left === 0 && right === segmentCount - 1)) continue;
+      if (segmentsIntersect(ring[left], ring[left + 1], ring[right], ring[right + 1])) return true;
+    }
+  }
+  return false;
+}
+
+function ringsIntersect(leftRing: number[][], rightRing: number[][]) {
+  for (let left = 0; left < leftRing.length - 1; left += 1) {
+    for (let right = 0; right < rightRing.length - 1; right += 1) {
+      if (segmentsIntersect(leftRing[left], leftRing[left + 1], rightRing[right], rightRing[right + 1])) return true;
+    }
+  }
+  return false;
+}
+
+function positionInsideRing(position: number[], ring: number[][]) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const currentPosition = ring[index];
+    const previousPosition = ring[previous];
+    const crossesLatitude = (currentPosition[1] > position[1]) !== (previousPosition[1] > position[1]);
+    if (!crossesLatitude) continue;
+    const crossingLongitude = ((previousPosition[0] - currentPosition[0]) *
+      (position[1] - currentPosition[1])) / (previousPosition[1] - currentPosition[1]) + currentPosition[0];
+    if (position[0] < crossingLongitude) inside = !inside;
+  }
+  return inside;
+}
+
+function normalizedGeoJsonPosition(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.length < 2) throw new ApiError(400, `${label} bevat een ongeldige positie`);
+  const longitude = Number(value[0]);
+  const latitude = Number(value[1]);
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+    !Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    throw new ApiError(400, `${label} bevat coördinaten buiten WGS84`);
+  }
+  return [Number(longitude.toFixed(7)), Number(latitude.toFixed(7))];
+}
+
+function normalizedGeoJsonRing(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.length < 4) throw new ApiError(400, `${label} bevat een onvolledige ring`);
+  const ring = value.map(position => normalizedGeoJsonPosition(position, label));
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) throw new ApiError(400, `${label} bevat een niet-gesloten ring`);
+  for (let index = 1; index < ring.length; index += 1) {
+    if (ring[index][0] === ring[index - 1][0] && ring[index][1] === ring[index - 1][1]) {
+      throw new ApiError(400, `${label} bevat opeenvolgende dubbele punten`);
+    }
+  }
+  const uniquePositions = new Set(ring.slice(0, -1).map(position => position.join(',')));
+  if (ringSelfIntersects(ring)) throw new ApiError(400, `${label} bevat een zelfdoorsnijding`);
+  if (uniquePositions.size < 3 || projectedRingAreaSquareMeters(ring) < 0.1) {
+    throw new ApiError(400, `${label} bevat een vlak zonder geldige oppervlakte`);
+  }
+  return ring;
+}
+
+function normalizedGeoJsonGeometry(value: unknown, label: string, anchor: number[]) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, `${label} mist geometrie`);
+  const geometry = value as LooseRecord;
+  if (!['Polygon', 'MultiPolygon'].includes(asString(geometry.type))) {
+    throw new ApiError(400, `${label} ondersteunt alleen Polygon en MultiPolygon`);
+  }
+  const normalizePolygon = (coordinates: unknown, polygonLabel: string) => {
+    if (!Array.isArray(coordinates) || !coordinates.length) throw new ApiError(400, `${polygonLabel} bevat geen ringen`);
+    const rings = coordinates.map((ring, index) => normalizedGeoJsonRing(ring, `${polygonLabel}, ring ${index + 1}`));
+    for (let holeIndex = 1; holeIndex < rings.length; holeIndex += 1) {
+      if (ringsIntersect(rings[0], rings[holeIndex]) || !positionInsideRing(rings[holeIndex][0], rings[0])) {
+        throw new ApiError(400, `${polygonLabel} bevat een binnenring buiten de buitenring`);
+      }
+      for (let otherHoleIndex = 1; otherHoleIndex < holeIndex; otherHoleIndex += 1) {
+        if (
+          ringsIntersect(rings[holeIndex], rings[otherHoleIndex]) ||
+          positionInsideRing(rings[holeIndex][0], rings[otherHoleIndex]) ||
+          positionInsideRing(rings[otherHoleIndex][0], rings[holeIndex])
+        ) {
+          throw new ApiError(400, `${polygonLabel} bevat overlappende binnenringen`);
+        }
+      }
+    }
+    return rings;
+  };
+  const coordinates = geometry.type === 'Polygon'
+    ? normalizePolygon(geometry.coordinates, label)
+    : (() => {
+      if (!Array.isArray(geometry.coordinates) || !geometry.coordinates.length) {
+        throw new ApiError(400, `${label} bevat geen polygonen`);
+      }
+      return geometry.coordinates.map((polygon: unknown, index: number) =>
+        normalizePolygon(polygon, `${label}, polygoon ${index + 1}`));
+    })();
+  const normalized = { type: geometry.type, coordinates } as LooseRecord;
+  for (const position of allGeometryPositions(normalized)) {
+    if (distanceMeters(anchor, position) > OBJECT_MAP_MAX_DISTANCE_METERS) {
+      throw new ApiError(400, `${label} ligt te ver van de gecontroleerde objectlocatie`);
+    }
+  }
+  return normalized;
+}
+
+function normalizedGeoJsonFeatureCollection(
+  value: unknown,
+  label: string,
+  options: {
+    anchor: number[];
+    maxFeatures: number;
+    maxAreaSquareMeters: number;
+    properties: (feature: LooseRecord, index: number) => LooseRecord;
+  },
+) {
+  if (value === null || value === undefined) return null;
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > OBJECT_MAP_MAX_PAYLOAD_BYTES) {
+    throw new ApiError(400, `${label} is te groot om veilig te verwerken`);
+  }
+  const rawFeatures = geoJsonFeatures(value);
+  const isFeatureCollection = Boolean(
+    value && typeof value === 'object' && !Array.isArray(value) &&
+    (value as LooseRecord).type === 'FeatureCollection' && Array.isArray((value as LooseRecord).features),
+  );
+  if (!rawFeatures.length && !isFeatureCollection) {
+    throw new ApiError(400, `${label} is geen geldige GeoJSON FeatureCollection`);
+  }
+  if (rawFeatures.length > options.maxFeatures) {
+    throw new ApiError(400, `${label} bevat meer dan ${options.maxFeatures} vlakken`);
+  }
+  const features = rawFeatures.map((rawFeature, index) => {
+    const rawGeometry = rawFeature.type === 'Feature' ? rawFeature.geometry : rawFeature;
+    const geometry = normalizedGeoJsonGeometry(rawGeometry, `${label} ${index + 1}`, options.anchor);
+    const id = asString(rawFeature.id || rawFeature.properties?.local_id)
+      .replace(/[^a-zA-Z0-9:_-]/g, '')
+      .slice(0, 120) || undefined;
+    return {
+      type: 'Feature',
+      ...(id ? { id } : {}),
+      properties: options.properties(rawFeature, index),
+      geometry,
+    };
+  });
+  const featureCollection = { type: 'FeatureCollection', features };
+  const vertices = geoJsonPositionCount(featureCollection);
+  if (vertices > OBJECT_MAP_MAX_VERTICES) {
+    throw new ApiError(400, `${label} bevat meer dan ${OBJECT_MAP_MAX_VERTICES} coördinaatpunten`);
+  }
+  const areaSquareMeters = featureCollectionAreaSquareMeters(featureCollection);
+  if (areaSquareMeters > options.maxAreaSquareMeters) {
+    throw new ApiError(400, `${label} heeft een onredelijk grote oppervlakte`);
+  }
+  if (new TextEncoder().encode(JSON.stringify(featureCollection)).byteLength > OBJECT_MAP_MAX_PAYLOAD_BYTES) {
+    throw new ApiError(400, `${label} is te groot om veilig op te slaan`);
+  }
+  return featureCollection;
+}
+
+function assertFeatureCollectionLimits(
+  value: unknown,
+  label: string,
+  maxFeatures: number,
+  maxAreaSquareMeters: number,
+) {
+  const features = geoJsonFeatures(value);
+  if (features.length > maxFeatures) {
+    throw new ApiError(400, `${label} bevat meer dan ${maxFeatures} vlakken`);
+  }
+  if (geoJsonPositionCount(value) > OBJECT_MAP_MAX_VERTICES) {
+    throw new ApiError(400, `${label} bevat meer dan ${OBJECT_MAP_MAX_VERTICES} coördinaatpunten`);
+  }
+  if (featureCollectionAreaSquareMeters(value) > maxAreaSquareMeters) {
+    throw new ApiError(400, `${label} heeft een onredelijk grote oppervlakte`);
+  }
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > OBJECT_MAP_MAX_PAYLOAD_BYTES) {
+    throw new ApiError(400, `${label} is te groot om veilig op te slaan`);
+  }
+}
+
+function safeLocalGeometryProperties(source: 'manual' | 'user_drawn', feature: LooseRecord, index: number) {
+  const localId = asString(feature.id || feature.properties?.local_id)
+    .replace(/[^a-zA-Z0-9:_-]/g, '')
+    .slice(0, 120) || `${source}:${index + 1}`;
+  return { source, local_id: localId };
+}
+
+function objectMapAnchor(object: LooseRecord) {
+  const latitude = objectCoordinate(object.latitude, -90, 90, 'Breedtegraad');
+  const longitude = objectCoordinate(object.longitude, -180, 180, 'Lengtegraad');
+  if (latitude === null || longitude === null || !['verified', 'manual'].includes(asString(object.geocoding_status))) {
+    throw new ApiError(409, 'Controleer eerst de kaartpositie van het object', {
+      code: 'object_map_location_unverified',
+    });
+  }
+  return [longitude, latitude];
+}
+
+function selectedBagFeatureIds(value: unknown) {
+  return [...new Set(geoJsonFeatures(value)
+    .map(feature => asString(feature.properties?.source_feature_id))
+    .filter(Boolean))];
+}
+
+function geometrySummary(value: unknown) {
+  try {
+    const features = geoJsonFeatures(value);
+    return {
+      feature_count: features.length,
+      bag_feature_count: features.filter(feature => feature.properties?.source === 'pdok_bag').length,
+      manual_feature_count: features.filter(feature => feature.properties?.source === 'manual').length,
+      vertex_count: geoJsonPositionCount(value),
+      area_sqm: Math.round(featureCollectionAreaSquareMeters(value)),
+      invalid_feature_count: 0,
+    };
+  } catch {
+    // Samenvattingen worden ook gebruikt in audit/recovery en mogen nooit ruwe of kapotte geometrie laten doorlekken.
+    return {
+      feature_count: 0,
+      bag_feature_count: 0,
+      manual_feature_count: 0,
+      vertex_count: 0,
+      area_sqm: 0,
+      invalid_feature_count: 1,
+    };
+  }
+}
+
+function mapGeometryHashProjection(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(mapGeometryHashProjection);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as LooseRecord)
+      .filter(([key]) => key !== 'source_retrieved_at')
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, mapGeometryHashProjection(nested)]));
+  }
+  return value;
+}
+
+function objectHasMapConfiguration(object: LooseRecord) {
+  return Boolean(
+    geoJsonFeatures(object.building_polygon_geojson).length ||
+    geoJsonFeatures(object.object_area_geojson).length ||
+    ['configured', 'needs_review'].includes(objectMapGeometryStatus(object)),
+  );
+}
+
+function safeObjectMapCoordinate(value: unknown, minimum: number, maximum: number) {
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) && coordinate >= minimum && coordinate <= maximum ? coordinate : null;
+}
+
+function existingManualBuildingFeatures(object: LooseRecord) {
+  return geoJsonFeatures(object.building_polygon_geojson).filter(feature =>
+    feature.properties?.source !== 'pdok_bag' || !asString(feature.properties?.source_feature_id));
+}
+
+function geoJsonPayloadWasConfigured(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (
+    value && typeof value === 'object' && !Array.isArray(value) &&
+    (value as LooseRecord).type === 'FeatureCollection' &&
+    Array.isArray((value as LooseRecord).features) &&
+    !(value as LooseRecord).features.length
+  ) return false;
+  return true;
+}
+
+function safeStoredBuildingCollection(object: LooseRecord) {
+  if (!geoJsonPayloadWasConfigured(object.building_polygon_geojson)) {
+    return { value: null, invalid: false };
+  }
+  const latitude = safeObjectMapCoordinate(object.latitude, -90, 90);
+  const longitude = safeObjectMapCoordinate(object.longitude, -180, 180);
+  if (latitude === null || longitude === null) return { value: null, invalid: true };
+  try {
+    const normalized = normalizedGeoJsonFeatureCollection(
+      object.building_polygon_geojson,
+      'Opgeslagen gebouwvlak',
+      {
+        anchor: [longitude, latitude],
+        maxFeatures: OBJECT_MAP_MAX_BUILDING_FEATURES,
+        maxAreaSquareMeters: OBJECT_MAP_MAX_BUILDING_AREA_SQM,
+        properties: (feature, index) => {
+          if (feature.properties?.source !== 'pdok_bag') {
+            return safeLocalGeometryProperties('manual', feature, index);
+          }
+          const sourceFeatureId = safePdokFeatureId(feature.properties?.source_feature_id || feature.id);
+          const sourceStatus = asString(feature.properties?.source_status).slice(0, 120) || null;
+          if (!activeBagBuildingStatus(sourceStatus)) {
+            throw new ApiError(409, 'Een opgeslagen BAG-pand heeft geen actieve status');
+          }
+          const rawRetrievedAt = asString(feature.properties?.source_retrieved_at);
+          const parsedRetrievedAt = Date.parse(rawRetrievedAt);
+          return {
+            source: 'pdok_bag',
+            source_feature_id: sourceFeatureId,
+            source_identificatie: asString(feature.properties?.source_identificatie).slice(0, 80) || null,
+            source_status: sourceStatus,
+            source_retrieved_at: Number.isFinite(parsedRetrievedAt)
+              ? new Date(parsedRetrievedAt).toISOString()
+              : null,
+          };
+        },
+      },
+    );
+    return { value: normalized?.features?.length ? normalized : null, invalid: false };
+  } catch {
+    // Ongeldige, te grote of niet-canonieke legacydata wordt nooit opnieuw uitgeleverd.
+    return { value: null, invalid: true };
+  }
+}
+
+function safeStoredTerrainCollection(object: LooseRecord) {
+  if (!geoJsonPayloadWasConfigured(object.object_area_geojson)) return { value: null, invalid: false };
+  const latitude = safeObjectMapCoordinate(object.latitude, -90, 90);
+  const longitude = safeObjectMapCoordinate(object.longitude, -180, 180);
+  if (latitude === null || longitude === null) return { value: null, invalid: true };
+  try {
+    const normalized = normalizedGeoJsonFeatureCollection(
+      object.object_area_geojson,
+      'Opgeslagen terreinvlak',
+      {
+        anchor: [longitude, latitude],
+        maxFeatures: OBJECT_MAP_MAX_TERRAIN_FEATURES,
+        maxAreaSquareMeters: OBJECT_MAP_MAX_TERRAIN_AREA_SQM,
+        properties: (feature, index) => safeLocalGeometryProperties('user_drawn', feature, index),
+      },
+    );
+    return { value: normalized?.features?.length ? normalized : null, invalid: false };
+  } catch {
+    return { value: null, invalid: true };
+  }
+}
+
+function safeStoredMapGeometry(object: LooseRecord) {
+  const building = safeStoredBuildingCollection(object);
+  const terrain = safeStoredTerrainCollection(object);
+  return {
+    building_polygon_geojson: building.value,
+    object_area_geojson: terrain.value,
+    invalid: building.invalid || terrain.invalid,
+  };
+}
+
+function safeExistingManualBuildingCollection(object: LooseRecord, safeBuildingValue?: unknown) {
+  const buildingValue = safeBuildingValue === undefined
+    ? safeStoredBuildingCollection(object).value
+    : safeBuildingValue;
+  const features = geoJsonFeatures(buildingValue).filter(feature => feature.properties?.source !== 'pdok_bag');
+  return features.length ? { type: 'FeatureCollection', features } : null;
+}
+
+function safeObjectMapConfiguration(object: LooseRecord) {
+  const safeGeometry = safeStoredMapGeometry(object);
+  const selectedFeatureIds = selectedBagFeatureIds(safeGeometry.building_polygon_geojson);
+  const storedStatus = objectMapGeometryStatus(object);
+  const effectiveStatus = safeGeometry.invalid ? 'needs_review' : storedStatus;
+  return {
+    object_id: object.id,
+    customer_id: object.customer_id,
+    version: versionOf(object),
+    object: {
+      id: object.id,
+      customer_id: object.customer_id,
+      object_code: object.object_code || null,
+      name: object.name,
+      address: object.address,
+      status: objectLifecycleStatus(object),
+      latitude: safeObjectMapCoordinate(object.latitude, -90, 90),
+      longitude: safeObjectMapCoordinate(object.longitude, -180, 180),
+      geocoding_status: object.geocoding_status || 'unverified',
+      show_on_mobile_map: effectiveStatus !== 'needs_review' && object.show_on_mobile_map !== false,
+      is_active_customer_object: object.is_active_customer_object !== false,
+    },
+    building_selection_mode: objectBuildingSelectionMode(object),
+    map_geometry_status: effectiveStatus,
+    map_geometry_revision: objectMapGeometryRevision(object),
+    map_geometry_hash: object.map_geometry_hash || null,
+    map_geometry_updated_at: object.map_geometry_updated_at || null,
+    map_geometry_updated_by_user_id: object.map_geometry_updated_by_user_id || null,
+    map_geometry_review_reason: safeGeometry.invalid
+      ? 'stored_geometry_invalid'
+      : object.map_geometry_review_reason || null,
+    selected_bag_feature_ids: selectedFeatureIds,
+    building_polygon_geojson: safeGeometry.building_polygon_geojson,
+    manual_building_geojson: safeExistingManualBuildingCollection(object, safeGeometry.building_polygon_geojson),
+    object_area_geojson: safeGeometry.object_area_geojson,
+    building_summary: geometrySummary(safeGeometry.building_polygon_geojson),
+    terrain_summary: geometrySummary(safeGeometry.object_area_geojson),
+  };
+}
+
+async function ensureObjectMapGeometryRevision(
+  base44: LooseRecord,
+  object: LooseRecord,
+  actorUserId: string | null,
+  sourceAction: string,
+  geometrySource: LooseRecord = object,
+) {
+  // Bij een adres-/locatiewijziging worden de oude contouren bewust behouden,
+  // terwijl de nieuwe objectlocatie nog niet als anker kan dienen. Valideer die
+  // historische contouren daarom tegen de laatste vertrouwde bronlocatie.
+  const revision = objectMapGeometryRevision(object);
+  const buildingSelectionMode = objectBuildingSelectionMode(object);
+  const mapGeometryStatus = objectMapGeometryStatus(object);
+  const entity = getEntity(base44, 'ObjectMapGeometryRevision');
+  const existing = await entity.filter({ object_id: object.id, revision }, '-created_date', 5);
+  let effectiveGeometrySource = geometrySource;
+  let safeGeometry = safeStoredMapGeometry(effectiveGeometrySource);
+  if (safeGeometry.invalid && mapGeometryStatus === 'needs_review' && !existing.length) {
+    // Herstel na een geslaagde object-CAS maar mislukte historiesnapshot mag
+    // niet afhangen van raw GeoJSON in CustomerEvent/recovery. De voorgaande,
+    // function-only revisie bevat daarvoor zowel contouren als het oude anker.
+    const previous = await entity.filter({ object_id: object.id }, '-revision', 25);
+    const sourceRevision = previous.find((record: LooseRecord) =>
+      record.customer_id === object.customer_id &&
+      Number.isInteger(Number(record.revision)) && Number(record.revision) < revision &&
+      safeObjectMapCoordinate(record.anchor_latitude, -90, 90) !== null &&
+      safeObjectMapCoordinate(record.anchor_longitude, -180, 180) !== null);
+    if (sourceRevision) {
+      effectiveGeometrySource = {
+        ...object,
+        latitude: sourceRevision.anchor_latitude,
+        longitude: sourceRevision.anchor_longitude,
+        building_polygon_geojson: sourceRevision.building_polygon_geojson,
+        object_area_geojson: sourceRevision.object_area_geojson,
+      };
+      safeGeometry = safeStoredMapGeometry(effectiveGeometrySource);
+    }
+  }
+  if (safeGeometry.invalid) {
+    if (existing.length === 1 && existing[0].customer_id === object.customer_id) return existing[0];
+    if (existing.length) {
+      throw new ApiError(409, 'De historie voor deze kaartrevisie is niet eenduidig', {
+        code: 'object_map_history_conflict',
+        retryable: false,
+        object_id: object.id,
+        revision,
+      });
+    }
+    return null;
+  }
+  if (
+    !safeGeometry.building_polygon_geojson &&
+    !safeGeometry.object_area_geojson &&
+    mapGeometryStatus === 'unconfigured'
+  ) return null;
+  const geometryHash = await sha256(JSON.stringify(mapGeometryHashProjection({
+    building_selection_mode: buildingSelectionMode,
+    building_polygon_geojson: safeGeometry.building_polygon_geojson,
+    object_area_geojson: safeGeometry.object_area_geojson,
+  })));
+  const matching = existing.find((record: LooseRecord) =>
+    record.customer_id === object.customer_id && record.geometry_hash === geometryHash);
+  if (matching) return matching;
+  if (existing.length) {
+    throw new ApiError(409, 'De historie voor deze kaartrevisie is niet eenduidig', {
+      code: 'object_map_history_conflict',
+      retryable: false,
+      object_id: object.id,
+      revision,
+    });
+  }
+  return entity.create({
+    customer_id: object.customer_id,
+    object_id: object.id,
+    revision,
+    geometry_hash: geometryHash,
+    building_selection_mode: buildingSelectionMode,
+    map_geometry_status: mapGeometryStatus,
+    building_polygon_geojson: safeGeometry.building_polygon_geojson,
+    object_area_geojson: safeGeometry.object_area_geojson,
+    anchor_latitude: safeObjectMapCoordinate(effectiveGeometrySource.latitude, -90, 90),
+    anchor_longitude: safeObjectMapCoordinate(effectiveGeometrySource.longitude, -180, 180),
+    recorded_at: nowIso(),
+    recorded_by_user_id: actorUserId || null,
+    source_action: asString(sourceAction).slice(0, 100) || 'map_configuration_snapshot',
+  });
+}
+
+async function ensureObjectMapGeometryRevisionUnderGlobalLock(
+  base44: LooseRecord,
+  object: LooseRecord,
+  user: LooseRecord,
+  idempotencyKey: string,
+  target: string,
+  sourceAction: string,
+) {
+  const reservation = await reserveGlobalObjectCodeMutation(
+    base44,
+    user,
+    `${idempotencyKey}:map-history-repair`,
+    `${target}|map-history-repair`,
+    'kaarthistorieherstel',
+  );
+  try {
+    await assertGlobalObjectCodeMutation(base44, reservation, 'kaarthistorieherstel');
+    return await ensureObjectMapGeometryRevision(base44, object, user.id, sourceAction);
+  } finally {
+    await releaseGlobalObjectCodeMutation(base44, reservation, 'kaarthistorieherstel');
+  }
+}
+
+function safePdokFeatureId(value: unknown) {
+  const featureId = asString(value);
+  if (!featureId || featureId.length > 120 || !/^[a-zA-Z0-9_-]+$/.test(featureId)) {
+    throw new ApiError(400, 'Een BAG-pand-ID is ongeldig');
+  }
+  return featureId;
+}
+
+function safePdokCursor(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  const cursor = asString(value);
+  if (cursor.length > 180 || !/^[a-zA-Z0-9_|-]+$/.test(cursor)) {
+    throw new ApiError(400, 'De BAG-paginacursor is ongeldig');
+  }
+  return cursor;
+}
+
+function nextPdokCursor(links: unknown) {
+  if (!Array.isArray(links)) return null;
+  const next = links.find(link => link && typeof link === 'object' && (link as LooseRecord).rel === 'next') as LooseRecord | undefined;
+  if (!next || !asString(next.href)) return null;
+  try {
+    const url = new URL(asString(next.href), `${pdokBagBaseUrl()}/`);
+    return safePdokCursor(url.searchParams.get('cursor'));
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(503, 'PDOK BAG gaf een ongeldige paginaverwijzing', {
+      code: 'pdok_bag_invalid_response',
+      retryable: true,
+    });
+  }
+}
+
+function activeBagBuildingStatus(value: unknown) {
+  const normalized = normalizeName(value);
+  return Boolean(normalized) &&
+    !['gesloopt', 'ten onrechte', 'ingetrokken', 'niet gerealiseerd'].some(term => normalized.includes(term));
+}
+
+function pdokBagBaseUrl() {
+  const deno = (globalThis as LooseRecord).Deno as LooseRecord | undefined;
+  const configured = typeof deno?.env?.get === 'function'
+    ? deno.env.get('PDOK_BAG_OGC_BASE_URL')
+    : null;
+  return (asString(configured) || PDOK_BAG_OGC_BASE_URL).replace(/\/+$/, '');
+}
+
+async function fetchPdokBagJson(url: URL) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBJECT_MAP_PDOK_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      headers: { accept: 'application/geo+json, application/json' },
+      signal: controller.signal,
+    });
+    if (response.status === 404) {
+      throw new ApiError(409, 'Het gekozen BAG-pand bestaat niet meer in PDOK', {
+        code: 'pdok_bag_building_not_found',
+        retryable: false,
+      });
+    }
+    if (!response.ok) {
+      throw new ApiError(503, 'PDOK BAG is tijdelijk niet beschikbaar', {
+        code: 'pdok_bag_unavailable',
+        retryable: true,
+        upstream_status: response.status,
+      });
+    }
+    const declaredLength = Number(response.headers.get('content-length') || 0);
+    if (declaredLength > 5_000_000) {
+      throw new ApiError(503, 'PDOK BAG gaf een te groot antwoord', {
+        code: 'pdok_bag_invalid_response',
+        retryable: true,
+      });
+    }
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > 5_000_000) {
+      throw new ApiError(503, 'PDOK BAG gaf een te groot antwoord', {
+        code: 'pdok_bag_invalid_response',
+        retryable: true,
+      });
+    }
+    try {
+      return JSON.parse(text) as LooseRecord;
+    } catch {
+      throw new ApiError(503, 'PDOK BAG gaf geen geldig antwoord', { code: 'pdok_bag_invalid_response', retryable: true });
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(503, 'PDOK BAG is tijdelijk niet bereikbaar', {
+      code: 'pdok_bag_unavailable',
+      retryable: true,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function canonicalPdokBuildingFeature(rawFeature: LooseRecord, anchor: number[], retrievedAt: string) {
+  const sourceFeatureId = safePdokFeatureId(rawFeature.id || rawFeature.properties?.id);
+  const sourceStatus = asString(rawFeature.properties?.status).slice(0, 120) || null;
+  if (!activeBagBuildingStatus(sourceStatus)) {
+    throw new ApiError(409, 'Het gekozen BAG-pand heeft geen actieve status', {
+      code: 'pdok_bag_building_inactive',
+      source_feature_id: sourceFeatureId,
+      source_status: sourceStatus,
+    });
+  }
+  const collection = normalizedGeoJsonFeatureCollection(
+    { type: 'FeatureCollection', features: [rawFeature] },
+    'BAG-pand',
+    {
+      anchor,
+      maxFeatures: 1,
+      maxAreaSquareMeters: OBJECT_MAP_MAX_BUILDING_AREA_SQM,
+      properties: feature => ({
+        source: 'pdok_bag',
+        source_feature_id: sourceFeatureId,
+        source_identificatie: asString(feature.properties?.identificatie).slice(0, 80) || null,
+        source_status: sourceStatus,
+        source_retrieved_at: retrievedAt,
+      }),
+    },
+  );
+  return { ...collection!.features[0], id: sourceFeatureId };
+}
+
+async function fetchPdokBuildingById(featureId: string, anchor: number[], retrievedAt: string) {
+  const requestedFeatureId = safePdokFeatureId(featureId);
+  const url = new URL(`${pdokBagBaseUrl()}/collections/pand/items/${encodeURIComponent(requestedFeatureId)}`);
+  url.searchParams.set('f', 'json');
+  url.searchParams.set('crs', 'http://www.opengis.net/def/crs/OGC/1.3/CRS84');
+  const feature = await fetchPdokBagJson(url);
+  if (feature.type !== 'Feature') {
+    throw new ApiError(503, 'PDOK BAG gaf voor het gekozen pand geen geldig object', {
+      code: 'pdok_bag_invalid_response',
+      retryable: true,
+    });
+  }
+  const canonical = canonicalPdokBuildingFeature(feature, anchor, retrievedAt);
+  if (canonical.properties.source_feature_id !== requestedFeatureId) {
+    throw new ApiError(503, 'PDOK BAG gaf een ander pand terug dan gevraagd', {
+      code: 'pdok_bag_invalid_response',
+      retryable: true,
+    });
+  }
+  return canonical;
+}
+
+function safeObjectConflict(record: LooseRecord) {
+  return {
+    object_id: record.id,
+    customer_id: record.customer_id,
+    object_code: record.object_code || null,
+    object_name: record.name,
+    status: objectLifecycleStatus(record),
+  };
+}
+
+function buildingConflictProbes(value: unknown) {
+  if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+    return [...new Set(value.map(safePdokFeatureId))].map(sourceFeatureId => ({
+      feature_key: `bag:${sourceFeatureId}`,
+      source: 'pdok_bag',
+      source_feature_id: sourceFeatureId,
+      feature: null,
+    }));
+  }
+  return geoJsonFeatures(value).map((feature, index) => {
+    const sourceFeatureId = feature.properties?.source === 'pdok_bag'
+      ? asString(feature.properties?.source_feature_id)
+      : '';
+    const localId = asString(feature.properties?.local_id || feature.id)
+      .replace(/[^a-zA-Z0-9:_-]/g, '')
+      .slice(0, 120) || String(index + 1);
+    return {
+      feature_key: sourceFeatureId ? `bag:${sourceFeatureId}` : `manual:${localId}:${index + 1}`,
+      source: sourceFeatureId ? 'pdok_bag' : 'manual',
+      source_feature_id: sourceFeatureId || null,
+      feature,
+    };
+  });
+}
+
+function conflictBetweenBuildingFeatures(probe: LooseRecord, candidateFeature: LooseRecord) {
+  const candidateSourceId = candidateFeature.properties?.source === 'pdok_bag'
+    ? asString(candidateFeature.properties?.source_feature_id)
+    : '';
+  if (probe.source_feature_id && candidateSourceId === probe.source_feature_id) return true;
+  return Boolean(probe.feature?.geometry && candidateFeature.geometry &&
+    geometriesOverlap(probe.feature.geometry, candidateFeature.geometry));
+}
+
+function publicBuildingAssignmentConflicts(conflicts: LooseRecord[]) {
+  return conflicts.map(conflict => ({
+    feature_key: conflict.feature_key,
+    source: conflict.source,
+    source_feature_id: conflict.source_feature_id,
+    objects: conflict.objects,
+  }));
+}
+
+function canonicalBuildingConflictBinding(conflicts: LooseRecord[]) {
+  return conflicts.map(conflict => ({
+    feature_key: asString(conflict.feature_key),
+    source: asString(conflict.source),
+    source_feature_id: asString(conflict.source_feature_id) || null,
+    object_ids: [...new Set((Array.isArray(conflict.objects) ? conflict.objects : [])
+      .map((object: LooseRecord) => asString(object.object_id))
+      .filter(Boolean))].sort(),
+  })).sort((left, right) => {
+    const leftValue = JSON.stringify(left);
+    const rightValue = JSON.stringify(right);
+    return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+  });
+}
+
+async function buildingConflictFingerprint(conflicts: LooseRecord[]) {
+  return sha256(JSON.stringify(canonicalBuildingConflictBinding(conflicts)));
+}
+
+async function requireBuildingOverlapConfirmation(input: LooseRecord, conflicts: LooseRecord[]) {
+  if (!conflicts.length) return { reason: null, conflictFingerprint: null };
+  const conflictFingerprint = await buildingConflictFingerprint(conflicts);
+  const confirmation = input?.overlap_confirmation;
+  const suppliedReason = confirmation && typeof confirmation === 'object' && !Array.isArray(confirmation)
+    ? asString(confirmation.reason)
+    : '';
+  if (
+    !confirmation || typeof confirmation !== 'object' || Array.isArray(confirmation) ||
+    confirmation.confirmed !== true || !suppliedReason ||
+    asString(confirmation.conflict_fingerprint) !== conflictFingerprint
+  ) {
+    throw new ApiError(409, 'Een of meer gebouwvlakken horen al bij een ander actief object', {
+      code: 'building_assignment_overlap_confirmation_required',
+      conflicts: publicBuildingAssignmentConflicts(conflicts),
+      conflict_fingerprint: conflictFingerprint,
+      confirmation_required: true,
+    });
+  }
+  const reason = objectText(confirmation.reason, 'Reden voor gedeeld gebouw', 500, false);
+  if ((reason || '').length < 3) throw new ApiError(400, 'Geef een korte reden voor het gedeelde gebouw');
+  return { reason, conflictFingerprint };
+}
+
+async function buildingAssignmentConflicts(
+  base44: LooseRecord,
+  object: LooseRecord,
+  featuresOrIds: unknown,
+  previousOwnGeometry: unknown = null,
+) {
+  const probes = buildingConflictProbes(featuresOrIds);
+  if (!probes.length) return [] as LooseRecord[];
+  const previousProbes = buildingConflictProbes(previousOwnGeometry);
+  const fields = [
+    'id', 'customer_id', 'object_code', 'name', 'status', 'is_active_customer_object',
+    'latitude', 'longitude', 'building_selection_mode', 'building_polygon_geojson',
+  ];
+  const objects: LooseRecord[] = [];
+  const entity = getEntity(base44, 'SurveillanceObject');
+  const pageSize = 1_000;
+  for (let skip = 0; skip < 50_000; skip += pageSize) {
+    const page = await entity.list('+name', pageSize, skip, fields);
+    objects.push(...page);
+    if (page.length < pageSize) break;
+    if (skip + pageSize >= 50_000) {
+      throw new ApiError(503, 'Gebouwconflicten konden niet volledig worden gecontroleerd', {
+        code: 'building_assignment_conflict_scan_incomplete',
+        retryable: true,
+      });
+    }
+  }
+  const byProbeKey = new Map<string, { probe: LooseRecord; objects: LooseRecord[]; newObjectIds: Set<string> }>();
+  objects.forEach((candidate: LooseRecord) => {
+    if (candidate.id === object.id || objectLifecycleStatus(candidate) !== 'active' || candidate.is_active_customer_object === false) return;
+    const safeCandidate = safeStoredBuildingCollection(candidate);
+    const candidateFeatures = geoJsonFeatures(safeCandidate.value);
+    const rawCandidateBagIds = new Set(selectedBagFeatureIds(candidate.building_polygon_geojson));
+    probes.forEach(probe => {
+      const matchingCandidateFeatures = candidateFeatures.filter(candidateFeature =>
+        conflictBetweenBuildingFeatures(probe, candidateFeature));
+      const exactUnsafeBagMatch = Boolean(
+        probe.source_feature_id && rawCandidateBagIds.has(probe.source_feature_id),
+      );
+      if (!matchingCandidateFeatures.length && !exactUnsafeBagMatch) return;
+      const existedBefore = exactUnsafeBagMatch
+        ? previousProbes.some(previous => previous.source_feature_id === probe.source_feature_id)
+        : previousProbes.some(previous => matchingCandidateFeatures.some(candidateFeature =>
+          conflictBetweenBuildingFeatures(previous, candidateFeature)));
+      const entry = byProbeKey.get(probe.feature_key) || {
+        probe,
+        objects: [],
+        newObjectIds: new Set<string>(),
+      };
+      entry.objects.push(safeObjectConflict(candidate));
+      if (!existedBefore) entry.newObjectIds.add(String(candidate.id));
+      byProbeKey.set(probe.feature_key, entry);
+    });
+  });
+  return [...byProbeKey.values()]
+    .sort((left, right) => asString(left.probe.feature_key).localeCompare(asString(right.probe.feature_key)))
+    .map(entry => ({
+      feature_key: entry.probe.feature_key,
+      source: entry.probe.source,
+      source_feature_id: entry.probe.source_feature_id,
+      objects: entry.objects.sort((left, right) =>
+        asString(left.object_name).localeCompare(asString(right.object_name), 'nl')),
+      new_conflict_object_ids: [...entry.newObjectIds].sort(),
+    }));
+}
+
+async function handleGetObjectMapConfiguration(base44: LooseRecord, body: LooseRecord) {
+  const { object } = await requireCustomerObjectScope(base44, body);
+  const configuration = safeObjectMapConfiguration(object);
+  return {
+    configuration,
+    conflicts: publicBuildingAssignmentConflicts(
+      await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson),
+    ),
+  };
+}
+
+async function handleListObjectBuildingCandidates(base44: LooseRecord, body: LooseRecord) {
+  const { object } = await requireCustomerObjectScope(base44, body);
+  const anchor = objectMapAnchor(object);
+  const radiusMeters = Number(body.radius_meters ?? OBJECT_MAP_DEFAULT_RADIUS_METERS);
+  if (!Number.isInteger(radiusMeters) || radiusMeters < OBJECT_MAP_MIN_RADIUS_METERS || radiusMeters > OBJECT_MAP_MAX_RADIUS_METERS) {
+    throw new ApiError(400, `radius_meters moet tussen ${OBJECT_MAP_MIN_RADIUS_METERS} en ${OBJECT_MAP_MAX_RADIUS_METERS} liggen`);
+  }
+  const limit = Math.min(OBJECT_MAP_MAX_CANDIDATES, requireInteger(body.limit ?? 50, 'limit', 1));
+  const cursor = safePdokCursor(body.cursor);
+  const latitudeDelta = radiusMeters / 110_540;
+  const longitudeScale = 111_320 * Math.max(0.1, Math.cos(anchor[1] * Math.PI / 180));
+  const longitudeDelta = radiusMeters / longitudeScale;
+  const bbox = [
+    anchor[0] - longitudeDelta,
+    anchor[1] - latitudeDelta,
+    anchor[0] + longitudeDelta,
+    anchor[1] + latitudeDelta,
+  ];
+  const url = new URL(`${pdokBagBaseUrl()}/collections/pand/items`);
+  url.searchParams.set('bbox', bbox.map(value => value.toFixed(7)).join(','));
+  url.searchParams.set('limit', String(limit));
+  if (cursor) url.searchParams.set('cursor', cursor);
+  url.searchParams.set('f', 'json');
+  url.searchParams.set('crs', 'http://www.opengis.net/def/crs/OGC/1.3/CRS84');
+  const response = await fetchPdokBagJson(url);
+  if (response.type !== 'FeatureCollection' || !Array.isArray(response.features)) {
+    throw new ApiError(503, 'PDOK BAG gaf geen geldige pandlijst', {
+      code: 'pdok_bag_invalid_response',
+      retryable: true,
+    });
+  }
+  const retrievedAt = nowIso();
+  const nextCursor = nextPdokCursor(response.links);
+  let skippedInvalidCount = 0;
+  const items = response.features.slice(0, limit).flatMap((feature: LooseRecord) => {
+    try {
+      return [canonicalPdokBuildingFeature(feature, anchor, retrievedAt)];
+    } catch (error) {
+      if (error instanceof ApiError && [400, 409].includes(error.status)) {
+        skippedInvalidCount += 1;
+        return [];
+      }
+      throw error;
+    }
+  });
+  const conflicts = publicBuildingAssignmentConflicts(
+    await buildingAssignmentConflicts(base44, object, { type: 'FeatureCollection', features: items }),
+  );
+  return {
+    object: safeObjectMapConfiguration(object).object,
+    center: { longitude: anchor[0], latitude: anchor[1] },
+    radius_meters: radiusMeters,
+    items,
+    total: items.length,
+    cursor,
+    next_cursor: nextCursor,
+    has_more: Boolean(nextCursor),
+    conflicts,
+    source: {
+      name: 'PDOK BAG',
+      collection: 'pand',
+      crs: 'OGC:CRS84',
+      retrieved_at: retrievedAt,
+    },
+    skipped_invalid_count: skippedInvalidCount,
+  };
+}
+
+async function handleUpdateObjectMapConfigurationUnderReservation(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+  reservation: LooseRecord,
+) {
+  const { object } = await requireCustomerObjectForMutation(base44, body);
+  if (objectLifecycleStatus(object) === 'archived') {
+    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+  }
+  const anchor = objectMapAnchor(object);
+  const data = requireObject(body);
+  const buildingSelectionMode = requireString(data, 'building_selection_mode');
+  if (!OBJECT_BUILDING_SELECTION_MODES.has(buildingSelectionMode)) {
+    throw new ApiError(400, 'building_selection_mode moet automatic of manual zijn');
+  }
+  if (!Array.isArray(data.selected_bag_feature_ids)) {
+    throw new ApiError(400, 'selected_bag_feature_ids moet een lijst zijn');
+  }
+  if (data.selected_bag_feature_ids.length > OBJECT_MAP_MAX_BUILDING_FEATURES) {
+    throw new ApiError(400, `Er kunnen maximaal ${OBJECT_MAP_MAX_BUILDING_FEATURES} BAG-panden worden geselecteerd`);
+  }
+  const selectedFeatureIds = [...new Set(data.selected_bag_feature_ids.map(safePdokFeatureId))];
+  const manualBuildingWasProvided = Object.prototype.hasOwnProperty.call(data, 'manual_building_geojson');
+  if (buildingSelectionMode === 'automatic') {
+    if (selectedFeatureIds.length > 0) {
+      throw new ApiError(400, 'Automatische gebouwselectie kan geen handmatige gebouwcontouren bevatten');
+    }
+    if (manualBuildingWasProvided && data.manual_building_geojson !== null) {
+      const manualValue = data.manual_building_geojson;
+      if (
+        !manualValue || typeof manualValue !== 'object' || Array.isArray(manualValue) ||
+        manualValue.type !== 'FeatureCollection' || !Array.isArray(manualValue.features)
+      ) {
+        throw new ApiError(400, 'manual_building_geojson moet een lege FeatureCollection of null zijn in automatic-modus');
+      }
+      if (manualValue.features.length > 0) {
+        throw new ApiError(400, 'Automatische gebouwselectie kan geen handmatige gebouwcontouren bevatten');
+      }
+    }
+  }
+
+  const retrievedAt = nowIso();
+  const reusablePdokFeatures = new Map<string, LooseRecord>();
+  geoJsonFeatures(object.building_polygon_geojson).forEach(feature => {
+    const sourceFeatureId = asString(feature.properties?.source_feature_id);
+    if (!sourceFeatureId || feature.properties?.source !== 'pdok_bag') return;
+    try {
+      const reusable = canonicalPdokBuildingFeature({
+        type: 'Feature',
+        id: sourceFeatureId,
+        properties: {
+          identificatie: feature.properties?.source_identificatie,
+          status: feature.properties?.source_status,
+        },
+        geometry: feature.geometry,
+      }, anchor, asString(feature.properties?.source_retrieved_at) || retrievedAt);
+      reusablePdokFeatures.set(sourceFeatureId, reusable);
+    } catch {
+      // Ongeldige legacygeometrie wordt niet vertrouwd en moet opnieuw bij PDOK worden opgehaald.
+    }
+  });
+  const pdokFeatures = buildingSelectionMode === 'manual'
+    ? await Promise.all(selectedFeatureIds.map(featureId =>
+      reusablePdokFeatures.get(featureId) || fetchPdokBuildingById(featureId, anchor, retrievedAt)))
+    : [];
+  const manualBuildingInput = manualBuildingWasProvided
+    ? data.manual_building_geojson
+    : (() => {
+      const features = existingManualBuildingFeatures(object);
+      return features.length ? { type: 'FeatureCollection', features } : null;
+    })();
+  const normalizedManualBuildingCollection = buildingSelectionMode === 'manual' &&
+    manualBuildingInput !== null && manualBuildingInput !== undefined
+    ? normalizedGeoJsonFeatureCollection(
+      manualBuildingInput,
+      'Handmatig gebouwvlak',
+      {
+        anchor,
+        maxFeatures: OBJECT_MAP_MAX_BUILDING_FEATURES - pdokFeatures.length,
+        maxAreaSquareMeters: OBJECT_MAP_MAX_BUILDING_AREA_SQM,
+        properties: (feature, index) => safeLocalGeometryProperties('manual', feature, index),
+      },
+    )
+    : null;
+  const normalizedManualBuildings = normalizedManualBuildingCollection?.features?.length
+    ? normalizedManualBuildingCollection
+    : null;
+  const combinedBuildingFeatures = [
+    ...pdokFeatures,
+    ...(normalizedManualBuildings?.features || []),
+  ];
+  if (combinedBuildingFeatures.length > OBJECT_MAP_MAX_BUILDING_FEATURES) {
+    throw new ApiError(400, `Er kunnen maximaal ${OBJECT_MAP_MAX_BUILDING_FEATURES} gebouwvlakken worden opgeslagen`);
+  }
+  const buildingPolygonGeoJson = buildingSelectionMode === 'manual' && combinedBuildingFeatures.length
+    ? { type: 'FeatureCollection', features: combinedBuildingFeatures }
+    : null;
+  if (buildingPolygonGeoJson) {
+    assertFeatureCollectionLimits(
+      buildingPolygonGeoJson,
+      'Gebouwselectie',
+      OBJECT_MAP_MAX_BUILDING_FEATURES,
+      OBJECT_MAP_MAX_BUILDING_AREA_SQM,
+    );
+  }
+  const objectAreaWasProvided = Object.prototype.hasOwnProperty.call(data, 'object_area_geojson');
+  const objectAreaInput = objectAreaWasProvided ? data.object_area_geojson : object.object_area_geojson;
+  const normalizedObjectAreaGeoJson = objectAreaInput !== null && objectAreaInput !== undefined
+    ? normalizedGeoJsonFeatureCollection(
+      objectAreaInput,
+      'Terreinvlak',
+      {
+        anchor,
+        maxFeatures: OBJECT_MAP_MAX_TERRAIN_FEATURES,
+        maxAreaSquareMeters: OBJECT_MAP_MAX_TERRAIN_AREA_SQM,
+        properties: (feature, index) => safeLocalGeometryProperties('user_drawn', feature, index),
+      },
+    )
+    : null;
+  const objectAreaGeoJson = normalizedObjectAreaGeoJson?.features?.length ? normalizedObjectAreaGeoJson : null;
+
+  const showOnMobileMap = Object.prototype.hasOwnProperty.call(data, 'show_on_mobile_map')
+    ? data.show_on_mobile_map
+    : object.show_on_mobile_map !== false;
+  if (typeof showOnMobileMap !== 'boolean') throw new ApiError(400, 'show_on_mobile_map moet ja of nee zijn');
+  if (showOnMobileMap) {
+    if (objectLifecycleStatus(object) !== 'active' || object.is_active_customer_object === false) {
+      throw new ApiError(409, 'Alleen een actief object kan op de mobiele objectkaart worden getoond');
+    }
+    if (!['verified', 'manual'].includes(asString(object.geocoding_status))) {
+      throw new ApiError(409, 'Controleer de kaartpositie voordat het object mobiel zichtbaar wordt');
+    }
+  }
+
+  const detectedConflicts = await buildingAssignmentConflicts(
+    base44,
+    object,
+    buildingPolygonGeoJson,
+    safeStoredBuildingCollection(object).value,
+  );
+  const allConflicts = publicBuildingAssignmentConflicts(detectedConflicts);
+  const newlyConflicting = detectedConflicts.filter(conflict => conflict.new_conflict_object_ids.length > 0);
+  const conflictsRequiringConfirmation = showOnMobileMap && object.show_on_mobile_map === false
+    ? detectedConflicts
+    : newlyConflicting;
+  const {
+    reason: overlapReason,
+    conflictFingerprint,
+  } = await requireBuildingOverlapConfirmation(data, conflictsRequiringConfirmation);
+
+  const nextRevision = objectMapGeometryRevision(object) + 1;
+  const mapGeometryHash = await sha256(JSON.stringify(mapGeometryHashProjection({
+    building_selection_mode: buildingSelectionMode,
+    building_polygon_geojson: buildingPolygonGeoJson,
+    object_area_geojson: objectAreaGeoJson,
+  })));
+  const patch = {
+    building_selection_mode: buildingSelectionMode,
+    building_polygon_geojson: buildingPolygonGeoJson,
+    object_area_geojson: objectAreaGeoJson,
+    map_geometry_status: 'configured',
+    map_geometry_revision: nextRevision,
+    map_geometry_hash: mapGeometryHash,
+    map_geometry_updated_at: retrievedAt,
+    map_geometry_updated_by_user_id: user.id,
+    map_geometry_review_reason: null,
+    show_on_mobile_map: showOnMobileMap,
+  };
+  const oldBuildingSummary = geometrySummary(object.building_polygon_geojson);
+  const newBuildingSummary = geometrySummary(buildingPolygonGeoJson);
+  const oldTerrainSummary = geometrySummary(object.object_area_geojson);
+  const newTerrainSummary = geometrySummary(objectAreaGeoJson);
+  const changes = [
+    {
+      field: 'building_selection_mode', label: 'Gebouwselectie',
+      before: objectBuildingSelectionMode(object), after: buildingSelectionMode,
+    },
+    {
+      field: 'building_count', label: 'Aantal gebouwen',
+      before: oldBuildingSummary.feature_count, after: newBuildingSummary.feature_count,
+    },
+    {
+      field: 'terrain_area_sqm', label: 'Terreinoppervlak',
+      before: oldTerrainSummary.area_sqm, after: newTerrainSummary.area_sqm,
+    },
+    {
+      field: 'map_geometry_status', label: 'Kaartcontrole',
+      before: objectMapGeometryStatus(object), after: 'configured',
+    },
+    {
+      field: 'map_geometry_revision', label: 'Kaartrevisie',
+      before: objectMapGeometryRevision(object), after: nextRevision,
+    },
+    {
+      field: 'show_on_mobile_map', label: 'Mobiele kaart',
+      before: object.show_on_mobile_map !== false, after: showOnMobileMap,
+    },
+  ].filter(change => change.before !== change.after);
+  if (conflictsRequiringConfirmation.length) {
+    changes.push({
+      field: 'building_overlap',
+      label: 'Gedeelde gebouwen',
+      before: null,
+      after: `${conflictsRequiringConfirmation.length} bevestigd: ${overlapReason}`,
+    });
+  }
+  const auditChangedFields = [...new Set(changes.map(change => asString(change.field)).filter(Boolean))];
+  const prepared = await customerObjectPatchWithRecovery({
+    object,
+    patch,
+    expectedVersion,
+    user,
+    action: 'update_object_map_configuration',
+    idempotencyKey,
+    requestFingerprint,
+    target,
+    resultChangedFields: auditChangedFields,
+    extraResult: {
+      changes,
+      summary: 'Kaart en terrein bijgewerkt',
+      outcome: 'success',
+      building_summary: newBuildingSummary,
+      terrain_summary: newTerrainSummary,
+      overlap_confirmation: conflictsRequiringConfirmation.length
+        ? {
+          confirmed: true,
+          reason: overlapReason,
+          conflict_count: conflictsRequiringConfirmation.length,
+          conflict_fingerprint: conflictFingerprint,
+        }
+        : null,
+    },
+  });
+  await assertGlobalObjectCodeMutation(base44, reservation, 'kaartwijziging');
+  await ensureObjectMapGeometryRevision(base44, object, user.id, 'before_update_object_map_configuration');
+  let updated: LooseRecord;
+  try {
+    updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      throw new ApiError(409, 'De kaartconfiguratie is intussen gewijzigd; laad de nieuwste versie en probeer opnieuw', {
+        ...(error.details || {}),
+        code: 'object_map_version_conflict',
+        retryable: true,
+      });
+    }
+    throw error;
+  }
+  const auditResult = customerObjectMutationResult(updated, auditChangedFields, {
+    changes,
+    summary: 'Kaart en terrein bijgewerkt',
+    outcome: 'success',
+    building_summary: newBuildingSummary,
+    terrain_summary: newTerrainSummary,
+    overlap_confirmation: conflictsRequiringConfirmation.length
+      ? {
+        confirmed: true,
+        reason: overlapReason,
+        conflict_count: conflictsRequiringConfirmation.length,
+        conflict_fingerprint: conflictFingerprint,
+      }
+      : null,
+  });
+  await ensureObjectMapGeometryRevision(base44, updated, user.id, 'update_object_map_configuration');
+  return {
+    ...auditResult,
+    configuration: safeObjectMapConfiguration(updated),
+    conflicts: allConflicts,
+    audit_result: auditResult,
+  };
+}
+
+async function handleUpdateObjectMapConfiguration(
+  base44: LooseRecord,
+  user: LooseRecord,
+  body: LooseRecord,
+  expectedVersion: number,
+  idempotencyKey: string,
+  requestFingerprint: string,
+  target: string,
+) {
+  const reservation = await reserveGlobalObjectCodeMutation(
+    base44,
+    user,
+    idempotencyKey,
+    target,
+    'kaartwijziging',
+  );
+  try {
+    return await handleUpdateObjectMapConfigurationUnderReservation(
+      base44,
+      user,
+      body,
+      expectedVersion,
+      idempotencyKey,
+      requestFingerprint,
+      target,
+      reservation,
+    );
+  } finally {
+    await releaseGlobalObjectCodeMutation(base44, reservation, 'kaartwijziging');
+  }
 }
 
 function safeThirdPartyOrganization(record: LooseRecord) {
@@ -4693,6 +6219,12 @@ const LOGBOOK_CHANGED_FIELD_LABELS: Record<string, string> = {
   safety_notes: 'Veiligheidsnotitie',
   show_on_mobile_map: 'Mobiele kaart',
   mobile_map_priority: 'Kaartprioriteit',
+  building_selection_mode: 'Gebouwselectie',
+  building_count: 'Aantal gebouwen',
+  terrain_area_sqm: 'Terreinoppervlak',
+  building_overlap: 'Gedeelde gebouwen',
+  map_geometry_status: 'Kaartcontrole',
+  map_geometry_revision: 'Kaartrevisie',
   notes: 'Notitie',
   variant_name: 'Planvariant',
   task_type: 'Taaktype',
@@ -4786,6 +6318,13 @@ const LOGBOOK_VALUE_FIELDS = new Set([
   'module_responsible_role',
   'module_suspension_reason',
   'module_archive_reason',
+  'building_selection_mode',
+  'building_count',
+  'terrain_area_sqm',
+  'building_overlap',
+  'map_geometry_status',
+  'map_geometry_revision',
+  'show_on_mobile_map',
 ]);
 
 function safeLogbookValue(value: unknown) {
@@ -4823,7 +6362,7 @@ function derivedLogbookChanges(event: LooseRecord) {
     event.resource_type === 'ObjectOperationalModule' ||
     (
       event.resource_type === 'SurveillanceObject' &&
-      event.action === 'update_customer_object_identity'
+      ['update_customer_object_identity', 'update_object_map_configuration'].includes(event.action)
     );
   const explicit = explicitValuesAreSafe ? safeExplicitLogbookChanges(result?.changes) : [];
   if (explicit.length) return explicit;
@@ -8490,6 +10029,11 @@ function objectOperationsPatch(data: LooseRecord, object: LooseRecord) {
   }
 
   if (patch.show_on_mobile_map === true) {
+    if (objectMapGeometryStatus(object) === 'needs_review' || safeStoredMapGeometry(object).invalid) {
+      throw new ApiError(409, 'Controleer en bevestig eerst opnieuw de gebouw- en terreinconfiguratie', {
+        code: 'object_map_geometry_review_required',
+      });
+    }
     if (objectLifecycleStatus(object) !== 'active') {
       throw new ApiError(409, 'Alleen een actief object kan op de mobiele objectkaart worden getoond');
     }
@@ -8767,6 +10311,7 @@ async function reserveGlobalObjectCodeMutation(
   user: LooseRecord,
   idempotencyKey: string,
   target: string,
+  operationLabel = 'objectcodewijziging',
 ) {
   const ownerToken = crypto.randomUUID();
   const keyHash = await sha256(idempotencyKey);
@@ -8788,15 +10333,15 @@ async function reserveGlobalObjectCodeMutation(
       ['id', 'version', 'created_date', 'object_code_mutation_lock'],
     );
     const coordinator = coordinators[0];
-    if (!coordinator) throw new ApiError(503, 'Objectcodecoördinator is niet beschikbaar');
+    if (!coordinator) throw new ApiError(503, 'Objectmutatiecoördinator is niet beschikbaar');
     const current = coordinator.object_code_mutation_lock;
     if (current && typeof current === 'object' && !Array.isArray(current) && reservationIsCurrent(current)) {
       const sameRequest = current.key_hash === keyHash
         && current.actor_id === user.id
         && current.mutation_target === target;
       throw new ApiError(409, sameRequest
-        ? 'Deze objectcodewijziging is nog in verwerking; probeer opnieuw'
-        : 'Een andere objectcodewijziging is nog in verwerking; probeer opnieuw', {
+        ? `Deze ${operationLabel} is nog in verwerking; probeer opnieuw`
+        : 'Een andere object- of kaartwijziging is nog in verwerking; probeer opnieuw', {
         retryable: true,
         reservation_expires_at: current.expires_at || null,
       });
@@ -8812,7 +10357,7 @@ async function reserveGlobalObjectCodeMutation(
       if (!(error instanceof ApiError) || error.status !== 409 || attempt === 7) throw error;
     }
   }
-  throw new ApiError(409, 'Objectcodewijziging kon niet veilig worden gereserveerd; probeer opnieuw', {
+  throw new ApiError(409, `${operationLabel} kon niet veilig worden gereserveerd; probeer opnieuw`, {
     retryable: true,
   });
 }
@@ -8820,6 +10365,7 @@ async function reserveGlobalObjectCodeMutation(
 async function releaseGlobalObjectCodeMutation(
   base44: LooseRecord,
   reservation: LooseRecord | null,
+  operationLabel = 'objectcodewijziging',
 ) {
   if (!reservation) return;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -8839,12 +10385,13 @@ async function releaseGlobalObjectCodeMutation(
 async function assertGlobalObjectCodeMutation(
   base44: LooseRecord,
   reservation: LooseRecord | null,
+  operationLabel = 'objectcodewijziging',
 ) {
-  if (!reservation) throw new ApiError(409, 'Objectcode-reservering ontbreekt; probeer opnieuw', { retryable: true });
-  const coordinator = await requireRecord(base44, 'Customer', reservation.coordinator_id, 'Objectcodecoördinator');
+  if (!reservation) throw new ApiError(409, `${operationLabel}-reservering ontbreekt; probeer opnieuw`, { retryable: true });
+  const coordinator = await requireRecord(base44, 'Customer', reservation.coordinator_id, 'Objectmutatiecoördinator');
   const current = coordinator.object_code_mutation_lock;
   if (current?.owner_token !== reservation.owner_token || !reservationIsCurrent(current)) {
-    throw new ApiError(409, 'Objectcode-reservering is verlopen of overgenomen; probeer opnieuw', {
+    throw new ApiError(409, `${operationLabel}-reservering is verlopen of overgenomen; probeer opnieuw`, {
       retryable: true,
     });
   }
@@ -9146,6 +10693,15 @@ async function handleCreateCustomerObject(
       is_active_customer_object: false,
       show_on_mobile_map: false,
       mobile_map_priority: 0,
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: 'automatic',
+      map_geometry_status: 'unconfigured',
+      map_geometry_revision: 0,
+      map_geometry_hash: null,
+      map_geometry_updated_at: null,
+      map_geometry_updated_by_user_id: null,
+      map_geometry_review_reason: null,
       version: 1,
     });
     const racedCode = await objectCodeExists(base44, objectCode, object.id, objectCodeReservation);
@@ -9209,9 +10765,26 @@ async function handleUpdateCustomerObjectIdentity(
   const patch = Object.fromEntries(Object.entries(normalizedPatch).filter(([field, value]) =>
     JSON.stringify(canonicalMutationValue(object[field])) !== JSON.stringify(canonicalMutationValue(value))));
   if (!Object.keys(patch).length) throw new ApiError(400, 'Er zijn geen gewijzigde objectgegevens om op te slaan');
+  const mapLocationChanged = Object.keys(patch).some(field => OBJECT_MAP_LOCATION_FIELDS.has(field));
+  if (mapLocationChanged && objectHasMapConfiguration(object)) {
+    patch.map_geometry_status = 'needs_review';
+    patch.map_geometry_review_reason = 'object_location_changed';
+    patch.map_geometry_revision = objectMapGeometryRevision(object) + 1;
+    patch.map_geometry_updated_at = nowIso();
+    patch.map_geometry_updated_by_user_id = user.id;
+    patch.show_on_mobile_map = false;
+  }
   const changesObjectCode = Object.prototype.hasOwnProperty.call(patch, 'object_code');
-  const objectCodeReservation = changesObjectCode
-    ? await reserveGlobalObjectCodeMutation(base44, user, idempotencyKey, target)
+  const changesMapLocationWithGeometry = mapLocationChanged && objectHasMapConfiguration(object);
+  const requiresGlobalObjectMutation = changesObjectCode || changesMapLocationWithGeometry;
+  const objectCodeReservation = requiresGlobalObjectMutation
+    ? await reserveGlobalObjectCodeMutation(
+      base44,
+      user,
+      idempotencyKey,
+      target,
+      changesMapLocationWithGeometry ? 'objectlocatiewijziging' : 'objectcodewijziging',
+    )
     : null;
   try {
     if (changesObjectCode) {
@@ -9240,8 +10813,31 @@ async function handleUpdateCustomerObjectIdentity(
         outcome: 'success',
       },
     });
-    if (changesObjectCode) await assertGlobalObjectCodeMutation(base44, objectCodeReservation);
+    if (requiresGlobalObjectMutation) {
+      await assertGlobalObjectCodeMutation(
+        base44,
+        objectCodeReservation,
+        changesMapLocationWithGeometry ? 'objectlocatiewijziging' : 'objectcodewijziging',
+      );
+    }
+    if (changesMapLocationWithGeometry) {
+      await ensureObjectMapGeometryRevision(
+        base44,
+        object,
+        user.id,
+        'before_update_customer_object_identity',
+      );
+    }
     const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+    if (changesMapLocationWithGeometry) {
+      await ensureObjectMapGeometryRevision(
+        base44,
+        updated,
+        user.id,
+        'update_customer_object_identity',
+        object,
+      );
+    }
     if (changesObjectCode) {
       const racedCode = await objectCodeExists(base44, updated.object_code, updated.id, objectCodeReservation);
       if (racedCode) {
@@ -9260,7 +10856,11 @@ async function handleUpdateCustomerObjectIdentity(
     });
   } finally {
     try {
-      await releaseGlobalObjectCodeMutation(base44, objectCodeReservation);
+      await releaseGlobalObjectCodeMutation(
+        base44,
+        objectCodeReservation,
+        changesMapLocationWithGeometry ? 'objectlocatiewijziging' : 'objectcodewijziging',
+      );
     } catch (error) {
       console.error('[customerPlatformApi] object code mutation lock release failed', object.id, error);
     }
@@ -9280,20 +10880,52 @@ async function handleUpdateCustomerObjectOperations(
   if (object.status === 'archived') {
     throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
   }
-  const patch = objectOperationsPatch(requireObject(body), object);
-  const prepared = await customerObjectPatchWithRecovery({
-    object,
-    patch,
-    expectedVersion,
-    user,
-    action: 'update_customer_object_operations',
-    idempotencyKey,
-    requestFingerprint,
-    target,
-  });
-  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
-  // Bewust alleen een samenvatting: instructies en notities komen niet in recovery of CustomerEvent.payload.
-  return customerObjectMutationResult(updated, prepared.changedFields);
+  const data = requireObject(body);
+  const patch = objectOperationsPatch(data, object);
+  const enablesMobileMap = patch.show_on_mobile_map === true && object.show_on_mobile_map === false;
+  const reservation = enablesMobileMap
+    ? await reserveGlobalObjectCodeMutation(base44, user, idempotencyKey, target, 'mobiele-kaartactivatie')
+    : null;
+  try {
+    const conflicts = enablesMobileMap
+      ? await buildingAssignmentConflicts(
+        base44,
+        object,
+        safeStoredBuildingCollection(object).value,
+      )
+      : [];
+    const {
+      reason: overlapReason,
+      conflictFingerprint,
+    } = await requireBuildingOverlapConfirmation(data, conflicts);
+    const overlapConfirmation = conflicts.length
+      ? {
+        confirmed: true,
+        reason: overlapReason,
+        conflict_count: conflicts.length,
+        conflict_fingerprint: conflictFingerprint,
+      }
+      : null;
+    const prepared = await customerObjectPatchWithRecovery({
+      object,
+      patch,
+      expectedVersion,
+      user,
+      action: 'update_customer_object_operations',
+      idempotencyKey,
+      requestFingerprint,
+      target,
+      extraResult: { overlap_confirmation: overlapConfirmation },
+    });
+    if (reservation) await assertGlobalObjectCodeMutation(base44, reservation, 'mobiele-kaartactivatie');
+    const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+    // Bewust alleen een samenvatting: instructies en notities komen niet in recovery of CustomerEvent.payload.
+    return customerObjectMutationResult(updated, prepared.changedFields, {
+      overlap_confirmation: overlapConfirmation,
+    });
+  } finally {
+    await releaseGlobalObjectCodeMutation(base44, reservation, 'mobiele-kaartactivatie');
+  }
 }
 
 async function handleSetCustomerObjectStatus(
@@ -9312,6 +10944,13 @@ async function handleSetCustomerObjectStatus(
   const reason = asString(body.reason);
   if (requested === 'archived' && !reason) throw new ApiError(400, 'Reden voor archiveren is verplicht');
   if (reason.length > 1_000) throw new ApiError(400, 'Reden mag maximaal 1000 tekens bevatten');
+  if (requested === 'active' && (
+    objectMapGeometryStatus(object) === 'needs_review' || safeStoredMapGeometry(object).invalid
+  )) {
+    throw new ApiError(409, 'Controleer en bevestig eerst opnieuw de gebouw- en terreinconfiguratie', {
+      code: 'object_map_geometry_review_required',
+    });
+  }
 
   const patch: LooseRecord = {
     status: requested,
@@ -9332,19 +10971,49 @@ async function handleSetCustomerObjectStatus(
     to: requested,
     reason: reason || null,
   };
-  const prepared = await customerObjectPatchWithRecovery({
-    object,
-    patch,
-    expectedVersion,
-    user,
-    action: 'set_customer_object_status',
-    idempotencyKey,
-    requestFingerprint,
-    target,
-    extraResult: { transition },
-  });
-  const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
-  return customerObjectMutationResult(updated, prepared.changedFields, { transition });
+  const reservation = requested === 'active'
+    ? await reserveGlobalObjectCodeMutation(base44, user, idempotencyKey, target, 'objectactivatie')
+    : null;
+  try {
+    const conflicts = requested === 'active'
+      ? await buildingAssignmentConflicts(
+        base44,
+        object,
+        safeStoredBuildingCollection(object).value,
+      )
+      : [];
+    const {
+      reason: overlapReason,
+      conflictFingerprint,
+    } = await requireBuildingOverlapConfirmation(body, conflicts);
+    const overlapConfirmation = conflicts.length
+      ? {
+        confirmed: true,
+        reason: overlapReason,
+        conflict_count: conflicts.length,
+        conflict_fingerprint: conflictFingerprint,
+      }
+      : null;
+    const prepared = await customerObjectPatchWithRecovery({
+      object,
+      patch,
+      expectedVersion,
+      user,
+      action: 'set_customer_object_status',
+      idempotencyKey,
+      requestFingerprint,
+      target,
+      extraResult: { transition, overlap_confirmation: overlapConfirmation },
+    });
+    if (reservation) await assertGlobalObjectCodeMutation(base44, reservation, 'objectactivatie');
+    const updated = await casUpdate(base44, 'SurveillanceObject', object, expectedVersion, prepared.patch);
+    return customerObjectMutationResult(updated, prepared.changedFields, {
+      transition,
+      overlap_confirmation: overlapConfirmation,
+    });
+  } finally {
+    await releaseGlobalObjectCodeMutation(base44, reservation, 'objectactivatie');
+  }
 }
 
 async function handleCustomerAccount(
@@ -15802,6 +17471,16 @@ async function executeMutation(
         requestFingerprint,
         target,
       );
+    case 'update_object_map_configuration':
+      return handleUpdateObjectMapConfiguration(
+        base44,
+        user,
+        body,
+        expectedVersion,
+        idempotencyKey,
+        requestFingerprint,
+        target,
+      );
     case 'set_customer_object_status':
       return handleSetCustomerObjectStatus(
         base44,
@@ -16032,6 +17711,8 @@ export async function handleCustomerPlatformRequest(req: Request) {
     if (READ_ACTIONS.has(action)) {
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
       if (action === 'search_customer_objects') return json(await handleSearchCustomerObjects(base44, body));
+      if (action === 'get_object_map_configuration') return json(await handleGetObjectMapConfiguration(base44, body));
+      if (action === 'list_object_building_candidates') return json(await handleListObjectBuildingCandidates(base44, body));
       if (action === 'list_object_warning_addresses') return json(await handleListObjectWarningAddresses(base44, body));
       if (action === 'list_object_logbook') return json(await handleListObjectLogbook(base44, body));
       if (action === 'list_object_keys') return json(await handleListObjectKeys(base44, body));

@@ -1003,6 +1003,249 @@ function safeNumber2(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
+function mobileGeoJsonHasGeometry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (value.type === "FeatureCollection") return Array.isArray(value.features) && value.features.length > 0;
+  return value.type === "Feature" || value.type === "Polygon" || value.type === "MultiPolygon";
+}
+function mobileBuildingSelectionMode(object) {
+  if (String(object?.building_selection_mode || "") === "manual" || mobileGeoJsonHasGeometry(object?.building_polygon_geojson)) return "manual";
+  return "automatic";
+}
+function mobileMapGeometryStatus(object) {
+  if (["configured", "needs_review"].includes(String(object?.map_geometry_status || ""))) return object.map_geometry_status;
+  return mobileGeoJsonHasGeometry(object?.building_polygon_geojson) || mobileGeoJsonHasGeometry(object?.object_area_geojson) ? "configured" : "unconfigured";
+}
+function mobileMapGeometryRevision(object) {
+  const revision = Number(object?.map_geometry_revision);
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0;
+}
+var MOBILE_MAP_MAX_FEATURES_BUILDING = 100;
+var MOBILE_MAP_MAX_FEATURES_TERRAIN = 25;
+var MOBILE_MAP_MAX_VERTICES = 1e4;
+var MOBILE_MAP_MAX_BYTES = 75e4;
+var MOBILE_MAP_MAX_DISTANCE_METERS = 5e3;
+var MOBILE_MAP_MAX_BUILDING_AREA_SQM = 5e6;
+var MOBILE_MAP_MAX_TERRAIN_AREA_SQM = 1e8;
+function mobileMapHttpError(status, message, code = null) {
+  const error = new Error(message);
+  error.status = status;
+  if (code) error.code = code;
+  return error;
+}
+function mobileMapFeatures(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  if (value.type === "FeatureCollection" && Array.isArray(value.features)) return value.features;
+  if (value.type === "Feature") return [value];
+  if (["Polygon", "MultiPolygon"].includes(String(value.type || ""))) return [{ type: "Feature", properties: {}, geometry: value }];
+  return [];
+}
+function mobileMapPayloadConfigured(value) {
+  if (value === null || value === void 0) return false;
+  return !(value?.type === "FeatureCollection" && Array.isArray(value.features) && value.features.length === 0);
+}
+function mobileMapDistanceMeters(left, right) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(right[1] - left[1]);
+  const longitudeDelta = radians(right[0] - left[0]);
+  const latitude1 = radians(left[1]);
+  const latitude2 = radians(right[1]);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6371008.8 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)));
+}
+function mobileMapOrientation(left, middle, right) {
+  return (middle[1] - left[1]) * (right[0] - middle[0]) - (middle[0] - left[0]) * (right[1] - middle[1]);
+}
+function mobileMapPointOnSegment(left, point, right) {
+  const epsilon = 1e-12;
+  return point[0] <= Math.max(left[0], right[0]) + epsilon && point[0] >= Math.min(left[0], right[0]) - epsilon && point[1] <= Math.max(left[1], right[1]) + epsilon && point[1] >= Math.min(left[1], right[1]) - epsilon;
+}
+function mobileMapSegmentsIntersect(leftStart, leftEnd, rightStart, rightEnd) {
+  const first = mobileMapOrientation(leftStart, leftEnd, rightStart);
+  const second = mobileMapOrientation(leftStart, leftEnd, rightEnd);
+  const third = mobileMapOrientation(rightStart, rightEnd, leftStart);
+  const fourth = mobileMapOrientation(rightStart, rightEnd, leftEnd);
+  const epsilon = 1e-12;
+  if ((first > epsilon && second < -epsilon || first < -epsilon && second > epsilon) && (third > epsilon && fourth < -epsilon || third < -epsilon && fourth > epsilon)) return true;
+  if (Math.abs(first) <= epsilon && mobileMapPointOnSegment(leftStart, rightStart, leftEnd)) return true;
+  if (Math.abs(second) <= epsilon && mobileMapPointOnSegment(leftStart, rightEnd, leftEnd)) return true;
+  if (Math.abs(third) <= epsilon && mobileMapPointOnSegment(rightStart, leftStart, rightEnd)) return true;
+  return Math.abs(fourth) <= epsilon && mobileMapPointOnSegment(rightStart, leftEnd, rightEnd);
+}
+function mobileMapRingSelfIntersects(ring) {
+  const segmentCount = ring.length - 1;
+  for (let left = 0; left < segmentCount; left += 1) {
+    for (let right = left + 1; right < segmentCount; right += 1) {
+      if (right === left + 1 || left === 0 && right === segmentCount - 1) continue;
+      if (mobileMapSegmentsIntersect(ring[left], ring[left + 1], ring[right], ring[right + 1])) return true;
+    }
+  }
+  return false;
+}
+function mobileMapRingsIntersect(leftRing, rightRing) {
+  for (let left = 0; left < leftRing.length - 1; left += 1) {
+    for (let right = 0; right < rightRing.length - 1; right += 1) {
+      if (mobileMapSegmentsIntersect(leftRing[left], leftRing[left + 1], rightRing[right], rightRing[right + 1])) return true;
+    }
+  }
+  return false;
+}
+function mobileMapPositionInsideRing(position, ring) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const currentPosition = ring[index];
+    const previousPosition = ring[previous];
+    const crossesLatitude = currentPosition[1] > position[1] !== previousPosition[1] > position[1];
+    if (!crossesLatitude) continue;
+    const crossingLongitude = (previousPosition[0] - currentPosition[0]) * (position[1] - currentPosition[1]) / (previousPosition[1] - currentPosition[1]) + currentPosition[0];
+    if (position[0] < crossingLongitude) inside = !inside;
+  }
+  return inside;
+}
+function mobileMapRingAreaSquareMeters(ring) {
+  const referenceLatitude = ring.reduce((sum, position) => sum + position[1], 0) / ring.length;
+  const longitudeScale = 111320 * Math.cos(referenceLatitude * Math.PI / 180);
+  const latitudeScale = 110540;
+  let twiceArea = 0;
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    twiceArea += ring[index][0] * longitudeScale * (ring[index + 1][1] * latitudeScale) - ring[index + 1][0] * longitudeScale * (ring[index][1] * latitudeScale);
+  }
+  return Math.abs(twiceArea) / 2;
+}
+function mobileMapNormalizePosition(value) {
+  if (!Array.isArray(value) || value.length < 2) throw new Error("invalid_position");
+  const longitude = Number(value[0]);
+  const latitude = Number(value[1]);
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180 || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new Error("invalid_position");
+  return [Number(longitude.toFixed(7)), Number(latitude.toFixed(7))];
+}
+function mobileMapNormalizeRing(value, anchor, state) {
+  if (!Array.isArray(value) || value.length < 4) throw new Error("invalid_ring");
+  const ring = value.map(mobileMapNormalizePosition);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) throw new Error("open_ring");
+  for (let index = 1; index < ring.length; index += 1) {
+    if (ring[index][0] === ring[index - 1][0] && ring[index][1] === ring[index - 1][1]) throw new Error("duplicate_position");
+  }
+  const unique = new Set(ring.slice(0, -1).map((position) => position.join(",")));
+  if (unique.size < 3 || mobileMapRingSelfIntersects(ring) || mobileMapRingAreaSquareMeters(ring) < 0.1) throw new Error("invalid_ring");
+  ring.forEach((position) => {
+    state.vertices += 1;
+    if (state.vertices > MOBILE_MAP_MAX_VERTICES || mobileMapDistanceMeters(anchor, position) > MOBILE_MAP_MAX_DISTANCE_METERS) throw new Error("geometry_limits");
+  });
+  return ring;
+}
+function mobileMapNormalizeGeometry(value, anchor, state) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !["Polygon", "MultiPolygon"].includes(String(value.type || ""))) throw new Error("invalid_geometry");
+  const normalizePolygon = (polygon) => {
+    if (!Array.isArray(polygon) || !polygon.length) throw new Error("invalid_polygon");
+    const rings = polygon.map((ring) => mobileMapNormalizeRing(ring, anchor, state));
+    for (let holeIndex = 1; holeIndex < rings.length; holeIndex += 1) {
+      if (mobileMapRingsIntersect(rings[0], rings[holeIndex]) || !mobileMapPositionInsideRing(rings[holeIndex][0], rings[0])) throw new Error("invalid_hole");
+      for (let otherHoleIndex = 1; otherHoleIndex < holeIndex; otherHoleIndex += 1) {
+        if (mobileMapRingsIntersect(rings[holeIndex], rings[otherHoleIndex]) || mobileMapPositionInsideRing(rings[holeIndex][0], rings[otherHoleIndex]) || mobileMapPositionInsideRing(rings[otherHoleIndex][0], rings[holeIndex])) throw new Error("overlapping_holes");
+      }
+    }
+    state.area += Math.max(0, mobileMapRingAreaSquareMeters(rings[0]) - rings.slice(1).reduce((sum, ring) => sum + mobileMapRingAreaSquareMeters(ring), 0));
+    if (state.area > state.maxArea) throw new Error("geometry_area_limit");
+    return rings;
+  };
+  const coordinates = value.type === "Polygon" ? normalizePolygon(value.coordinates) : Array.isArray(value.coordinates) && value.coordinates.length ? value.coordinates.map(normalizePolygon) : (() => {
+    throw new Error("invalid_multipolygon");
+  })();
+  return { type: value.type, coordinates };
+}
+function mobileMapSafeLocalId(feature, index, prefix) {
+  return String(feature?.id || feature?.properties?.local_id || "").replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 120) || `${prefix}:${index + 1}`;
+}
+function mobileMapSafeCollection(value, object, kind) {
+  if (!mobileMapPayloadConfigured(value)) return { value: null, invalid: false };
+  try {
+    const text = JSON.stringify(value);
+    if (new TextEncoder().encode(text).byteLength > MOBILE_MAP_MAX_BYTES) throw new Error("payload_too_large");
+    const latitude = Number(object?.latitude);
+    const longitude = Number(object?.longitude);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error("missing_anchor");
+    const rawFeatures = mobileMapFeatures(value);
+    const isCollection = value?.type === "FeatureCollection" && Array.isArray(value.features);
+    if (!rawFeatures.length && !isCollection) throw new Error("invalid_collection");
+    const maxFeatures = kind === "building" ? MOBILE_MAP_MAX_FEATURES_BUILDING : MOBILE_MAP_MAX_FEATURES_TERRAIN;
+    if (rawFeatures.length > maxFeatures) throw new Error("too_many_features");
+    const state = {
+      vertices: 0,
+      area: 0,
+      maxArea: kind === "building" ? MOBILE_MAP_MAX_BUILDING_AREA_SQM : MOBILE_MAP_MAX_TERRAIN_AREA_SQM
+    };
+    const features = rawFeatures.map((feature, index) => {
+      const rawGeometry = feature?.type === "Feature" ? feature.geometry : feature;
+      let properties;
+      if (kind === "building" && feature?.properties?.source === "pdok_bag") {
+        const sourceFeatureId = String(feature.properties.source_feature_id || feature.id || "").trim();
+        const sourceStatus = String(feature.properties.source_status || "").trim().slice(0, 120);
+        if (!sourceFeatureId || sourceFeatureId.length > 120 || !/^[a-zA-Z0-9_-]+$/.test(sourceFeatureId) || !sourceStatus || ["gesloopt", "ten onrechte", "ingetrokken", "niet gerealiseerd"].some((term) => sourceStatus.toLowerCase().includes(term))) throw new Error("invalid_pdok_source");
+        const sourceRetrievedAt = String(feature.properties.source_retrieved_at || "").trim();
+        properties = {
+          source: "pdok_bag",
+          source_feature_id: sourceFeatureId,
+          source_identificatie: String(feature.properties.source_identificatie || "").trim().slice(0, 80) || null,
+          source_status: sourceStatus,
+          source_retrieved_at: Number.isFinite(Date.parse(sourceRetrievedAt)) ? new Date(sourceRetrievedAt).toISOString() : null
+        };
+      } else {
+        const source = kind === "building" ? "manual" : "user_drawn";
+        properties = { source, local_id: mobileMapSafeLocalId(feature, index, source) };
+      }
+      return {
+        type: "Feature",
+        id: mobileMapSafeLocalId(feature, index, kind),
+        properties,
+        geometry: mobileMapNormalizeGeometry(rawGeometry, [longitude, latitude], state)
+      };
+    });
+    const collection = features.length ? { type: "FeatureCollection", features } : null;
+    if (collection && new TextEncoder().encode(JSON.stringify(collection)).byteLength > MOBILE_MAP_MAX_BYTES) throw new Error("payload_too_large");
+    return { value: collection, invalid: false };
+  } catch {
+    return { value: null, invalid: true };
+  }
+}
+function mobileSafeMapState(object) {
+  const building = mobileMapSafeCollection(object?.building_polygon_geojson, object, "building");
+  const terrain = mobileMapSafeCollection(object?.object_area_geojson, object, "terrain");
+  const invalid = building.invalid || terrain.invalid;
+  return {
+    building_polygon_geojson: building.value,
+    object_area_geojson: terrain.value,
+    building_selection_mode: mobileBuildingSelectionMode(object),
+    map_geometry_status: invalid ? "needs_review" : mobileMapGeometryStatus(object),
+    invalid
+  };
+}
+async function requireMobilePersonnel(base44, user) {
+  if (isPrivileged2(user)) return null;
+  const linked = await base44.asServiceRole.entities.Personnel.filter({ linked_user_id: user.id });
+  if (linked.length !== 1) {
+    throw mobileMapHttpError(403, "Gebruikersaccount is niet eenduidig aan een actieve medewerker gekoppeld", "mobile_personnel_link_required");
+  }
+  const employee = linked[0];
+  if (String(employee.status || "").toLowerCase() !== "active") {
+    throw mobileMapHttpError(403, "Het gekoppelde medewerkersaccount is niet actief", "mobile_personnel_inactive");
+  }
+  return employee;
+}
+async function requireAuthorizedMobileRoute(base44, user, routeExecutionId, employee = void 0) {
+  const routeId = String(routeExecutionId || "").trim();
+  if (!routeId || routeId.length > 180) throw mobileMapHttpError(400, "route_execution_id is ongeldig", "mobile_route_id_invalid");
+  const resolvedEmployee = employee === void 0 ? await requireMobilePersonnel(base44, user) : employee;
+  const routes = await base44.asServiceRole.entities.RouteExecution.filter({ id: routeId });
+  const route = routes[0] || null;
+  if (!route) throw mobileMapHttpError(404, "Route-uitvoering niet gevonden", "mobile_route_not_found");
+  if (!isPrivileged2(user) && (!resolvedEmployee || String(route.employee_id || "") !== String(resolvedEmployee.id))) {
+    throw mobileMapHttpError(403, "Geen toegang tot deze route-uitvoering", "mobile_route_forbidden");
+  }
+  return { route, employee: resolvedEmployee };
+}
 function statusForObject(objectId, tasks) {
   const items = tasks.filter((task) => String(task.object_id) === String(objectId));
   if (!items.length) return { map_status: "customer", open_task_count: 0, has_task_in_current_route: false, is_next_task_object: false };
@@ -1020,23 +1263,34 @@ async function handleMobileObjectsMap(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
+    const employee = await requireMobilePersonnel(base44, user);
+    const authorizedRoute = body.route_execution_id
+      ? (await requireAuthorizedMobileRoute(base44, user, body.route_execution_id, employee)).route
+      : null;
     const [objects, tasks, floorPlans] = await Promise.all([
       base44.asServiceRole.entities.SurveillanceObject.list(),
-      body.route_execution_id ? base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: body.route_execution_id }) : Promise.resolve([]),
+      authorizedRoute ? base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: authorizedRoute.id }) : Promise.resolve([]),
       base44.asServiceRole.entities.ObjectFloorPlan.filter({ is_current: true, status: "published" })
     ]);
     const floorPlanByObjectId = new Map(floorPlans.map((fp) => [String(fp.object_id), fp]));
     return Response.json({
-      objects: objects.filter((object) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false).map((object) => {
+      objects: objects.map((object) => ({ object, geometryState: mobileSafeMapState(object) })).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => {
         const fp = floorPlanByObjectId.get(String(object.id));
+        const taskMapState = statusForObject(object.id, tasks);
         return {
           object_id: object.id,
           name: object.name,
           latitude: safeNumber2(object.latitude),
           longitude: safeNumber2(object.longitude),
           address: object.address || null,
-          ...statusForObject(object.id, tasks),
-          building_polygon_geojson: object.building_polygon_geojson || null,
+          ...taskMapState,
+          building_selection_mode: geometryState.building_selection_mode,
+          map_geometry_status: geometryState.map_geometry_status,
+          map_geometry_revision: mobileMapGeometryRevision(object),
+          map_geometry_hash: object.map_geometry_hash || null,
+          building_polygon_geojson: geometryState.building_polygon_geojson,
+          object_area_geojson: taskMapState.has_task_in_current_route ? geometryState.object_area_geojson : null,
+          mobile_map_priority: Number(object.mobile_map_priority || 0),
           floor_plan_summary: fp ? {
             floor_plan_id: fp.id,
             revision: fp.revision,
@@ -1048,7 +1302,7 @@ async function handleMobileObjectsMap(req) {
       }).filter((object) => object.latitude !== null && object.longitude !== null)
     });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message, code: error.code || null }, { status: Number(error.status) || 500 });
   }
 }
 
@@ -1133,42 +1387,54 @@ async function audit(base44, action, route, body) {
     app_version: body?.app_version || null
   });
 }
+async function executeMobileRouteAction(base44, user, body) {
+  const routeId = String(body?.route_execution_id || "").trim();
+  const action = String(body?.action || "").trim();
+  if (!routeId || !action) throw mobileMapHttpError(400, "route_execution_id en action zijn verplicht");
+  if (!["downloaded", "start", "complete", "pause", "cancel"].includes(action)) {
+    throw mobileMapHttpError(400, "Onbekende route-actie");
+  }
+  const employee = await requireMobilePersonnel(base44, user);
+  const { route } = await requireAuthorizedMobileRoute(base44, user, routeId, employee);
+  const patch = { last_mobile_sync_at: nowIso4() };
+  if (action === "downloaded") {
+    patch.status = route.status === "planned" ? "downloaded" : route.status;
+    patch.downloaded_by_employee_at = body.downloaded_at || nowIso4();
+  }
+  if (action === "start") {
+    patch.status = "active";
+    patch.actual_started_at = body.timestamp || nowIso4();
+  }
+  if (action === "complete") {
+    const tasks = await base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: route.id });
+    const openTasks = tasks.filter((task) => !["completed", "skipped"].includes(task.status));
+    if (openTasks.length && !body.force_complete) {
+      const error = mobileMapHttpError(409, "Er staan nog open taken in deze route");
+      error.open_task_count = openTasks.length;
+      throw error;
+    }
+    patch.status = "completed";
+    patch.actual_completed_at = body.timestamp || nowIso4();
+  }
+  if (action === "pause") patch.status = "paused";
+  if (action === "cancel") patch.status = "cancelled";
+  const updated = await base44.asServiceRole.entities.RouteExecution.update(route.id, patch);
+  await audit(base44, action === "downloaded" ? "route_downloaded" : `route_${action}ed`, route, body);
+  return { route_execution: updated, server_time: nowIso4() };
+}
 async function handleMobileRouteAction(req) {
   try {
     const base44 = createClientFromRequest6(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
-    const routeId = body.route_execution_id;
-    const action = body.action;
-    if (!routeId || !action) return Response.json({ error: "route_execution_id en action zijn verplicht" }, { status: 400 });
-    const routes = await base44.asServiceRole.entities.RouteExecution.filter({ id: routeId });
-    const route = routes[0];
-    if (!route) return Response.json({ error: "RouteExecution niet gevonden" }, { status: 404 });
-    const patch = { last_mobile_sync_at: nowIso4() };
-    if (action === "downloaded") {
-      patch.status = route.status === "planned" ? "downloaded" : route.status;
-      patch.downloaded_by_employee_at = body.downloaded_at || nowIso4();
-    }
-    if (action === "start") {
-      patch.status = "active";
-      patch.actual_started_at = body.timestamp || nowIso4();
-    }
-    if (action === "complete") {
-      const tasks = await base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: routeId });
-      const openTasks = tasks.filter((task) => !["completed", "skipped"].includes(task.status));
-      if (openTasks.length && !body.force_complete) return Response.json({ error: "Er staan nog open taken in deze route", open_task_count: openTasks.length }, { status: 409 });
-      patch.status = "completed";
-      patch.actual_completed_at = body.timestamp || nowIso4();
-    }
-    if (!["downloaded", "start", "complete", "pause", "cancel"].includes(action)) return Response.json({ error: "Onbekende route-actie" }, { status: 400 });
-    if (action === "pause") patch.status = "paused";
-    if (action === "cancel") patch.status = "cancelled";
-    const updated = await base44.asServiceRole.entities.RouteExecution.update(routeId, patch);
-    await audit(base44, action === "downloaded" ? "route_downloaded" : `route_${action}ed`, route, body);
-    return Response.json({ route_execution: updated, server_time: nowIso4() });
+    return Response.json(await executeMobileRouteAction(base44, user, body));
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({
+      error: error.message,
+      code: error.code || null,
+      ...(Number.isInteger(error.open_task_count) ? { open_task_count: error.open_task_count } : {})
+    }, { status: Number(error.status) || 500 });
   }
 }
 
@@ -1189,26 +1455,22 @@ function safeNumber3(value) {
   return Number.isFinite(n) ? n : null;
 }
 async function findEmployee(base44, user) {
-  const linkedByUserId = await base44.asServiceRole.entities.Personnel.filter({ linked_user_id: user.id });
-  if (linkedByUserId.length > 0) return linkedByUserId[0];
-  const byEmail = await base44.asServiceRole.entities.Personnel.filter({ email: user.email });
-  if (byEmail.length > 0) return byEmail[0];
-  const byLoginEmail = await base44.asServiceRole.entities.Personnel.filter({ login_email: user.email });
-  if (byLoginEmail.length > 0) return byLoginEmail[0];
-  const all = await base44.asServiceRole.entities.Personnel.list();
-  return all.find((p) => String(p.name || "").toLowerCase() === String(user.full_name || "").toLowerCase()) || null;
+  return requireMobilePersonnel(base44, user);
 }
-async function getRouteExecution(base44, user, body) {
+async function getRouteExecution(base44, user, body, employee) {
   if (body.route_execution_id) {
-    const matches = await base44.asServiceRole.entities.RouteExecution.filter({ id: body.route_execution_id });
-    return matches[0] || null;
+    return (await requireAuthorizedMobileRoute(base44, user, body.route_execution_id, employee)).route;
   }
-  const employee = await findEmployee(base44, user);
   const date = body.date || todayIso();
-  let executions = await base44.asServiceRole.entities.RouteExecution.filter({ service_date: date });
+  const routeQuery = {
+    service_date: date,
+    ...(!isPrivileged2(user) ? { employee_id: employee?.id } : {}),
+    ...(isPrivileged2(user) && body.employee_id ? { employee_id: body.employee_id } : {})
+  };
+  let executions = await base44.asServiceRole.entities.RouteExecution.filter(routeQuery);
   executions = executions.filter((route) => ["planned", "downloaded", "active", "paused"].includes(route.status));
   if (body.vehicle_id) executions = executions.filter((route) => String(route.vehicle_id || "") === String(body.vehicle_id));
-  if (employee && !isPrivileged2(user)) executions = executions.filter((route) => String(route.employee_id || "") === String(employee.id));
+  if (!isPrivileged2(user)) executions = executions.filter((route) => String(route.employee_id || "") === String(employee?.id || ""));
   if (isPrivileged2(user) && body.employee_id) executions = executions.filter((route) => String(route.employee_id || "") === String(body.employee_id));
   return executions.sort((a, b) => String(a.shift_start_time || "").localeCompare(String(b.shift_start_time || "")))[0] || null;
 }
@@ -1280,15 +1542,19 @@ async function buildPackage(base44, routeExecution) {
       report_template_id: taskTemplateId(templates, task.task_type)
     };
   });
-  const objectsOnMap = objects.filter((object) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false).map((object) => ({
+  const objectsOnMap = objects.map((object) => ({ object, geometryState: mobileSafeMapState(object) })).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => ({
     object_id: object.id,
     name: object.name,
     latitude: safeNumber3(object.latitude),
     longitude: safeNumber3(object.longitude),
     address: object.address || null,
     ...mapStatus(object.id, sortedTasks),
-    building_polygon_geojson: object.building_polygon_geojson || null,
-    object_area_geojson: object.object_area_geojson || null,
+    building_selection_mode: geometryState.building_selection_mode,
+    map_geometry_status: geometryState.map_geometry_status,
+    map_geometry_revision: mobileMapGeometryRevision(object),
+    map_geometry_hash: object.map_geometry_hash || null,
+    building_polygon_geojson: geometryState.building_polygon_geojson,
+    object_area_geojson: relevantObjectIds.has(String(object.id)) ? geometryState.object_area_geojson : null,
     mobile_map_priority: Number(object.mobile_map_priority || 0),
     floor_plan_summary: (() => {
       const fp = floorPlanByObjectId.get(String(object.id));
@@ -1323,17 +1589,14 @@ async function handleMobileRoutePackage(req) {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
-    const routeExecution = await getRouteExecution(base44, user, body || {});
-    if (!routeExecution) return Response.json({ error: "Geen actieve of geplande route gevonden" }, { status: 404 });
     const employee = await findEmployee(base44, user);
-    if (!isPrivileged2(user) && employee && String(routeExecution.employee_id || "") !== String(employee.id)) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const routeExecution = await getRouteExecution(base44, user, body || {}, employee);
+    if (!routeExecution) return Response.json({ error: "Geen actieve of geplande route gevonden" }, { status: 404 });
     const routePackage = await buildPackage(base44, routeExecution);
     await base44.asServiceRole.entities.RouteExecution.update(routeExecution.id, { mobile_route_package_cache: routePackage, last_mobile_sync_at: nowIso5() });
     return Response.json(routePackage);
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message, code: error.code || null }, { status: Number(error.status) || 500 });
   }
 }
 

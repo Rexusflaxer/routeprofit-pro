@@ -1,7 +1,7 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ObjectOperationsDialog } from "@/components/objects/ObjectRecordDialogs";
+import { ObjectOperationsDialog, ObjectStatusDialog } from "@/components/objects/ObjectRecordDialogs";
 
 const activeObject = {
   id: "object-1",
@@ -13,6 +13,14 @@ const activeObject = {
   show_on_mobile_map: false,
   mobile_map_priority: 0,
 };
+const overlapError = Object.assign(new Error("Gebouw is al gekoppeld"), {
+  status: 409,
+  details: {
+    code: "building_assignment_overlap_confirmation_required",
+    conflict_fingerprint: "e".repeat(64),
+    conflicts: [{ source_feature_id: "bag-1", objects: [{ object_id: "other-1", object_name: "Andere huurder" }] }],
+  },
+});
 
 function renderOperationsDialog(object = activeObject, overrides = {}) {
   const props = {
@@ -82,5 +90,91 @@ describe("ObjectOperationsDialog", () => {
     expect(props.onSave).toHaveBeenCalledWith(expect.objectContaining({
       mobile_map_priority: String(priority),
     }));
+  });
+
+  it("toont na een overlapfout een verplichte reden en retryt mobiele kaartinschakeling", () => {
+    const onSave = vi.fn();
+    const baseProps = {
+      object: activeObject,
+      open: true,
+      onOpenChange: vi.fn(),
+      onSave,
+      saving: false,
+    };
+    const { rerender } = render(<ObjectOperationsDialog {...baseProps} error={null} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Zichtbaar op mobiele objectkaart" }));
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ show_on_mobile_map: true }));
+
+    rerender(<ObjectOperationsDialog {...baseProps} error={overlapError} />);
+    expect(screen.getByText("Gedeeld gebouw bevestigen")).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "Bevestigen en opnieuw opslaan" });
+    expect(retry).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reden voor gedeeld gebouw *"), { target: { value: "ab" } });
+    expect(screen.getByText("Vul minimaal 3 tekens in.")).toBeInTheDocument();
+    expect(retry).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reden voor gedeeld gebouw *"), { target: { value: "Gedeelde bedrijfshal" } });
+    fireEvent.click(retry);
+
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ show_on_mobile_map: true }),
+      { confirmed: true, reason: "Gedeelde bedrijfshal", conflict_fingerprint: "e".repeat(64) },
+    );
+  });
+});
+
+describe("ObjectStatusDialog", () => {
+  it("retryt activeren met dezelfde zichtbare overlapbevestiging", () => {
+    const onConfirm = vi.fn();
+    const baseProps = {
+      object: { ...activeObject, status: "inactive" },
+      targetStatus: "active",
+      open: true,
+      onOpenChange: vi.fn(),
+      onConfirm,
+      saving: false,
+    };
+    const { rerender } = render(<ObjectStatusDialog {...baseProps} error={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Bevestigen" }));
+    expect(onConfirm).toHaveBeenLastCalledWith("");
+
+    rerender(<ObjectStatusDialog {...baseProps} error={overlapError} />);
+    expect(screen.getByText("Gedeeld gebouw bevestigen")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Reden voor gedeeld gebouw *"), { target: { value: "Gedeeld verzamelgebouw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Bevestigen en opnieuw proberen" }));
+
+    expect(onConfirm).toHaveBeenLastCalledWith("", {
+      confirmed: true,
+      reason: "Gedeeld verzamelgebouw",
+      conflict_fingerprint: "e".repeat(64),
+    });
+  });
+
+  it("laat een overlap zonder vingerafdruk alleen veilig opnieuw proberen", () => {
+    const onSave = vi.fn();
+    renderOperationsDialog(activeObject, {
+      onSave,
+      error: Object.assign(new Error("Bevestiging verouderd"), {
+        status: 409,
+        details: { code: "building_assignment_overlap_confirmation_required" },
+      }),
+    });
+
+    expect(screen.getByText(/kon niet veilig worden voorbereid/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Opnieuw proberen" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ show_on_mobile_map: false }));
+  });
+
+  it("wist de conflictvingerafdruk zodra de operationele configuratie verandert", () => {
+    const onSave = vi.fn();
+    renderOperationsDialog(activeObject, { onSave, error: overlapError });
+    expect(screen.getByLabelText("Reden voor gedeeld gebouw *")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Kaartprioriteit" }), { target: { value: "12" } });
+
+    expect(screen.queryByLabelText("Reden voor gedeeld gebouw *")).not.toBeInTheDocument();
+    expect(screen.getByText(/kon niet veilig worden voorbereid/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Opnieuw proberen" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mobile_map_priority: "12" }));
   });
 });
