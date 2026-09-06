@@ -114,6 +114,8 @@ describe("objectHasCoordinates", () => {
     expect(objectHasCoordinates({ latitude: "", longitude: " " })).toBe(false);
     expect(objectHasCoordinates({ latitude: 91, longitude: 4.9 })).toBe(false);
     expect(objectHasCoordinates({ latitude: 52.37, longitude: 4.9 })).toBe(true);
-    expect(objectHasCoordinates({ latitude: 0, longitude: 0 })).toBe(true);
+    expect(objectHasCoordinates({ latitude: 0, longitude: 0 })).toBe(false);
+    expect(objectHasCoordinates({ latitude: 0, longitude: 4.9 })).toBe(true);
+    expect(objectHasCoordinates({ latitude: 52.37, longitude: 0 })).toBe(true);
   });
 });

@@ -46,13 +46,32 @@ function r2(n) {
   return Math.round((n || 0) * 100) / 100;
 }
 
+function strictNumber(value) {
+  if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeCoordinatePair(latitudeValue, longitudeValue) {
+  const latitude = strictNumber(latitudeValue);
+  const longitude = strictNumber(longitudeValue);
+  if (
+    latitude === null || latitude < -90 || latitude > 90 ||
+    longitude === null || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) return null;
+  return { latitude, longitude };
+}
+
 function fixCoords(obj) {
-  if (!obj) return obj;
-  const lat = Number(obj.latitude);
-  const lng = Number(obj.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return obj;
-  if (lat < lng && lng > 40) return { ...obj, latitude: lng, longitude: lat };
-  return { ...obj, latitude: lat, longitude: lng };
+  if (!obj) return null;
+  const latitude = strictNumber(obj.latitude);
+  const longitude = strictNumber(obj.longitude);
+  if (latitude === null || longitude === null) return null;
+  const coordinates = latitude !== 0 && longitude !== 0 && latitude < longitude && longitude > 40
+    ? normalizeCoordinatePair(longitude, latitude)
+    : normalizeCoordinatePair(latitude, longitude);
+  return coordinates ? { ...obj, ...coordinates } : null;
 }
 
 function haversineKm(lat1, lng1, lat2, lng2) {
@@ -64,15 +83,17 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 }
 
 async function getTravelTime(from, to, apiKey, cache) {
-  if (!from?.latitude || !from?.longitude || !to?.latitude || !to?.longitude) {
+  const normalizedFrom = fixCoords(from);
+  const normalizedTo = fixCoords(to);
+  if (!normalizedFrom || !normalizedTo) {
     return { travelMinutes: 0, distanceKm: 0, estimated: true, status: 'missing_coordinates' };
   }
 
-  const key = `${r2(from.latitude)},${r2(from.longitude)}->${r2(to.latitude)},${r2(to.longitude)}`;
+  const key = `${r2(normalizedFrom.latitude)},${r2(normalizedFrom.longitude)}->${r2(normalizedTo.latitude)},${r2(normalizedTo.longitude)}`;
   if (cache.has(key)) return cache.get(key);
 
   try {
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${from.latitude},${from.longitude}&destination=${to.latitude},${to.longitude}&key=${apiKey}`;
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${normalizedFrom.latitude},${normalizedFrom.longitude}&destination=${normalizedTo.latitude},${normalizedTo.longitude}&key=${apiKey}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.status === 'OK' && data.routes?.length > 0) {
@@ -90,7 +111,7 @@ async function getTravelTime(from, to, apiKey, cache) {
     console.warn('Google Maps travel fallback:', error.message);
   }
 
-  const km = haversineKm(from.latitude, from.longitude, to.latitude, to.longitude);
+  const km = haversineKm(normalizedFrom.latitude, normalizedFrom.longitude, normalizedTo.latitude, normalizedTo.longitude);
   const result = { travelMinutes: Math.max(1, Math.round(km * 1.4)), distanceKm: r2(km * 1.3), estimated: true, status: 'estimated' };
   cache.set(key, result);
   return result;
@@ -234,7 +255,8 @@ function getTaskAreaKey(task) {
   const knownAreas = ['kampen', 'zwolle', 'hattem', 'heerde', 'wapenveld', 'wezep', 'ijsselmuiden'];
   const matched = knownAreas.find(area => text.includes(area));
   if (matched) return matched;
-  if (Number.isFinite(Number(task.latitude)) && Number.isFinite(Number(task.longitude))) return distanceClusterKey(task);
+  const coordinates = fixCoords(task);
+  if (coordinates) return distanceClusterKey(coordinates);
   return 'onbekend';
 }
 
@@ -360,35 +382,37 @@ function prepareTaskInstances(tasks, objects, collectiefs, weekday) {
     if (task.collectief_id && task.selected_object_ids?.length > 0) {
       const durationPerObject = Math.max(1, Math.round((task.duration_minutes || 15) / task.selected_object_ids.length));
       for (const objectId of task.selected_object_ids) {
-        const obj = fixCoords(objects.find(o => o.id === objectId));
+        const sourceObject = objects.find(o => o.id === objectId);
+        const obj = fixCoords(sourceObject);
         instances.push({
           ...base,
           id: `${task.id}_${objectId}`,
           object_id: objectId,
-          name: obj?.name || 'Onbekend object',
-          address: obj?.address || '',
-          latitude: obj?.latitude || null,
-          longitude: obj?.longitude || null,
+          name: sourceObject?.name || 'Onbekend object',
+          address: sourceObject?.address || '',
+          latitude: obj?.latitude ?? null,
+          longitude: obj?.longitude ?? null,
           duration_minutes: durationPerObject,
           is_collectief: true,
           parent_task_id: task.id,
-          missing_coords: !obj?.latitude || !obj?.longitude,
+          missing_coords: !obj,
         });
       }
       continue;
     }
 
     if (task.object_id) {
-      const obj = fixCoords(objects.find(o => o.id === task.object_id));
+      const sourceObject = objects.find(o => o.id === task.object_id);
+      const obj = fixCoords(sourceObject);
       instances.push({
         ...base,
         id: task.id,
         object_id: task.object_id,
-        name: obj?.name || task.task_type || 'Onbekend object',
-        address: obj?.address || '',
-        latitude: obj?.latitude || null,
-        longitude: obj?.longitude || null,
-        missing_coords: !obj?.latitude || !obj?.longitude,
+        name: sourceObject?.name || task.task_type || 'Onbekend object',
+        address: sourceObject?.address || '',
+        latitude: obj?.latitude ?? null,
+        longitude: obj?.longitude ?? null,
+        missing_coords: !obj,
       });
     }
   }
@@ -535,7 +559,7 @@ function validateRouteRun(route, vehicleCount) {
   if (route.route_end_minute <= route.route_start_minute) errors.push('route heeft geen realistische eindtijd');
   if (route.stats.total_route_minutes < route.stats.total_travel_minutes + route.stats.total_service_minutes) errors.push('route is korter dan reistijd + taaktijd');
   for (const task of route.tasks || []) {
-    if (!task.latitude || !task.longitude) errors.push(`${task.name}: ontbrekende coördinaten`);
+    if (!fixCoords(task)) errors.push(`${task.name}: ontbrekende coördinaten`);
     if ((task._waitTime || 0) < 0) errors.push(`${task.name}: negatieve wachttijd`);
     if (task._actualStart < task._windowStart) errors.push(`${task.name}: start vóór tijdvenster`);
     if (task._departureTime > task._windowEnd) errors.push(`${task.name}: eindigt na tijdvenster`);
@@ -818,6 +842,14 @@ function buildManualRouteStates(manualRoutes, vehicles, objects, offices) {
   });
 }
 
+function assertManualRouteDepots(routeStates) {
+  const invalidRoute = routeStates.find(route => !fixCoords(route.startDepot) || !fixCoords(route.endDepot));
+  if (invalidRoute) {
+    throw new Error(`Geen bruikbare start- of eindlocatie voor ${invalidRoute.name || 'een route'}. Controleer de depotcoördinaten.`);
+  }
+  return routeStates;
+}
+
 function hasVehicleOverlap(routes) {
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
@@ -984,6 +1016,7 @@ async function repairUnassignedTasks(routeStates, unassigned, apiKey, travelCach
 
 async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, vehicles, objects, offices, apiKey, travelCache, weekday, settings) {
   let routeStates = buildManualRouteStates(manualRoutes, vehicles, objects, offices);
+  assertManualRouteDepots(routeStates);
   const missingCoordTasks = taskInstances.filter(t => t.missing_coords).map(t => ({
     ...t,
     primaryReason: 'missing_coordinates',
@@ -1157,6 +1190,7 @@ async function generateManualRoutePlanningAdvice(unassignedTasks, existingRoutes
 
 async function runGlobalFleetOptimizer(taskInstances, vehicles, offices, apiKey, travelCache, weekday, settings) {
   const depot = fixCoords(offices[0]);
+  if (!depot) throw new Error('Geen bruikbare depotcoördinaten gevonden. Controleer het kantooradres.');
   const missingCoordTasks = taskInstances.filter(t => t.missing_coords).map(t => ({
     ...t,
     primaryReason: 'missing_coordinates',
@@ -1456,3 +1490,12 @@ Deno.serve(async (req) => {
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
+
+export {
+  assertManualRouteDepots,
+  buildManualRouteStates,
+  fixCoords,
+  getTravelTime,
+  normalizeCoordinatePair,
+  prepareTaskInstances,
+};

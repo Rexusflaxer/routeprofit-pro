@@ -85,13 +85,32 @@ async function withRateLimitRetry(action, retries = 4) {
   }
 }
 
+function strictNumber(value) {
+  if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeCoordinatePair(latitudeValue, longitudeValue) {
+  const latitude = strictNumber(latitudeValue);
+  const longitude = strictNumber(longitudeValue);
+  if (
+    latitude === null || latitude < -90 || latitude > 90 ||
+    longitude === null || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) return null;
+  return { latitude, longitude };
+}
+
 function fixCoords(obj) {
-  if (!obj) return obj;
-  const lat = Number(obj.latitude);
-  const lng = Number(obj.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return obj;
-  if (lat < lng && lng > 40) return { ...obj, latitude: lng, longitude: lat };
-  return { ...obj, latitude: lat, longitude: lng };
+  if (!obj) return null;
+  const latitude = strictNumber(obj.latitude);
+  const longitude = strictNumber(obj.longitude);
+  if (latitude === null || longitude === null) return null;
+  const coordinates = latitude !== 0 && longitude !== 0 && latitude < longitude && longitude > 40
+    ? normalizeCoordinatePair(longitude, latitude)
+    : normalizeCoordinatePair(latitude, longitude);
+  return coordinates ? { ...obj, ...coordinates } : null;
 }
 
 function dateForWeekday(weekday) {
@@ -229,7 +248,8 @@ function prepareTaskInstances(tasks, objects, weekday) {
     };
 
     const addInstance = (objectId, idSuffix = '') => {
-      const obj = fixCoords(objects.find(o => o.id === objectId));
+      const sourceObject = objects.find(o => o.id === objectId);
+      const obj = fixCoords(sourceObject);
       for (const repeatWindow of repeatWindows) {
         const repeatSuffix = repeatWindows.length > 1 ? `_r${repeatWindow.index}` : '';
         const splitCount = base.allow_split ? base.split_part_count : 1;
@@ -245,8 +265,8 @@ function prepareTaskInstances(tasks, objects, weekday) {
             split_index: splitIndex,
             split_part_count: splitCount,
           };
-          if (!obj?.latitude || !obj?.longitude) {
-            skipped.push({ ...instanceBase, id: `${task.id}${idSuffix}${repeatSuffix}${splitSuffix}`, task_id: task.id, name: obj?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende coördinaten bij het object.' });
+          if (!obj) {
+            skipped.push({ ...instanceBase, id: `${task.id}${idSuffix}${repeatSuffix}${splitSuffix}`, task_id: task.id, name: sourceObject?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende of ongeldige coördinaten bij het object.' });
             return;
           }
           instances.push({
@@ -322,6 +342,16 @@ function buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices) {
   });
 }
 
+function assertPlanningVehicleDepots(vehicles) {
+  const invalidVehicle = vehicles.find(vehicle =>
+    !fixCoords(vehicle?._startDepot) || !fixCoords(vehicle?._endDepot)
+  );
+  if (invalidVehicle) {
+    throw new Error(`Geen bruikbare start- of eindlocatie voor ${invalidVehicle._planningLabel || invalidVehicle.name || 'een route'}. Controleer de depotcoördinaten.`);
+  }
+  return vehicles;
+}
+
 function buildTaskTimeWindows(date, start, end, globalStart, globalEnd) {
   const candidates = [
     { start, end },
@@ -334,6 +364,7 @@ function buildTaskTimeWindows(date, start, end, globalStart, globalEnd) {
 }
 
 function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) {
+  assertPlanningVehicleDepots(vehicles);
   const date = dateForWeekday(weekday);
   const shipmentStarts = taskInstances.map(task => parseTime(task.time_window_start) ?? 0);
   const shipmentEnds = taskInstances.map(task => {
@@ -345,6 +376,8 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
   const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds);
 
   const shipments = taskInstances.map((task, index) => {
+    const coordinates = fixCoords(task);
+    if (!coordinates) throw new Error(`Geen bruikbare coördinaten voor ${task.name || task.id || 'een taak'}.`);
     const start = parseTime(task.time_window_start) ?? 0;
     let end = task.use_arrival_deadline ? start + 1 : (parseTime(task.time_window_end) ?? 1439);
     if (end <= start) end += 1440;
@@ -353,22 +386,29 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
       label: task.id,
       penaltyCost: 1000000,
       deliveries: [{
-        arrivalLocation: { latitude: task.latitude, longitude: task.longitude },
+        arrivalLocation: { latitude: coordinates.latitude, longitude: coordinates.longitude },
         duration: `${Math.max(1, task.duration_minutes || 1) * 60}s`,
         timeWindows: buildTaskTimeWindows(date, start, end, globalStart, globalEnd),
       }],
     };
   });
 
-  const googleVehicles = vehicles.map((vehicle, index) => ({
-    label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
-    startLocation: { latitude: vehicle._startDepot.latitude, longitude: vehicle._startDepot.longitude },
-    endLocation: { latitude: vehicle._endDepot.latitude, longitude: vehicle._endDepot.longitude },
-    startTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
-    endTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
-    costPerKilometer: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? 0.35),
-    costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
-  }));
+  const googleVehicles = vehicles.map((vehicle, index) => {
+    const startCoordinates = fixCoords(vehicle._startDepot);
+    const endCoordinates = fixCoords(vehicle._endDepot);
+    if (!startCoordinates || !endCoordinates) {
+      throw new Error(`Geen bruikbare start- of eindlocatie voor ${vehicle._planningLabel || vehicle.name || 'een route'}.`);
+    }
+    return {
+      label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
+      startLocation: { latitude: startCoordinates.latitude, longitude: startCoordinates.longitude },
+      endLocation: { latitude: endCoordinates.latitude, longitude: endCoordinates.longitude },
+      startTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
+      endTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
+      costPerKilometer: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? 0.35),
+      costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
+    };
+  });
 
 
   return {
@@ -397,8 +437,10 @@ function taskWindowCandidates(task) {
 }
 
 function sameLocation(a, b) {
-  if (!a || !b) return false;
-  return Math.abs(Number(a.latitude) - Number(b.latitude)) < 0.0002 && Math.abs(Number(a.longitude) - Number(b.longitude)) < 0.0002;
+  const left = fixCoords(a);
+  const right = fixCoords(b);
+  if (!left || !right) return false;
+  return Math.abs(left.latitude - right.latitude) < 0.0002 && Math.abs(left.longitude - right.longitude) < 0.0002;
 }
 
 function routeTaskStartMinute(task, referenceStart = 0) {
@@ -705,6 +747,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      assertPlanningVehicleDepots(planningVehicles);
       const googleRequest = buildGoogleRequest(instances, planningVehicles, offices, objects, weekday);
       const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`, {
         method: 'POST',
@@ -811,3 +854,12 @@ Deno.serve(async (req) => {
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
+
+export {
+  assertPlanningVehicleDepots,
+  buildGoogleRequest,
+  buildPlanningVehicles,
+  fixCoords,
+  normalizeCoordinatePair,
+  prepareTaskInstances,
+};

@@ -1,3 +1,5 @@
+import { objectCoordinatePair } from "@/lib/coordinates";
+
 export const OBJECT_TYPE_OPTIONS = [
   { key: "office", label: "Kantoor / bedrijfspand", description: "Kantoor, hoofdkantoor of algemeen bedrijfspand." },
   { key: "retail_hospitality", label: "Winkel / horeca", description: "Filiaal, winkelcentrum, hotel of horecalocatie." },
@@ -25,7 +27,7 @@ export function objectStatus(object = {}) {
 export function objectAttentionItems(object = {}) {
   const items = [];
   if (!object.address) items.push("Locatie ontbreekt");
-  else if (object.geocoding_status !== "verified" || !Number.isFinite(Number(object.latitude)) || !Number.isFinite(Number(object.longitude))) {
+  else if (object.geocoding_status !== "verified" || !objectCoordinatePair(object)) {
     items.push("Locatie controleren");
   }
   if (objectStatus(object) === "concept") items.push("Object inrichten");

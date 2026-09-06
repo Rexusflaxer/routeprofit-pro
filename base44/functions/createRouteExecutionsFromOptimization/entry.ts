@@ -2,7 +2,25 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
 function nowIso() { return new Date().toISOString(); }
 function secondsFromTime(time) { if (!time) return null; const [h, m = 0] = String(time).split(':').map(Number); return Number.isFinite(h) ? h * 3600 + (Number.isFinite(m) ? m * 60 : 0) : null; }
-function safeNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : null; }
+function safeNumber(value) {
+  if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function normalizeCoordinatePair(latitudeValue, longitudeValue) {
+  const latitude = safeNumber(latitudeValue);
+  const longitude = safeNumber(longitudeValue);
+  if (
+    latitude === null || latitude < -90 || latitude > 90 ||
+    longitude === null || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) return null;
+  return { latitude, longitude };
+}
+function taskCoordinatePair(task, object) {
+  return normalizeCoordinatePair(task?.latitude, task?.longitude)
+    || normalizeCoordinatePair(object?.latitude, object?.longitude);
+}
 function taskName(task, index, count) { return count > 1 && index ? `${task.name || task.object_name || task.task_type} (${index}/${count})` : (task.name || task.object_name || task.task_type || 'Taak'); }
 function unwrapFunctionData(response) { return response?.data || response || null; }
 function unique(values) { return [...new Set((values || []).filter(Boolean).map(String))]; }
@@ -688,6 +706,25 @@ Deno.serve(async (req) => {
         continue;
       }
       const routeTasks = route.tasks || route.optimized_order || [];
+      const taskCoordinatePairs = routeTasks.map(task => {
+        const sourceTask = taskById.get(String(task.original_task_id || task.task_id || '')) || {};
+        const object = objectById.get(String(task.object_id || sourceTask.object_id || '')) || {};
+        return taskCoordinatePair(task, object);
+      });
+      const invalidCoordinateIndex = taskCoordinatePairs.findIndex(coordinates => !coordinates);
+      if (invalidCoordinateIndex >= 0) {
+        const invalidTask = routeTasks[invalidCoordinateIndex] || {};
+        blocked.push({
+          route_id: sourceRouteId,
+          reason: `Stop zonder bruikbare coördinaten: ${invalidTask.name || invalidTask.task_id || invalidTask.original_task_id || 'Taak'}`,
+          code: 'TASK_EXECUTION_COORDINATES_INVALID',
+          details: {
+            task_id: String(invalidTask.original_task_id || invalidTask.task_id || ''),
+            object_id: String(invalidTask.object_id || ''),
+          },
+        });
+        continue;
+      }
       let publishedRoutingEvidence;
       try {
         publishedRoutingEvidence = await mapWithConcurrency(routeTasks, 8, async task => {
@@ -802,6 +839,8 @@ Deno.serve(async (req) => {
         });
         continue;
       }
+      const startCoordinates = normalizeCoordinatePair(route.start_latitude, route.start_longitude);
+      const endCoordinates = normalizeCoordinatePair(route.end_latitude, route.end_longitude);
       const routePayload = {
         route_id: sourceRouteId,
         route_name: route.manual_route_name || route.name || route.vehicle?.name || 'Route',
@@ -822,11 +861,11 @@ Deno.serve(async (req) => {
         shift_start_time: route.time_window_start || route.shift_start_time || '00:00',
         shift_end_time: route.time_window_end || route.shift_end_time || '00:00',
         start_location_name: route.start_location_name || null,
-        start_latitude: safeNumber(route.start_latitude),
-        start_longitude: safeNumber(route.start_longitude),
+        start_latitude: startCoordinates?.latitude ?? null,
+        start_longitude: startCoordinates?.longitude ?? null,
         end_location_name: route.end_location_name || null,
-        end_latitude: safeNumber(route.end_latitude),
-        end_longitude: safeNumber(route.end_longitude),
+        end_latitude: endCoordinates?.latitude ?? null,
+        end_longitude: endCoordinates?.longitude ?? null,
         total_planned_distance_km: route.stats?.total_distance_km ?? route.total_distance_km ?? null,
         total_planned_travel_minutes: route.stats?.total_travel_minutes ?? route.total_travel_minutes ?? null,
         total_planned_service_minutes: route.stats?.total_service_minutes ?? route.total_service_minutes ?? null,
@@ -841,7 +880,7 @@ Deno.serve(async (req) => {
       const taskPayloads = routeTasks.map((task, index) => {
         const sourceTask = taskById.get(String(task.original_task_id || task.task_id || '')) || {};
         const object = objectById.get(String(task.object_id || sourceTask.object_id || '')) || {};
-        if (safeNumber(task.latitude ?? object.latitude) === null || safeNumber(task.longitude ?? object.longitude) === null) throw new Error(`Stop zonder coördinaten: ${task.name || task.task_id}`);
+        const coordinates = taskCoordinatePairs[index];
         const repeatCount = task.repeat_count ?? null;
         const repeatIndex = task.repeat_index ?? null;
         const serviceContext = buildTaskContext(task, sourceTask, object, sourceRoute, route, serviceDate, publishedRoutingEvidence[index]);
@@ -884,8 +923,8 @@ Deno.serve(async (req) => {
           distance_from_previous_km: task.distance_from_previous_km ?? task.distance_km ?? null,
           travel_to_next_minutes: task.travel_to_next_minutes ?? null,
           distance_to_next_km: task.distance_to_next_km ?? null,
-          latitude: safeNumber(task.latitude ?? object.latitude),
-          longitude: safeNumber(task.longitude ?? object.longitude),
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
           address: task.address || object.address || null,
           locked_to_route: !!task.locked_to_route,
           locked_sequence: !!task.locked_sequence,
@@ -905,4 +944,11 @@ Deno.serve(async (req) => {
   }
 });
 
-export { buildTaskExecutionRoutingProjection, loadPublishedTaskRoutingEvidence, projectedTaskTypeKey, resolvedEmploymentProjection };
+export {
+  buildTaskExecutionRoutingProjection,
+  loadPublishedTaskRoutingEvidence,
+  normalizeCoordinatePair,
+  projectedTaskTypeKey,
+  resolvedEmploymentProjection,
+  taskCoordinatePair,
+};

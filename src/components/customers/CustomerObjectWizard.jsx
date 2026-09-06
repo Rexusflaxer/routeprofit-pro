@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
 import { formatAddress } from "@/lib/addressFormatting";
+import { objectCoordinatePair } from "@/lib/coordinates";
 import { wizardRevealMotion } from "@/components/ui-custom/wizardMotion";
 import {
   findPotentialObjectDuplicates,
@@ -143,9 +144,7 @@ export default function CustomerObjectWizard({
     () => findPotentialObjectDuplicates(objects, form),
     [form, objects],
   );
-  const addressVerified = form.geocoding_status === "verified"
-    && Number.isFinite(Number(form.latitude))
-    && Number.isFinite(Number(form.longitude));
+  const addressVerified = form.geocoding_status === "verified" && Boolean(objectCoordinatePair(form));
   const canContinue = [
     Boolean(form.name.trim() && form.object_type),
     Boolean(form.address.trim()),

@@ -180,6 +180,13 @@ describe("ObjectDossierTabs", () => {
     expect(screen.queryByText("0.000000, 0.000000")).not.toBeInTheDocument();
   });
 
+  it("behandelt het exacte coördinatenpaar 0,0 als een ontbrekende locatie", () => {
+    renderTabs({ object: { ...object, latitude: 0, longitude: "0", geocoding_status: "verified" } });
+
+    expect(screen.getByText("Nog geen coördinaten vastgelegd")).toBeInTheDocument();
+    expect(screen.queryByText("0.000000, 0.000000")).not.toBeInTheDocument();
+  });
+
   it("blokkeert het wijzigen van objectgegevens bij een gearchiveerd object", () => {
     renderTabs({ object: { ...object, status: "archived" }, activeTab: "details" });
 

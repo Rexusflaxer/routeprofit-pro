@@ -47,28 +47,37 @@ function nextWeekday(day) {
   return n === 7 ? 1 : n + 1;
 }
 
+function strictNumber(value) {
+  if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeCoordinatePair(latitudeValue, longitudeValue) {
+  const latitude = strictNumber(latitudeValue);
+  const longitude = strictNumber(longitudeValue);
+  if (
+    latitude === null || latitude < -90 || latitude > 90 ||
+    longitude === null || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) return null;
+  return { latitude, longitude };
+}
+
 function fixCoords(location) {
   if (!location) return null;
 
-  const lat = Number(location.latitude);
-  const lon = Number(location.longitude);
+  const lat = strictNumber(location.latitude);
+  const lon = strictNumber(location.longitude);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat === null || lon === null) return null;
 
   // Veiligheidscheck voor omgewisselde lat/lon.
-  if (lat < lon && lon > 40) {
-    return {
-      ...location,
-      latitude: lon,
-      longitude: lat,
-    };
-  }
+  const coordinates = lat < lon && lon > 40
+    ? normalizeCoordinatePair(lon, lat)
+    : normalizeCoordinatePair(lat, lon);
 
-  return {
-    ...location,
-    latitude: lat,
-    longitude: lon,
-  };
+  return coordinates ? { ...location, ...coordinates } : null;
 }
 
 function getPlanningOptions(body = {}) {
@@ -1494,3 +1503,5 @@ Deno.serve(async (req) => {
     }, { status: 500 });
   }
 });
+
+export { buildTasksForDay, fixCoords, normalizeCoordinatePair };

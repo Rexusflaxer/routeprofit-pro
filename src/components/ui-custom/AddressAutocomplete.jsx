@@ -7,6 +7,7 @@ import {
   addressSuggestionLabel,
   formatAddress,
 } from "@/lib/addressFormatting";
+import { objectCoordinatePair, safeCoordinateNumber } from "@/lib/coordinates";
 
 export default function AddressAutocomplete({ id, value = {}, onAddressSelect, onQueryChange, placeholder, className = "" }) {
   const formattedAddress = formatAddress(value, { omitDefaultCountry: true });
@@ -57,14 +58,16 @@ export default function AddressAutocomplete({ id, value = {}, onAddressSelect, o
   };
 
   const selectAddress = (suggestion) => {
+    const parsedLatitude = safeCoordinateNumber(suggestion.latitude, -90, 90);
+    const parsedLongitude = safeCoordinateNumber(suggestion.longitude, -180, 180);
+    const coordinates = objectCoordinatePair({ latitude: parsedLatitude, longitude: parsedLongitude });
+    const [longitude, latitude] = coordinates || [null, null];
     const address = {
       ...addressPartsFromSuggestion(suggestion, value),
-      latitude: Number.isFinite(Number(suggestion.latitude)) ? Number(suggestion.latitude) : null,
-      longitude: Number.isFinite(Number(suggestion.longitude)) ? Number(suggestion.longitude) : null,
+      latitude,
+      longitude,
       bag_address_id: suggestion.bag_address_id || suggestion.nummeraanduiding_id || null,
-      geocoding_status: Number.isFinite(Number(suggestion.latitude)) && Number.isFinite(Number(suggestion.longitude))
-        ? "verified"
-        : "unverified",
+      geocoding_status: coordinates ? "verified" : "unverified",
     };
     onAddressSelect?.(address, suggestion);
     setQuery(formatAddress(address, { omitDefaultCountry: true }));

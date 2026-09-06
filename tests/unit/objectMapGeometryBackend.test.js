@@ -42,6 +42,7 @@ beforeAll(async () => {
     "buildingAssignmentConflicts",
     "buildingConflictFingerprint",
     "customerObjectMutationMarkerReplay",
+    "ensureObjectMapGeometryRevision",
     "geometriesOverlap",
     "geometrySummary",
     "handleGetObjectMapConfiguration",
@@ -51,14 +52,18 @@ beforeAll(async () => {
     "handleUpdateObjectMapConfiguration",
     "handleSetCustomerObjectStatus",
     "normalizedGeoJsonFeatureCollection",
+    "normalizedObjectCoordinatePair",
     "objectBuildingSelectionMode",
     "objectHasMapConfiguration",
+    "objectIdentityPatch",
+    "objectMapAnchor",
     "objectMapGeometryStatus",
     "objectOperationsPatch",
     "pdokBagBaseUrl",
     "recordMutationResult",
     "requireAdmin",
     "safeObjectMapConfiguration",
+    "safeObjectMapCoordinate",
     "safeStoredMapGeometry",
   ]);
   mobileBackend = await compiledBackend(mobileSource, [
@@ -67,9 +72,11 @@ beforeAll(async () => {
     "mobileBuildingSelectionMode",
     "mobileMapGeometryRevision",
     "mobileMapGeometryStatus",
+    "mobileMapCoordinatePair",
     "mobileSafeMapState",
     "requireAuthorizedMobileRoute",
     "requireMobilePersonnel",
+    "safeNumber2",
   ]);
 });
 
@@ -329,6 +336,296 @@ describe("Kaart en terrein backendcontract", () => {
     }
   });
 
+  it("serializeert ontbrekende kaartcoördinaten nooit als 0,0", () => {
+    [null, undefined, "", " ", false, [], {}].forEach(value => {
+      expect(customerBackend.safeObjectMapCoordinate(value, -180, 180)).toBeNull();
+    });
+    expect(customerBackend.safeObjectMapCoordinate(0, -180, 180)).toBe(0);
+    expect(customerBackend.safeObjectMapCoordinate("0", -180, 180)).toBe(0);
+    expect(customerBackend.normalizedObjectCoordinatePair(0, "0")).toEqual({
+      latitude: null,
+      longitude: null,
+    });
+    expect(customerBackend.normalizedObjectCoordinatePair(0, 4.3)).toEqual({
+      latitude: 0,
+      longitude: 4.3,
+    });
+    expect(customerBackend.normalizedObjectCoordinatePair(52.1, 0)).toEqual({
+      latitude: 52.1,
+      longitude: 0,
+    });
+
+    expect(customerBackend.safeObjectMapConfiguration(surveillanceObject({
+      latitude: null,
+      longitude: " ",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+    })).object).toMatchObject({ latitude: null, longitude: null });
+
+    expect(customerBackend.safeObjectMapConfiguration(surveillanceObject({
+      latitude: 0,
+      longitude: "0",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: "automatic",
+      map_geometry_status: "unconfigured",
+    })).object).toMatchObject({
+      latitude: null,
+      longitude: null,
+      show_on_mobile_map: false,
+    });
+
+    expect(customerBackend.safeObjectMapConfiguration(surveillanceObject({
+      latitude: 0,
+      longitude: 0,
+    }))).toMatchObject({
+      map_geometry_status: "needs_review",
+      map_geometry_review_reason: "stored_geometry_invalid",
+      building_polygon_geojson: null,
+      object: {
+        latitude: null,
+        longitude: null,
+        show_on_mobile_map: false,
+      },
+    });
+
+    expect(customerBackend.safeObjectMapConfiguration(surveillanceObject({
+      latitude: 0,
+      longitude: 4.3,
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: "automatic",
+      map_geometry_status: "unconfigured",
+    })).object).toMatchObject({
+      latitude: 0,
+      longitude: 4.3,
+      show_on_mobile_map: true,
+    });
+  });
+
+  it("weigert Null Island als kaartanker maar behoudt geldige nulcoördinaten", () => {
+    expect(() => customerBackend.objectMapAnchor(surveillanceObject({
+      latitude: 0,
+      longitude: 0,
+    }))).toThrow("Controleer eerst de kaartpositie");
+    expect(customerBackend.objectMapAnchor(surveillanceObject({
+      latitude: 0,
+      longitude: 4.3,
+    }))).toEqual([4.3, 0]);
+    expect(customerBackend.objectMapAnchor(surveillanceObject({
+      latitude: 52.1,
+      longitude: 0,
+    }))).toEqual([0, 52.1]);
+  });
+
+  it("normaliseert 0,0 bij objectmutaties naar ontbrekend en vereist daarna een echte geverifieerde locatie", () => {
+    const objectWithoutLocation = surveillanceObject({
+      latitude: null,
+      longitude: null,
+      geocoding_status: "unverified",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: "automatic",
+      map_geometry_status: "unconfigured",
+    });
+
+    expect(customerBackend.objectIdentityPatch({
+      latitude: 0,
+      longitude: "0",
+      geocoding_status: "unverified",
+      bag_address_id: "onjuist-adres",
+    }, objectWithoutLocation)).toMatchObject({
+      latitude: null,
+      longitude: null,
+      bag_address_id: null,
+      geocoding_status: "unverified",
+    });
+    expect(() => customerBackend.objectIdentityPatch({
+      latitude: 0,
+      longitude: 0,
+      geocoding_status: "verified",
+    }, objectWithoutLocation)).toThrow("vereist geldige coördinaten");
+    expect(customerBackend.objectIdentityPatch({
+      latitude: 0,
+      longitude: 4.3,
+      geocoding_status: "manual",
+    }, objectWithoutLocation)).toMatchObject({
+      latitude: 0,
+      longitude: 4.3,
+      geocoding_status: "manual",
+    });
+
+    const nullIslandActiveObject = surveillanceObject({
+      latitude: 0,
+      longitude: 0,
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: "automatic",
+      map_geometry_status: "unconfigured",
+      show_on_mobile_map: false,
+    });
+    expect(() => customerBackend.objectOperationsPatch({
+      show_on_mobile_map: true,
+    }, nullIslandActiveObject)).toThrow("geldige locatiecoördinaten");
+    expect(customerBackend.objectOperationsPatch({
+      show_on_mobile_map: true,
+    }, {
+      ...nullIslandActiveObject,
+      longitude: 4.3,
+    })).toMatchObject({ show_on_mobile_map: true });
+  });
+
+  it("schrijft nooit een revisieanker op 0,0 en bewaart onbruikbare legacyhistorie zonder herstel te blokkeren", async () => {
+    const nullIsland = mockCustomerPlatform({
+      latitude: 0,
+      longitude: 0,
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      map_geometry_status: "configured",
+    });
+    await expect(customerBackend.ensureObjectMapGeometryRevision(
+      nullIsland.base44,
+      nullIsland.state(),
+      "admin-1",
+      "test_null_island",
+    )).resolves.toBeNull();
+    expect(nullIsland.mapGeometryRevisions).toHaveLength(0);
+    nullIsland.mapGeometryRevisions.push({
+      id: "legacy-null-island-revision",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      revision: 2,
+      geometry_hash: "legacy-invalid-anchor",
+      anchor_latitude: 0,
+      anchor_longitude: 0,
+    });
+    await expect(customerBackend.ensureObjectMapGeometryRevision(
+      nullIsland.base44,
+      nullIsland.state(),
+      "admin-1",
+      "test_existing_null_island",
+    )).resolves.toBeNull();
+    expect(nullIsland.mapGeometryRevisions).toEqual([
+      expect.objectContaining({
+        id: "legacy-null-island-revision",
+        anchor_latitude: 0,
+        anchor_longitude: 0,
+      }),
+    ]);
+
+    const equator = mockCustomerPlatform({
+      latitude: 0,
+      longitude: 4.3,
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      map_geometry_status: "configured",
+    });
+    await expect(customerBackend.ensureObjectMapGeometryRevision(
+      equator.base44,
+      equator.state(),
+      "admin-1",
+      "test_equator",
+    )).resolves.toMatchObject({
+      anchor_latitude: 0,
+      anchor_longitude: 4.3,
+    });
+    expect(equator.mapGeometryRevisions).toHaveLength(1);
+  });
+
+  it("laat na een legacy 0,0-revisie eerst het adres en daarna de kaartconfiguratie herstellen", async () => {
+    const setup = mockCustomerPlatform({
+      latitude: 0,
+      longitude: 0,
+      geocoding_status: "verified",
+    });
+    setup.mapGeometryRevisions.push({
+      id: "legacy-null-island-revision",
+      customer_id: "customer-1",
+      object_id: "object-1",
+      revision: 2,
+      geometry_hash: "legacy-invalid-anchor",
+      building_selection_mode: "manual",
+      map_geometry_status: "configured",
+      building_polygon_geojson: setup.state().building_polygon_geojson,
+      object_area_geojson: null,
+      anchor_latitude: 0,
+      anchor_longitude: 0,
+      recorded_at: "2026-09-01T10:00:00.000Z",
+      source_action: "legacy_bug",
+    });
+
+    await expect(customerBackend.handleUpdateCustomerObjectIdentity(
+      setup.base44,
+      { id: "admin-1" },
+      {
+        customer_id: "customer-1",
+        object_id: "object-1",
+        data: {
+          address: "Voorbeeldweg 1, Utrecht",
+          latitude: 52.1005,
+          longitude: 4.3005,
+          geocoding_status: "verified",
+          bag_address_id: "nummeraanduiding-1",
+        },
+      },
+      3,
+      "identity-repair-null-island",
+      "fingerprint-identity-repair-null-island",
+      "update_customer_object_identity|customer_id:customer-1|object_id:object-1",
+    )).resolves.toMatchObject({ outcome: "success" });
+
+    expect(setup.state()).toMatchObject({
+      latitude: 52.1005,
+      longitude: 4.3005,
+      map_geometry_status: "needs_review",
+      map_geometry_revision: 3,
+      show_on_mobile_map: false,
+    });
+    expect(setup.mapGeometryRevisions).toHaveLength(1);
+
+    await expect(customerBackend.handleUpdateObjectMapConfiguration(
+      setup.base44,
+      { id: "admin-1" },
+      {
+        customer_id: "customer-1",
+        object_id: "object-1",
+        data: {
+          building_selection_mode: "manual",
+          selected_bag_feature_ids: ["bag-building-1"],
+          object_area_geojson: null,
+          show_on_mobile_map: true,
+        },
+      },
+      4,
+      "map-repair-null-island",
+      "fingerprint-map-repair-null-island",
+      "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    )).resolves.toMatchObject({ outcome: "success" });
+
+    expect(setup.state()).toMatchObject({
+      map_geometry_status: "configured",
+      map_geometry_revision: 4,
+      show_on_mobile_map: true,
+    });
+    expect(setup.mapGeometryRevisions).toEqual([
+      expect.objectContaining({
+        id: "legacy-null-island-revision",
+        anchor_latitude: 0,
+        anchor_longitude: 0,
+      }),
+      expect.objectContaining({
+        revision: 3,
+        anchor_latitude: 52.1005,
+        anchor_longitude: 4.3005,
+      }),
+      expect.objectContaining({
+        revision: 4,
+        anchor_latitude: 52.1005,
+        anchor_longitude: 4.3005,
+      }),
+    ]);
+  });
+
   it("levert legacygeometrie alleen gecanonicaliseerd uit en behandelt ongeldige opslag als needs_review", () => {
     const validLegacy = squareFeature("legacy-safe");
     validLegacy.properties = { vrije_tekst: "mag niet uitlekken" };
@@ -408,6 +705,29 @@ describe("Kaart en terrein backendcontract", () => {
       object_id: "object-1",
       cursor: "https://kwaad.example/volgende-pagina",
     })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("vraagt PDOK niet aan wanneer de objectlocatie ontbreekt", async () => {
+    const { base44 } = mockCustomerPlatform({
+      latitude: null,
+      longitude: " ",
+      geocoding_status: "verified",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      building_selection_mode: "automatic",
+      map_geometry_status: "unconfigured",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(customerBackend.handleListObjectBuildingCandidates(base44, {
+      customer_id: "customer-1",
+      object_id: "object-1",
+    })).rejects.toMatchObject({
+      status: 409,
+      details: { code: "object_map_location_unverified" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("hergebruikt een bestaande canonieke BAG-selectie, bewaart raw geometrie alleen op het object en logt een veilige samenvatting", async () => {
@@ -1183,6 +1503,59 @@ describe("Kaart en terrein backendcontract", () => {
 });
 
 describe("Mobiele kaartpayload", () => {
+  it("gebruikt de paarvalidatie ook bij het aanmaken van route-uitvoeringen en taken", () => {
+    const start = mobileSource.indexOf("async function handleCreateMobileRouteExecution");
+    const end = mobileSource.indexOf("// base44/functions/_shared/mobile/mobileMe.ts", start);
+    const createExecutionSource = mobileSource.slice(start, end);
+
+    expect(createExecutionSource).toContain("const startCoordinates = mobileMapCoordinatePair(startOffice?.latitude, startOffice?.longitude)");
+    expect(createExecutionSource).toContain("const endCoordinates = mobileMapCoordinatePair(endOffice?.latitude, endOffice?.longitude)");
+    expect(createExecutionSource).toContain("...mobileMapCoordinatePair(object.latitude, object.longitude)");
+    expect(createExecutionSource).toContain("const invalidTaskCoordinates = assignedTaskCoordinates.filter");
+    expect(createExecutionSource).toContain("const { latitude, longitude } = assignedTaskCoordinates[assignmentIndex]");
+    expect(createExecutionSource.indexOf("if (invalidTaskCoordinates.length)")).toBeLessThan(
+      createExecutionSource.indexOf("RouteExecution.create"),
+    );
+    expect(createExecutionSource).not.toContain("start_latitude: safeNumber(");
+    expect(createExecutionSource).not.toContain("end_latitude: safeNumber(");
+  });
+
+  it("normaliseert ontbrekende en exact 0,0 mobiele coördinaten zonder een enkele nul af te keuren", () => {
+    [null, undefined, "", " ", false, [], {}].forEach(value => {
+      expect(mobileBackend.safeNumber2(value)).toBeNull();
+    });
+    expect(mobileBackend.safeNumber2(0)).toBe(0);
+    expect(mobileBackend.mobileMapCoordinatePair(0, 0)).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair("0", "0.0")).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair(null, 4.3)).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair(52.1, " ")).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair(91, 4.3)).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair(52.1, 181)).toEqual({ latitude: null, longitude: null });
+    expect(mobileBackend.mobileMapCoordinatePair(0, 4.3)).toEqual({ latitude: 0, longitude: 4.3 });
+    expect(mobileBackend.mobileMapCoordinatePair(52.1, 0)).toEqual({ latitude: 52.1, longitude: 0 });
+
+    const stateAtNullIsland = mobileBackend.mobileSafeMapState(surveillanceObject({
+      latitude: 0,
+      longitude: 0,
+      building_polygon_geojson: {
+        type: "FeatureCollection",
+        features: [{
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[0, 0], [0.0001, 0], [0.0001, 0.0001], [0, 0.0001], [0, 0]]],
+          },
+        }],
+      },
+    }));
+    expect(stateAtNullIsland).toMatchObject({
+      building_polygon_geojson: null,
+      map_geometry_status: "needs_review",
+      invalid: true,
+    });
+  });
+
   it("houdt legacyobjecten compatibel en neemt de kaartrevisie veilig over", () => {
     expect(mobileBackend.mobileBuildingSelectionMode({ building_polygon_geojson: null })).toBe("automatic");
     expect(mobileBackend.mobileBuildingSelectionMode({
@@ -1204,13 +1577,41 @@ describe("Mobiele kaartpayload", () => {
       map_geometry_revision: 4,
     });
     const reviewObject = surveillanceObject({ id: "object-review", map_geometry_status: "needs_review" });
+    const objectWithoutLocation = surveillanceObject({
+      id: "object-zonder-locatie",
+      latitude: null,
+      longitude: " ",
+      building_selection_mode: "automatic",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      map_geometry_status: "unconfigured",
+    });
+    const zeroCoordinateRouteObject = surveillanceObject({
+      id: "object-zero-route",
+      latitude: 0,
+      longitude: 0,
+      building_selection_mode: "automatic",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      map_geometry_status: "unconfigured",
+    });
+    const singleZeroObject = surveillanceObject({
+      id: "object-single-zero",
+      latitude: 0,
+      longitude: 4.3,
+      building_selection_mode: "automatic",
+      building_polygon_geojson: null,
+      object_area_geojson: null,
+      map_geometry_status: "unconfigured",
+    });
     const entities = {
       TaskExecution: { filter: vi.fn(async () => [
         { id: "task-1", object_id: "object-route", status: "pending", sequence_index: 1 },
         { id: "task-2", object_id: "object-manual-empty", status: "pending", sequence_index: 2 },
         { id: "task-3", object_id: "object-review", status: "pending", sequence_index: 3 },
+        { id: "task-4", object_id: "object-zero-route", status: "pending", sequence_index: 4, latitude: 0, longitude: 0 },
       ]) },
-      SurveillanceObject: { list: vi.fn(async () => [routeObject, unrelatedObject, manualEmptyObject, reviewObject]) },
+      SurveillanceObject: { list: vi.fn(async () => [routeObject, unrelatedObject, manualEmptyObject, reviewObject, objectWithoutLocation, zeroCoordinateRouteObject, singleZeroObject]) },
       ReportTemplate: { list: vi.fn(async () => []) },
       Vehicle: { list: vi.fn(async () => []) },
       Personnel: { list: vi.fn(async () => []) },
@@ -1230,6 +1631,10 @@ describe("Mobiele kaartpayload", () => {
       map_geometry_revision: 4,
     });
     expect(byId.has("object-review")).toBe(false);
+    expect(byId.has("object-zonder-locatie")).toBe(false);
+    expect(byId.get("object-zero-route")).toMatchObject({ latitude: null, longitude: null, has_task_in_current_route: true });
+    expect(byId.get("object-single-zero")).toMatchObject({ latitude: 0, longitude: 4.3 });
+    expect(result.stops.find(stop => stop.object_id === "object-zero-route")).toMatchObject({ latitude: null, longitude: null });
     expect(byId.get("object-route")).toMatchObject({
       building_selection_mode: "manual",
       map_geometry_status: "configured",

@@ -3,6 +3,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_PUBLIC_TOKEN } from "./mapboxConfig";
 import { Navigation } from "lucide-react";
+import { getBuildingProximityFilter, normalizeRouteCoordinatePair } from "./routeStopUtils";
 
 mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
 
@@ -96,30 +97,10 @@ function getRouteBearing(geometry, userPosition, fallbackBearing) {
   return fallbackBearing;
 }
 
-function normalizeMapCoordinates(item) {
-  const latitude = Number(item?.latitude);
-  const longitude = Number(item?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-
-  if (latitude > 40 && latitude < 60 && longitude > -10 && longitude < 15) return [longitude, latitude];
-  if (longitude > 40 && longitude < 60 && latitude > -10 && latitude < 15) return [latitude, longitude];
-  return [longitude, latitude];
-}
-
-function getBuildingProximityFilter(items, radiusMeters = 45) {
-  const coordinates = items.map(normalizeMapCoordinates).filter(Boolean);
-  if (!coordinates.length) return ["in", ["id"], ["literal", []]];
-
-  return [
-    "all",
-    ["==", ["get", "extrude"], "true"],
-    ["<=", ["distance", { type: "MultiPoint", coordinates }], radiusMeters]
-  ];
-}
-
 async function fetchDirections(points) {
-  if (points.length < 2) return emptyRoute;
-  const coordinates = points.slice(0, 25).map(point => `${point.longitude},${point.latitude}`).join(";");
+  const routeCoordinates = points.map(normalizeRouteCoordinatePair).filter(Boolean).slice(0, 25);
+  if (routeCoordinates.length < 2) return emptyRoute;
+  const coordinates = routeCoordinates.map(([longitude, latitude]) => `${longitude},${latitude}`).join(";");
   const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&steps=true&continue_straight=false&language=nl&access_token=${MAPBOX_PUBLIC_TOKEN}`;
   const response = await fetch(url);
   const data = await response.json();
@@ -147,11 +128,13 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
   React.useEffect(() => {
     if (!mapNode.current || mapRef.current) return;
 
-    const center = userPosition || stops[0] || { latitude: 52.0907, longitude: 5.1214 };
+    const center = normalizeRouteCoordinatePair(userPosition)
+      || normalizeRouteCoordinatePair(stops[0])
+      || [5.1214, 52.0907];
     const map = new mapboxgl.Map({
       container: mapNode.current,
       style: "mapbox://styles/mapbox/navigation-night-v1",
-      center: [center.longitude, center.latitude],
+      center,
       zoom: 16,
       pitch: 62,
       bearing: getBearing(userPosition || stops[0], stops[1]),
@@ -283,11 +266,13 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     }
 
     markersRef.current.forEach(marker => marker.remove());
-    markersRef.current = stops.map(stop => {
+    markersRef.current = stops.flatMap(stop => {
+      const coordinates = normalizeRouteCoordinatePair(stop);
+      if (!coordinates) return [];
       const markerEl = document.createElement("div");
       markerEl.className = `flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-xs font-bold shadow-lg ${visitedIds.has(stop.id) ? "bg-emerald-500 text-white" : "bg-amber-400 text-slate-950"}`;
       markerEl.textContent = stop.sequence;
-      return new mapboxgl.Marker(markerEl).setLngLat([stop.longitude, stop.latitude]).setPopup(new mapboxgl.Popup().setHTML(`<strong>${stop.sequence}. ${stop.name}</strong><br>${stop.address || ""}`)).addTo(map);
+      return [new mapboxgl.Marker(markerEl).setLngLat(coordinates).setPopup(new mapboxgl.Popup().setHTML(`<strong>${stop.sequence}. ${stop.name}</strong><br>${stop.address || ""}`)).addTo(map)];
     });
 
     const source = map.getSource("navigation-route");
@@ -299,13 +284,15 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
   React.useEffect(() => {
     if (!mapRef.current || !mapReady || !userPosition) return;
     const map = mapRef.current;
+    const userCoordinates = normalizeRouteCoordinatePair(userPosition);
+    if (!userCoordinates) return;
 
     if (!userMarkerRef.current) {
       const markerEl = document.createElement("div");
       markerEl.className = "relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-500 text-white shadow-xl ring-4 ring-blue-400/30";
       markerEl.innerHTML = "➤";
       userMarkerRef.current = new mapboxgl.Marker(markerEl)
-        .setLngLat([userPosition.longitude, userPosition.latitude])
+        .setLngLat(userCoordinates)
         .addTo(map);
     }
 
@@ -317,7 +304,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     }
     previousPositionRef.current = userPosition;
 
-    userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
+    userMarkerRef.current.setLngLat(userCoordinates);
 
     const fallbackBearing = gpsBearingRef.current ?? getBearing(userPosition, nextStop || stops[0]);
 
@@ -336,7 +323,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         userMarkerRef.current?.setRotation(cameraBearing);
 
         map.easeTo({
-          center: [userPosition.longitude, userPosition.latitude],
+          center: userCoordinates,
           zoom: 18.2,
           pitch: 76,
           bearing: cameraBearing,
@@ -349,7 +336,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
 
     userMarkerRef.current?.setRotation(fallbackBearing);
     map.easeTo({
-      center: [userPosition.longitude, userPosition.latitude],
+      center: userCoordinates,
       zoom: 18.2,
       pitch: 76,
       bearing: fallbackBearing,

@@ -34,6 +34,7 @@ beforeAll(async () => {
   await loadBackend("assignment", "base44/functions/assignPersonnelToRouteExecution/entry.ts");
   await loadBackend("optimizationStart", "base44/functions/startOptimizationJob/entry.ts");
   await loadBackend("optimizationResult", "base44/functions/getOptimizationJobResult/entry.ts");
+  await loadBackend("surveillanceOptimization", "base44/functions/optimaliseerSurveillance/entry.ts");
 });
 
 beforeEach(() => {
@@ -234,6 +235,121 @@ function employmentResolution(overrides = {}) {
     ...overrides,
   };
 }
+
+describe("strikte routecoördinaten", () => {
+  it.each([
+    [null, null],
+    ["", " "],
+    ["geen-getal", 4.3],
+    [52.1, "geen-getal"],
+    [91, 4.3],
+    [52.1, 181],
+    [0, 0],
+  ])("weigert een onbruikbaar paar (%o, %o)", (latitude, longitude) => {
+    expect(modules.optimization.normalizeCoordinatePair(latitude, longitude)).toBeNull();
+    expect(modules.surveillanceOptimization.normalizeCoordinatePair(latitude, longitude)).toBeNull();
+  });
+
+  it.each([
+    [0, 4.3],
+    [52.1, 0],
+    ["0", "4.3"],
+  ])("behoudt een geldig paar met één nul (%o, %o)", (latitude, longitude) => {
+    expect(modules.optimization.normalizeCoordinatePair(latitude, longitude)).toEqual({
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    });
+    expect(modules.surveillanceOptimization.normalizeCoordinatePair(latitude, longitude)).toEqual({
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    });
+  });
+
+  it("gebruikt bij een ongeldig optimizerpaar alleen een volledig geldige objectlocatie", () => {
+    expect(modules.optimization.taskCoordinatePair(
+      { latitude: 0, longitude: 0 },
+      { latitude: "52.1", longitude: "4.3" },
+    )).toEqual({ latitude: 52.1, longitude: 4.3 });
+    expect(modules.optimization.taskCoordinatePair(
+      { latitude: "52.1", longitude: "" },
+      { latitude: 0, longitude: 0 },
+    )).toBeNull();
+  });
+
+  it.each([
+    ["ontbrekende", null, null],
+    ["lege", "", " "],
+    ["niet-numerieke", "geen-getal", 4.3],
+    ["0,0", 0, 0],
+  ])("stuurt een object met %s coördinaten niet naar de routingserver", (_label, latitude, longitude) => {
+    const result = modules.surveillanceOptimization.buildTasksForDay(
+      1,
+      [{
+        id: "task-zero-zero",
+        object_id: "object-zero-zero",
+        task_type: "Mobiele controleronde",
+        weekdays: [1],
+        time_window_start: "18:00",
+        time_window_end: "19:00",
+        duration_minutes: 15,
+      }],
+      [{ id: "object-zero-zero", name: "Onbekende locatie", latitude, longitude }],
+      [],
+      {
+        serviceDayCutoff: 12 * 3600,
+        shiftEarlyTasksToNextMorning: false,
+        weekdayMode: "service_day",
+        includeNextDayEarlyTasks: false,
+      },
+    );
+
+    expect(result.optimizerTasks).toEqual([]);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({
+        id: "task-zero-zero",
+        skip_reason: "Geen bruikbare coördinaten gevonden.",
+      }),
+    ]);
+  });
+
+  it("blokkeert een 0,0-stop vóórdat een mobiele route-uitvoering wordt geschreven", async () => {
+    const createRouteExecution = vi.fn();
+    const bulkCreateTaskExecutions = vi.fn();
+    globalThis.__taskExecutionRoutingBase44 = {
+      auth: { me: vi.fn(async () => ({ id: "admin-1", role: "admin" })) },
+      asServiceRole: {
+        entities: {
+          SurveillanceObject: { list: vi.fn(async () => [{ id: "object-zero-zero", latitude: 0, longitude: 0 }]) },
+          RouteExecution: { list: vi.fn(async () => []), create: createRouteExecution },
+          Route: { list: vi.fn(async () => [{ id: "route-1" }]) },
+          Task: { list: vi.fn(async () => [{ id: "task-zero-zero", object_id: "object-zero-zero" }]) },
+          TaskExecution: { bulkCreate: bulkCreateTaskExecutions },
+        },
+      },
+    };
+
+    const response = await handlers.optimization(new Request("https://example.test/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        plannedResult: {
+          routes: [{
+            id: "route-1",
+            tasks: [{ task_id: "task-zero-zero", object_id: "object-zero-zero", latitude: 0, longitude: 0 }],
+          }],
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      created: [],
+      blocked: [{ route_id: "route-1", code: "TASK_EXECUTION_COORDINATES_INVALID" }],
+    });
+    expect(createRouteExecution).not.toHaveBeenCalled();
+    expect(bulkCreateTaskExecutions).not.toHaveBeenCalled();
+  });
+});
 
 describe.each(["mobile", "optimization"])("%s TaskExecution-routeringsprojectie", name => {
   it("bevriest commerciële, service- en arbeidsrollen zonder ze gelijk te trekken", () => {
@@ -538,6 +654,60 @@ it("schrijft de commerciële route in het echte mobiele bulkCreate-pad", async (
     employing_company_id: null,
     payroll_cao_key: null,
   });
+});
+
+it("blokkeert een mobiele route met een 0,0-taak vóór de RouteExecution-write", async () => {
+  const createRouteExecution = vi.fn(async payload => ({ id: "route-execution-1", ...payload }));
+  const bulkCreate = vi.fn(async payloads => payloads);
+  globalThis.__taskExecutionRoutingBase44 = {
+    auth: { me: vi.fn(async () => ({ id: "admin-1", role: "admin" })) },
+    asServiceRole: {
+      entities: {
+        Route: { filter: vi.fn(async () => [{
+          id: "route-1",
+          name: "Route 1",
+          weekdays: [6],
+          operating_company_id: "service-company",
+          assigned_tasks: [{
+            task_id: "task-1",
+            days: [6],
+            ...routedTask(),
+          }],
+        }]) },
+        RouteExecution: { filter: vi.fn(async () => []), create: createRouteExecution },
+        Task: { list: vi.fn(async () => [sourceTask()]) },
+        SurveillanceObject: { list: vi.fn(async () => [{
+          id: "object-1",
+          name: "Object zonder locatie",
+          customer_id: "customer-1",
+          latitude: 0,
+          longitude: 0,
+        }]) },
+        Vehicle: { list: vi.fn(async () => []) },
+        Office: { list: vi.fn(async () => []) },
+        PlanningShiftTaskSegment: { get: vi.fn(async () => publishedSegment()) },
+        PlanningTaskOccurrence: { get: vi.fn(async () => publishedOccurrence()) },
+        PlanningShift: { get: vi.fn(async () => publishedShift()) },
+        CustomerContract: { get: vi.fn(async () => customerContract()) },
+        CustomerContractLine: { get: vi.fn(async () => customerContractLine()) },
+        TaskExecution: { bulkCreate },
+      },
+    },
+  };
+
+  const response = await handlers.mobile(new Request("https://example.test/mobile", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "create_route_execution", route_id: "route-1", service_date: "2026-09-05" }),
+  }));
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    code: "TASK_EXECUTION_COORDINATES_INVALID",
+    details: { task_ids: ["task-1"], object_ids: ["object-1"] },
+  });
+  expect(createRouteExecution).not.toHaveBeenCalled();
+  expect(bulkCreate).not.toHaveBeenCalled();
 });
 
 it("slaat een bron-taak buiten haar weekdag over voordat mobiel oud publicatiebewijs valideert", async () => {

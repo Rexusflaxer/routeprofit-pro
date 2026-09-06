@@ -254,6 +254,18 @@ describe("ObjectMapTab", () => {
     expect(listCandidates).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { latitude: null, longitude: null },
+    { latitude: "", longitude: " " },
+    { latitude: 0, longitude: "0" },
+  ])("vertrouwt de status verified niet zonder echte coördinaten: %o", async coordinates => {
+    renderTab({ ...object, geocoding_status: "verified", ...coordinates });
+
+    expect(await screen.findByText(/Controleer en bevestig eerst het objectadres/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Opslaan en toepassen" })).toBeDisabled();
+    expect(listCandidates).not.toHaveBeenCalled();
+  });
+
   it("beschouwt een handmatig bevestigde kaartpositie als geldig", async () => {
     renderTab({ ...object, geocoding_status: "manual" });
 

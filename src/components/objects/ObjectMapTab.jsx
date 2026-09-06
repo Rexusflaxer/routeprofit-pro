@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
+import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import ObjectMapCanvas from "./ObjectMapCanvas";
 import {
   appendPolygon,
@@ -214,9 +215,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   });
   latestConfigurationRef.current = configurationQuery.data;
   const mapObject = useMemo(() => ({ ...object, ...((appliedConfiguration || configurationQuery.data)?.object || {}) }), [appliedConfiguration, configurationQuery.data, object]);
-  const verified = ["verified", "manual"].includes(mapObject?.geocoding_status)
-    && Number.isFinite(Number(mapObject?.latitude))
-    && Number.isFinite(Number(mapObject?.longitude));
+  const verified = Boolean(trustedObjectCoordinatePair(mapObject));
   const archived = mapObject?.status === "archived";
   const readOnly = archived || !verified;
   const candidateConfigurationVersion = appliedConfiguration?.expected_version

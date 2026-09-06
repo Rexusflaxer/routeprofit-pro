@@ -7,7 +7,8 @@ const mapboxState = vi.hoisted(() => ({ instances: [] }));
 vi.mock("@/components/navigation/mapboxConfig", () => ({ MAPBOX_PUBLIC_TOKEN: "test-mapbox-token" }));
 vi.mock("mapbox-gl", () => {
   class FakeMap {
-    constructor() {
+    constructor(options) {
+      this.options = options;
       this.handlers = new globalThis.Map();
       this.sources = new globalThis.Map();
       this.layers = new globalThis.Map();
@@ -44,7 +45,7 @@ vi.mock("mapbox-gl", () => {
     fitBounds() {}
     easeTo() {}
     resize() {}
-    remove() {}
+    remove = vi.fn();
   }
 
   return {
@@ -68,7 +69,7 @@ const candidate = {
 
 function renderCanvas(overrides = {}) {
   const props = {
-    object: { id: "object-1", name: "Testobject", longitude: 4.48, latitude: 51.92 },
+    object: { id: "object-1", name: "Testobject", longitude: 4.48, latitude: 51.92, geocoding_status: "verified" },
     candidates: [candidate],
     selectedBagFeatureIds: ["bag-1"],
     selectedBuildings: { type: "FeatureCollection", features: [candidate] },
@@ -123,5 +124,59 @@ describe("ObjectMapCanvas", () => {
 
     expect(props.onToggleCandidate).toHaveBeenCalledOnce();
     expect(props.onAddDrawingPoint).not.toHaveBeenCalled();
+  });
+
+  it("centreert ontbrekende coördinaten veilig op Nederland zonder 0,0-marker", async () => {
+    renderCanvas({ object: { id: "object-zonder-locatie", name: "Onbevestigd", latitude: null, longitude: " ", geocoding_status: "unverified" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+
+    expect(map.options).toMatchObject({ center: [5.2913, 52.1326], zoom: 7, pitch: 0, bearing: 0 });
+    act(() => map.emit("style.load"));
+    expect(map.sources.get("loq-object-map-anchor").data.features).toEqual([]);
+  });
+
+  it("gebruikt ook een handmatig vastgelegde 0,0-locatie nooit als kaartanker", async () => {
+    renderCanvas({ object: { id: "object-null-island", name: "Null Island", latitude: 0, longitude: "0", geocoding_status: "manual" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+
+    expect(map.options).toMatchObject({ center: [5.2913, 52.1326], zoom: 7, pitch: 0, bearing: 0 });
+    act(() => map.emit("style.load"));
+    expect(map.sources.get("loq-object-map-anchor").data.features).toEqual([]);
+  });
+
+  it("gebruikt een ongecontroleerde 0,0-waarde nooit als kaartanker", async () => {
+    renderCanvas({ object: { id: "object-ongecontroleerd", name: "Ongecontroleerd", latitude: 0, longitude: 0, geocoding_status: "unverified" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+
+    expect(map.options.center).toEqual([5.2913, 52.1326]);
+    act(() => map.emit("style.load"));
+    expect(map.sources.get("loq-object-map-anchor").data.features).toEqual([]);
+  });
+
+  it("bouwt de kaart opnieuw op wanneer dezelfde coördinaten worden bevestigd", async () => {
+    const initialObject = {
+      id: "object-statuswijziging",
+      name: "Statuswijziging",
+      latitude: 52.44874121,
+      longitude: 6.07245109,
+      geocoding_status: "unverified",
+    };
+    const rendered = renderCanvas({ object: initialObject });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    expect(mapboxState.instances[0].options.center).toEqual([5.2913, 52.1326]);
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} object={{ ...initialObject, geocoding_status: "verified" }} />);
+
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(2));
+    expect(mapboxState.instances[0].remove).toHaveBeenCalledOnce();
+    expect(mapboxState.instances[1].options).toMatchObject({
+      center: [6.07245109, 52.44874121],
+      zoom: 17,
+      pitch: 42,
+      bearing: -12,
+    });
   });
 });

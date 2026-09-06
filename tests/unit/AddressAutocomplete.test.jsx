@@ -60,4 +60,64 @@ describe("AddressAutocomplete", () => {
       geocoding_status: "verified",
     }), expect.objectContaining({ address: "Reactorweg 1, 3542 AD Utrecht" }));
   });
+
+  it("markeert een suggestie zonder echte coördinaten niet als geverifieerd", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({
+      data: {
+        suggestions: [{
+          address: "Ir. R.R. van der Zeelaan 1, 8191 JH Wapenveld",
+          street_name: "Ir. R.R. van der Zeelaan",
+          house_number: "1",
+          postal_code: "8191JH",
+          city: "Wapenveld",
+          latitude: null,
+          longitude: " ",
+          bag_address_id: "bag-zonder-coordinaten",
+        }],
+      },
+    });
+    const onAddressSelect = vi.fn();
+    render(<AddressAutocomplete id="legacy-address" onAddressSelect={onAddressSelect} />);
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Ir. R.R. van der Zeelaan 1" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(301);
+    });
+    fireEvent.mouseDown(screen.getByRole("button", { name: /Ir. R.R. van der Zeelaan 1/i }));
+
+    expect(onAddressSelect).toHaveBeenCalledWith(expect.objectContaining({
+      latitude: null,
+      longitude: null,
+      geocoding_status: "unverified",
+    }), expect.any(Object));
+  });
+
+  it("markeert een 0,0-suggestie niet als geverifieerd", async () => {
+    vi.useFakeTimers();
+    invoke.mockResolvedValue({
+      data: {
+        suggestions: [{
+          address: "Onbruikbare kaartpositie",
+          latitude: 0,
+          longitude: "0",
+          bag_address_id: "bag-null-island",
+        }],
+      },
+    });
+    const onAddressSelect = vi.fn();
+    render(<AddressAutocomplete id="null-island-address" onAddressSelect={onAddressSelect} />);
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Onbruikbare kaartpositie" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(301);
+    });
+    fireEvent.mouseDown(screen.getByRole("button", { name: /Onbruikbare kaartpositie/i }));
+
+    expect(onAddressSelect).toHaveBeenCalledWith(expect.objectContaining({
+      latitude: null,
+      longitude: null,
+      geocoding_status: "unverified",
+    }), expect.any(Object));
+  });
 });
