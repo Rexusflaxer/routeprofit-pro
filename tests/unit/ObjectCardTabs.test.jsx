@@ -99,11 +99,12 @@ describe("ObjectCardTabs", () => {
     });
   });
 
-  it("toont alleen Waarschuwingsadressen en Logboek als objecttabs", async () => {
+  it("toont de vaste objecttabs inclusief Kaart & terrein", async () => {
     renderHarness();
 
     expect(screen.getAllByRole("tab", { name: "Waarschuwingsadressen" })).toHaveLength(2);
     expect(screen.getAllByRole("tab", { name: "Logboek" })).toHaveLength(2);
+    expect(screen.getAllByRole("tab", { name: "Kaart & terrein" })).toHaveLength(2);
     expect(screen.queryByRole("tab", { name: "Overzicht" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Planning & taken" })).not.toBeInTheDocument();
     expect((await screen.findAllByText("Sanne de Vries")).length).toBeGreaterThan(0);

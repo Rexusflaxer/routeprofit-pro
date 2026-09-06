@@ -676,14 +676,71 @@
         "object",
         "null"
       ],
-      "additionalProperties": true
+      "additionalProperties": true,
+      "description": "Canonieke WGS84 FeatureCollection met BAG-pandcontouren en eventuele expliciet handmatig getekende gebouwcontouren"
     },
     "object_area_geojson": {
       "type": [
         "object",
         "null"
       ],
-      "additionalProperties": true
+      "additionalProperties": true,
+      "description": "Canonieke WGS84 FeatureCollection met een of meer door de gebruiker getekende terreinvlakken"
+    },
+    "building_selection_mode": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual"
+      ],
+      "default": "automatic",
+      "description": "Automatic gebruikt de legacy nabijheidslogica; manual gebruikt uitsluitend de expliciet opgeslagen contouren en mag bewust leeg zijn"
+    },
+    "map_geometry_status": {
+      "type": "string",
+      "enum": [
+        "unconfigured",
+        "configured",
+        "needs_review"
+      ],
+      "default": "unconfigured",
+      "description": "Reviewstatus van de gebouw- en terreinconfiguratie; een relevante adreswijziging zet bestaande geometrie op needs_review"
+    },
+    "map_geometry_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Monotoon oplopende revisie waarmee mobiele kaartcaches exact kunnen worden ververst"
+    },
+    "map_geometry_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80,
+      "description": "SHA-256 van de canonieke gebouwmodus en opgeslagen gebouw- en terreingeometrie"
+    },
+    "map_geometry_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "map_geometry_updated_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Backofficegebruiker die de kaartconfiguratie het laatst heeft opgeslagen of reviewplichtig heeft gemaakt"
+    },
+    "map_geometry_review_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500,
+      "description": "Technische, niet-gevoelige reden waarom de kaartconfiguratie opnieuw gecontroleerd moet worden"
     },
     "show_on_mobile_map": {
       "type": "boolean",
@@ -715,25 +772,13 @@
     "customer_id"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
+    "create": false,
     "read": {
       "user_condition": {
         "role": "admin"
       }
     },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "update": false,
+    "delete": false
   }
 }

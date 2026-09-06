@@ -1,0 +1,99 @@
+{
+  "name": "ObjectMapGeometryRevision",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "geometry_hash": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "building_selection_mode": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual"
+      ]
+    },
+    "map_geometry_status": {
+      "type": "string",
+      "enum": [
+        "unconfigured",
+        "configured",
+        "needs_review"
+      ]
+    },
+    "building_polygon_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "object_area_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "anchor_latitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -90,
+      "maximum": 90,
+      "description": "Vertrouwd locatieanker waarmee de canonieke historische geometrie later opnieuw veilig kan worden gevalideerd"
+    },
+    "anchor_longitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -180,
+      "maximum": 180
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recorded_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_action": {
+      "type": "string",
+      "maxLength": 100
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "revision",
+    "geometry_hash",
+    "building_selection_mode",
+    "map_geometry_status",
+    "anchor_latitude",
+    "anchor_longitude",
+    "recorded_at",
+    "source_action"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

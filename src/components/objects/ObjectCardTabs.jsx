@@ -29,6 +29,7 @@ import ObjectSecurityPlanTab from "./ObjectSecurityPlanTab";
 import ObjectModulesTab from "./ObjectModulesTab";
 import ObjectHandbookTab from "./ObjectHandbookTab";
 import ObjectFloorPlanPlaceholderTab from "./ObjectFloorPlanPlaceholderTab";
+import ObjectMapTab from "./ObjectMapTab";
 import ObjectTasksTab from "./ObjectTasksTab";
 import {
   OBJECT_CARD_TABS,
@@ -418,6 +419,8 @@ export default function ObjectCardTabs({
             />
           ) : activeTab === "floor-plan" ? (
             <ObjectFloorPlanPlaceholderTab />
+          ) : activeTab === "map-area" ? (
+            <ObjectMapTab key={object.id} object={object} onRegisterNavigationGuard={onRegisterModuleNavigationGuard} />
           ) : activeTab === "tasks" ? (
             <ObjectTasksTab
               object={object}
