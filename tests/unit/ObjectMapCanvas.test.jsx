@@ -1,5 +1,5 @@
 import React from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mapboxState = vi.hoisted(() => ({ instances: [] }));
@@ -18,6 +18,7 @@ vi.mock("mapbox-gl", () => {
       this.dragRotate = { disable: vi.fn() };
       this.touchZoomRotate = { disableRotation: vi.fn() };
       this.dragPan = { disable: vi.fn(), enable: vi.fn() };
+      this.doubleClickZoom = { disable: vi.fn(), enable: vi.fn() };
       mapboxState.instances.push(this);
     }
 
@@ -48,11 +49,14 @@ vi.mock("mapbox-gl", () => {
     addLayer(definition) { this.layers.set(definition.id, definition); }
     getLayer(id) { return this.layers.get(id); }
     setFilter() {}
+    setLayoutProperty = vi.fn();
+    setConfigProperty = vi.fn();
     queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
     setFeatureState = vi.fn();
     getCanvas() { return this.canvas; }
     fitBounds() {}
-    easeTo() {}
+    easeTo = vi.fn();
+    getZoom() { return 17; }
     resize() {}
     remove = vi.fn();
   }
@@ -125,6 +129,7 @@ describe("ObjectMapCanvas", () => {
     expect(screen.getByRole("button", { name: "Passend tonen" })).not.toBeDisabled();
     expect(map.options.config.basemap).toMatchObject({
       colorBuildingSelect: "#1f7aff",
+      show3dObjects: true,
       show3dBuildings: true,
       show3dFacades: true,
       show3dLandmarks: false,
@@ -214,6 +219,190 @@ describe("ObjectMapCanvas", () => {
     expect(props.onToggleCandidate).not.toHaveBeenCalled();
     expect(onBuildingMatchUnavailable).toHaveBeenCalledOnce();
     expect(map.setFeatureState).not.toHaveBeenCalledWith(unmatched, expect.objectContaining({ select: true }));
+    expect(map.easeTo).toHaveBeenCalledWith({ pitch: 0, zoom: 18, duration: 450 });
+  });
+
+  it("bewaart een gebouw zonder BAG-match als eigen klikpunt en kleurt het native gebouw", async () => {
+    const onToggleBuildingPoint = vi.fn();
+    const { props } = renderCanvas({ candidates: [], selectedBuildings: empty, selectedBagFeatureIds: [], onToggleBuildingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", {
+      feature: standardBuilding,
+      lngLat: { lng: 4.4808, lat: 51.9202 },
+    }));
+
+    expect(props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(onToggleBuildingPoint).toHaveBeenCalledWith({
+      id: expect.any(String), source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4808, latitude: 51.9202,
+    });
+    expect(Object.keys(onToggleBuildingPoint.mock.calls[0][0])).toHaveLength(6);
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: true, highlight: false });
+  });
+
+  it("herstelt en deselecteert een opgeslagen klikpunt zonder BAG of Mapbox-id op te slaan", async () => {
+    const point = { id: "own-point", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4808, latitude: 51.9202 };
+    const onToggleBuildingPoint = vi.fn();
+    renderCanvas({ candidates: [], selectedBuildings: empty, selectedBagFeatureIds: [], buildingSelectionPoints: [point], onToggleBuildingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: true });
+
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding }));
+
+    expect(onToggleBuildingPoint).toHaveBeenCalledWith(point);
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: false, highlight: false });
+  });
+
+  it("kleurt een dubbel geladen identieke voetafdruk maar geen twee verschillende overlappende gebouwen", async () => {
+    const point = { id: "own-point", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4808, latitude: 51.9202 };
+    renderCanvas({ candidates: [], selectedBuildings: empty, selectedBagFeatureIds: [], buildingSelectionPoints: [point] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    const duplicate = { ...standardBuilding, id: "duplicate", geometry: { type: "Polygon", coordinates: [[...standardBuilding.geometry.coordinates[0]].reverse()] } };
+    map.renderedFeatures = [standardBuilding, duplicate];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: true });
+    expect(map.setFeatureState).toHaveBeenCalledWith(duplicate, { select: true });
+
+    const overlapping = { ...standardBuilding, id: "other-building", geometry: { type: "Polygon", coordinates: [[[4.4806, 51.92], [4.4812, 51.92], [4.4812, 51.9205], [4.4806, 51.9205], [4.4806, 51.92]]] } };
+    map.renderedFeatures = [standardBuilding, duplicate, overlapping];
+    map.setFeatureState.mockClear();
+    act(() => map.emit("idle"));
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: false });
+    expect(map.setFeatureState).toHaveBeenCalledWith(duplicate, { select: false });
+    expect(map.setFeatureState).not.toHaveBeenCalledWith(overlapping, { select: true });
+  });
+
+  it("bewaart geen onduidelijk klikpunt waar twee verschillende gebouwen overlappen", async () => {
+    const onToggleBuildingPoint = vi.fn();
+    const onBuildingMatchUnavailable = vi.fn();
+    renderCanvas({ candidates: [], selectedBuildings: empty, selectedBagFeatureIds: [], onToggleBuildingPoint, onBuildingMatchUnavailable });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [{ ...standardBuilding, id: "other-building", geometry: { type: "Polygon", coordinates: [[[4.4806, 51.92], [4.4812, 51.92], [4.4812, 51.9205], [4.4806, 51.9205], [4.4806, 51.92]]] } }];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9202 } }));
+    expect(onToggleBuildingPoint).not.toHaveBeenCalled();
+    expect(onBuildingMatchUnavailable).toHaveBeenCalledWith("Hier overlappen twee gebouwen. Klik van bovenaf op een vrij deel van het gewenste gebouw.");
+  });
+
+  it("verwijdert geen willekeurige opgeslagen selectie vanuit een overlappend gebouw", async () => {
+    const point = { id: "own-point", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4808, latitude: 51.9202 };
+    const onToggleBuildingPoint = vi.fn();
+    const onBuildingMatchUnavailable = vi.fn();
+    renderCanvas({ candidates: [], selectedBuildings: empty, selectedBagFeatureIds: [], buildingSelectionPoints: [point], onToggleBuildingPoint, onBuildingMatchUnavailable });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [{ ...standardBuilding, id: "other-building", geometry: { type: "Polygon", coordinates: [[[4.4806, 51.92], [4.4812, 51.92], [4.4812, 51.9205], [4.4806, 51.9205], [4.4806, 51.92]]] } }];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9202 } }));
+    expect(onToggleBuildingPoint).not.toHaveBeenCalled();
+    expect(onBuildingMatchUnavailable).toHaveBeenCalledWith("Deze opgeslagen selectie ligt onder meerdere gebouwen. Verwijder haar uit de lijst en kies het gebouw opnieuw van bovenaf.");
+  });
+
+  it("houdt de kaart en getekende punten intact bij wisselen naar luchtfoto en toont terrein van bovenaf", async () => {
+    const drawingPoints = [[4.48, 51.92], [4.481, 51.92]];
+    const rendered = renderCanvas({ workspace: "terrain", drawingTarget: "terrain", drawingPoints });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    expect(map.options.pitch).toBe(0);
+    expect(map.options.config.basemap.show3dBuildings).toBe(false);
+    expect(map.options.config.basemap.show3dObjects).toBe(false);
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} mapView="satellite" />);
+
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-satellite-layer", "visibility", "visible");
+    expect(map.sources.get("loq-object-map-satellite").tiles[0]).toContain("service.pdok.nl/hwh/luchtfotorgb");
+    expect(map.layers.get("loq-object-map-satellite-layer")).not.toHaveProperty("slot");
+    expect([...map.layers.keys()].indexOf("loq-object-map-satellite-layer")).toBeLessThan([...map.layers.keys()].indexOf("loq-object-map-terrain-fill"));
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dObjects", false);
+    expect(map.sources.get("loq-object-map-draft").setData).toHaveBeenLastCalledWith(expect.objectContaining({
+      features: expect.arrayContaining([expect.objectContaining({ geometry: { type: "LineString", coordinates: drawingPoints } })]),
+    }));
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.doubleClickZoom.disable).toHaveBeenCalled();
+  });
+
+  it("houdt luchtfoto buiten de gebouwselectie en herstelt native 3D bij terugkeren", async () => {
+    const rendered = renderCanvas({ workspace: "terrain", mapView: "satellite" });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-satellite-layer", "visibility", "visible");
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="buildings" />);
+
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-satellite-layer", "visibility", "none");
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dObjects", true);
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", true);
+    expect(map.easeTo).toHaveBeenCalledWith({ pitch: 42, duration: 350 });
+  });
+
+  it("selecteert percelen uitsluitend in de actieve perceelmodus en selecteert daar geen gebouwen", async () => {
+    const onToggleParcel = vi.fn();
+    const rendered = renderCanvas({ workspace: "terrain", parcelCandidates: [candidate], parcelsVisible: true, parcelSelectionEnabled: true, onToggleParcel });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    act(() => map.emitLayer("click", "loq-object-map-parcels-fill", { features: [candidate], originalEvent: {} }));
+    expect(onToggleParcel).toHaveBeenCalledWith("bag-1");
+
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9202 } }));
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} drawingTarget="terrain" />);
+    act(() => map.emitLayer("click", "loq-object-map-parcels-fill", { features: [candidate], originalEvent: {} }));
+    expect(onToggleParcel).toHaveBeenCalledOnce();
+  });
+
+  it("toont tijdens tekenen de lijn naar de muis en sluit op het eerste punt zonder extra hoekpunt", async () => {
+    const drawingPoints = [[4.48, 51.92], [4.481, 51.92], [4.481, 51.921]];
+    const onFinishDrawing = vi.fn();
+    const { props } = renderCanvas({ workspace: "terrain", drawingTarget: "terrain", drawingPoints, onFinishDrawing });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    act(() => map.emit("mousemove", { lngLat: { lng: 4.48, lat: 51.921 } }));
+    expect(map.sources.get("loq-object-map-draft").setData).toHaveBeenLastCalledWith(expect.objectContaining({
+      features: expect.arrayContaining([expect.objectContaining({ geometry: { type: "LineString", coordinates: [...drawingPoints, [4.48, 51.921]] } })]),
+    }));
+
+    const originalEvent = {};
+    act(() => {
+      map.emitLayer("click", "loq-object-map-draft-points", { features: [{ properties: { point_index: 0 } }], originalEvent });
+      map.emit("click", { originalEvent, lngLat: { lng: 4.48, lat: 51.92 } });
+    });
+    expect(onFinishDrawing).toHaveBeenCalledOnce();
+    expect(props.onAddDrawingPoint).not.toHaveBeenCalled();
+  });
+
+  it("beperkt teken-sneltoetsen tot de kaart en laat invoervelden ongemoeid", async () => {
+    const onFinishDrawing = vi.fn();
+    const onCancelDrawing = vi.fn();
+    const onRemoveLastDrawingPoint = vi.fn();
+    renderCanvas({ workspace: "terrain", drawingTarget: "terrain", drawingPoints: [[4.48, 51.92], [4.481, 51.92], [4.481, 51.921]], onFinishDrawing, onCancelDrawing, onRemoveLastDrawingPoint });
+    const canvas = screen.getByLabelText("Kaart en terrein van Testobject");
+    fireEvent.keyDown(canvas, { key: "Enter" });
+    fireEvent.keyDown(canvas, { key: "Backspace" });
+    fireEvent.keyDown(canvas, { key: "Escape" });
+    expect(onFinishDrawing).toHaveBeenCalledOnce();
+    expect(onRemoveLastDrawingPoint).toHaveBeenCalledOnce();
+    expect(onCancelDrawing).toHaveBeenCalledOnce();
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    const input = document.createElement("input");
+    canvas.appendChild(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onFinishDrawing).toHaveBeenCalledOnce();
+    input.remove();
   });
 
   it("centreert ontbrekende coördinaten veilig op Nederland zonder 0,0-marker", async () => {

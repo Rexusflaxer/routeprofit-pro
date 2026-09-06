@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getObjectMapConfiguration,
   listObjectBuildingCandidates,
+  listObjectParcelCandidates,
   normalizeObjectMapCandidates,
   normalizeObjectMapConfiguration,
   updateObjectMapConfiguration,
@@ -13,6 +14,23 @@ const polygon = {
 };
 
 describe("objectkaart API-workflow", () => {
+  it("vraagt kadastrale percelen op binnen dezelfde objectscope en bewaart herkomst", async () => {
+    const invoke = vi.fn(async () => ({ candidates: { type: "FeatureCollection", features: [{ type: "Feature", id: "parcel-1", properties: { source: "pdok_brk", label: "Apeldoorn A 12" }, geometry: polygon }] }, source: { name: "PDOK Kadastrale kaart" }, next_cursor: "next-page" }));
+    const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", radiusMeters: 999, limit: 500, cursor: "page-1", invoke });
+    expect(invoke).toHaveBeenCalledWith({ action: "list_object_parcel_candidates", customer_id: "customer-1", object_id: "object-1", radius_meters: 500, limit: 100, cursor: "page-1" });
+    expect(result.items[0].properties).toMatchObject({ source: "pdok_brk", label: "Apeldoorn A 12" });
+    expect(result.next_cursor).toBe("next-page");
+  });
+
+  it("bewaart uitsluitend de eigen klikselectie en geen Mapbox featuremetadata", async () => {
+    const point = { id: "own-point-1", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.48, latitude: 51.92 };
+    const invoke = vi.fn(async payload => ({ configuration: { version: 8, ...payload.data } }));
+    const result = await updateObjectMapConfiguration({ customerId: "customer-1", objectId: "object-1", expectedVersion: 7, idempotencyKey: "points-key", data: { building_selection_mode: "manual", building_selection_points: [{ ...point, feature_id: 123, geometry: polygon }] }, invoke });
+    expect(invoke.mock.calls[0][0].data.building_selection_points).toEqual([point]);
+    expect(result.building_selection_points).toEqual([point]);
+    await updateObjectMapConfiguration({ customerId: "customer-1", objectId: "object-1", expectedVersion: 8, idempotencyKey: "automatic-key", data: { building_selection_mode: "automatic", building_selection_points: [point] }, invoke });
+    expect(invoke.mock.calls[1][0].data.building_selection_points).toEqual([]);
+  });
   it("vraagt de kaartconfiguratie op binnen klant- en objectscope", async () => {
     const invoke = vi.fn(async () => ({ configuration: { version: 3 } }));
     const result = await getObjectMapConfiguration({ customerId: "customer-1", objectId: "object-1", invoke });

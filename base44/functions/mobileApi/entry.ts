@@ -1036,12 +1036,12 @@ function mobileGeoJsonHasGeometry(value) {
   return value.type === "Feature" || value.type === "Polygon" || value.type === "MultiPolygon";
 }
 function mobileBuildingSelectionMode(object) {
-  if (String(object?.building_selection_mode || "") === "manual" || mobileGeoJsonHasGeometry(object?.building_polygon_geojson)) return "manual";
+  if (String(object?.building_selection_mode || "") === "manual" || mobileGeoJsonHasGeometry(object?.building_polygon_geojson) || Array.isArray(object?.building_selection_points) && object.building_selection_points.length) return "manual";
   return "automatic";
 }
 function mobileMapGeometryStatus(object) {
   if (["configured", "needs_review"].includes(String(object?.map_geometry_status || ""))) return object.map_geometry_status;
-  return mobileGeoJsonHasGeometry(object?.building_polygon_geojson) || mobileGeoJsonHasGeometry(object?.object_area_geojson) ? "configured" : "unconfigured";
+  return mobileGeoJsonHasGeometry(object?.building_polygon_geojson) || mobileGeoJsonHasGeometry(object?.object_area_geojson) || Array.isArray(object?.building_selection_points) && object.building_selection_points.length ? "configured" : "unconfigured";
 }
 function mobileMapGeometryRevision(object) {
   const revision = Number(object?.map_geometry_revision);
@@ -1221,6 +1221,11 @@ function mobileMapSafeCollection(value, object, kind) {
       } else {
         const source = kind === "building" ? "manual" : "user_drawn";
         properties = { source, local_id: mobileMapSafeLocalId(feature, index, source) };
+        const derivedFromId = String(feature?.properties?.derived_from_id || "").trim();
+        if (kind === "terrain" && feature?.properties?.derived_from === "pdok_brk" && /^[a-zA-Z0-9_-]{1,120}$/.test(derivedFromId)) {
+          properties.derived_from = "pdok_brk";
+          properties.derived_from_id = derivedFromId;
+        }
       }
       return {
         type: "Feature",
@@ -1236,17 +1241,54 @@ function mobileMapSafeCollection(value, object, kind) {
     return { value: null, invalid: true };
   }
 }
+function mobileMapSafeBuildingSelectionPoints(object) {
+  const value = object?.building_selection_points;
+  if (value === null || value === void 0) return { value: [], invalid: false };
+  try {
+    if (!Array.isArray(value) || value.length > MOBILE_MAP_MAX_FEATURES_BUILDING || new TextEncoder().encode(JSON.stringify(value)).byteLength > MOBILE_MAP_MAX_BYTES) throw new Error("invalid_selection_points");
+    if (!value.length) return { value: [], invalid: false };
+    const { latitude, longitude } = mobileMapCoordinatePair(object?.latitude, object?.longitude);
+    if (latitude === null || longitude === null) throw new Error("missing_anchor");
+    const ids = new Set();
+    const positions = new Set();
+    const points = value.map((point) => {
+      if (!point || typeof point !== "object" || Array.isArray(point)) throw new Error("invalid_selection_point");
+      const id = String(point.id || "").trim();
+      if (!/^[a-zA-Z0-9:_-]{1,120}$/.test(id) || ids.has(id)) throw new Error("invalid_selection_point_id");
+      if (typeof point.longitude !== "number" || typeof point.latitude !== "number" || !Number.isFinite(point.longitude) || !Number.isFinite(point.latitude) || point.longitude < -180 || point.longitude > 180 || point.latitude < -90 || point.latitude > 90) throw new Error("invalid_selection_point_position");
+      const pointLongitude = Number(point.longitude.toFixed(7));
+      const pointLatitude = Number(point.latitude.toFixed(7));
+      if (mobileMapDistanceMeters([longitude, latitude], [pointLongitude, pointLatitude]) > MOBILE_MAP_MAX_DISTANCE_METERS) throw new Error("selection_point_too_far");
+      const key = `${pointLongitude},${pointLatitude}`;
+      if (positions.has(key)) throw new Error("duplicate_selection_point");
+      ids.add(id);
+      positions.add(key);
+      return { id, source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: pointLongitude, latitude: pointLatitude };
+    }).sort((left, right) => left.id.localeCompare(right.id));
+    return { value: points, invalid: false };
+  } catch {
+    return { value: [], invalid: true };
+  }
+}
 function mobileSafeMapState(object) {
   const building = mobileMapSafeCollection(object?.building_polygon_geojson, object, "building");
   const terrain = mobileMapSafeCollection(object?.object_area_geojson, object, "terrain");
-  const invalid = building.invalid || terrain.invalid;
+  const points = mobileMapSafeBuildingSelectionPoints(object);
+  const invalid = building.invalid || terrain.invalid || points.invalid || mobileMapFeatures(building.value).length + points.value.length > MOBILE_MAP_MAX_FEATURES_BUILDING;
   return {
     building_polygon_geojson: building.value,
+    building_selection_points: points.value,
     object_area_geojson: terrain.value,
     building_selection_mode: mobileBuildingSelectionMode(object),
     map_geometry_status: invalid ? "needs_review" : mobileMapGeometryStatus(object),
     invalid
   };
+}
+function mobileObjectMapVisible(object, geometryState) {
+  const status = String(object?.status || "").trim().toLowerCase();
+  return (!status || status === "active") && object?.is_active !== false &&
+    object?.show_on_mobile_map !== false && object?.is_active_customer_object !== false &&
+    geometryState.map_geometry_status !== "needs_review";
 }
 async function requireMobilePersonnel(base44, user) {
   if (isPrivileged2(user)) return null;
@@ -1304,7 +1346,7 @@ async function handleMobileObjectsMap(req) {
         const coordinates = mobileMapCoordinatePair(object.latitude, object.longitude);
         const mobileObject = { ...object, ...coordinates };
         return { object: mobileObject, geometryState: mobileSafeMapState(mobileObject) };
-      }).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => {
+      }).filter(({ object, geometryState }) => mobileObjectMapVisible(object, geometryState)).map(({ object, geometryState }) => {
         const fp = floorPlanByObjectId.get(String(object.id));
         const taskMapState = statusForObject(object.id, tasks);
         return {
@@ -1319,6 +1361,7 @@ async function handleMobileObjectsMap(req) {
           map_geometry_revision: mobileMapGeometryRevision(object),
           map_geometry_hash: object.map_geometry_hash || null,
           building_polygon_geojson: geometryState.building_polygon_geojson,
+          building_selection_points: geometryState.building_selection_points,
           object_area_geojson: taskMapState.has_task_in_current_route ? geometryState.object_area_geojson : null,
           mobile_map_priority: Number(object.mobile_map_priority || 0),
           floor_plan_summary: fp ? {
@@ -1573,7 +1616,7 @@ async function buildPackage(base44, routeExecution) {
     const coordinates = mobileMapCoordinatePair(object.latitude, object.longitude);
     const mobileObject = { ...object, ...coordinates };
     return { object: mobileObject, geometryState: mobileSafeMapState(mobileObject) };
-  }).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => ({
+  }).filter(({ object, geometryState }) => mobileObjectMapVisible(object, geometryState)).map(({ object, geometryState }) => ({
     object_id: object.id,
     name: object.name,
     latitude: object.latitude,
@@ -1585,6 +1628,7 @@ async function buildPackage(base44, routeExecution) {
     map_geometry_revision: mobileMapGeometryRevision(object),
     map_geometry_hash: object.map_geometry_hash || null,
     building_polygon_geojson: geometryState.building_polygon_geojson,
+    building_selection_points: geometryState.building_selection_points,
     object_area_geojson: relevantObjectIds.has(String(object.id)) ? geometryState.object_area_geojson : null,
     mobile_map_priority: Number(object.mobile_map_priority || 0),
     floor_plan_summary: (() => {

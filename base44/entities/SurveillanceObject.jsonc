@@ -679,13 +679,32 @@
       "additionalProperties": true,
       "description": "Canonieke WGS84 FeatureCollection met BAG-pandcontouren en eventuele expliciet handmatig getekende gebouwcontouren"
     },
+    "building_selection_points": {
+      "type": "array",
+      "maxItems": 100,
+      "default": [],
+      "description": "Door de gebruiker aangeklikte WGS84-posities voor 3D-gebouwen zonder BAG-koppeling. Bevat geen Mapbox-contouren of tijdelijke Mapbox-feature-ID's.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "source": { "type": "string", "enum": ["user_selected"] },
+          "provider": { "type": "string", "enum": ["mapbox"] },
+          "bag_status": { "type": "string", "enum": ["unlinked"] },
+          "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+          "latitude": { "type": "number", "minimum": -90, "maximum": 90 }
+        },
+        "required": ["id", "source", "provider", "bag_status", "longitude", "latitude"]
+      }
+    },
     "object_area_geojson": {
       "type": [
         "object",
         "null"
       ],
       "additionalProperties": true,
-      "description": "Canonieke WGS84 FeatureCollection met een of meer door de gebruiker getekende terreinvlakken"
+      "description": "Canonieke WGS84 FeatureCollection met operationele terreinvlakken, eventueel begonnen vanuit een PDOK-perceel met gesaneerde herkomstverwijzing"
     },
     "building_selection_mode": {
       "type": "string",

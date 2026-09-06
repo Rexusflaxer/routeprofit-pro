@@ -39,6 +39,24 @@
       ],
       "additionalProperties": true
     },
+    "building_selection_points": {
+      "type": "array",
+      "maxItems": 100,
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "source": { "type": "string", "enum": ["user_selected"] },
+          "provider": { "type": "string", "enum": ["mapbox"] },
+          "bag_status": { "type": "string", "enum": ["unlinked"] },
+          "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+          "latitude": { "type": "number", "minimum": -90, "maximum": 90 }
+        },
+        "required": ["id", "source", "provider", "bag_status", "longitude", "latitude"]
+      }
+    },
     "object_area_geojson": {
       "type": [
         "object",

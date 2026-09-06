@@ -221,7 +221,7 @@ function coordinateOnRingBoundary(ring, coordinate) {
   return false;
 }
 
-function featureStrictlyContainsCoordinate(feature, coordinate) {
+export function featureStrictlyContainsCoordinate(feature, coordinate) {
   return featureContainsCoordinate(feature, coordinate)
     && !polygonRings(feature).some(ring => coordinateOnRingBoundary(ring, coordinate));
 }

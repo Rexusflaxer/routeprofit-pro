@@ -4,9 +4,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getConfiguration, listCandidates, updateConfiguration, guardState } = vi.hoisted(() => ({
+const { getConfiguration, listCandidates, listParcels, updateConfiguration, guardState } = vi.hoisted(() => ({
   getConfiguration: vi.fn(),
   listCandidates: vi.fn(),
+  listParcels: vi.fn(),
   updateConfiguration: vi.fn(),
   guardState: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("@/components/objects/objectMapWorkflow", () => ({
   createObjectMapMutationKey: vi.fn(() => "map-mutation-key"),
   getObjectMapConfiguration: getConfiguration,
   listObjectBuildingCandidates: listCandidates,
+  listObjectParcelCandidates: listParcels,
   updateObjectMapConfiguration: updateConfiguration,
 }));
 vi.mock("@/components/objects/useObjectModuleNavigationGuard", () => ({
@@ -26,8 +28,11 @@ vi.mock("@/components/objects/useObjectModuleNavigationGuard", () => ({
 vi.mock("@/components/objects/ObjectMapCanvas", () => ({
   default: props => <div data-testid="map-canvas">
     <button type="button" onClick={() => props.onToggleCandidate("bag-1")}>Pand op kaart selecteren</button>
-    <button type="button" onClick={() => props.onAddDrawingPoint([4.48, 51.92])}>Hoekpunt op kaart plaatsen</button>
+    <button type="button" onClick={() => props.onAddDrawingPoint([[4.48, 51.92], [4.481, 51.92], [4.481, 51.921]][props.drawingPoints.length % 3])}>Hoekpunt op kaart plaatsen</button>
+    <button type="button" onClick={() => props.onToggleBuildingPoint({ id: "user-point-1", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4815, latitude: 51.92 })}>Gebouw zonder BAG selecteren</button>
+    <button type="button" onClick={() => props.onToggleParcel("parcel-1")}>Perceel op kaart selecteren</button>
     <output aria-label="Geselecteerde kaartpanden">{(props.selectedBagFeatureIds || []).join(",")}</output>
+    <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, drawingPoints: props.drawingPoints, points: props.buildingSelectionPoints, terrain: props.terrain })}</output>
   </div>,
 }));
 
@@ -75,6 +80,7 @@ describe("ObjectMapTab", () => {
     vi.clearAllMocks();
     getConfiguration.mockResolvedValue(configuration);
     listCandidates.mockResolvedValue({ items: [candidate], total: 1, source: "PDOK BAG", source_retrieved_at: "2026-09-06T09:00:00Z" });
+    listParcels.mockResolvedValue({ items: [{ ...candidate, id: "parcel-1", properties: { source: "pdok_brk", source_feature_id: "parcel-1", label: "ROTTERDAM A 12" } }], source: "PDOK Kadastrale kaart" });
     updateConfiguration.mockResolvedValue({ ...configuration, expected_version: 5, building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"], map_geometry_status: "configured", map_geometry_revision: 1 });
   });
 
@@ -102,14 +108,14 @@ describe("ObjectMapTab", () => {
     })));
   });
 
-  it("blokkeert Exact vastleggen zolang BAG-kandidaten nog laden", async () => {
+  it("laat gebouwen selecteren terwijl BAG-kandidaten nog laden", async () => {
     let resolveCandidates;
     listCandidates.mockReturnValue(new Promise(resolve => { resolveCandidates = resolve; }));
     renderTab();
 
     const exactSelection = await screen.findByRole("button", { name: /Exact vastleggen/ });
-    expect(exactSelection).toBeDisabled();
-    expect(screen.getByText(/beschikbaar zodra de BAG-controle is afgerond/)).toBeInTheDocument();
+    expect(exactSelection).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Gebouwcontour tekenen/ })).not.toBeInTheDocument();
 
     await act(async () => {
       resolveCandidates({ items: [candidate], total: 1, source: "PDOK BAG" });
@@ -117,25 +123,26 @@ describe("ObjectMapTab", () => {
     await waitFor(() => expect(exactSelection).not.toBeDisabled());
   });
 
-  it("blokkeert Exact vastleggen als BAG-kandidaten niet konden worden geladen", async () => {
+  it("laat gebouwen zonder BAG-koppeling selecteren bij BAG-uitval", async () => {
     listCandidates.mockRejectedValue(new Error("PDOK tijdelijk niet bereikbaar"));
     renderTab();
 
     expect(await screen.findByText("BAG-gebouwen konden niet worden geladen.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Exact vastleggen/ })).toBeDisabled();
-    expect(screen.getByText(/Probeer opnieuw of teken zelf een gebouwcontour/)).toBeInTheDocument();
-    expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Exact vastleggen/ })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Gebouw zonder BAG selecteren" }));
+    expect(screen.getByText("Gebouw 1 · Zonder BAG-koppeling")).toBeInTheDocument();
+    expect(screen.getByText("Niet opgeslagen")).toBeInTheDocument();
   });
 
-  it("maakt een lege handmatige selectie alleen via de expliciete keuze mogelijk", async () => {
+  it("kan zonder BAG-kandidaten omschakelen naar eigen selecties", async () => {
     listCandidates.mockResolvedValue({ items: [], total: 0, source: "PDOK BAG" });
     renderTab();
 
     expect(await screen.findByText("0 BAG-kandidaten binnen 250 meter geladen")).toBeInTheDocument();
     const exactSelection = screen.getByRole("button", { name: /Exact vastleggen/ });
-    expect(exactSelection).toBeDisabled();
+    expect(exactSelection).not.toBeDisabled();
     fireEvent.click(exactSelection);
-    expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
+    expect(screen.getByText("Niet opgeslagen")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Bewust geen gebouwen markeren" }));
     expect(screen.getByText("Niet opgeslagen")).toBeInTheDocument();
@@ -434,7 +441,8 @@ describe("ObjectMapTab", () => {
 
   it("beschouwt een lopend tekenvlak als niet-opgeslagen wijziging", async () => {
     renderTab();
-    fireEvent.click(await screen.findByRole("button", { name: "Gebouwcontour tekenen" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
     fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
 
     await waitFor(() => expect(guardState.mock.calls.at(-1)[0].dirty).toBe(true));
@@ -450,6 +458,71 @@ describe("ObjectMapTab", () => {
     expect(draftSaveError).toMatchObject({ message: expect.stringContaining("Sluit of annuleer eerst het vlak") });
     expect(await screen.findByText("Maak het getekende vlak eerst af")).toBeInTheDocument();
     expect(updateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("slaat eigen gebouwselecties met herkomst op en kan ze opnieuw verwijderen", async () => {
+    updateConfiguration.mockImplementation(async ({ data }) => ({ ...configuration, ...data, expected_version: 5 }));
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Gebouw zonder BAG selecteren" }));
+    expect(screen.getByText("Gebouw 1 · Zonder BAG-koppeling")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      building_selection_mode: "manual",
+      building_selection_points: [{ id: "user-point-1", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4815, latitude: 51.92 }],
+    }) })));
+    await waitFor(() => expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument());
+    expect(screen.getByText("Gebouw 1 · Zonder BAG-koppeling")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Gebouw zonder BAG-koppeling 1 verwijderen" }));
+    expect(screen.queryByText("Gebouw 1 · Zonder BAG-koppeling")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Wijziging ongedaan maken" }));
+    expect(screen.getByText("Gebouw 1 · Zonder BAG-koppeling")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Automatisch bepalen/ }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).points).toEqual([]);
+  });
+
+  it("behoudt de terreintekening bij wisselen tussen kaart en luchtfoto", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    expect(screen.getByRole("button", { name: "Luchtfoto" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Kaart" }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent)).toMatchObject({ view: "map", drawingPoints: [[4.48, 51.92], [4.481, 51.92]] });
+    fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Vlak sluiten (3/3)" }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).terrain.features).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      object_area_geojson: expect.objectContaining({ features: [expect.objectContaining({ geometry: candidate.geometry })] }),
+    }) })));
+  });
+
+  it("neemt een perceel over met herkomst, bewaart undo en kan het weer wissen", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    await waitFor(() => expect(listParcels).toHaveBeenCalledWith(expect.objectContaining({ customerId: "customer-1", objectId: "object-1" })));
+    expect(await screen.findByText(/1 percelen rond het object geladen/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Perceel kiezen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Perceel op kaart selecteren" }));
+    const state = () => JSON.parse(screen.getByLabelText("Kaartstatus").textContent);
+    expect(state().terrain.features[0]).toMatchObject({ geometry: candidate.geometry, properties: { source: "user_drawn", derived_from: "pdok_brk", derived_from_id: "parcel-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Wijziging ongedaan maken" }));
+    expect(state().terrain.features).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Wijziging opnieuw uitvoeren" }));
+    expect(state().terrain.features).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Terreindeel 1 verwijderen" }));
+    expect(state().terrain.features).toEqual([]);
+  });
+
+  it("houdt zelf tekenen beschikbaar bij een storing van de perceelbron", async () => {
+    listParcels.mockRejectedValue(new Error("PDOK tijdelijk niet bereikbaar"));
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    expect(await screen.findByText(/Perceelgrenzen konden niet worden geladen/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zelf tekenen" })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Gebouwcontour tekenen/ })).not.toBeInTheDocument();
   });
 
   it("laadt vervolgcandidaten met een opaque cursor en dedupliceert de kaartlijst", async () => {

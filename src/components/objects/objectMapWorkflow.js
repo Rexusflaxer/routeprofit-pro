@@ -133,6 +133,7 @@ export function normalizeObjectMapConfiguration(value) {
     map_geometry_review_reason: configuration.map_geometry_review_reason || null,
     show_on_mobile_map: typeof showOnMobileMap === "boolean" ? showOnMobileMap : null,
     selected_bag_feature_ids: [...new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String).filter(Boolean))].sort(),
+    building_selection_points: Array.isArray(configuration.building_selection_points) ? configuration.building_selection_points : [],
     building_polygon_geojson: selectedBuildings,
     manual_building_geojson: manualBuildings,
     object_area_geojson: normalizeFeatureCollection(configuration.object_area_geojson),
@@ -169,6 +170,18 @@ export async function listObjectBuildingCandidates({ customerId, objectId, radiu
   return normalizeObjectMapCandidates(result);
 }
 
+export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, invoke = invokeCustomerPlatformRead }) {
+  const result = await invoke({
+    action: "list_object_parcel_candidates",
+    customer_id: required(customerId, "Klant-ID"),
+    object_id: required(objectId, "Object-ID"),
+    radius_meters: Math.min(500, Math.max(25, Math.round(Number(radiusMeters) || 250))),
+    limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
+    ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
+  });
+  return normalizeObjectMapCandidates(result);
+}
+
 export async function updateObjectMapConfiguration({ customerId, objectId, expectedVersion, data, idempotencyKey, invoke = invokeCustomerPlatformMutation }) {
   const version = Number(expectedVersion);
   if (!Number.isInteger(version) || version < 0) throw new Error("De actuele objectversie ontbreekt. Vernieuw de kaart en probeer opnieuw.");
@@ -184,6 +197,16 @@ export async function updateObjectMapConfiguration({ customerId, objectId, expec
       building_selection_mode: mode,
       selected_bag_feature_ids: mode === "manual"
         ? [...new Set((data?.selected_bag_feature_ids || []).map(String).filter(Boolean))].sort()
+        : [],
+      building_selection_points: mode === "manual"
+        ? (data?.building_selection_points || []).map(point => ({
+          id: point.id,
+          source: "user_selected",
+          provider: "mapbox",
+          bag_status: "unlinked",
+          longitude: point.longitude,
+          latitude: point.latitude,
+        }))
         : [],
       manual_building_geojson: mode === "manual"
         ? normalizeFeatureCollection(data?.manual_building_geojson)

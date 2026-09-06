@@ -113,6 +113,14 @@ describe("customerPlatformApi runtimecontract", () => {
     expect(invokeLatest).toHaveBeenCalledWith("customerPlatformApi", payload);
   });
 
+  it("herstelt perceelvragen uit een verouderde previewfunctieversie", async () => {
+    const payload = { action: "list_object_parcel_candidates", customer_id: "customer-1", object_id: "object-1" };
+    invoke.mockRejectedValue(Object.assign(new Error("Onbekende actie"), { response: { status: 400, data: { error: "Onbekende actie" } } }));
+    invokeLatest.mockResolvedValue({ data: { data: { candidates: { type: "FeatureCollection", features: [] } } } });
+    await expect(invokeCustomerPlatformRead(payload)).resolves.toMatchObject({ candidates: { features: [] } });
+    expect(invokeLatest).toHaveBeenCalledWith("customerPlatformApi", payload);
+  });
+
   it("toont één gerichte objectplatformmelding als ook de nieuwste snapshot de actie niet kent", async () => {
     const unknownAction = Object.assign(new Error("Request failed with status code 400"), {
       response: { status: 400, data: { error: "Onbekende actie" } },

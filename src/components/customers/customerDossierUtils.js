@@ -36,6 +36,7 @@ const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "sync_object_installation_handbooks",
   "get_object_map_configuration",
   "list_object_building_candidates",
+  "list_object_parcel_candidates",
   "update_object_map_configuration",
 ]);
 
