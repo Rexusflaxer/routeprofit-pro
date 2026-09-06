@@ -335,6 +335,7 @@ const OBJECT_MAP_PARCEL_ATTEMPT_TIMEOUT_MS = Math.floor(
 const OBJECT_MAP_DEFAULT_RADIUS_METERS = 150;
 const OBJECT_MAP_MIN_RADIUS_METERS = 25;
 const OBJECT_MAP_MAX_RADIUS_METERS = 500;
+const OBJECT_MAP_MAX_PARCEL_RADIUS_METERS = 1_000;
 const OBJECT_MAP_MAX_CANDIDATES = 100;
 const OBJECT_MAP_MAX_BUILDING_FEATURES = 100;
 const OBJECT_MAP_MAX_TERRAIN_FEATURES = 25;
@@ -4214,6 +4215,49 @@ function buildingSelectionSummary(geometry: unknown, points: LooseRecord[] = [])
   return { ...summary, feature_count: summary.feature_count + points.length, selection_point_count: points.length };
 }
 
+function objectBuildingLabelKeys(geometry: unknown, points: LooseRecord[] = []) {
+  const counts = new Map<string, number>();
+  const add = (key: string) => counts.set(key, (counts.get(key) || 0) + 1);
+  geoJsonFeatures(geometry).forEach(feature => {
+    const properties = feature.properties || {};
+    const id = asString(properties.source === 'pdok_bag'
+      ? properties.source_feature_id
+      : properties.local_id || feature.id);
+    if (id) add(`${properties.source === 'pdok_bag' ? 'bag' : 'manual'}:${id}`);
+  });
+  points.forEach(point => { if (asString(point.id)) add(`point:${point.id}`); });
+  // Ambigue legacy-ID's mogen nooit een naam aan meer dan één gebouw koppelen.
+  return new Set([...counts].filter(([, count]) => count === 1).map(([key]) => key));
+}
+
+function normalizedBuildingLabels(value: unknown, geometry: unknown, points: LooseRecord[] = [], strict = false) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    Object.keys(value).length > OBJECT_MAP_MAX_BUILDING_FEATURES ||
+    new TextEncoder().encode(JSON.stringify(value)).byteLength > 50_000) {
+    if (strict) throw new ApiError(400, 'Gebouwnamen moeten een object met maximaal 100 namen zijn');
+    return {};
+  }
+  const allowedKeys = objectBuildingLabelKeys(geometry, points);
+  const entries: [string, string][] = [];
+  for (const [key, rawLabel] of Object.entries(value)) {
+    if (!allowedKeys.has(key) || typeof rawLabel !== 'string') {
+      if (strict) throw new ApiError(400, 'Een gebouwnaam hoort niet bij een uniek geselecteerd gebouw of bevat geen tekst');
+      continue;
+    }
+    const label = rawLabel.normalize('NFC')
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      .replace(/[\u202a-\u202e\u2066-\u2069]/g, '')
+      .replace(/\s+/g, ' ').trim();
+    if (label.length > 100) {
+      if (strict) throw new ApiError(400, 'Een gebouwnaam mag maximaal 100 tekens bevatten');
+      continue;
+    }
+    if (label) entries.push([key, label]);
+  }
+  return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function objectMapAnchor(object: LooseRecord) {
   const latitude = objectCoordinate(object.latitude, -90, 90, 'Breedtegraad');
   const longitude = objectCoordinate(object.longitude, -180, 180, 'Lengtegraad');
@@ -4430,6 +4474,7 @@ function safeObjectMapConfiguration(object: LooseRecord) {
     selected_bag_feature_ids: selectedFeatureIds,
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     building_selection_points: safeGeometry.building_selection_points,
+    building_labels: normalizedBuildingLabels(object.building_labels, safeGeometry.building_polygon_geojson, safeGeometry.building_selection_points),
     manual_building_geojson: safeExistingManualBuildingCollection(object, safeGeometry.building_polygon_geojson),
     object_area_geojson: safeGeometry.object_area_geojson,
     building_summary: buildingSelectionSummary(safeGeometry.building_polygon_geojson, safeGeometry.building_selection_points),
@@ -4484,6 +4529,7 @@ async function ensureObjectMapGeometryRevision(
         longitude: sourceRevision.anchor_longitude,
         building_polygon_geojson: sourceRevision.building_polygon_geojson,
         building_selection_points: sourceRevision.building_selection_points,
+        building_labels: sourceRevision.building_labels,
         object_area_geojson: sourceRevision.object_area_geojson,
       };
       safeGeometry = safeStoredMapGeometry(effectiveGeometrySource);
@@ -4512,10 +4558,14 @@ async function ensureObjectMapGeometryRevision(
     effectiveGeometrySource.longitude,
   );
   if (!revisionAnchor) return null;
+  const buildingLabels = normalizedBuildingLabels(
+    effectiveGeometrySource.building_labels, safeGeometry.building_polygon_geojson, safeGeometry.building_selection_points,
+  );
   const geometryHash = await sha256(JSON.stringify(mapGeometryHashProjection({
     building_selection_mode: buildingSelectionMode,
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     ...(safeGeometry.building_selection_points.length ? { building_selection_points: safeGeometry.building_selection_points } : {}),
+    ...(Object.keys(buildingLabels).length ? { building_labels: buildingLabels } : {}),
     object_area_geojson: safeGeometry.object_area_geojson,
   })));
   const matching = trustedExisting.find((record: LooseRecord) => record.geometry_hash === geometryHash);
@@ -4537,6 +4587,7 @@ async function ensureObjectMapGeometryRevision(
     map_geometry_status: mapGeometryStatus,
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     building_selection_points: safeGeometry.building_selection_points,
+    building_labels: buildingLabels,
     object_area_geojson: safeGeometry.object_area_geojson,
     anchor_latitude: revisionAnchor.latitude,
     anchor_longitude: revisionAnchor.longitude,
@@ -5093,9 +5144,9 @@ function canonicalPdokParcelFeature(feature: LooseRecord, anchor: number[], retr
 async function handleListObjectParcelCandidates(base44: LooseRecord, body: LooseRecord) {
   const { object } = await requireCustomerObjectScope(base44, body);
   const anchor = objectMapAnchor(object);
-  const radiusMeters = Number(body.radius_meters ?? OBJECT_MAP_DEFAULT_RADIUS_METERS);
-  if (!Number.isInteger(radiusMeters) || radiusMeters < OBJECT_MAP_MIN_RADIUS_METERS || radiusMeters > OBJECT_MAP_MAX_RADIUS_METERS) {
-    throw new ApiError(400, `radius_meters moet tussen ${OBJECT_MAP_MIN_RADIUS_METERS} en ${OBJECT_MAP_MAX_RADIUS_METERS} liggen`);
+  const radiusMeters = Number(body.radius_meters ?? OBJECT_MAP_MAX_PARCEL_RADIUS_METERS);
+  if (!Number.isInteger(radiusMeters) || radiusMeters < OBJECT_MAP_MIN_RADIUS_METERS || radiusMeters > OBJECT_MAP_MAX_PARCEL_RADIUS_METERS) {
+    throw new ApiError(400, `radius_meters moet tussen ${OBJECT_MAP_MIN_RADIUS_METERS} en ${OBJECT_MAP_MAX_PARCEL_RADIUS_METERS} liggen`);
   }
   const limit = Math.min(OBJECT_MAP_MAX_CANDIDATES, requireInteger(body.limit ?? 50, 'limit', 1));
   const cursor = safePdokParcelCursor(body.cursor);
@@ -5253,6 +5304,13 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
       OBJECT_MAP_MAX_BUILDING_AREA_SQM,
     );
   }
+  const buildingLabelsWereProvided = Object.prototype.hasOwnProperty.call(data, 'building_labels');
+  const buildingLabels = normalizedBuildingLabels(
+    buildingLabelsWereProvided ? data.building_labels : object.building_labels,
+    buildingPolygonGeoJson,
+    buildingSelectionPoints,
+    buildingLabelsWereProvided,
+  );
   const objectAreaWasProvided = Object.prototype.hasOwnProperty.call(data, 'object_area_geojson');
   const objectAreaInput = objectAreaWasProvided ? data.object_area_geojson : object.object_area_geojson;
   const normalizedObjectAreaGeoJson = objectAreaInput !== null && objectAreaInput !== undefined
@@ -5305,12 +5363,14 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
     building_selection_mode: buildingSelectionMode,
     building_polygon_geojson: buildingPolygonGeoJson,
     ...(buildingSelectionPoints.length ? { building_selection_points: buildingSelectionPoints } : {}),
+    ...(Object.keys(buildingLabels).length ? { building_labels: buildingLabels } : {}),
     object_area_geojson: objectAreaGeoJson,
   })));
   const patch = {
     building_selection_mode: buildingSelectionMode,
     building_polygon_geojson: buildingPolygonGeoJson,
     building_selection_points: buildingSelectionPoints,
+    building_labels: buildingLabels,
     object_area_geojson: objectAreaGeoJson,
     map_geometry_status: 'configured',
     map_geometry_revision: nextRevision,
@@ -5324,6 +5384,10 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
   const newBuildingSummary = buildingSelectionSummary(buildingPolygonGeoJson, buildingSelectionPoints);
   const oldTerrainSummary = geometrySummary(object.object_area_geojson);
   const newTerrainSummary = geometrySummary(objectAreaGeoJson);
+  const oldLabels = normalizedBuildingLabels(object.building_labels,
+    safeStoredBuildingCollection(object).value, safeStoredBuildingSelectionPoints(object).value);
+  const nameChangeCount = [...new Set([...Object.keys(oldLabels), ...Object.keys(buildingLabels)])]
+    .filter(key => oldLabels[key] !== buildingLabels[key]).length;
   const changes = [
     {
       field: 'building_selection_mode', label: 'Gebouwselectie',
@@ -5350,6 +5414,10 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
       before: object.show_on_mobile_map !== false, after: showOnMobileMap,
     },
   ].filter(change => change.before !== change.after);
+  if (nameChangeCount) {
+    // Namen kunnen persoons- of bedrijfsgegevens bevatten: alleen aantallen in audit/recovery.
+    changes.push({ field: 'building_name_changes', label: 'Gewijzigde gebouwnamen', before: 0, after: nameChangeCount });
+  }
   if (conflictsRequiringConfirmation.length) {
     changes.push({
       field: 'building_overlap',
@@ -11013,6 +11081,7 @@ async function handleCreateCustomerObject(
       mobile_map_priority: 0,
       building_polygon_geojson: null,
       building_selection_points: [],
+      building_labels: {},
       object_area_geojson: null,
       building_selection_mode: 'automatic',
       map_geometry_status: 'unconfigured',

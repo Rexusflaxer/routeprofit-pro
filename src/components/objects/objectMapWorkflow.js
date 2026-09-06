@@ -136,6 +136,7 @@ export function normalizeObjectMapConfiguration(value) {
     show_on_mobile_map: typeof showOnMobileMap === "boolean" ? showOnMobileMap : null,
     selected_bag_feature_ids: [...new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String).filter(Boolean))].sort(),
     building_selection_points: Array.isArray(configuration.building_selection_points) ? configuration.building_selection_points : [],
+    building_labels: configuration.building_labels && typeof configuration.building_labels === "object" && !Array.isArray(configuration.building_labels) ? configuration.building_labels : {},
     building_polygon_geojson: selectedBuildings,
     manual_building_geojson: manualBuildings,
     object_area_geojson: normalizeFeatureCollection(configuration.object_area_geojson),
@@ -175,11 +176,11 @@ export async function listObjectBuildingCandidates({ customerId, objectId, radiu
 function readableParcelError(error) {
   const code = error?.details?.code;
   const message = code === "pdok_parcel_unavailable"
-    ? "De perceelgrenzen konden via de beschikbare verbindingen niet worden opgehaald. Probeer opnieuw; je kunt ondertussen zelf tekenen."
+    ? "De perceelgrenzen konden via de beschikbare verbindingen niet worden opgehaald. Probeer opnieuw; je bestaande terrein blijft bewaard."
     : code === "pdok_parcel_invalid_response"
-      ? "De kadastrale perceeldienst (PDOK) gaf geen bruikbaar antwoord. Je kunt opnieuw proberen of zelf het terrein tekenen."
+      ? "De kadastrale perceeldienst (PDOK) gaf geen bruikbaar antwoord. Probeer opnieuw; je bestaande terrein blijft bewaard."
       : Number(error?.status) >= 500
-        ? "Het ophalen van objectgegevens of perceelgrenzen is tijdelijk mislukt. Probeer opnieuw; je kunt ondertussen zelf tekenen."
+        ? "Het ophalen van objectgegevens of perceelgrenzen is tijdelijk mislukt. Probeer opnieuw; je bestaande terrein blijft bewaard."
         : null;
   if (!message) return error;
   return Object.assign(new Error(message), {
@@ -193,12 +194,12 @@ function requireUnchangedParcelCenter(expected, actual) {
   }
 }
 
-export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, transport = "server", expectedCenter = null, invoke = invokeCustomerPlatformRead, fetchDirect = fetchObjectParcelCandidatesDirect }) {
+export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 1_000, limit = 100, cursor = null, transport = "server", expectedCenter = null, invoke = invokeCustomerPlatformRead, fetchDirect = fetchObjectParcelCandidatesDirect }) {
   const payload = {
     action: "list_object_parcel_candidates",
     customer_id: required(customerId, "Klant-ID"),
     object_id: required(objectId, "Object-ID"),
-    radius_meters: Math.min(500, Math.max(25, Math.round(Number(radiusMeters) || 250))),
+    radius_meters: Math.min(1_000, Math.max(25, Math.round(Number(radiusMeters) || 1_000))),
     limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
     ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
   };
@@ -260,6 +261,7 @@ export async function updateObjectMapConfiguration({ customerId, objectId, expec
     idempotency_key: required(idempotencyKey, "Mutatiesleutel"),
     data: {
       building_selection_mode: mode,
+      ...(Object.prototype.hasOwnProperty.call(data || {}, "building_labels") ? { building_labels: data.building_labels || {} } : {}),
       selected_bag_feature_ids: mode === "manual"
         ? [...new Set((data?.selected_bag_feature_ids || []).map(String).filter(Boolean))].sort()
         : [],

@@ -52,6 +52,7 @@ beforeAll(async () => {
     "handleUpdateObjectMapConfiguration",
     "handleSetCustomerObjectStatus",
     "normalizedGeoJsonFeatureCollection",
+    "normalizedBuildingLabels",
     "normalizedObjectCoordinatePair",
     "objectBuildingSelectionMode",
     "objectHasMapConfiguration",
@@ -241,6 +242,7 @@ describe("Kaart en terrein backendcontract", () => {
     expect(schema.properties).toHaveProperty("map_geometry_updated_at");
     expect(schema.properties).toHaveProperty("map_geometry_updated_by_user_id");
     expect(schema.properties).toHaveProperty("map_geometry_review_reason");
+    expect(schema.properties.building_labels).toMatchObject({ type: "object", maxProperties: 100, default: {}, additionalProperties: { type: "string", maxLength: 100 } });
     expect(schema.rls).toMatchObject({ create: false, update: false, delete: false });
 
     const historySchema = JSON.parse(fs.readFileSync(
@@ -248,6 +250,7 @@ describe("Kaart en terrein backendcontract", () => {
       "utf8",
     ));
     expect(historySchema.rls).toEqual({ create: false, read: false, update: false, delete: false });
+    expect(historySchema.properties.building_labels).toMatchObject({ type: "object", maxProperties: 100, additionalProperties: { type: "string", maxLength: 100 } });
     expect(historySchema.required).toEqual(expect.arrayContaining([
       "customer_id",
       "object_id",
@@ -828,6 +831,113 @@ describe("Kaart en terrein backendcontract", () => {
       "andere-fingerprint",
       "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
     )).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("bewaart namen voor BAG, aanklikpunten en legacycontouren in de private historie en bij herladen", async () => {
+    const mock = mockCustomerPlatform();
+    vi.stubGlobal("fetch", vi.fn());
+    const labels = {
+      "bag:bag-building-1": "  Receptie\n Hoofdingang  ",
+      "point:user-point-1": "Werkplaats",
+      "manual:legacy-building": "Magazijn",
+    };
+    const expectedLabels = { ...labels, "bag:bag-building-1": "Receptie Hoofdingang" };
+    const body = {
+      customer_id: "customer-1", object_id: "object-1",
+      data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"],
+        manual_building_geojson: { type: "FeatureCollection", features: [squareFeature("legacy-building", 0.002)] },
+        building_selection_points: [{ id: "user-point-1", longitude: 4.305, latitude: 52.1005 }],
+        building_labels: labels,
+      },
+    };
+    const target = "update_object_map_configuration|customer_id:customer-1|object_id:object-1";
+    const result = await customerBackend.handleUpdateObjectMapConfiguration(
+      mock.base44, { id: "admin-1" }, body, 3, "map-names", "fingerprint-names", target,
+    );
+    expect(result.configuration.building_labels).toEqual(expectedLabels);
+    expect(mock.state().building_labels).toEqual(expectedLabels);
+    expect(mock.mapGeometryRevisions.at(-1).building_labels).toEqual(expectedLabels);
+    const reloaded = await customerBackend.handleGetObjectMapConfiguration(mock.base44, body);
+    expect(reloaded.configuration.building_labels).toEqual(expectedLabels);
+    const replay = await customerBackend.customerObjectMutationMarkerReplay(
+      mock.base44, { id: "admin-1" }, "update_object_map_configuration", body,
+      "map-names", "fingerprint-names", target,
+    );
+    expect(replay.configuration.building_labels).toEqual(expectedLabels);
+    await customerBackend.recordMutationResult(mock.base44, { id: "admin-1" }, "update_object_map_configuration",
+      "event-map-names", result, body, "fingerprint-names", target);
+    for (const value of [result.audit_result, mock.events[0].payload.result, mock.state().customer_platform_last_mutation_recovery]) {
+      const serialized = JSON.stringify(value);
+      expect(serialized).not.toContain("building_labels");
+      Object.values(expectedLabels).forEach(label => expect(serialized).not.toContain(label));
+    }
+    expect(result.audit_result.changes).toContainEqual({ field: "building_name_changes", label: "Gewijzigde gebouwnamen", before: 0, after: 3 });
+  });
+
+  it("verhoogt revisie en hash voor alleen een gewijzigde gebouwnaam, zonder naamtekst te loggen", async () => {
+    const mock = mockCustomerPlatform({ building_labels: { "bag:bag-building-1": "Oude naam" } });
+    const saveNames = (label, version, key) => customerBackend.handleUpdateObjectMapConfiguration(
+      mock.base44, { id: "admin-1" }, {
+        customer_id: "customer-1", object_id: "object-1", data: {
+          building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], building_labels: { "bag:bag-building-1": label },
+        },
+      }, version, key, `${key}-fingerprint`, "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    );
+    const first = await saveNames("Nieuwe naam", 3, "name-update-1");
+    const second = await saveNames("Andere naam", 4, "name-update-2");
+    expect(second.configuration.map_geometry_revision).toBe(first.configuration.map_geometry_revision + 1);
+    expect(second.configuration.map_geometry_hash).not.toBe(first.configuration.map_geometry_hash);
+    expect(mock.mapGeometryRevisions.map(revision => revision.building_labels["bag:bag-building-1"]))
+      .toEqual(["Oude naam", "Nieuwe naam", "Andere naam"]);
+    expect(second.audit_result.changes).toContainEqual({ field: "building_name_changes", label: "Gewijzigde gebouwnamen", before: 0, after: 1 });
+    expect(JSON.stringify(second.audit_result)).not.toContain("Andere naam");
+  });
+
+  it("behoudt namen voor oudere clients en verwijdert namen bij deselectie of automatisch herstellen", async () => {
+    const mock = mockCustomerPlatform({
+      building_labels: { "bag:bag-building-1": "Hoofdgebouw", "point:point-1": "Portiersloge" },
+      building_selection_points: [{ id: "point-1", longitude: 4.305, latitude: 52.1005 }],
+    });
+    const saveSelection = (data, version, key) => customerBackend.handleUpdateObjectMapConfiguration(
+      mock.base44, { id: "admin-1" }, { customer_id: "customer-1", object_id: "object-1", data }, version,
+      key, `${key}-fingerprint`, "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    );
+    const first = await saveSelection({ building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"] }, 3, "names-legacy");
+    expect(first.configuration.building_labels).toEqual({ "bag:bag-building-1": "Hoofdgebouw", "point:point-1": "Portiersloge" });
+    const second = await saveSelection({ building_selection_mode: "manual", selected_bag_feature_ids: [] }, 4, "names-deselect");
+    expect(second.configuration.building_labels).toEqual({ "point:point-1": "Portiersloge" });
+    const third = await saveSelection({ building_selection_mode: "automatic", selected_bag_feature_ids: [] }, 5, "names-automatic");
+    expect(third.configuration.building_labels).toEqual({});
+  });
+
+  it.each([
+    null, [], "name", { "bag:other-building": "Naam" }, { "bag:bag-building-1": 1 },
+    { "bag:bag-building-1": "a".repeat(101) },
+    Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`point:${index}`, "naam"])),
+    JSON.parse('{"__proto__":"name"}'),
+  ])("weigert ongeldige of niet-geselecteerde gebouwnamen zonder objectwijziging (%#)", async labels => {
+    const mock = mockCustomerPlatform();
+    await expect(customerBackend.handleUpdateObjectMapConfiguration(
+      mock.base44, { id: "admin-1" }, { customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], building_labels: labels,
+      } }, 3, "invalid-name", "invalid-name-fingerprint", "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    )).rejects.toMatchObject({ status: 400 });
+    expect(mock.surveillanceEntity.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("saneert gelezen legacy-namen en laat een leeg veld de naam verwijderen", async () => {
+    const mock = mockCustomerPlatform({ building_labels: { "bag:bag-building-1": "  Hoofd\u202egebouw  ", "bag:removed": "Niet uitleveren" } });
+    expect(customerBackend.safeObjectMapConfiguration(mock.state()).building_labels).toEqual({ "bag:bag-building-1": "Hoofdgebouw" });
+    const result = await customerBackend.handleUpdateObjectMapConfiguration(
+      mock.base44, { id: "admin-1" }, { customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], building_labels: { "bag:bag-building-1": "  " },
+      } }, 3, "clear-name", "clear-name-fingerprint", "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    );
+    expect(result.configuration.building_labels).toEqual({});
+    expect(customerBackend.normalizedBuildingLabels({ "manual:duplicate": "Ambigue naam" }, {
+      type: "FeatureCollection", features: [0, 1].map(() => ({ ...squareFeature("duplicate"), properties: { source: "manual", local_id: "duplicate" } })),
+    })).toEqual({});
   });
 
   it("behoudt legacy mobiele zichtbaarheid als show_on_mobile_map nog ontbreekt", async () => {

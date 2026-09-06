@@ -28,7 +28,7 @@ describe("begrensd rechtstreeks lezen van publieke PDOK-percelen", () => {
     const [url, options] = fetchImpl.mock.calls[0];
     expect(url.origin).toBe("https://api.pdok.nl");
     expect(url.pathname).toBe("/kadaster/brk-kadastrale-kaart/ogc/v1/collections/perceel/items");
-    expect(url.searchParams.get("bbox")).toBe("4.2968440,52.0982384,4.3041560,52.1027616");
+    expect(url.searchParams.get("bbox")).toBe("4.2858762,52.0914535,4.3151238,52.1095465");
     expect(url.searchParams.get("limit")).toBe("100");
     expect(url.searchParams.get("crs")).toBe("http://www.opengis.net/def/crs/OGC/1.3/CRS84");
     expect(options).toMatchObject({ credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" });
@@ -38,6 +38,35 @@ describe("begrensd rechtstreeks lezen van publieke PDOK-percelen", () => {
     expect(result.candidates.features[0]).toMatchObject({ id: feature().id, geometry: { type: "Polygon", coordinates: [ring] },
       properties: { source: "pdok_brk", source_feature_id: feature().id, label: "Heerde A 934" } });
     expect(JSON.stringify(result)).not.toMatch(/must not survive|not-pdok\.example|owner_name/);
+  });
+
+  it("bereikt ook perceel Heerde C 4979 ten zuiden van de oude zoekgrens", async () => {
+    // Public PDOK fixture, checked 2026-09-06: HDE00-C-4979, 24,500 m².
+    // Its northern tip starts > 250 m from the address; it is not missing in BAG/BRK.
+    const southernParcel = feature({
+      id: "410b827b-e3b6-5bb2-a420-b8ebbf576a5c",
+      properties: { kadastrale_gemeente_waarde: "Heerde", sectie: "C", perceelnummer: 4979 },
+      geometry: { type: "MultiPolygon", coordinates: [[[
+        [6.0726793, 52.4432025], [6.0730087, 52.4431353], [6.0733483, 52.4431145],
+        [6.0734082, 52.4431109], [6.0734613, 52.4431849], [6.0735481, 52.4432955],
+        [6.0736348, 52.4434131], [6.0737821, 52.4437211], [6.0739305, 52.4438590],
+        [6.0746795, 52.4445353], [6.0752358, 52.4450387], [6.0755322, 52.4453106],
+        [6.0735399, 52.4451566], [6.0734930, 52.4451530], [6.0733942, 52.4451453],
+        [6.0725176, 52.4442239], [6.0724398, 52.4441424], [6.0728063, 52.4440960],
+        [6.0725714, 52.4437534], [6.0725735, 52.4435087], [6.0726481, 52.4433724],
+        [6.0726598, 52.4432029], [6.0726793, 52.4432025],
+      ]]] },
+    });
+    const fetchImpl = vi.fn(async url => {
+      const bounds = url.searchParams.get("bbox").split(",").map(Number);
+      return json(collection(...(bounds[1] <= 52.4453106 ? [southernParcel] : [])));
+    });
+    const publicObject = { ...object, longitude: 6.07245109, latitude: 52.44874121 };
+    expect((await run(fetchImpl, { object: publicObject, radiusMeters: 250 })).total).toBe(0);
+    const result = await run(fetchImpl, { object: publicObject });
+    expect(result).toMatchObject({ total: 1, skipped_invalid_count: 0, radius_meters: 1_000 });
+    expect(result.candidates.features[0]).toMatchObject({ id: southernParcel.id,
+      properties: { source: "pdok_brk", label: "Heerde C 4979" } });
   });
 
   it.each([
@@ -55,7 +84,7 @@ describe("begrensd rechtstreeks lezen van publieke PDOK-percelen", () => {
       .resolves.toMatchObject({ total: 0 });
   });
 
-  it.each([{ radiusMeters: 24 }, { radiusMeters: 501 }, { radiusMeters: 50.5 }, { limit: 0 }, { limit: 101 },
+  it.each([{ radiusMeters: 24 }, { radiusMeters: 1_001 }, { radiusMeters: 50.5 }, { limit: 0 }, { limit: 101 },
     { limit: "100" }, { cursor: "../../another" }, { cursor: "x".repeat(181) }, { cursor: ["id"] }])(
     "weigert onbegrensde/ongeldige aanvragen: %j", async overrides => {
       const fetchImpl = vi.fn();

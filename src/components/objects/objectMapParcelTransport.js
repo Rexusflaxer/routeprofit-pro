@@ -16,8 +16,8 @@ function parcelError(code, reason, status = 503) {
     : status === 400
       ? "De aanvraag voor perceelgrenzen is ongeldig."
       : code === "pdok_parcel_invalid_response"
-        ? "PDOK gaf geen bruikbare perceelgrenzen terug. Zelf tekenen blijft mogelijk."
-        : "De verbinding met de perceeldienst is niet beschikbaar. Zelf tekenen blijft mogelijk.");
+        ? "PDOK gaf geen bruikbare perceelgrenzen terug. Je bestaande terrein blijft bewaard."
+        : "De verbinding met de perceeldienst is niet beschikbaar. Je bestaande terrein blijft bewaard.");
   error.status = status;
   error.details = { code, reason, retryable: false, transport: "browser" };
   return error;
@@ -205,12 +205,14 @@ async function readBoundedJson(response, signal) {
 /** Read-only public-source transport. The caller must first obtain this object
  * through the authenticated, scoped get_object_map_configuration endpoint.
  * Parcel candidates remain editable user terrain; saving is server-validated. */
-export async function fetchObjectParcelCandidatesDirect({ object, radiusMeters = 250, limit = 100, cursor = null, fetchImpl = globalThis.fetch }) {
+export async function fetchObjectParcelCandidatesDirect({ object, radiusMeters = 1_000, limit = 100, cursor = null, fetchImpl = globalThis.fetch }) {
   const anchor = trustedObjectCoordinatePair(object);
   if (!anchor || typeof object?.id !== "string" || !object.id.trim()) {
     throw parcelError("object_map_location_unverified", "location", 409);
   }
-  if (!Number.isInteger(radiusMeters) || radiusMeters < 25 || radiusMeters > 500
+  // Match the address-bounded workspace, not just the building lookup radius:
+  // a large neighbouring parcel can begin beyond 250 m but still be on screen.
+  if (!Number.isInteger(radiusMeters) || radiusMeters < 25 || radiusMeters > 1_000
     || !Number.isInteger(limit) || limit < 1 || limit > 100) throw parcelError("pdok_parcel_invalid_request", "bounds", 400);
   const currentCursor = safeCursor(cursor);
   const latitudeDelta = radiusMeters / 110_540;

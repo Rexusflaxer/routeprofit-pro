@@ -10,6 +10,7 @@ import {
   Loader2,
   Map as MapIcon,
   MousePointer2,
+  Pencil,
   PencilRuler,
   Redo2,
   RefreshCw,
@@ -23,13 +24,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import ObjectMapCanvas from "./ObjectMapCanvas";
 import {
-  appendPolygon,
   emptyFeatureCollection,
   featureCollectionAreaSquareMeters,
   featureSourceId,
@@ -78,6 +79,7 @@ function mapForm(configuration, object) {
     building_selection_mode: configuration?.building_selection_mode === "manual" ? "manual" : "automatic",
     selected_bag_feature_ids: [...(configuration?.selected_bag_feature_ids || [])].sort(),
     building_selection_points: configuration?.building_selection_points || [],
+    building_labels: configuration?.building_labels || {},
     persisted_building_geojson: normalizeFeatureCollection(configuration?.building_polygon_geojson),
     manual_building_geojson: normalizeFeatureCollection(configuration?.manual_building_geojson),
     object_area_geojson: normalizeFeatureCollection(configuration?.object_area_geojson),
@@ -91,6 +93,7 @@ function persistedForm(form) {
     building_selection_mode: form.building_selection_mode,
     selected_bag_feature_ids: [...form.selected_bag_feature_ids].sort(),
     building_selection_points: form.building_selection_points || [],
+    building_labels: form.building_labels || {},
     manual_building_geojson: normalizeFeatureCollection(form.manual_building_geojson),
     object_area_geojson: normalizeFeatureCollection(form.object_area_geojson),
     show_on_mobile_map: form.show_on_mobile_map === true,
@@ -127,6 +130,27 @@ function candidateLabel(feature) {
   return properties.source_identificatie
     ? `BAG-pand ${properties.source_identificatie}`
     : `Gebouw ${String(featureSourceId(feature)).slice(0, 12)}`;
+}
+
+function keepSelectedBuildingLabels(form) {
+  if (form.building_selection_mode !== "manual") return {};
+  const keys = new Set([
+    ...(form.selected_bag_feature_ids || []).map(id => `bag:${id}`),
+    ...(form.building_selection_points || []).map(point => `point:${point.id}`),
+    ...normalizeFeatureCollection(form.manual_building_geojson).features.map(feature => `manual:${feature.properties?.local_id || feature.id}`),
+  ]);
+  return Object.fromEntries(Object.entries(form.building_labels || {}).filter(([key]) => keys.has(key)));
+}
+
+function BuildingSelectionRow({ selectionKey, label, caption, colorClass, disabled, onHighlight, onRename, onRemove, removeLabel }) {
+  return <div role="listitem" tabIndex={0} aria-label={label} className="flex items-center gap-2 p-3 outline-none transition hover:bg-primary/10 focus-within:bg-primary/10"
+    onMouseEnter={() => onHighlight(selectionKey)} onMouseLeave={() => onHighlight(null)}
+    onFocus={() => onHighlight(selectionKey)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) onHighlight(null); }}>
+    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${colorClass}`} />
+    <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium" title={label}>{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{caption}</p></div>
+    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={() => onRename(selectionKey, label)} aria-label={`${label} naam wijzigen`}><Pencil className="h-3.5 w-3.5" /></Button>
+    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={onRemove} aria-label={removeLabel || `${label} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button>
+  </div>;
 }
 
 function apiErrorCode(error) {
@@ -187,33 +211,30 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const [workspace, setWorkspace] = useState("buildings");
   const [mapView, setMapView] = useState("map");
   const [parcelsVisible, setParcelsVisible] = useState(false);
-  const [parcelSelectionEnabled, setParcelSelectionEnabled] = useState(false);
+  const [highlightedBuildingKey, setHighlightedBuildingKey] = useState(null);
+  const [renamingBuilding, setRenamingBuilding] = useState(null);
+  const [buildingName, setBuildingName] = useState("");
   const [form, setForm] = useState(null);
   const [baseForm, setBaseForm] = useState(null);
   const [appliedConfiguration, setAppliedConfiguration] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
-  const [drawingTarget, setDrawingTarget] = useState(null);
-  const [drawingPoints, setDrawingPoints] = useState([]);
   const [editingTarget, setEditingTarget] = useState(null);
   const [overlapDialog, setOverlapDialog] = useState(false);
   const [overlapReason, setOverlapReason] = useState("");
   const [overlapFingerprint, setOverlapFingerprint] = useState(null);
   const [serverOverlapConflicts, setServerOverlapConflicts] = useState([]);
   const [conflictNotice, setConflictNotice] = useState(null);
-  const [drawingSaveNotice, setDrawingSaveNotice] = useState(false);
   const mutationKeyRef = useRef(null);
   const dragStartRef = useRef(null);
   const baseFormRef = useRef(baseForm);
   const appliedConfigurationRef = useRef(appliedConfiguration);
   const latestConfigurationRef = useRef(null);
-  const drawingPointsRef = useRef(drawingPoints);
   const overlapContinuationRef = useRef(null);
   const formRef = useRef(form);
   formRef.current = form;
   baseFormRef.current = baseForm;
   appliedConfigurationRef.current = appliedConfiguration;
-  drawingPointsRef.current = drawingPoints;
 
   const configurationQuery = useQuery({
     queryKey: ["object-card", object.id, "map-configuration"],
@@ -239,17 +260,28 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     retry: 1,
     staleTime: 5 * 60 * 1000,
   });
+
   const parcelsQuery = useInfiniteQuery({
     queryKey: ["object-card", object.id, "map-parcel-candidates", candidateConfigurationVersion],
     queryFn: ({ pageParam }) => listObjectParcelCandidates({ customerId: object.customer_id, objectId: object.id, ...(typeof pageParam === "object" && pageParam ? pageParam : { cursor: pageParam }) }),
     initialPageParam: null,
-    getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor
+    getNextPageParam: (lastPage, allPages) => lastPage?.next_cursor && !allPages.some(page => page.cursor === lastPage.next_cursor)
       ? { cursor: lastPage.next_cursor, transport: lastPage.transport, expectedCenter: lastPage.center }
       : undefined,
     enabled: verified && Boolean(configurationQuery.data) && workspace === "terrain" && parcelsVisible,
     retry: shouldRetryObjectParcelCandidates,
     staleTime: 5 * 60 * 1000,
   });
+
+  const parcelPages = parcelsQuery.data?.pages || [];
+  const parcelPageCount = parcelPages.length;
+  const parcelPaginationCycle = Boolean(parcelPages.at(-1)?.next_cursor
+    && parcelPages.some(page => page.cursor === parcelPages.at(-1).next_cursor));
+  const autoLoadingParcels = workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage
+    && parcelPageCount < 20 && !parcelsQuery.isError;
+  useEffect(() => {
+    if (autoLoadingParcels && !parcelsQuery.isFetching) void parcelsQuery.fetchNextPage();
+  }, [autoLoadingParcels, parcelPageCount, parcelsQuery.isFetching, parcelsQuery.fetchNextPage]);
 
   const applyConfiguration = useCallback(configuration => {
     const nextObject = { ...object, ...(configuration?.object || {}) };
@@ -261,11 +293,10 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     appliedConfigurationRef.current = configuration;
     setUndoStack([]);
     setRedoStack([]);
-    setDrawingTarget(null);
-    setDrawingPoints([]);
     setEditingTarget(null);
+    setHighlightedBuildingKey(null);
+    setRenamingBuilding(null);
     setConflictNotice(null);
-    setDrawingSaveNotice(false);
     setOverlapReason("");
     setOverlapFingerprint(null);
     setServerOverlapConflicts([]);
@@ -277,11 +308,11 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     const current = formRef.current;
     const baseline = baseFormRef.current;
     const formIsClean = !current || (baseline && sameForm(current, baseline));
-    if (formIsClean && drawingPointsRef.current.length === 0) applyConfiguration(configurationQuery.data);
-  }, [applyConfiguration, configurationQuery.data]);
+    if (formIsClean && !renamingBuilding) applyConfiguration(configurationQuery.data);
+  }, [applyConfiguration, configurationQuery.data, renamingBuilding]);
 
   const formDirty = Boolean(form && baseForm && !sameForm(form, baseForm));
-  const dirty = formDirty || drawingPoints.length > 0;
+  const dirty = formDirty;
   // Previously hidden objects are activated only by an explicit save, never
   // merely by opening this workspace or treating the saved state as dirty.
   const needsMobileActivation = form?.show_on_mobile_map === false;
@@ -357,11 +388,11 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const updateWithHistory = useCallback(updater => {
     setForm(current => {
       if (!current) return current;
-      const next = updater(current);
+      const updated = updater(current);
+      const next = { ...updated, building_labels: keepSelectedBuildingLabels(updated) };
       if (sameForm(current, next)) return current;
       setUndoStack(stack => [...stack, current].slice(-50));
       setRedoStack([]);
-      setDrawingSaveNotice(false);
       setOverlapReason("");
       setOverlapFingerprint(null);
       setServerOverlapConflicts([]);
@@ -371,10 +402,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   }, []);
 
   const undo = () => {
-    if (drawingPoints.length) {
-      setDrawingPoints(points => points.slice(0, -1));
-      return;
-    }
     setUndoStack(stack => {
       if (!stack.length) return stack;
       const previous = stack[stack.length - 1];
@@ -406,11 +433,10 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       setForm(baseForm);
       setUndoStack([]);
       setRedoStack([]);
-      setDrawingTarget(null);
-      setDrawingPoints([]);
       setEditingTarget(null);
+      setRenamingBuilding(null);
+      setHighlightedBuildingKey(null);
       setConflictNotice(null);
-      setDrawingSaveNotice(false);
       setOverlapReason("");
       setOverlapFingerprint(null);
       setServerOverlapConflicts([]);
@@ -502,10 +528,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   }), [openOverlapDialog]);
 
   const requestSave = async () => {
-    if (drawingPointsRef.current.length > 0) {
-      setDrawingSaveNotice(true);
-      return;
-    }
     if (staleConfiguration) {
       setConflictNotice(Object.assign(new Error("Er is een nieuwere kaartconfiguratie beschikbaar."), { status: 409, code: "object_map_version_conflict" }));
       return;
@@ -523,10 +545,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     dirty,
     moduleName: "Kaart & terrein",
     onSave: async () => {
-      if (drawingPointsRef.current.length > 0) {
-        setDrawingSaveNotice(true);
-        throw new Error("Sluit of annuleer eerst het vlak dat u tekent.");
-      }
       if (hasVersionDrift(baseFormRef.current, latestConfigurationRef.current)) {
         setConflictNotice(Object.assign(new Error("Er is een nieuwere kaartconfiguratie beschikbaar."), { status: 409, code: "object_map_version_conflict" }));
         throw new Error("Laad eerst de actuele kaartconfiguratie.");
@@ -566,14 +584,22 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   };
 
   const toggleParcel = id => {
-    if (readOnly || drawingTarget || editingTarget) return;
+    if (readOnly || editingTarget) return;
     const parcel = parcelCandidates.find(feature => featureSourceId(feature) === id);
     if (!parcel) return;
+    const terrainFeatures = normalizeFeatureCollection(formRef.current?.object_area_geojson).features;
+    if (terrainFeatures.length >= 25 && !terrainFeatures.some(feature => feature.properties?.derived_from_id === id)) {
+      toast({ title: "Maximaal 25 terreindelen", description: "Verwijder eerst een terreindeel voordat je een nieuw perceel toevoegt." });
+      return;
+    }
     updateWithHistory(current => {
       const features = normalizeFeatureCollection(current.object_area_geojson).features;
       const existing = features.find(feature => feature.properties?.derived_from === "pdok_brk" && feature.properties?.derived_from_id === id);
       const next = existing
-        ? features.filter(feature => feature !== existing)
+        // Clicking green terrain removes its current shape in the Canvas.
+        // Clicking outside an edited shape but inside its source parcel adds
+        // that area back; it must not remove an unrelated visible green area.
+        ? features.map(feature => feature === existing ? { ...feature, geometry: JSON.parse(JSON.stringify(parcel.geometry)) } : feature)
         : [...features, {
           type: "Feature",
           id: `terrain:${globalThis.crypto.randomUUID()}`,
@@ -596,39 +622,35 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     });
   };
 
-  const startDrawing = target => {
-    if (readOnly || target !== "terrain") return;
-    setDrawingSaveNotice(false);
-    setOverlapReason("");
-    setOverlapFingerprint(null);
-    setServerOverlapConflicts([]);
-    setDrawingTarget(target);
-    setDrawingPoints([]);
-    setEditingTarget(null);
-    setParcelSelectionEnabled(false);
+  const renameBuilding = (key, label) => {
+    if (readOnly) return;
+    setRenamingBuilding({ key, label });
+    setBuildingName(form.building_labels?.[key] || "");
   };
-  const finishDrawing = () => {
-    if (!drawingTarget || drawingPoints.length < 3) return;
-    const featureId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    updateWithHistory(current => ({ ...current, object_area_geojson: appendPolygon(current.object_area_geojson, drawingPoints, { source: "user_drawn", local_id: `terrain:${featureId}` }) }));
-    setDrawingTarget(null);
-    setDrawingPoints([]);
-    setDrawingSaveNotice(false);
+  const applyBuildingName = () => {
+    if (!renamingBuilding || readOnly) return;
+    const label = buildingName.normalize("NFC")
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
+      .replace(/\s+/g, " ").trim().slice(0, 100);
+    updateWithHistory(current => ({
+      ...current,
+      building_selection_mode: "manual",
+      selected_bag_feature_ids: current.building_selection_mode === "automatic" ? automaticBagFeatureIds : current.selected_bag_feature_ids,
+      building_labels: label
+        ? { ...(current.building_labels || {}), [renamingBuilding.key]: label }
+        : Object.fromEntries(Object.entries(current.building_labels || {}).filter(([key]) => key !== renamingBuilding.key)),
+    }));
+    setRenamingBuilding(null);
   };
-  const cancelDrawing = () => { setDrawingTarget(null); setDrawingPoints([]); setDrawingSaveNotice(false); };
 
   const switchWorkspace = nextWorkspace => {
     if (nextWorkspace === workspace) return;
-    if (drawingPoints.length > 0) {
-      setDrawingSaveNotice(true);
-      return;
-    }
     setWorkspace(nextWorkspace);
-    setParcelSelectionEnabled(false);
+    setHighlightedBuildingKey(null);
     if (nextWorkspace === "terrain") {
       setParcelsVisible(true);
     }
-    cancelDrawing();
     setEditingTarget(null);
   };
 
@@ -716,7 +738,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
           <p className="mt-1 text-xs text-muted-foreground">Selecteer de gebouwen die bij dit object horen en leg het te bewaken terrein vast. Opgeslagen wijzigingen worden ook in de mobiele app toegepast bij de volgende synchronisatie.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || (!dirty && !needsMobileActivation) || saveMutation.isPending || Boolean(drawingTarget) || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
+          <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || (!dirty && !needsMobileActivation) || saveMutation.isPending || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
         </div>
       </div>
 
@@ -724,7 +746,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       {appliedConfiguration.map_geometry_status === "needs_review" && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-amber-300/50 bg-amber-500/10 p-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><div><p className="font-medium">Controleer deze kaart opnieuw</p><p className="mt-0.5 text-xs text-muted-foreground">{["location_changed", "object_location_changed"].includes(appliedConfiguration.map_geometry_review_reason) ? "Het objectadres of de locatie is gewijzigd." : "De opgeslagen geometrie vraagt om een nieuwe controle."} Sla de gecontroleerde inrichting opnieuw op voordat mobiele kaartweergave wordt geactiveerd.</p></div></div>}
       {(configurationQuery.isRefetchError || (configurationQuery.error && configurationQuery.data)) && <ErrorPanel title="De opgeslagen kaart blijft zichtbaar, maar vernieuwen is mislukt." error={configurationQuery.error} onRetry={() => configurationQuery.refetch()} />}
       {(conflictNotice || staleConfiguration) && <div className="m-4 mb-0 rounded-xl border border-destructive/30 bg-destructive/10 p-4"><p className="text-sm font-medium text-destructive">De kaart is ondertussen door iemand anders gewijzigd.</p><p className="mt-1 text-xs text-muted-foreground">Uw lokale wijzigingen zijn niet overschreven. Laad de actuele versie en pas ze daarna opnieuw toe.</p><Button type="button" size="sm" variant="outline" className="mt-3" onClick={reloadCurrentConfiguration}><RefreshCw className="h-4 w-4" /> Actuele versie laden</Button></div>}
-      {drawingSaveNotice && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-amber-300/50 bg-amber-500/10 p-3 text-sm"><PencilRuler className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><div><p className="font-medium">Maak het getekende vlak eerst af</p><p className="mt-0.5 text-xs text-muted-foreground">Sluit het vlak met minimaal drie hoekpunten, of kies Annuleren. Daarna kunt u opslaan of verder navigeren.</p></div></div>}
       {saveMutation.isError && (!isOverlapError(saveMutation.error) || !overlapConflictFingerprint(saveMutation.error)) && !conflictNotice && !staleConfiguration && !overlapDialog && <ErrorPanel title="Kaart en terrein konden niet worden opgeslagen." error={saveMutation.error} onRetry={requestSave} />}
 
       <div className="border-b border-border/70 px-4 pt-3">
@@ -741,26 +762,26 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
               <Button type="button" size="sm" variant="secondary" disabled={readOnly}><MousePointer2 className="h-4 w-4" /> Selecteren</Button>
               <span className="px-2 text-xs text-muted-foreground">Klik op een 3D-gebouw om het toe te voegen of te verwijderen.</span>
             </> : <>
-              <Button type="button" size="sm" variant={parcelSelectionEnabled ? "secondary" : "ghost"} onClick={() => { cancelDrawing(); setEditingTarget(null); setParcelsVisible(true); setParcelSelectionEnabled(value => !value); }} disabled={readOnly || drawingPoints.length > 0}><MousePointer2 className="h-4 w-4" /> Perceel kiezen</Button>
-              <Button type="button" size="sm" variant={drawingTarget === "terrain" ? "secondary" : "ghost"} onClick={() => startDrawing("terrain")} disabled={readOnly || drawingPoints.length > 0}><PencilRuler className="h-4 w-4" /> Zelf tekenen</Button>
-              <Button type="button" size="sm" variant={editingTarget === "terrain" ? "secondary" : "ghost"} onClick={() => { cancelDrawing(); setParcelSelectionEnabled(false); setEditingTarget(value => value === "terrain" ? null : "terrain"); }} disabled={readOnly || drawingPoints.length > 0 || !form.object_area_geojson.features.length}><MousePointer2 className="h-4 w-4" /> Grens aanpassen</Button>
+              <Button type="button" size="sm" aria-pressed={editingTarget === "terrain"} variant={editingTarget === "terrain" ? "secondary" : "ghost"} onClick={() => setEditingTarget(value => value === "terrain" ? null : "terrain")} disabled={readOnly || !form.object_area_geojson.features.length}><MousePointer2 className="h-4 w-4" /> {editingTarget === "terrain" ? "Klaar met aanpassen" : "Grens aanpassen"}</Button>
+              {!editingTarget && <span className="px-2 text-xs text-muted-foreground">Klik een perceel aan om het toe te voegen of te verwijderen.</span>}
             </>}
             <span className="mx-1 h-6 w-px bg-border/70" />
-            <Button type="button" size="sm" variant="ghost" onClick={undo} disabled={readOnly || (!undoStack.length && !drawingPoints.length)} aria-label="Wijziging ongedaan maken"><Undo2 className="h-4 w-4" /> Ongedaan</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={redo} disabled={readOnly || !redoStack.length || Boolean(drawingTarget)} aria-label="Wijziging opnieuw uitvoeren"><Redo2 className="h-4 w-4" /> Opnieuw</Button>
-            {drawingTarget && <div className="ml-auto flex gap-2"><Button type="button" size="sm" variant="outline" onClick={cancelDrawing}>Annuleren</Button><Button type="button" size="sm" onClick={finishDrawing} disabled={drawingPoints.length < 3}>Vlak sluiten ({drawingPoints.length}/3)</Button></div>}
+            <Button type="button" size="sm" variant="ghost" onClick={undo} disabled={readOnly || !undoStack.length} aria-label="Wijziging ongedaan maken"><Undo2 className="h-4 w-4" /> Ongedaan</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={redo} disabled={readOnly || !redoStack.length} aria-label="Wijziging opnieuw uitvoeren"><Redo2 className="h-4 w-4" /> Opnieuw</Button>
           </div>
           {workspace === "terrain" && <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-1 rounded-lg border border-border/70 bg-card/35 p-1" role="group" aria-label="Kaartweergave">
               <Button type="button" size="sm" variant={mapView === "map" ? "secondary" : "ghost"} aria-pressed={mapView === "map"} onClick={() => setMapView("map")}><MapIcon className="h-4 w-4" /> Kaart</Button>
               <Button type="button" size="sm" variant={mapView === "satellite" ? "secondary" : "ghost"} aria-pressed={mapView === "satellite"} onClick={() => setMapView("satellite")}><Satellite className="h-4 w-4" /> Luchtfoto</Button>
             </div>
-            {workspace === "terrain" && <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={value => { setParcelsVisible(value); if (!value) setParcelSelectionEnabled(false); }} /> Perceelgrenzen</Label>}
+            <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={setParcelsVisible} /> Perceelgrenzen</Label>
           </div>}
-          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{drawingTarget ? "Je tekent tijdelijk van bovenaf, op dezelfde plek en hetzelfde zoomniveau. Klik voor ieder hoekpunt. Klik op het eerste punt of druk Enter om af te sluiten. Backspace verwijdert het laatste punt; Escape annuleert. Je kunt tussendoor van kaartweergave wisselen." : editingTarget ? "Je past de grens tijdelijk van bovenaf aan. Sleep de hoekpunten; Ongedaan herstelt je vorige wijziging. De locatie en het zoomniveau blijven gelijk." : "Je blijft op dezelfde kaart. Kies een perceel als startpunt, of teken zelf. Met Luchtfoto kun je de grens nauwkeurig bepalen."}</p>}
+          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{editingTarget ? "Klik op de groene grenslijn om een bewerkpunt te plaatsen. Versleep dat punt om de grens te veranderen. Met rechts klikken op een punt kun je het verwijderen. Alleen jouw terrein is groen; grijze lijnen zijn kadastrale grenzen." : "Klik op een perceel om het aan je terrein toe te voegen. Klik op het geselecteerde terrein om het weer te verwijderen. Alleen het gekozen gebied is groen. Gebruik Luchtfoto voor extra detail."}</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Kadastrale percelen laden…</p>}
-          {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel optional retrying={parcelsQuery.isFetching} title={parcelCandidates.length ? "Niet alle perceelgrenzen konden worden geladen. Geladen percelen en je eigen terrein blijven beschikbaar." : "Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard; zelf tekenen blijft mogelijk."} error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
-          {workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage && <Button type="button" size="sm" variant="outline" disabled={parcelsQuery.isFetchingNextPage} onClick={() => parcelsQuery.fetchNextPage()}>{parcelsQuery.isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Meer percelen laden</Button>}
+          {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel optional retrying={parcelsQuery.isFetching} title={parcelCandidates.length ? "Niet alle perceelgrenzen konden worden geladen. Geladen percelen en je eigen terrein blijven beschikbaar." : "Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard en aanpasbaar."} error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
+          {workspace === "terrain" && parcelsVisible && autoLoadingParcels && <p role="status" className="text-xs text-muted-foreground">Meer percelen ophalen… {parcelCandidates.length} geladen.</p>}
+          {workspace === "terrain" && parcelsVisible && parcelPaginationCycle && <p role="status" className="text-xs text-amber-700">De bron herhaalt een vervolgpagina. Niet alle percelen zijn geladen; vernieuw de kaart om opnieuw te proberen.</p>}
+          {workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage && !autoLoadingParcels && !parcelsQuery.isError && <div className="space-y-2"><p className="text-xs text-muted-foreground">Er zijn veel percelen in dit gebied. Niet alles is geladen; haal zo nodig de volgende pagina op.</p><Button type="button" size="sm" variant="outline" disabled={parcelsQuery.isFetchingNextPage} onClick={() => parcelsQuery.fetchNextPage()}>{parcelsQuery.isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Meer percelen laden</Button></div>}
           {candidatesQuery.isError && !candidatesQuery.data && workspace === "buildings" && <ErrorPanel title="BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
           {candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="Meer BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.fetchNextPage()} />}
           {candidatesQuery.isRefetchError && candidatesQuery.data && !candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="De geladen BAG-gebouwen blijven zichtbaar, maar vernieuwen is mislukt." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
@@ -770,8 +791,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             mapView={mapView}
             parcelCandidates={parcelCandidates}
             parcelsVisible={parcelsVisible}
-            parcelSelectionEnabled={parcelSelectionEnabled}
+            parcelSelectionEnabled={workspace === "terrain" && parcelsVisible && !editingTarget}
             onToggleParcel={toggleParcel}
+            onRemoveTerrainFeature={index => { if (!readOnly && !editingTarget) updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) })); }}
             buildingSelectionPoints={form.building_selection_mode === "manual" ? form.building_selection_points : []}
             onToggleBuildingPoint={toggleBuildingPoint}
             candidates={candidates}
@@ -779,19 +801,18 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             selectedBuildings={selectedBuildings}
             manualBuildings={form.manual_building_geojson}
             terrain={form.object_area_geojson}
-            drawingTarget={drawingTarget}
-            drawingPoints={drawingPoints}
+            drawingTarget={null}
+            drawingPoints={[]}
             editingTarget={editingTarget}
             disabled={readOnly}
             onToggleCandidate={toggleCandidate}
-            onAddDrawingPoint={coordinate => { setDrawingSaveNotice(false); setOverlapReason(""); setOverlapFingerprint(null); setServerOverlapConflicts([]); setDrawingPoints(points => [...points, coordinate]); }}
+            highlightedBuildingKey={highlightedBuildingKey}
+            onTerrainGeometryChange={collection => { if (!readOnly) updateWithHistory(current => ({ ...current, object_area_geojson: collection })); }}
+            onEditError={message => toast({ title: "Grens controleren", description: message, variant: "destructive" })}
             onVertexDragStart={startVertexDrag}
             onMoveVertex={moveVertex}
             onVertexDragEnd={finishVertexDrag}
             onBuildingMatchUnavailable={notifyBuildingMatchUnavailable}
-            onFinishDrawing={finishDrawing}
-            onCancelDrawing={cancelDrawing}
-            onRemoveLastDrawingPoint={() => setDrawingPoints(points => points.slice(0, -1))}
           />
           <p className="text-[11px] text-muted-foreground">3D-gebouwen: Mapbox · gebouwgegevens en perceelgrenzen: Kadaster via PDOK · luchtfoto: PDOK / Beeldmateriaal Nederland.</p>
         </div>
@@ -812,7 +833,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             </section>
             <section className="rounded-xl border border-border/70 bg-card/45 backdrop-blur-xl">
               <div className="border-b border-border/70 p-4"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold">{form.building_selection_mode === "automatic" ? "Automatische indicatie" : "Geselecteerde gebouwen"}</p>{form.building_selection_mode === "automatic" && <p className="mt-0.5 text-[11px] text-muted-foreground">Wordt als uitgangspunt gebruikt wanneer u Exact vastleggen kiest.</p>}</div><Badge variant="secondary">{displayedBagFeatureIds.length + (form.building_selection_mode === "manual" ? form.manual_building_geojson.features.length + form.building_selection_points.length : 0)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{candidatesQuery.isLoading ? "Gebouwen rond het object ophalen..." : `${candidates.length} BAG-kandidaten binnen 250 meter geladen`}</p>{candidateMetadata?.has_more && !candidateMetadata?.next_cursor && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">Alleen de eerste 100 gebouwen worden getoond; deze bron levert geen geldige vervolgcodelink.</p>}</div>
-              <div className="max-h-72 divide-y divide-border/60 overflow-y-auto">
+              <div role="list" aria-label="Gebouwen bij dit object" className="max-h-72 divide-y divide-border/60 overflow-y-auto">
                 {!displayedBagFeatureIds.length && !(form.building_selection_mode === "manual" && (form.manual_building_geojson.features.length || form.building_selection_points.length)) && <p className="p-4 text-xs text-muted-foreground">{form.building_selection_mode === "manual" ? "Er wordt bewust geen gebouw gemarkeerd. Klik op een pand op de kaart om het toe te voegen." : candidatesQuery.isLoading ? "Automatische adresnabijheid wordt bepaald…" : "Er is geen passend BAG-pand gevonden; de mobiele app blijft de bestaande adresnabijheid gebruiken."}</p>}
                 {displayedBagFeatureIds.map(id => {
                   const feature = candidates.find(item => featureSourceId(item) === id) || appliedConfiguration.building_polygon_geojson.features.find(item => featureSourceId(item) === id);
@@ -823,10 +844,22 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
                     Array.isArray(recordedConflict?.objects) ? recordedConflict.objects.length : 0,
                     conflictingFeatureIds.has(id) ? 1 : 0,
                   );
-                  return <div key={id} className="flex items-center gap-3 p-3"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${conflictCount ? "bg-amber-500" : "bg-blue-500"}`} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium">{feature ? candidateLabel(feature) : `BAG-pand ${id.slice(0, 12)}`}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{conflictCount ? `Gekoppeld aan ${conflictCount} ander object` : form.building_selection_mode === "automatic" ? "Automatisch voorgesteld · PDOK BAG" : "PDOK BAG"}</p></div><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => toggleCandidate(id)} aria-label={`${feature ? candidateLabel(feature) : id} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></div>;
+                  const key = `bag:${id}`;
+                  return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || (feature ? candidateLabel(feature) : `BAG-pand ${id.slice(0, 12)}`)}
+                    caption={conflictCount ? `Gekoppeld aan ${conflictCount} ander object` : form.building_selection_mode === "automatic" ? "Automatisch voorgesteld · PDOK BAG" : "PDOK BAG"}
+                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
                 })}
-                {form.building_selection_mode === "manual" && form.building_selection_points.map((point, index) => <div key={point.id} className="flex items-center gap-3 p-3"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-500" /><div className="min-w-0 flex-1"><p className="text-xs font-medium">Gebouw {index + 1} · Zonder BAG-koppeling</p><p className="mt-0.5 text-[11px] text-muted-foreground">Eigen kaartselectie · geen bevestigde BAG-koppeling</p></div><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => toggleBuildingPoint(point)} aria-label={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></div>)}
-                {form.building_selection_mode === "manual" && form.manual_building_geojson.features.map((_, index) => <div key={`manual-${index}`} className="flex items-center gap-3 p-3"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" /><div className="min-w-0 flex-1"><p className="text-xs font-medium">Eerder ingetekend gebouw {index + 1}</p><p className="mt-0.5 text-[11px] text-muted-foreground">Bestaande contour behouden</p></div><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} aria-label={`Eerder ingetekend gebouw ${index + 1} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></div>)}
+                {form.building_selection_mode === "manual" && form.building_selection_points.map((point, index) => {
+                  const key = `point:${point.id}`;
+                  return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Gebouw ${index + 1} · Zonder BAG-koppeling`}
+                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
+                })}
+                {form.building_selection_mode === "manual" && form.manual_building_geojson.features.map((feature, index) => {
+                  const key = `manual:${feature.properties?.local_id || feature.id}`;
+                  return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Eerder ingetekend gebouw ${index + 1}`}
+                    caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding}
+                    onRemove={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} />;
+                })}
               </div>
               {form.building_selection_mode === "manual" && form.building_selection_points.length > 0 && <p className="border-t border-border/70 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">Zonder BAG-koppeling bewaren we jouw gekozen plek. Controleer gedeeld gebruik zelf: verschillende selecties in hetzelfde gebouw zijn niet altijd automatisch als overlap herkenbaar.</p>}
               {candidatesQuery.hasNextPage && <div className="border-t border-border/70 p-3"><Button type="button" size="sm" variant="outline" className="w-full" disabled={candidatesQuery.isFetchingNextPage} onClick={() => candidatesQuery.fetchNextPage()}>{candidatesQuery.isFetchingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Meer gebouwen laden</Button></div>}
@@ -834,8 +867,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             </section>
           </> : <>
             <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
-              <p className="text-sm font-semibold">Begin met een kadastraal perceel</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Via Perceel kiezen neem je een bestaande grens over. Daarna kun je hoekpunten verslepen of meerdere terreindelen toevoegen.</p>
+              <p className="text-sm font-semibold">Klik je terrein bij elkaar</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Klik direct op percelen om ze toe te voegen of te verwijderen. Met Grens aanpassen plaats je zelf bewerkpunten op de grenslijn.</p>
+              <p className="mt-2 text-xs text-muted-foreground">Zoekgebied: 1 km rond het objectadres. Vervolgpagina’s worden automatisch opgehaald.</p>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Een perceel is een hulpmiddel, geen bevestiging van eigendom of bewakingsopdracht. Controleer de grens op de luchtfoto en pas hem zo nodig aan.</p>
               {parcelsQuery.data && <p className="mt-2 text-[11px] text-muted-foreground">{parcelCandidates.length} percelen rond het object geladen · <a className="underline" href="https://www.pdok.nl/introductie/-/article/kadastrale-kaart" target="_blank" rel="noreferrer">PDOK Kadastrale kaart</a></p>}
             </section>
@@ -854,6 +888,13 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         </aside>
       </div>
 
+      <Dialog open={Boolean(renamingBuilding)} onOpenChange={open => { if (!open) setRenamingBuilding(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Gebouwnaam wijzigen</DialogTitle><DialogDescription>Geef dit gebouw een herkenbare naam, bijvoorbeeld Receptie of Magazijn. De naam wordt samen met de kaart opgeslagen.</DialogDescription></DialogHeader>
+          <div className="space-y-2"><Label htmlFor="object-map-building-name">Gebouwnaam</Label><Input id="object-map-building-name" maxLength={100} value={buildingName} onChange={event => setBuildingName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); applyBuildingName(); } }} placeholder={renamingBuilding?.label || "Gebouwnaam"} /><p className="text-xs text-muted-foreground">Laat leeg om weer de standaardnaam te gebruiken.</p></div>
+          <DialogFooter><Button type="button" variant="outline" onClick={() => setRenamingBuilding(null)}>Annuleren</Button><Button type="button" onClick={applyBuildingName}>Naam toepassen</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={overlapDialog} onOpenChange={open => { if (!open) cancelOverlapDialog(); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Gedeeld gebouw bevestigen</DialogTitle><DialogDescription>{allConflicts === 1 ? "1 geselecteerd gebouw is" : `${allConflicts} geselecteerde gebouwen zijn`} ook aan een ander actief object gekoppeld. Dit is toegestaan wanneer meerdere klanten of objecten hetzelfde pand gebruiken.</DialogDescription></DialogHeader>

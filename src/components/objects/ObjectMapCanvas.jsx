@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, LandPlot, Loader2, LocateFixed, MousePointer2 } from "lucide-react";
+import { Building2, LandPlot, Loader2, LocateFixed, MousePointer2, RotateCcw, RotateCw, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
@@ -11,6 +11,7 @@ import {
   matchMapboxBuildingToBagCandidate,
   normalizeFeatureCollection,
 } from "./objectMapGeometry";
+import { boundaryHandleCollection, boundaryHandleKey, insertBoundaryHandle, moveBoundaryHandle, removeBoundaryHandle, shiftBoundaryHandles } from "./objectMapBoundaryEditor";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 const SOURCE = {
@@ -22,6 +23,7 @@ const SOURCE = {
   anchor: "loq-object-map-anchor",
   satellite: "loq-object-map-satellite",
   parcels: "loq-object-map-parcels",
+  hover: "loq-object-map-building-hover",
 };
 
 const LAYER = {
@@ -39,6 +41,9 @@ const LAYER = {
   satellite: "loq-object-map-satellite-layer",
   parcelsFill: "loq-object-map-parcels-fill",
   parcelsLine: "loq-object-map-parcels-line",
+  parcelsHalo: "loq-object-map-parcels-halo",
+  hoverLine: "loq-object-map-building-hover-line",
+  hoverPoint: "loq-object-map-building-hover-point",
 };
 
 const NETHERLANDS_MAP_BOUNDS = [[3, 50.6], [7.4, 53.7]];
@@ -260,9 +265,13 @@ function addWorkspaceLayers(map, data) {
   addSource(map, SOURCE.vertices, data.vertices);
   addSource(map, SOURCE.anchor, data.anchor);
   addSource(map, SOURCE.parcels, data.parcels);
+  addSource(map, SOURCE.hover, featureCollection());
 
-  addLayer(map, { id: LAYER.parcelsFill, type: "fill", source: SOURCE.parcels, layout: { visibility: "none" }, paint: { "fill-color": "#14b8a6", "fill-opacity": ["case", ["==", ["get", "loq_selected"], true], 0.18, 0.025] } });
-  addLayer(map, { id: LAYER.parcelsLine, type: "line", source: SOURCE.parcels, layout: { visibility: "none" }, paint: { "line-color": "#0f766e", "line-width": 2, "line-dasharray": [3, 2] } });
+  // Candidate polygons exist only for hit-testing. Only the actual edited
+  // terrain is green; the original parcel must not retain a ghost selection.
+  addLayer(map, { id: LAYER.parcelsFill, type: "fill", source: SOURCE.parcels, layout: { visibility: "none" }, paint: { "fill-color": "#64748b", "fill-opacity": 0 } });
+  addLayer(map, { id: LAYER.parcelsHalo, type: "line", source: SOURCE.parcels, layout: { visibility: "none" }, paint: { "line-color": "#ffffff", "line-opacity": 0.8, "line-width": 3.5, "line-dasharray": [3, 2] } });
+  addLayer(map, { id: LAYER.parcelsLine, type: "line", source: SOURCE.parcels, layout: { visibility: "none" }, paint: { "line-color": "#64748b", "line-opacity": 0.65, "line-width": 1.25, "line-dasharray": [3, 2] } });
 
   addLayer(map, {
     id: LAYER.candidatesFill,
@@ -287,7 +296,9 @@ function addWorkspaceLayers(map, data) {
   addLayer(map, { id: LAYER.selectedFill, type: "fill", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.34 } });
   addLayer(map, { id: LAYER.selectedLine, type: "line", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "line-color": "#7c3aed", "line-width": 3 } });
   addLayer(map, { id: LAYER.terrainFill, type: "fill", source: SOURCE.terrain, paint: { "fill-color": "#10b981", "fill-opacity": 0.18 } });
-  addLayer(map, { id: LAYER.terrainLine, type: "line", source: SOURCE.terrain, paint: { "line-color": "#059669", "line-width": 3, "line-dasharray": [2, 1] } });
+  addLayer(map, { id: LAYER.terrainLine, type: "line", source: SOURCE.terrain, paint: { "line-color": "#047857", "line-width": 3 } });
+  addLayer(map, { id: LAYER.hoverLine, type: "line", source: SOURCE.hover, filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#f59e0b", "line-width": 5 } });
+  addLayer(map, { id: LAYER.hoverPoint, type: "circle", source: SOURCE.hover, filter: ["==", ["geometry-type"], "Point"], paint: { "circle-color": "#f59e0b", "circle-radius": 10, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
   addLayer(map, { id: LAYER.draftFill, type: "fill", source: SOURCE.draft, filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.18 } });
   addLayer(map, { id: LAYER.draftLine, type: "line", source: SOURCE.draft, filter: ["==", ["geometry-type"], "LineString"], paint: { "line-color": "#7c3aed", "line-width": 3, "line-dasharray": [2, 1] } });
   addLayer(map, { id: LAYER.draftPoints, type: "circle", source: SOURCE.draft, filter: ["==", ["geometry-type"], "Point"], paint: { "circle-radius": ["case", ["==", ["get", "point_index"], 0], 7, 5], "circle-color": "#7c3aed", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
@@ -329,6 +340,10 @@ export default function ObjectMapCanvas({
   onFinishDrawing,
   onRemoveLastDrawingPoint,
   onCancelDrawing,
+  onTerrainGeometryChange,
+  onRemoveTerrainFeature,
+  onEditError,
+  highlightedBuildingKey = null,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -357,6 +372,13 @@ export default function ObjectMapCanvas({
   const appliedNavigationBoundsRef = useRef(null);
   const navigationBoundsRef = useRef(null);
   const previewPointRef = useRef(null);
+  const handlesRef = useRef([]);
+  const expectedTerrainRef = useRef(null);
+  const suppressBoundaryClickRef = useRef(false);
+  const reportedEditErrorRef = useRef(null);
+  const [handles, setHandles] = useState([]);
+  const [pointMenu, setPointMenu] = useState(null);
+  const [editError, setEditError] = useState(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
   const interactionDisabled = disabled || !trustedObjectCoordinatePair(object);
@@ -364,14 +386,30 @@ export default function ObjectMapCanvas({
     [object?.latitude, object?.longitude, object?.geocoding_status, selectedBuildings, terrain, buildingSelectionPoints]);
   const navigationBoundsKey = JSON.stringify(navigationBounds);
   navigationBoundsRef.current = navigationBounds;
+  const groundEditing = workspace === "terrain" && (mapView === "satellite" || Boolean(editingTarget) || Boolean(drawingTarget));
+  const updateHandles = next => { handlesRef.current = next; setHandles(next); };
+  const reportEditError = message => {
+    setEditError(message);
+    if (reportedEditErrorRef.current !== message) onEditError?.(message);
+    reportedEditErrorRef.current = message;
+  };
+
+  useEffect(() => {
+    if (editingTarget !== "terrain" || (expectedTerrainRef.current && expectedTerrainRef.current !== JSON.stringify(terrain))) {
+      handlesRef.current = [];
+      setHandles([]);
+      setPointMenu(null);
+    }
+    expectedTerrainRef.current = JSON.stringify(terrain);
+  }, [terrain, editingTarget]);
 
   const mapData = useMemo(() => ({
     candidates: candidateCollection(candidates, selectedBagFeatureIds),
     selected: normalizeFeatureCollection(selectedBuildings),
-    terrain: normalizeFeatureCollection(terrain),
+    terrain: featureCollection(normalizeFeatureCollection(terrain).features.map((feature, index) => ({ ...feature, properties: { ...feature.properties, loq_feature_index: index } }))),
     draft: drawingCollection(drawingPoints),
     vertices: editingTarget === "terrain"
-      ? editableVertices(terrain, "terrain")
+      ? boundaryHandleCollection(terrain, handles)
       : editingTarget === "building"
         ? editableVertices(manualBuildings, "building")
         : featureCollection(),
@@ -380,7 +418,7 @@ export default function ObjectMapCanvas({
       ...feature,
       properties: { source_feature_id: featureSourceId(feature), loq_selected: feature.properties?.loq_selected === true },
     }))),
-  }), [candidates, drawingPoints, editingTarget, manualBuildings, object, parcelCandidates, selectedBagFeatureIds, selectedBuildings, terrain]);
+  }), [candidates, drawingPoints, editingTarget, handles, manualBuildings, object, parcelCandidates, selectedBagFeatureIds, selectedBuildings, terrain]);
   const matchCandidates = useMemo(
     () => buildingMatchCandidates(candidates, selectedBuildings, selectedBagFeatureIds),
     [candidates, selectedBagFeatureIds, selectedBuildings],
@@ -414,6 +452,11 @@ export default function ObjectMapCanvas({
     onFinishDrawing,
     onRemoveLastDrawingPoint,
     onCancelDrawing,
+    terrain,
+    onTerrainGeometryChange,
+    onRemoveTerrainFeature,
+    reportEditError,
+    highlightedBuildingKey,
   };
 
   useEffect(() => {
@@ -452,6 +495,10 @@ export default function ObjectMapCanvas({
         minZoom: coordinates ? 10 : 6,
         maxBounds: navigationBoundsRef.current,
         renderWorldCopies: false,
+        dragRotate: true,
+        touchZoomRotate: true,
+        pitchWithRotate: true,
+        maxPitch: appliedGroundView ? 0 : 65,
         attributionControl: true,
         config: {
           basemap: {
@@ -465,9 +512,7 @@ export default function ObjectMapCanvas({
         },
       });
       appliedNavigationBoundsRef.current = JSON.stringify(navigationBoundsRef.current);
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), "bottom-right");
-      map.dragRotate.disable();
-      map.touchZoomRotate.disableRotation();
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), "bottom-right");
 
       const applyWorkspaceView = () => {
         const interaction = interactionsRef.current;
@@ -477,6 +522,9 @@ export default function ObjectMapCanvas({
         const parcelVisibility = terrainWorkspace && interaction.parcelsVisible ? "visible" : "none";
         map.setLayoutProperty(LAYER.parcelsFill, "visibility", parcelVisibility);
         map.setLayoutProperty(LAYER.parcelsLine, "visibility", parcelVisibility);
+        map.setLayoutProperty(LAYER.parcelsHalo, "visibility", parcelVisibility);
+        map.setPaintProperty(LAYER.parcelsHalo, "line-opacity", interaction.editingTarget ? 0.3 : 0.8);
+        map.setPaintProperty(LAYER.parcelsLine, "line-opacity", interaction.editingTarget ? 0.25 : 0.65);
         map.setConfigProperty("basemap", "show3dObjects", !groundView);
         map.setConfigProperty("basemap", "show3dBuildings", !groundView);
         map.setConfigProperty("basemap", "show3dFacades", !groundView);
@@ -484,6 +532,7 @@ export default function ObjectMapCanvas({
         // viewing or ground editing temporarily flattens this same map.
         if (appliedGroundView !== groundView) {
           if (groundView) normalMapPitch = map.getPitch();
+          map.setMaxPitch(groundView ? 0 : 65);
           map.easeTo({ pitch: groundView ? 0 : normalMapPitch, duration: 350 });
           appliedGroundView = groundView;
         }
@@ -513,6 +562,14 @@ export default function ObjectMapCanvas({
 
         standardBuildingStatesRef.current.forEach(record => {
           const selected = selectedIds.has(record.bagFeatureId) || selectedPointIds.has(record.selectionPointId);
+          const listHighlight = interaction.highlightedBuildingKey === `bag:${record.bagFeatureId}`
+            || interaction.highlightedBuildingKey === `point:${record.selectionPointId}`;
+          if (listHighlight || record.listHighlight) {
+            setStandardBuildingState(map, record.feature, { select: selected && !listHighlight, highlight: listHighlight });
+            record.listHighlight = listHighlight;
+            record.selected = selected;
+            return;
+          }
           if (record.selected === selected) return;
           if (setStandardBuildingState(map, record.feature, { select: selected })) record.selected = selected;
         });
@@ -521,7 +578,9 @@ export default function ObjectMapCanvas({
         try {
           visibleBuildings = map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || [];
         } catch {
-          return;
+          // A style without Standard features still supports an exact stored
+          // geometry/selection-point hover fallback.
+          visibleBuildings = [];
         }
         const pointAssociations = pointBuildingAssociations(visibleBuildings, interaction.buildingSelectionPoints);
         visibleBuildings.forEach(feature => {
@@ -537,8 +596,25 @@ export default function ObjectMapCanvas({
           const previous = standardBuildingStatesRef.current.get(key);
           if (!bagFeatureId && !selectionPoint && !previous) return;
           if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
-          rememberStandardBuilding(feature, bagFeatureId, selected, selectionPoint?.id || null);
+          const listHighlight = interaction.highlightedBuildingKey === `bag:${bagFeatureId}`
+            || interaction.highlightedBuildingKey === `point:${selectionPoint?.id}`;
+          if (listHighlight) setStandardBuildingState(map, feature, { select: false, highlight: true });
+          const stateKey = rememberStandardBuilding(feature, bagFeatureId, selected, selectionPoint?.id || null);
+          standardBuildingStatesRef.current.get(stateKey).listHighlight = listHighlight;
         });
+        // Fallback only when no native building can be highlighted, including
+        // legacy hand-drawn buildings. Never persist rendered Mapbox geometry.
+        const nativeHighlighted = [...standardBuildingStatesRef.current.values()].some(record => record.listHighlight);
+        const fallbackFeatures = nativeHighlighted || !interaction.highlightedBuildingKey ? []
+          : (dataRef.current?.selected.features || []).filter(feature => {
+            const key = feature.properties?.source === "manual" ? `manual:${feature.properties.local_id || feature.id}` : `bag:${featureSourceId(feature)}`;
+            return key === interaction.highlightedBuildingKey;
+          });
+        if (!nativeHighlighted && interaction.highlightedBuildingKey?.startsWith("point:")) {
+          const point = (interaction.buildingSelectionPoints || []).find(item => `point:${item.id}` === interaction.highlightedBuildingKey);
+          if (point) fallbackFeatures.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [point.longitude, point.latitude] } });
+        }
+        sourceData(map, SOURCE.hover, featureCollection(fallbackFeatures));
       };
       const resetAndSyncStandardBuildingStates = () => {
         standardBuildingStatesRef.current.clear();
@@ -567,7 +643,8 @@ export default function ObjectMapCanvas({
           target: STANDARD_BUILDINGS_TARGET,
           handler: event => {
             if (event.feature) {
-              setStandardBuildingState(map, event.feature, { highlight: false });
+              const record = standardBuildingStatesRef.current.get(mapboxBuildingFeatureKey(event.feature));
+              setStandardBuildingState(map, event.feature, { highlight: Boolean(record?.listHighlight) });
               hoveredStandardBuildingsRef.current.delete(mapboxBuildingFeatureKey(event.feature));
             }
             if (!dragRef.current) map.getCanvas().style.cursor = "";
@@ -707,6 +784,8 @@ export default function ObjectMapCanvas({
         if (interaction.disabled || interaction.workspace !== "terrain" || !interaction.parcelsVisible || !interaction.parcelSelectionEnabled || interaction.drawingTarget || interaction.editingTarget) return;
         const feature = event.features?.[0];
         if (!feature || featureEventHandled(event, handledEventsRef.current)) return;
+        // A moved/edited selection wins over the source parcel underneath it.
+        if (event.lngLat && normalizeFeatureCollection(interaction.terrain).features.some(selected => featureStrictlyContainsCoordinate(selected, [event.lngLat.lng, event.lngLat.lat]))) return;
         markFeatureEventHandled(event, handledEventsRef.current);
         interaction.onToggleParcel?.(featureSourceId(feature));
       });
@@ -716,6 +795,30 @@ export default function ObjectMapCanvas({
       });
       map.on("mouseleave", LAYER.parcelsFill, () => {
         if (!dragRef.current) map.getCanvas().style.cursor = interactionsRef.current.drawingTarget ? "crosshair" : "";
+      });
+
+      map.on("click", LAYER.terrainFill, event => {
+        const interaction = interactionsRef.current;
+        if (interaction.disabled || interaction.workspace !== "terrain" || interaction.editingTarget || interaction.drawingTarget || !interaction.onRemoveTerrainFeature) return;
+        if (featureEventHandled(event, handledEventsRef.current)) return;
+        const index = Number(event.features?.[0]?.properties?.loq_feature_index);
+        if (!Number.isInteger(index)) return;
+        markFeatureEventHandled(event, handledEventsRef.current);
+        interaction.onRemoveTerrainFeature(index);
+      });
+
+      map.on("contextmenu", LAYER.vertices, event => {
+        const interaction = interactionsRef.current;
+        if (interaction.disabled || interaction.editingTarget !== "terrain") return;
+        const reference = event.features?.[0]?.properties;
+        if (!reference) return;
+        event.preventDefault?.();
+        event.originalEvent?.preventDefault?.();
+        markFeatureEventHandled(event, handledEventsRef.current);
+        const point = event.point || { x: 20, y: 20 };
+        const width = containerRef.current?.clientWidth || 400;
+        const height = containerRef.current?.clientHeight || 400;
+        setPointMenu({ reference, x: Math.max(8, Math.min(point.x, width - 200)), y: Math.max(8, Math.min(point.y, height - 90)) });
       });
 
       map.on("click", LAYER.draftPoints, event => {
@@ -732,6 +835,22 @@ export default function ObjectMapCanvas({
           handledEventsRef.current.delete(event.originalEvent);
           return;
         }
+        setPointMenu(null);
+        if (suppressBoundaryClickRef.current) { suppressBoundaryClickRef.current = false; return; }
+        if (!interaction.disabled && interaction.editingTarget === "terrain" && event.point) {
+          const result = insertBoundaryHandle(interaction.terrain, event.point, coordinate => map.project(coordinate));
+          if (!result) return;
+          setEditError(null);
+          reportedEditErrorRef.current = null;
+          let nextHandles = result.inserted ? shiftBoundaryHandles(handlesRef.current, result.reference, 1) : handlesRef.current;
+          if (!nextHandles.some(handle => boundaryHandleKey(handle) === boundaryHandleKey(result.reference))) nextHandles = [...nextHandles, result.reference];
+          updateHandles(nextHandles);
+          if (result.inserted) {
+            expectedTerrainRef.current = JSON.stringify(result.collection);
+            interaction.onTerrainGeometryChange?.(result.collection);
+          }
+          return;
+        }
         if (interaction.disabled || !interaction.drawingTarget) return;
         containerRef.current?.focus({ preventScroll: true });
         interaction.onAddDrawingPoint?.([event.lngLat.lng, event.lngLat.lat]);
@@ -740,6 +859,9 @@ export default function ObjectMapCanvas({
         const interaction = interactionsRef.current;
         const feature = event.features?.[0];
         if (interaction.disabled || !interaction.editingTarget || !feature) return;
+        if (event.originalEvent?.button === 2 || event.originalEvent?.ctrlKey) return;
+        suppressBoundaryClickRef.current = false;
+        setPointMenu(null);
         event.preventDefault();
         if (event.originalEvent) handledEventsRef.current.add(event.originalEvent);
         dragRef.current = {
@@ -756,6 +878,14 @@ export default function ObjectMapCanvas({
       map.on("mousemove", event => {
         const interaction = interactionsRef.current;
         if (dragRef.current) {
+          suppressBoundaryClickRef.current = true;
+          if (dragRef.current.target === "terrain") {
+            const result = moveBoundaryHandle(interaction.terrain, dragRef.current, [event.lngLat.lng, event.lngLat.lat]);
+            if (result.error) { interaction.reportEditError(result.error); return; }
+            expectedTerrainRef.current = JSON.stringify(result.collection);
+            setEditError(null);
+            reportedEditErrorRef.current = null;
+          }
           interaction.onMoveVertex?.(dragRef.current.target, dragRef.current, [event.lngLat.lng, event.lngLat.lat]);
           return;
         }
@@ -818,7 +948,7 @@ export default function ObjectMapCanvas({
   useEffect(() => {
     if (!ready) return;
     syncStandardBuildingStatesRef.current?.();
-  }, [buildingSelectionPoints, ready]);
+  }, [buildingSelectionPoints, highlightedBuildingKey, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -855,6 +985,7 @@ export default function ObjectMapCanvas({
       }} />
       {!ready && !error && <div className="absolute inset-0 flex items-center justify-center bg-background/75 text-sm text-muted-foreground backdrop-blur-sm"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Kaart laden...</div>}
       {error && <div className="absolute inset-x-4 top-4 rounded-xl border border-destructive/30 bg-background/95 p-4 text-sm text-destructive shadow-lg backdrop-blur-xl">{error.message}</div>}
+      {editError && <div role="alert" className="absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{editError}</div>}
       {ready && <div className="pointer-events-none absolute bottom-12 left-3 rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-xl">{trustedObjectCoordinatePair(object) ? "Kaart begrensd tot de omgeving van dit object" : "Nederland-overzicht · bevestig eerst het objectadres"}</div>}
       {drawingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
@@ -863,16 +994,42 @@ export default function ObjectMapCanvas({
         </div>
       )}
       {workspace === "buildings" && !drawingTarget && !editingTarget && !interactionDisabled && (
-        <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-blue-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
+        <div className="pointer-events-none absolute left-3 top-3 flex max-w-[calc(100%-110px)] items-center gap-2 rounded-xl border border-blue-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <Building2 className="h-3.5 w-3.5 text-primary" />
           Klik op een 3D-gebouw; het gebouw zelf kleurt blauw
         </div>
       )}
       {workspace === "terrain" && parcelSelectionEnabled && !drawingTarget && !editingTarget && !interactionDisabled && (
-        <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-emerald-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
-          <LandPlot className="h-3.5 w-3.5 text-emerald-600" /> Klik een perceel om het als terrein te gebruiken
+        <div className="pointer-events-none absolute left-3 top-3 flex max-w-[calc(100%-110px)] items-center gap-2 rounded-xl border border-emerald-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
+          <LandPlot className="h-3.5 w-3.5 text-emerald-600" /> Klik een perceel om toe te voegen; klik groen terrein om te verwijderen
         </div>
       )}
+      {editingTarget === "terrain" && !interactionDisabled && <div className="pointer-events-none absolute left-3 top-3 max-w-[calc(100%-110px)] rounded-xl border border-emerald-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
+        Klik op de groene grens voor een punt · sleep het punt · rechtermuisknop: verwijderen
+      </div>}
+      {ready && <div className="absolute right-3 top-3 grid grid-cols-2 gap-1 rounded-xl border bg-background/95 p-1 shadow-lg" role="group" aria-label="Kaart draaien en kantelen">
+        <Button type="button" size="icon" variant="ghost" aria-label="Kaart linksom draaien" title="Linksom draaien · rechtermuisknop + slepen werkt ook" onClick={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() - 15, duration: 250 })}><RotateCcw className="h-4 w-4" /></Button>
+        <Button type="button" size="icon" variant="ghost" aria-label="Kaart rechtsom draaien" title="Rechtsom draaien · rechtermuisknop + slepen werkt ook" onClick={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() + 15, duration: 250 })}><RotateCw className="h-4 w-4" /></Button>
+        <Button type="button" size="icon" variant="ghost" aria-label="3D-kijkhoek vergroten" title={groundEditing ? "Tijdens grens aanpassen en luchtfoto blijft de kaart vlak voor nauwkeurigheid" : "Meer 3D · rechtermuisknop + verticaal slepen"} disabled={groundEditing} onClick={() => mapRef.current?.easeTo({ pitch: Math.min(65, mapRef.current.getPitch() + 10), duration: 250 })}><ChevronUp className="h-4 w-4" /></Button>
+        <Button type="button" size="icon" variant="ghost" aria-label="3D-kijkhoek verkleinen" title={groundEditing ? "Tijdens grens aanpassen en luchtfoto blijft de kaart vlak voor nauwkeurigheid" : "Minder 3D · rechtermuisknop + verticaal slepen"} disabled={groundEditing} onClick={() => mapRef.current?.easeTo({ pitch: Math.max(0, mapRef.current.getPitch() - 10), duration: 250 })}><ChevronDown className="h-4 w-4" /></Button>
+      </div>}
+      {pointMenu && editingTarget === "terrain" && <div role="menu" aria-label="Grenspunt" className="absolute z-20 rounded-xl border bg-background p-1 shadow-xl" style={{ left: pointMenu.x, top: pointMenu.y }} onKeyDown={event => {
+        if (event.key === "Escape") { setPointMenu(null); containerRef.current?.focus(); }
+      }}>
+        <Button type="button" role="menuitem" variant="ghost" size="sm" autoFocus onClick={() => {
+          const result = removeBoundaryHandle(terrain, pointMenu.reference);
+          if (result.error) reportEditError(result.error);
+          else {
+            setEditError(null);
+            reportedEditErrorRef.current = null;
+            updateHandles(shiftBoundaryHandles(handlesRef.current, pointMenu.reference, -1));
+            expectedTerrainRef.current = JSON.stringify(result.collection);
+            onTerrainGeometryChange?.(result.collection);
+          }
+          setPointMenu(null);
+          containerRef.current?.focus();
+        }}><Trash2 className="mr-2 h-4 w-4" /> Punt verwijderen</Button>
+      </div>}
       <Button type="button" size="sm" variant="secondary" className="absolute bottom-3 left-3 bg-background/90 shadow-md backdrop-blur-xl" onClick={() => {
         const map = mapRef.current;
         const bounds = featureCollectionBounds(selectedBuildings, selectedPointCollection, terrain, mapData.anchor);

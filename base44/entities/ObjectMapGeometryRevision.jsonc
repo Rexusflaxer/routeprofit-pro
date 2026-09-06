@@ -57,6 +57,13 @@
         "required": ["id", "source", "provider", "bag_status", "longitude", "latitude"]
       }
     },
+    "building_labels": {
+      "type": "object",
+      "maxProperties": 100,
+      "default": {},
+      "additionalProperties": { "type": "string", "maxLength": 100 },
+      "description": "Private historische gebouwnamen per stabiele selectiesleutel; wordt nooit opgenomen in logboek of mutatieherstelpayload."
+    },
     "object_area_geojson": {
       "type": [
         "object",

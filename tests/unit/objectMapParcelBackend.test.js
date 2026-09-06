@@ -22,7 +22,7 @@ beforeAll(async () => {
   globalThis.Uint8Array = new TextEncoder().encode("").constructor;
   globalThis.Deno = { env: { get: () => undefined }, serve: () => undefined };
   api = await loadBackend("base44/functions/customerPlatformApi/entry.ts", [
-    "READ_ACTIONS", "handleListObjectParcelCandidates", "normalizedBuildingSelectionPoints",
+    "READ_ACTIONS", "handleListObjectParcelCandidates", "handleListObjectBuildingCandidates", "normalizedBuildingSelectionPoints",
     "safeObjectMapConfiguration", "safeStoredMapGeometry", "safeLocalGeometryProperties",
     "handleUpdateObjectMapConfiguration", "ensureObjectMapGeometryRevision", "objectHasMapConfiguration",
     "buildingAssignmentConflicts", "nextPdokParcelCursor",
@@ -85,6 +85,19 @@ const save = (mock, data, expectedVersion = mock.state().version, key = "map-poi
 );
 
 describe("Kadastrale terreinvoorbeelden", () => {
+  it("laadt standaard de volledige lokale perceelomgeving van 1000 meter zonder het BAG-bereik te verruimen", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(collection(feature()))));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.handleListObjectParcelCandidates(backendMock().base44, { ...body, radius_meters: undefined });
+    expect(result.radius_meters).toBe(1000);
+    const bbox = new URL(fetchMock.mock.calls[0][0]).searchParams.get("bbox").split(",").map(Number);
+    expect((bbox[3] - bbox[1]) * 110540 / 2).toBeCloseTo(1000, 1);
+    await expect(api.handleListObjectParcelCandidates(backendMock().base44, { ...body, radius_meters: 1000 })).resolves.toMatchObject({ radius_meters: 1000 });
+    await expect(api.handleListObjectParcelCandidates(backendMock().base44, { ...body, radius_meters: 1001 })).rejects.toMatchObject({ status: 400 });
+    await expect(api.handleListObjectBuildingCandidates(backendMock().base44, { ...body, radius_meters: 501 })).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it.each([408, 429, 500, 503])("herstelt tijdelijk HTTP %s met maximaal twee pogingen zonder gegevens te wijzigen", async status => {
     vi.useFakeTimers();
     const mock = backendMock();

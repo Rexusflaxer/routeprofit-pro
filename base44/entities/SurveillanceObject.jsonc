@@ -698,6 +698,13 @@
         "required": ["id", "source", "provider", "bag_status", "longitude", "latitude"]
       }
     },
+    "building_labels": {
+      "type": "object",
+      "maxProperties": 100,
+      "default": {},
+      "additionalProperties": { "type": "string", "maxLength": 100 },
+      "description": "Gebruikersnamen voor geselecteerde gebouwen, gekoppeld via bag:<PDOK-id>, point:<lokaal aanklikpunt-id> of manual:<local_id>. Alleen opslaan via de kaartconfiguratie; geen namen in logboek of recoverypayloads."
+    },
     "object_area_geojson": {
       "type": [
         "object",

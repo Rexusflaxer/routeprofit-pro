@@ -15,6 +15,16 @@ const polygon = {
 };
 
 describe("objectkaart API-workflow", () => {
+  it("geeft gebouwnamen mee en behoudt ze bij herladen zonder oude callers te overschrijven", async () => {
+    const labels = { "bag:bag-1": "Receptie", "point:point-1": "Magazijn" };
+    const invoke = vi.fn(async payload => ({ configuration: { version: 8, ...payload.data } }));
+    const result = await updateObjectMapConfiguration({ customerId: "customer-1", objectId: "object-1", expectedVersion: 7, idempotencyKey: "names-key", data: { building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"], building_labels: labels }, invoke });
+    expect(invoke.mock.calls[0][0].data.building_labels).toEqual(labels);
+    expect(result.building_labels).toEqual(labels);
+    await updateObjectMapConfiguration({ customerId: "customer-1", objectId: "object-1", expectedVersion: 8, idempotencyKey: "old-client-key", data: { building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"] }, invoke });
+    expect(invoke.mock.calls[1][0].data).not.toHaveProperty("building_labels");
+    expect(normalizeObjectMapConfiguration({ configuration: { building_labels: null } }).building_labels).toEqual({});
+  });
   it.each([
     [{ code: "pdok_parcel_unavailable", reason: "http", retryable: false }, /beschikbare verbindingen/],
     [{ code: "pdok_parcel_invalid_response" }, /PDOK.*geen bruikbaar antwoord/],
@@ -41,7 +51,7 @@ describe("objectkaart API-workflow", () => {
     const fetchDirect = vi.fn().mockResolvedValue({ candidates: { type: "FeatureCollection", features: [{ type: "Feature", id: "parcel", properties: { source: "pdok_brk" }, geometry: polygon }] }, center: { longitude: 4.48, latitude: 51.92 }, next_cursor: "page-2" });
     const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke, fetchDirect });
     expect(invoke.mock.calls.map(([p]) => p.action)).toEqual(["list_object_parcel_candidates", "get_object_map_configuration"]);
-    expect(fetchDirect).toHaveBeenCalledWith({ object: scopedConfiguration.configuration.object, radiusMeters: 250, limit: 100, cursor: null });
+    expect(fetchDirect).toHaveBeenCalledWith({ object: scopedConfiguration.configuration.object, radiusMeters: 1_000, limit: 100, cursor: null });
     expect(result).toMatchObject({ transport: "browser", next_cursor: "page-2", items: [expect.objectContaining({ id: "parcel" })] });
   });
 
@@ -116,8 +126,8 @@ describe("objectkaart API-workflow", () => {
 
   it("vraagt kadastrale percelen op binnen dezelfde objectscope en bewaart herkomst", async () => {
     const invoke = vi.fn(async () => ({ candidates: { type: "FeatureCollection", features: [{ type: "Feature", id: "parcel-1", properties: { source: "pdok_brk", label: "Apeldoorn A 12" }, geometry: polygon }] }, source: { name: "PDOK Kadastrale kaart" }, next_cursor: "next-page" }));
-    const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", radiusMeters: 999, limit: 500, cursor: "page-1", invoke });
-    expect(invoke).toHaveBeenCalledWith({ action: "list_object_parcel_candidates", customer_id: "customer-1", object_id: "object-1", radius_meters: 500, limit: 100, cursor: "page-1" });
+    const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", radiusMeters: 5_000, limit: 500, cursor: "page-1", invoke });
+    expect(invoke).toHaveBeenCalledWith({ action: "list_object_parcel_candidates", customer_id: "customer-1", object_id: "object-1", radius_meters: 1_000, limit: 100, cursor: "page-1" });
     expect(result.items[0].properties).toMatchObject({ source: "pdok_brk", label: "Apeldoorn A 12" });
     expect(result.next_cursor).toBe("next-page");
   });
