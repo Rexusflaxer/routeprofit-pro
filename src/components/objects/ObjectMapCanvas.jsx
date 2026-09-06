@@ -41,6 +41,72 @@ const LAYER = {
   parcelsLine: "loq-object-map-parcels-line",
 };
 
+const NETHERLANDS_MAP_BOUNDS = [[3, 50.6], [7.4, 53.7]];
+const LOCAL_MAP_RADIUS_METERS = 1_000;
+const MAP_GEOMETRY_MAX_DISTANCE_METERS = 5_000; // Same locality limit as customerPlatformApi.
+const MAP_BOUNDS_PADDING_METERS = 150;
+
+function nearbyMapCoordinate(coordinate, anchor) {
+  if (!Array.isArray(coordinate) || coordinate.length < 2) return false;
+  const [lng, lat] = coordinate;
+  if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 85) return false;
+  const radians = Math.PI / 180;
+  const latitudeDelta = (lat - anchor[1]) * radians;
+  const longitudeDelta = (lng - anchor[0]) * radians;
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(lat * radians) * Math.cos(anchor[1] * radians) * Math.sin(longitudeDelta / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(haversine))) <= MAP_GEOMETRY_MAX_DISTANCE_METERS;
+}
+
+function localGeometryCoordinates(geometry, anchor) {
+  const polygons = geometry?.type === "Polygon" ? [geometry.coordinates]
+    : geometry?.type === "MultiPolygon" ? geometry.coordinates : null;
+  if (!Array.isArray(polygons) || !polygons.length || polygons.length > 100) return [];
+  const coordinates = [];
+  for (const polygon of polygons) {
+    if (!Array.isArray(polygon) || !polygon.length || polygon.length > 100) return [];
+    for (const ring of polygon) {
+      if (!Array.isArray(ring) || ring.length < 4 || ring.length + coordinates.length > 10_000
+        || !ring.every(coordinate => nearbyMapCoordinate(coordinate, anchor))) return [];
+      if (ring[0][0] !== ring.at(-1)[0] || ring[0][1] !== ring.at(-1)[1]) return [];
+      const area = ring.slice(1).reduce((sum, point, index) => sum
+        + (ring[index][0] - anchor[0]) * (point[1] - anchor[1])
+        - (point[0] - anchor[0]) * (ring[index][1] - anchor[1]), 0);
+      if (Math.abs(area) < 1e-12) return [];
+      coordinates.push(...ring);
+    }
+  }
+  return coordinates;
+}
+
+function objectNavigationBounds(object, selectedBuildings, terrain, buildingSelectionPoints) {
+  const anchor = trustedObjectCoordinatePair(object);
+  if (!anchor) return NETHERLANDS_MAP_BOUNDS;
+  const metersPerLatitude = 111320;
+  const metersPerLongitude = metersPerLatitude * Math.max(0.01, Math.cos(anchor[1] * Math.PI / 180));
+  const radiusLng = LOCAL_MAP_RADIUS_METERS / metersPerLongitude;
+  const radiusLat = LOCAL_MAP_RADIUS_METERS / metersPerLatitude;
+  const bounds = [[anchor[0] - radiusLng, anchor[1] - radiusLat], [anchor[0] + radiusLng, anchor[1] + radiusLat]];
+  const include = coordinate => {
+    bounds[0][0] = Math.min(bounds[0][0], coordinate[0] - MAP_BOUNDS_PADDING_METERS / metersPerLongitude);
+    bounds[0][1] = Math.min(bounds[0][1], coordinate[1] - MAP_BOUNDS_PADDING_METERS / metersPerLatitude);
+    bounds[1][0] = Math.max(bounds[1][0], coordinate[0] + MAP_BOUNDS_PADDING_METERS / metersPerLongitude);
+    bounds[1][1] = Math.max(bounds[1][1], coordinate[1] + MAP_BOUNDS_PADDING_METERS / metersPerLatitude);
+  };
+  // Only local, closed stored/edited polygons extend the workspace. Candidate
+  // feeds and unfinished drawings never enlarge the navigation area.
+  [selectedBuildings, terrain].forEach(collection => {
+    normalizeFeatureCollection(collection).features.slice(0, 100).forEach(feature => {
+      localGeometryCoordinates(feature.geometry, anchor).forEach(include);
+    });
+  });
+  (buildingSelectionPoints || []).slice(0, 100).forEach(point => {
+    const coordinate = [point.longitude, point.latitude];
+    if (nearbyMapCoordinate(coordinate, anchor)) include(coordinate);
+  });
+  return bounds.map(([lng, lat]) => [Math.max(-180, Math.min(180, lng)), Math.max(-85, Math.min(85, lat))]);
+}
+
 const STANDARD_BUILDINGS_TARGET = { featuresetId: "buildings", importId: "basemap" };
 const STANDARD_BUILDING_INTERACTION = {
   click: "loq-object-map-standard-building-click",
@@ -257,6 +323,7 @@ export default function ObjectMapCanvas({
   onToggleBuildingPoint,
   workspace = "buildings",
   mapView = "map",
+  topDown = false,
   parcelCandidates = [],
   parcelsVisible = false,
   parcelSelectionEnabled = false,
@@ -289,9 +356,16 @@ export default function ObjectMapCanvas({
   const syncStandardBuildingStatesRef = useRef(null);
   const clearStandardBuildingHoverRef = useRef(null);
   const applyWorkspaceViewRef = useRef(null);
+  const appliedNavigationBoundsRef = useRef(null);
+  const navigationBoundsRef = useRef(null);
   const previewPointRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
+  const interactionDisabled = disabled || !trustedObjectCoordinatePair(object);
+  const navigationBounds = useMemo(() => objectNavigationBounds(object, selectedBuildings, terrain, buildingSelectionPoints),
+    [object?.latitude, object?.longitude, object?.geocoding_status, selectedBuildings, terrain, buildingSelectionPoints]);
+  const navigationBoundsKey = JSON.stringify(navigationBounds);
+  navigationBoundsRef.current = navigationBounds;
 
   const mapData = useMemo(() => ({
     candidates: candidateCollection(candidates, selectedBagFeatureIds),
@@ -320,7 +394,7 @@ export default function ObjectMapCanvas({
   }))), [buildingSelectionPoints]);
   dataRef.current = mapData;
   interactionsRef.current = {
-    disabled,
+    disabled: interactionDisabled,
     drawingTarget,
     editingTarget,
     candidates: matchCandidates,
@@ -335,6 +409,7 @@ export default function ObjectMapCanvas({
     onToggleBuildingPoint,
     workspace,
     mapView,
+    topDown,
     parcelsVisible,
     parcelSelectionEnabled,
     drawingPoints,
@@ -361,44 +436,59 @@ export default function ObjectMapCanvas({
       const mapboxgl = module.default;
       mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
       const coordinates = trustedObjectCoordinatePair(object);
+      const usesGroundView = interaction => interaction.workspace === "terrain"
+        && (interaction.mapView === "satellite" || interaction.topDown || Boolean(interaction.drawingTarget) || Boolean(interaction.editingTarget));
+      let appliedGroundView = usesGroundView(interactionsRef.current);
+      let normalMapPitch = coordinates ? 42 : 0;
       map = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/standard",
+        // Standard defaults to globe, where maxBounds constrains only the
+        // center. Mercator also constrains the visible viewport and zoom.
+        projection: "mercator",
         center: coordinates || [5.2913, 52.1326],
         zoom: coordinates ? 17 : 7,
-        pitch: coordinates && interactionsRef.current.workspace === "buildings" ? 42 : 0,
+        pitch: appliedGroundView ? 0 : normalMapPitch,
         bearing: coordinates ? -12 : 0,
-        minZoom: 5,
+        // maxBounds imposes the viewport-dependent zoom floor. Keep a lower
+        // absolute floor so an existing large site still fits on narrow screens.
+        minZoom: coordinates ? 10 : 6,
+        maxBounds: navigationBoundsRef.current,
+        renderWorldCopies: false,
         attributionControl: true,
         config: {
           basemap: {
             colorBuildingHighlight: "#93c5fd",
             colorBuildingSelect: "#1f7aff",
-            show3dObjects: interactionsRef.current.workspace === "buildings",
-            show3dBuildings: interactionsRef.current.workspace === "buildings",
-            show3dFacades: interactionsRef.current.workspace === "buildings",
+            show3dObjects: !appliedGroundView,
+            show3dBuildings: !appliedGroundView,
+            show3dFacades: !appliedGroundView,
             show3dLandmarks: false,
           },
         },
       });
+      appliedNavigationBoundsRef.current = JSON.stringify(navigationBoundsRef.current);
       map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), "bottom-right");
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
 
-      let appliedWorkspace = interactionsRef.current.workspace;
       const applyWorkspaceView = () => {
         const interaction = interactionsRef.current;
         const terrainWorkspace = interaction.workspace === "terrain";
+        const groundView = usesGroundView(interaction);
         map.setLayoutProperty(LAYER.satellite, "visibility", terrainWorkspace && interaction.mapView === "satellite" ? "visible" : "none");
         const parcelVisibility = terrainWorkspace && interaction.parcelsVisible ? "visible" : "none";
         map.setLayoutProperty(LAYER.parcelsFill, "visibility", parcelVisibility);
         map.setLayoutProperty(LAYER.parcelsLine, "visibility", parcelVisibility);
-        map.setConfigProperty("basemap", "show3dObjects", !terrainWorkspace);
-        map.setConfigProperty("basemap", "show3dBuildings", !terrainWorkspace);
-        map.setConfigProperty("basemap", "show3dFacades", !terrainWorkspace);
-        if (appliedWorkspace !== interaction.workspace) {
-          map.easeTo({ pitch: terrainWorkspace ? 0 : 42, duration: 350 });
-          appliedWorkspace = interaction.workspace;
+        map.setConfigProperty("basemap", "show3dObjects", !groundView);
+        map.setConfigProperty("basemap", "show3dBuildings", !groundView);
+        map.setConfigProperty("basemap", "show3dFacades", !groundView);
+        // A workspace switch is not a camera action. Only explicit aerial/2D
+        // viewing or ground editing temporarily flattens this same map.
+        if (appliedGroundView !== groundView) {
+          if (groundView) normalMapPitch = map.getPitch();
+          map.easeTo({ pitch: groundView ? 0 : normalMapPitch, duration: 350 });
+          appliedGroundView = groundView;
         }
         if (interaction.drawingTarget) map.doubleClickZoom.disable();
         else map.doubleClickZoom.enable();
@@ -736,7 +826,14 @@ export default function ObjectMapCanvas({
   useEffect(() => {
     if (!ready) return;
     applyWorkspaceViewRef.current?.();
-  }, [drawingTarget, mapView, parcelsVisible, ready, workspace]);
+  }, [drawingTarget, editingTarget, mapView, parcelsVisible, ready, topDown, workspace]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || appliedNavigationBoundsRef.current === navigationBoundsKey) return;
+    map.setMaxBounds(navigationBoundsRef.current);
+    appliedNavigationBoundsRef.current = navigationBoundsKey;
+  }, [navigationBoundsKey, ready]);
 
   useEffect(() => {
     if (workspace === "buildings" && !disabled && !drawingTarget && !editingTarget) return;
@@ -758,7 +855,7 @@ export default function ObjectMapCanvas({
   return (
     <div className="relative h-[540px] min-h-[420px] overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-inner lg:h-[680px]">
       <div ref={containerRef} className="absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-primary" tabIndex={0} aria-label={`Kaart en terrein van ${object?.name || "object"}`} onKeyDown={event => {
-        if (disabled || !drawingTarget || event.altKey || event.ctrlKey || event.metaKey) return;
+        if (interactionDisabled || !drawingTarget || event.altKey || event.ctrlKey || event.metaKey) return;
         if (event.target?.closest?.("input, textarea, select, button, [contenteditable='true']")) return;
         if (event.key === "Enter" && drawingPoints?.length >= 3 && onFinishDrawing) {
           event.preventDefault();
@@ -773,19 +870,20 @@ export default function ObjectMapCanvas({
       }} />
       {!ready && !error && <div className="absolute inset-0 flex items-center justify-center bg-background/75 text-sm text-muted-foreground backdrop-blur-sm"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Kaart laden...</div>}
       {error && <div className="absolute inset-x-4 top-4 rounded-xl border border-destructive/30 bg-background/95 p-4 text-sm text-destructive shadow-lg backdrop-blur-xl">{error.message}</div>}
-      {drawingTarget && !disabled && (
+      {ready && <div className="pointer-events-none absolute bottom-12 left-3 rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-xl">{trustedObjectCoordinatePair(object) ? "Kaart begrensd tot de omgeving van dit object" : "Nederland-overzicht · bevestig eerst het objectadres"}</div>}
+      {drawingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <MousePointer2 className="h-3.5 w-3.5 text-violet-600" />
           Klik hoekpunten · sluit op het eerste punt of met Enter · Backspace: punt terug · Esc: annuleren
         </div>
       )}
-      {workspace === "buildings" && !drawingTarget && !editingTarget && !disabled && (
+      {workspace === "buildings" && !drawingTarget && !editingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-blue-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <Building2 className="h-3.5 w-3.5 text-primary" />
           Klik op een 3D-gebouw; het gebouw zelf kleurt blauw
         </div>
       )}
-      {workspace === "terrain" && parcelSelectionEnabled && !drawingTarget && !editingTarget && !disabled && (
+      {workspace === "terrain" && parcelSelectionEnabled && !drawingTarget && !editingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-emerald-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <LandPlot className="h-3.5 w-3.5 text-emerald-600" /> Klik een perceel om het als terrein te gebruiken
         </div>

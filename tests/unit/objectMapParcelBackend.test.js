@@ -26,7 +26,7 @@ beforeAll(async () => {
     "safeObjectMapConfiguration", "safeStoredMapGeometry", "safeLocalGeometryProperties",
     "handleUpdateObjectMapConfiguration", "ensureObjectMapGeometryRevision", "objectHasMapConfiguration",
     "buildingAssignmentConflicts", "nextPdokParcelCursor",
-    "customerObjectMutationMarkerReplay",
+    "customerObjectMutationMarkerReplay", "fetchPdokParcelJson", "publicCustomerPlatformErrorMessage",
   ]);
   mobile = await loadBackend("base44/functions/mobileApi/entry.ts", ["mobileSafeMapState", "buildPackage"]);
 });
@@ -85,6 +85,110 @@ const save = (mock, data, expectedVersion = mock.state().version, key = "map-poi
 );
 
 describe("Kadastrale terreinvoorbeelden", () => {
+  it.each([408, 429, 500, 503])("herstelt tijdelijk HTTP %s met maximaal twee pogingen zonder gegevens te wijzigen", async status => {
+    vi.useFakeTimers();
+    const mock = backendMock();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("unavailable", { status }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(collection(feature()))));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = api.handleListObjectParcelCandidates(mock.base44, body);
+    await vi.runAllTimersAsync();
+    const result = await pending;
+    expect(result.candidates.features).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0].href).toBe(fetchMock.mock.calls[1][0].href);
+    expect(fetchMock.mock.calls.every(([, options]) => options.redirect === "error")).toBe(true);
+    expect(mock.base44.asServiceRole.entities.Customer.updateMany).not.toHaveBeenCalled();
+    expect(mock.base44.asServiceRole.entities.SurveillanceObject.updateMany).not.toHaveBeenCalled();
+    expect(mock.revisions).toHaveLength(0);
+  });
+
+  it("stopt na twee mislukte pogingen met alleen veilige diagnosegegevens", async () => {
+    vi.useFakeTimers();
+    const url = new URL("https://api.pdok.nl/example?bbox=4.3005,52.1005,4.4,52.2");
+    const fetchMock = vi.fn(async () => new Response(`upstream failure at ${url.href}`, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = api.fetchPdokParcelJson(url).catch(error => error);
+    await vi.runAllTimersAsync();
+    const error = await pending;
+    expect(error).toMatchObject({ status: 503, details: { code: "pdok_parcel_unavailable", reason: "http", upstream_status: 503, attempts: 2, retryable: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(error)).not.toMatch(/bbox|4\.3005|52\.1005|https:/);
+    expect(error.message).not.toContain(url.href);
+  });
+
+  it("herstelt een netwerkfout zonder de ruwe fetch-fout door te geven", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("private upstream URL with coordinates"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(collection(feature()))));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = api.fetchPdokParcelJson(new URL("https://api.pdok.nl/example"));
+    await vi.runAllTimersAsync();
+    expect((await pending).features).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sanitiseert ook een herhaalde netwerkfout", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed https://api.pdok.nl/example?bbox=4.3005,52.1005"); }));
+    const pending = api.fetchPdokParcelJson(new URL("https://api.pdok.nl/example")).catch(error => error);
+    await vi.runAllTimersAsync();
+    const error = await pending;
+    expect(error.details).toEqual({ code: "pdok_parcel_unavailable", reason: "network", attempts: 2, retryable: true });
+    expect(JSON.stringify(error)).not.toMatch(/https:|bbox|4\.3005/);
+  });
+
+  it("begrensd twee trage pogingen tot samen acht seconden en meldt een timeout", async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    const fetchMock = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("raw abort detail", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = api.fetchPdokParcelJson(new URL("https://api.pdok.nl/example")).catch(error => error);
+    await vi.runAllTimersAsync();
+    const error = await pending;
+    expect(error.details).toEqual({ code: "pdok_parcel_unavailable", reason: "timeout", attempts: 2, retryable: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([, options]) => options.signal.aborted)).toBe(true);
+    expect(Date.now() - started).toBe(8_000);
+    expect(api.publicCustomerPlatformErrorMessage(error, 503)).toContain("duurde te lang");
+  });
+
+  it.each([400, 401, 403, 404])("herhaalt een niet-tijdelijke HTTP %s fout niet", async status => {
+    const fetchMock = vi.fn(async () => new Response("invalid request", { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.fetchPdokParcelJson(new URL("https://api.pdok.nl/example"))).rejects.toMatchObject({
+      status: 503, details: { reason: "http", upstream_status: status, attempts: 1, retryable: false },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["invalid_json", "oversized_header", "oversized_body"])("herhaalt onbruikbare brondata niet: %s", async kind => {
+    const response = kind === "invalid_json" ? new Response("not json") : kind === "oversized_header"
+      ? new Response("{}", { headers: { "content-length": "5000001" } }) : new Response("x".repeat(5_000_001));
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.fetchPdokParcelJson(new URL("https://api.pdok.nl/example"))).rejects.toMatchObject({
+      status: 503,
+      details: { code: "pdok_parcel_invalid_response", reason: kind === "invalid_json" ? "invalid_json" : "oversized_response", attempts: 1, retryable: false },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("toont uitsluitend veilige perceelmeldingen en houdt onbekende serverfouten generiek", () => {
+    const raw = "https://upstream.test/private?bbox=4.3005,52.1005";
+    expect(api.publicCustomerPlatformErrorMessage({ message: raw, details: { code: "pdok_parcel_unavailable" } }, 503))
+      .toBe("Kadastrale perceelgrenzen zijn tijdelijk niet bereikbaar. Probeer het opnieuw.");
+    expect(api.publicCustomerPlatformErrorMessage({ message: raw, details: { code: "pdok_parcel_invalid_response" } }, 503))
+      .toBe("De bron gaf geen bruikbare kadastrale perceelgrenzen terug. Probeer het later opnieuw.");
+    expect(api.publicCustomerPlatformErrorMessage({ message: raw, details: { code: "unknown" } }, 503)).toBe("Klantplatformactie mislukt");
+    expect(api.publicCustomerPlatformErrorMessage(new Error(raw), 500)).toBe("Klantplatformactie mislukt");
+    expect(api.publicCustomerPlatformErrorMessage(new Error("Object hoort niet bij deze klant"), 409)).toBe("Object hoort niet bij deze klant");
+  });
+
   it("geeft gesaneerde percelen vanuit de gecontroleerde objectlocatie en exacte paginacursor", async () => {
     expect(api.READ_ACTIONS.has("list_object_parcel_candidates")).toBe(true);
     const fetchMock = vi.fn(async url => {

@@ -31,11 +31,18 @@ Overlapcontrole kan punten tegen BAG/legacy-contouren of identieke punten contro
 - **Zelf tekenen** blijft voor het operationele terrein beschikbaar.
 - **Grens aanpassen** versleept hoekpunten. Ongedaan/opnieuw blijft beschikbaar.
 - Klik op het eerste punt of Enter om af te sluiten; Backspace verwijdert het laatste punt en Escape annuleert. Sneltoetsen zijn beperkt tot de gefocuste kaart.
-- **Kaart / Luchtfoto** wisselt zonder een nieuwe kaartinstantie, verlies van camerastand of conceptpunten. Terrein staat recht van boven. De luchtfoto ligt boven de Mapbox-ondergrond en onder de LOQ-terreinlagen, zodat native gebouwen het beeld niet bedekken.
+- **Gebouwen / Terrein** gebruikt dezelfde kaartinstantie, positie, zoom en kijkhoek. Terrein opent niet automatisch als luchtfoto. **Luchtfoto** en **Bovenaanzicht** zijn optionele weergaven; een gekozen terreinweergave blijft onthouden bij terugkeren. Tekenen en hoekpunten aanpassen schakelen tijdelijk naar bovenaanzicht voor nauwkeurige grondcoördinaten. Daarna herstelt de eerdere kijkhoek, zonder locatie- of zoomreset. Conceptpunten blijven behouden bij wisselen van ondergrond. De luchtfoto ligt boven de Mapbox-ondergrond en onder de LOQ-terreinlagen, zodat native gebouwen het beeld niet bedekken.
+- **Lokale kaartgrens** beperkt uitzoomen en verschuiven tot circa 1 km rondom de bevestigde objectlocatie. Bestaande of afgesloten terrein-/gebouwcontouren en selectiepunten binnen de serverlimiet van 5 km kunnen dit gebied met 150 m marge vergroten. Onvoltooide tekeningen en kandidaatfeeds verruimen de navigatiegrens niet. De kaart gebruikt expliciet Mercator met `maxBounds`, zodat ook de minimale zoom aan de schermgrootte wordt aangepast; wereldkopieën staan uit. Dit is belangrijk: in de standaard Globe-projectie begrenst Mapbox alleen het kaartmiddelpunt, niet het volledige beeld. De browsercontrole ving dit verschil ondanks geslaagde componenttests. Een onbevestigd adres toont alleen een begrensd Nederland-overzicht, zonder teken- of selectieacties. Dit beperkt het bekijken/laden van verre tegels, maar is geen meting of garantie van CPU-winst.
 
 De luchtfoto komt uit de PDOK actuele orthofotolaag. Een kadastraal perceel bewijst geen eigendom, toegang of bewakingsopdracht; de gebruiker moet de operationele grens controleren. Geïmporteerd terrein blijft `source: user_drawn` met optionele `derived_from: pdok_brk` en `derived_from_id`. Deze herkomst is geen claim dat de bewerkte grens nog exact kadastraal is.
 
 `customerPlatformApi.list_object_parcel_candidates` gebruikt dezelfde klant-/objectscope en gecontroleerde locatie als BAG-kandidaten. De server haalt maximaal 100 resultaten per pagina op binnen de toegestane straal, begrenst responstijd/grootte, saneert bronvelden en accepteert alleen vervolgcursors voor exact dezelfde PDOK-query. Bij bronuitval blijven opgeslagen selecties en terreinen intact.
+
+### Controle melding 503 en herstelgedrag
+
+De gemelde historische referentie `7026b7a0-8492-49d7-96ee-7ee897a6fd73` kon zonder de bijbehorende productie-serverlog niet exact worden herleid. Op 6 september 2026 slaagt de volledige perceelhandler lokaal met een in-memory klant/objectscope en echte PDOK-data voor het eerder getoonde adres in Wapenveld: 44 percelen, 0 overgeslagen geometrieën en geen vervolgpagina. Ook een echte gepagineerde Rotterdam-query en de strikte vervolglinkcontrole slagen. Dit bewijst geen succesvolle productieaanroep van Base44 en geen blijvende oplossing van een niet-gereproduceerde externe storing.
+
+De generieke foutmelding was wel reproduceerbaar: de publieke API maskeerde iedere 5xx als `Klantplatformactie mislukt`. Bekende perceelfoutcodes krijgen nu een veilige, specifieke uitleg. Er zijn maximaal twee serverpogingen voor tijdelijke netwerk-/timeout-/HTTP408/429/5xx-fouten binnen een netwerkbudget van acht seconden. Ongeldige JSON, te grote antwoorden en overige HTTP4xx-fouten worden niet automatisch herhaald. Diagnostiek bevat alleen foutsoort, pogingenaantal en eventuele bronstatus; geen URL met coördinaten. De browser verdubbelt uitgeputte serverpogingen niet, laat bron-/scopefouten herkenbaar en biedt handmatig opnieuw laden. Eerder geladen percelen, opgeslagen terrein en conceptpunten blijven beschikbaar. Perceeluitval blokkeert zelf tekenen of opslaan niet.
 
 Terrein wordt alleen meegestuurd voor relevante routetaken. Automatische terreinactivering wordt niet geïmplementeerd.
 
@@ -49,6 +56,7 @@ Publiceer zowel `customerPlatformApi` als `mobileApi` en de entiteitswijzigingen
 
 - [Mapbox Standard configuratie en featuresets](https://docs.mapbox.com/map-styles/reference/standard/)
 - [Native gebouwen selecteren en highlighten](https://docs.mapbox.com/mapbox-gl-js/example/highlight-buildings-standard/)
+- [Mapbox lokale kaartbegrenzing](https://docs.mapbox.com/mapbox-gl-js/example/restrict-bounds/)
 - [Mapbox Product Terms](https://www.mapbox.com/legal/product-terms)
 - [Mapbox Streets: tijdelijke feature-ID's](https://docs.mapbox.com/data/tilesets/reference/mapbox-streets-v8/#ids)
 - [PDOK BRK-percelencollectie](https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1/collections/perceel?f=html)

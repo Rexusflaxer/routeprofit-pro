@@ -12,7 +12,8 @@ const { getConfiguration, listCandidates, listParcels, updateConfiguration, guar
   guardState: vi.fn(),
 }));
 
-vi.mock("@/components/objects/objectMapWorkflow", () => ({
+vi.mock("@/components/objects/objectMapWorkflow", async importOriginal => ({
+  ...await importOriginal(),
   createObjectMapMutationKey: vi.fn(() => "map-mutation-key"),
   getObjectMapConfiguration: getConfiguration,
   listObjectBuildingCandidates: listCandidates,
@@ -32,7 +33,7 @@ vi.mock("@/components/objects/ObjectMapCanvas", () => ({
     <button type="button" onClick={() => props.onToggleBuildingPoint({ id: "user-point-1", source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4815, latitude: 51.92 })}>Gebouw zonder BAG selecteren</button>
     <button type="button" onClick={() => props.onToggleParcel("parcel-1")}>Perceel op kaart selecteren</button>
     <output aria-label="Geselecteerde kaartpanden">{(props.selectedBagFeatureIds || []).join(",")}</output>
-    <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, drawingPoints: props.drawingPoints, points: props.buildingSelectionPoints, terrain: props.terrain })}</output>
+    <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, workspace: props.workspace, topDown: props.topDown, drawingPoints: props.drawingPoints, points: props.buildingSelectionPoints, terrain: props.terrain })}</output>
   </div>,
 }));
 
@@ -483,10 +484,13 @@ describe("ObjectMapTab", () => {
   it("behoudt de terreintekening bij wisselen tussen kaart en luchtfoto", async () => {
     renderTab();
     fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
-    expect(screen.getByRole("button", { name: "Luchtfoto" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Kaart" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Luchtfoto" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
     fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
     fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent)).toMatchObject({ view: "satellite", drawingPoints: [[4.48, 51.92], [4.481, 51.92]] });
     fireEvent.click(screen.getByRole("button", { name: "Kaart" }));
     expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent)).toMatchObject({ view: "map", drawingPoints: [[4.48, 51.92], [4.481, 51.92]] });
     fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
@@ -497,6 +501,54 @@ describe("ObjectMapTab", () => {
     await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       object_area_geojson: expect.objectContaining({ features: [expect.objectContaining({ geometry: candidate.geometry })] }),
     }) })));
+  });
+
+  it("blijft standaard in dezelfde kaart en onthoudt pas na een keuze de luchtfoto", async () => {
+    renderTab();
+    await screen.findByTestId("map-canvas");
+    const state = () => JSON.parse(screen.getByLabelText("Kaartstatus").textContent);
+    expect(state()).toMatchObject({ view: "map", workspace: "buildings", topDown: false });
+    fireEvent.click(screen.getByRole("tab", { name: "Terrein" }));
+    expect(state()).toMatchObject({ view: "map", workspace: "terrain", topDown: false });
+    expect(screen.getByRole("button", { name: "Bovenaanzicht" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
+    expect(state().view).toBe("satellite");
+    fireEvent.click(screen.getByRole("tab", { name: "Gebouwen" }));
+    expect(state().workspace).toBe("buildings");
+    fireEvent.click(screen.getByRole("tab", { name: "Terrein" }));
+    expect(state().view).toBe("satellite");
+    expect(screen.getByRole("button", { name: "Luchtfoto" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument();
+  });
+
+  it("biedt bovenaanzicht vrijwillig aan en beschermt de camera tijdens grondbewerking", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    const button = screen.getByRole("button", { name: "Bovenaanzicht" });
+    fireEvent.click(button);
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).topDown).toBe(true);
+    fireEvent.click(button);
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).topDown).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Annuleren" }));
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("bewaart onvoltooide hoekpunten bij een poging terug naar gebouwen te wisselen", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Luchtfoto" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Gebouwen" }));
+    expect(screen.getByText("Maak het getekende vlak eerst af")).toBeInTheDocument();
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent)).toMatchObject({ workspace: "terrain", view: "satellite", drawingPoints: [[4.48, 51.92]] });
+    fireEvent.click(screen.getByRole("button", { name: "Annuleren" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Gebouwen" }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent)).toMatchObject({ workspace: "buildings", drawingPoints: [] });
   });
 
   it("neemt een perceel over met herkomst, bewaart undo en kan het weer wissen", async () => {
@@ -523,6 +575,50 @@ describe("ObjectMapTab", () => {
     expect(await screen.findByText(/Perceelgrenzen konden niet worden geladen/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zelf tekenen" })).not.toBeDisabled();
     expect(screen.queryByRole("button", { name: /Gebouwcontour tekenen/ })).not.toBeInTheDocument();
+  });
+
+  it("herstelt een perceelfout op verzoek zonder opgeslagen terrein of conceptpunten te verliezen", async () => {
+    const existingTerrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-existing", properties: { source: "user_drawn" } }] };
+    getConfiguration.mockResolvedValue({ ...configuration, object_area_geojson: existingTerrain });
+    const error = Object.assign(new Error("PDOK tijdelijk niet bereikbaar"), { status: 503, requestId: "perceel-test-ref", details: { code: "pdok_parcel_unavailable", attempts: 2 } });
+    listParcels.mockRejectedValue(error);
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    expect(await screen.findByText(/Status 503 · Referentie perceel-test-ref/)).toBeInTheDocument();
+    expect(listParcels).toHaveBeenCalledOnce();
+    const state = () => JSON.parse(screen.getByLabelText("Kaartstatus").textContent);
+    expect(state().terrain).toEqual(existingTerrain);
+    fireEvent.click(screen.getByRole("button", { name: "Zelf tekenen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hoekpunt op kaart plaatsen" }));
+    let resolveRetry;
+    listParcels.mockImplementation(() => new Promise(resolve => { resolveRetry = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "Opnieuw" }));
+    expect(await screen.findByText("Kadastrale percelen laden…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Opnieuw" })).not.toBeInTheDocument();
+    await act(async () => resolveRetry({ items: [], source: "PDOK Kadastrale kaart" }));
+    await waitFor(() => expect(screen.queryByText(/Perceelgrenzen konden niet worden geladen/)).not.toBeInTheDocument());
+    expect(state()).toMatchObject({ terrain: existingTerrain, drawingPoints: [[4.48, 51.92]] });
+    expect(updateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("behoudt eerdere percelen bij een mislukte vervolgpagina en herhaalt die pagina", async () => {
+    const firstPage = { items: [{ ...candidate, id: "parcel-1", properties: { source: "pdok_brk", source_feature_id: "parcel-1" } }], source: "PDOK Kadastrale kaart", next_cursor: "next-page", has_more: true };
+    listParcels.mockImplementation(async ({ cursor }) => {
+      if (!cursor) return firstPage;
+      throw Object.assign(new Error("PDOK tijdelijk niet bereikbaar"), { status: 503, details: { attempts: 2 } });
+    });
+    renderTab();
+    fireEvent.click(await screen.findByRole("tab", { name: "Terrein" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Meer percelen laden" }));
+    expect(await screen.findByText(/Niet alle perceelgrenzen konden worden geladen/)).toBeInTheDocument();
+    expect(screen.getByText(/1 percelen rond het object geladen/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Perceel kiezen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Perceel op kaart selecteren" }));
+    expect(JSON.parse(screen.getByLabelText("Kaartstatus").textContent).terrain.features).toHaveLength(1);
+    listParcels.mockResolvedValue({ items: [], cursor: "next-page", next_cursor: null });
+    fireEvent.click(screen.getByRole("button", { name: "Opnieuw" }));
+    await waitFor(() => expect(screen.queryByText(/Niet alle perceelgrenzen konden worden geladen/)).not.toBeInTheDocument());
+    expect(listParcels).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "next-page" }));
   });
 
   it("laadt vervolgcandidaten met een opaque cursor en dedupliceert de kaartlijst", async () => {

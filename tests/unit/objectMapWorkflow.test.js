@@ -5,6 +5,7 @@ import {
   listObjectParcelCandidates,
   normalizeObjectMapCandidates,
   normalizeObjectMapConfiguration,
+  shouldRetryObjectParcelCandidates,
   updateObjectMapConfiguration,
 } from "../../src/components/objects/objectMapWorkflow";
 
@@ -14,6 +15,37 @@ const polygon = {
 };
 
 describe("objectkaart API-workflow", () => {
+  it.each([
+    [{ code: "pdok_parcel_unavailable", reason: "timeout" }, /PDOK.*te langzaam/],
+    [{ code: "pdok_parcel_unavailable" }, /PDOK.*tijdelijk niet bereikbaar/],
+    [{ code: "pdok_parcel_invalid_response" }, /PDOK.*geen bruikbaar antwoord/],
+    [null, /objectgegevens of perceelgrenzen/],
+  ])("maakt een perceelfout leesbaar en behoudt status en referentie (%#)", async (details, message) => {
+    const original = Object.assign(new Error("Klantplatformactie mislukt"), { status: 503, requestId: "request-1", details, action: "list_object_parcel_candidates" });
+    const invoke = vi.fn().mockRejectedValue(original);
+    await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke })).rejects.toMatchObject({ message: expect.stringMatching(message), status: 503, requestId: "request-1", details });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(original.message).toBe("Klantplatformactie mislukt");
+  });
+
+  it("laat scope-, autorisatie- en publicatiefouten intact", async () => {
+    for (const status of [400, 401, 403, 409]) {
+      const original = Object.assign(new Error("Controleer eerst het object"), { status, requestId: "request-scope" });
+      await expect(listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", invoke: vi.fn().mockRejectedValue(original) })).rejects.toBe(original);
+    }
+  });
+
+  it("herhaalt alleen tijdelijke fouten die niet al door de server zijn herhaald", () => {
+    for (const status of [null, 408, 429, 500, 503, 504]) {
+      expect(shouldRetryObjectParcelCandidates(0, { status })).toBe(true);
+      expect(shouldRetryObjectParcelCandidates(1, { status })).toBe(false);
+    }
+    for (const status of [400, 401, 403, 404, 409]) expect(shouldRetryObjectParcelCandidates(0, { status })).toBe(false);
+    expect(shouldRetryObjectParcelCandidates(0, { status: 503, details: { attempts: 2 } })).toBe(false);
+    expect(shouldRetryObjectParcelCandidates(0, { status: 503, details: { code: "pdok_parcel_invalid_response" } })).toBe(false);
+    expect(shouldRetryObjectParcelCandidates(0, { status: 503, details: { retryable: false } })).toBe(false);
+  });
+
   it("vraagt kadastrale percelen op binnen dezelfde objectscope en bewaart herkomst", async () => {
     const invoke = vi.fn(async () => ({ candidates: { type: "FeatureCollection", features: [{ type: "Feature", id: "parcel-1", properties: { source: "pdok_brk", label: "Apeldoorn A 12" }, geometry: polygon }] }, source: { name: "PDOK Kadastrale kaart" }, next_cursor: "next-page" }));
     const result = await listObjectParcelCandidates({ customerId: "customer-1", objectId: "object-1", radiusMeters: 999, limit: 500, cursor: "page-1", invoke });

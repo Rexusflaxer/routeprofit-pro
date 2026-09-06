@@ -327,6 +327,11 @@ const OBJECT_MAP_LOCATION_FIELDS = new Set([
 const PDOK_BAG_OGC_BASE_URL = 'https://api.pdok.nl/kadaster/bag/ogc/v2';
 const PDOK_PARCEL_OGC_BASE_URL = 'https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1';
 const OBJECT_MAP_PDOK_TIMEOUT_MS = 8_000;
+const OBJECT_MAP_PARCEL_FETCH_ATTEMPTS = 2;
+const OBJECT_MAP_PARCEL_RETRY_DELAY_MS = 250;
+const OBJECT_MAP_PARCEL_ATTEMPT_TIMEOUT_MS = Math.floor(
+  (OBJECT_MAP_PDOK_TIMEOUT_MS - OBJECT_MAP_PARCEL_RETRY_DELAY_MS) / OBJECT_MAP_PARCEL_FETCH_ATTEMPTS,
+);
 const OBJECT_MAP_DEFAULT_RADIUS_METERS = 150;
 const OBJECT_MAP_MIN_RADIUS_METERS = 25;
 const OBJECT_MAP_MAX_RADIUS_METERS = 500;
@@ -591,6 +596,20 @@ const LIST_CONFIG: Record<string, LooseRecord> = {
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status });
+}
+
+function publicCustomerPlatformErrorMessage(error: unknown, status: number) {
+  if (status < 500) return (error as Error)?.message || 'Actie mislukt';
+  const code = (error as LooseRecord)?.details?.code;
+  if (code === 'pdok_parcel_unavailable') {
+    return (error as LooseRecord)?.details?.reason === 'timeout'
+      ? 'Het ophalen van de kadastrale perceelgrenzen duurde te lang. Probeer het opnieuw.'
+      : 'Kadastrale perceelgrenzen zijn tijdelijk niet bereikbaar. Probeer het opnieuw.';
+  }
+  if (code === 'pdok_parcel_invalid_response') {
+    return 'De bron gaf geen bruikbare kadastrale perceelgrenzen terug. Probeer het later opnieuw.';
+  }
+  return 'Klantplatformactie mislukt';
 }
 
 function nowIso() {
@@ -4993,35 +5012,56 @@ function nextPdokParcelCursor(links: unknown, requestUrl: URL) {
 }
 
 async function fetchPdokParcelJson(url: URL) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OBJECT_MAP_PDOK_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      headers: { accept: 'application/geo+json, application/json' },
-      signal: controller.signal,
-      redirect: 'error',
-    });
-    if (!response.ok) throw new ApiError(503, 'Kadastrale percelen zijn tijdelijk niet beschikbaar', {
-      code: 'pdok_parcel_unavailable', retryable: true,
-    });
-    if (Number(response.headers.get('content-length') || 0) > 5_000_000) {
-      throw new ApiError(503, 'PDOK gaf een te groot perceelantwoord', { code: 'pdok_parcel_invalid_response', retryable: true });
+  for (let attempt = 1; attempt <= OBJECT_MAP_PARCEL_FETCH_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), OBJECT_MAP_PARCEL_ATTEMPT_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        headers: { accept: 'application/geo+json, application/json' },
+        signal: controller.signal,
+        redirect: 'error',
+      });
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        throw new ApiError(503, 'Kadastrale percelen zijn tijdelijk niet beschikbaar', {
+          code: 'pdok_parcel_unavailable',
+          reason: 'http',
+          upstream_status: response.status,
+          attempts: attempt,
+          retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+        });
+      }
+      if (Number(response.headers.get('content-length') || 0) > 5_000_000) {
+        void response.body?.cancel().catch(() => undefined);
+        throw new ApiError(503, 'PDOK gaf een te groot perceelantwoord', {
+          code: 'pdok_parcel_invalid_response', reason: 'oversized_response', attempts: attempt, retryable: false,
+        });
+      }
+      const text = await response.text();
+      if (new TextEncoder().encode(text).byteLength > 5_000_000) {
+        throw new ApiError(503, 'PDOK gaf een te groot perceelantwoord', {
+          code: 'pdok_parcel_invalid_response', reason: 'oversized_response', attempts: attempt, retryable: false,
+        });
+      }
+      try { return JSON.parse(text) as LooseRecord; } catch {
+        throw new ApiError(503, 'PDOK gaf geen geldig perceelantwoord', {
+          code: 'pdok_parcel_invalid_response', reason: 'invalid_json', attempts: attempt, retryable: false,
+        });
+      }
+    } catch (error) {
+      const safeError = error instanceof ApiError ? error : new ApiError(503, 'Kadastrale percelen zijn tijdelijk niet bereikbaar', {
+        code: 'pdok_parcel_unavailable',
+        reason: controller.signal.aborted ? 'timeout' : 'network',
+        attempts: attempt,
+        retryable: true,
+      });
+      if (!safeError.details?.retryable || attempt === OBJECT_MAP_PARCEL_FETCH_ATTEMPTS) throw safeError;
+    } finally {
+      clearTimeout(timeout);
     }
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > 5_000_000) {
-      throw new ApiError(503, 'PDOK gaf een te groot perceelantwoord', { code: 'pdok_parcel_invalid_response', retryable: true });
-    }
-    try { return JSON.parse(text) as LooseRecord; } catch {
-      throw new ApiError(503, 'PDOK gaf geen geldig perceelantwoord', { code: 'pdok_parcel_invalid_response', retryable: true });
-    }
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError(503, 'Kadastrale percelen zijn tijdelijk niet bereikbaar', {
-      code: 'pdok_parcel_unavailable', retryable: true,
-    });
-  } finally {
-    clearTimeout(timeout);
+    await new Promise(resolve => setTimeout(resolve, OBJECT_MAP_PARCEL_RETRY_DELAY_MS));
   }
+  throw new ApiError(503, 'Kadastrale percelen zijn tijdelijk niet bereikbaar', { code: 'pdok_parcel_unavailable', retryable: true });
 }
 
 function canonicalPdokParcelFeature(feature: LooseRecord, anchor: number[], retrievedAt: string) {
@@ -18147,7 +18187,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const status = Number((error as LooseRecord)?.status || 500);
     console.error('[customerPlatformApi]', requestId, error);
     return json({
-      error: status >= 500 ? 'Klantplatformactie mislukt' : (error as Error)?.message || 'Actie mislukt',
+      error: publicCustomerPlatformErrorMessage(error, status),
       details: (error as LooseRecord)?.details || null,
       request_id: requestId,
     }, status);

@@ -43,6 +43,7 @@ import {
   getObjectMapConfiguration,
   listObjectBuildingCandidates,
   listObjectParcelCandidates,
+  shouldRetryObjectParcelCandidates,
   updateObjectMapConfiguration,
 } from "./objectMapWorkflow";
 import { useObjectModuleNavigationGuard } from "./useObjectModuleNavigationGuard";
@@ -153,17 +154,17 @@ function hasVersionDrift(base, latestConfiguration) {
   return Number.isInteger(baseVersion) && Number.isInteger(latestVersion) && baseVersion !== latestVersion;
 }
 
-function ErrorPanel({ error, onRetry, title }) {
+function ErrorPanel({ error, onRetry, title, retrying = false, optional = false }) {
   return (
-    <div className="m-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 backdrop-blur-xl">
+    <div className={`m-4 rounded-xl border p-4 backdrop-blur-xl ${optional ? "border-amber-500/30 bg-amber-500/10" : "border-destructive/30 bg-destructive/10"}`}>
       <div className="flex items-start gap-3">
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${optional ? "text-amber-600 dark:text-amber-400" : "text-destructive"}`} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-destructive">{title}</p>
+          <p className={`text-sm font-medium ${optional ? "text-amber-800 dark:text-amber-200" : "text-destructive"}`}>{title}</p>
           <p className="mt-1 text-xs text-muted-foreground">{error?.message || "Probeer het opnieuw."}</p>
           {(error?.status || error?.requestId) && <p className="mt-1 text-[11px] text-muted-foreground">{[error.status && `Status ${error.status}`, error.requestId && `Referentie ${error.requestId}`].filter(Boolean).join(" · ")}</p>}
         </div>
-        <Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="h-3.5 w-3.5" /> Opnieuw</Button>
+        <Button size="sm" variant="outline" disabled={retrying} onClick={onRetry}><RefreshCw className={`h-3.5 w-3.5 ${retrying ? "animate-spin" : ""}`} /> {retrying ? "Opnieuw laden…" : "Opnieuw"}</Button>
       </div>
     </div>
   );
@@ -185,6 +186,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const { toast } = useToast();
   const [workspace, setWorkspace] = useState("buildings");
   const [mapView, setMapView] = useState("map");
+  const [topDown, setTopDown] = useState(false);
   const [parcelsVisible, setParcelsVisible] = useState(false);
   const [parcelSelectionEnabled, setParcelSelectionEnabled] = useState(false);
   const [form, setForm] = useState(null);
@@ -245,7 +247,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     initialPageParam: null,
     getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor ? lastPage.next_cursor : undefined,
     enabled: verified && Boolean(configurationQuery.data) && workspace === "terrain" && parcelsVisible,
-    retry: 1,
+    retry: shouldRetryObjectParcelCandidates,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -621,9 +623,6 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     setParcelSelectionEnabled(false);
     if (nextWorkspace === "terrain") {
       setParcelsVisible(true);
-      setMapView("satellite");
-    } else {
-      setMapView("map");
     }
     cancelDrawing();
     setEditingTarget(null);
@@ -752,12 +751,13 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             <div className="flex gap-1 rounded-lg border border-border/70 bg-card/35 p-1" role="group" aria-label="Kaartweergave">
               <Button type="button" size="sm" variant={mapView === "map" ? "secondary" : "ghost"} aria-pressed={mapView === "map"} onClick={() => setMapView("map")}><MapIcon className="h-4 w-4" /> Kaart</Button>
               <Button type="button" size="sm" variant={mapView === "satellite" ? "secondary" : "ghost"} aria-pressed={mapView === "satellite"} onClick={() => setMapView("satellite")}><Satellite className="h-4 w-4" /> Luchtfoto</Button>
+              <Button type="button" size="sm" variant={topDown || mapView === "satellite" || drawingTarget || editingTarget ? "secondary" : "ghost"} aria-pressed={Boolean(topDown || mapView === "satellite" || drawingTarget || editingTarget)} disabled={mapView === "satellite" || Boolean(drawingTarget) || Boolean(editingTarget)} onClick={() => setTopDown(value => !value)}><MapIcon className="h-4 w-4" /> Bovenaanzicht</Button>
             </div>
             {workspace === "terrain" && <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={value => { setParcelsVisible(value); if (!value) setParcelSelectionEnabled(false); }} /> Perceelgrenzen</Label>}
           </div>}
-          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{drawingTarget ? "Klik voor ieder hoekpunt. Klik op het eerste punt of druk Enter om af te sluiten. Backspace verwijdert het laatste punt; Escape annuleert. Je kunt tussendoor van kaartweergave wisselen." : editingTarget ? "Sleep de hoekpunten om de grens nauwkeurig aan te passen. Ongedaan herstelt je vorige wijziging." : "Kies één of meer percelen als startpunt, of teken zelf. Pas de grens aan aan het gebied dat jullie daadwerkelijk bewaken."}</p>}
+          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{drawingTarget ? "Je tekent tijdelijk van bovenaf, op dezelfde plek en hetzelfde zoomniveau. Klik voor ieder hoekpunt. Klik op het eerste punt of druk Enter om af te sluiten. Backspace verwijdert het laatste punt; Escape annuleert. Je kunt tussendoor van kaartweergave wisselen." : editingTarget ? "Je past de grens tijdelijk van bovenaf aan. Sleep de hoekpunten; Ongedaan herstelt je vorige wijziging. De locatie en het zoomniveau blijven gelijk." : "Je blijft op dezelfde kaart. Kies een perceel als startpunt, of teken zelf. Luchtfoto en Bovenaanzicht helpen bij het nauwkeurig bepalen van de grens."}</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Kadastrale percelen laden…</p>}
-          {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel title="Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard; zelf tekenen blijft mogelijk." error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
+          {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel optional retrying={parcelsQuery.isFetching} title={parcelCandidates.length ? "Niet alle perceelgrenzen konden worden geladen. Geladen percelen en je eigen terrein blijven beschikbaar." : "Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard; zelf tekenen blijft mogelijk."} error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage && <Button type="button" size="sm" variant="outline" disabled={parcelsQuery.isFetchingNextPage} onClick={() => parcelsQuery.fetchNextPage()}>{parcelsQuery.isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Meer percelen laden</Button>}
           {candidatesQuery.isError && !candidatesQuery.data && workspace === "buildings" && <ErrorPanel title="BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
           {candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="Meer BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.fetchNextPage()} />}
@@ -766,6 +766,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             object={mapObject}
             workspace={workspace}
             mapView={mapView}
+            topDown={topDown}
             parcelCandidates={parcelCandidates}
             parcelsVisible={parcelsVisible}
             parcelSelectionEnabled={parcelSelectionEnabled}

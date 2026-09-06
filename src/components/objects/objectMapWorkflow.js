@@ -171,15 +171,48 @@ export async function listObjectBuildingCandidates({ customerId, objectId, radiu
 }
 
 export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, invoke = invokeCustomerPlatformRead }) {
-  const result = await invoke({
+  const payload = {
     action: "list_object_parcel_candidates",
     customer_id: required(customerId, "Klant-ID"),
     object_id: required(objectId, "Object-ID"),
     radius_meters: Math.min(500, Math.max(25, Math.round(Number(radiusMeters) || 250))),
     limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
     ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
-  });
+  };
+  let result;
+  try {
+    result = await invoke(payload);
+  } catch (error) {
+    // Older deployed functions mask every 503, but retain the safe error code.
+    // Never attribute an unclassified platform/scoping failure to PDOK.
+    const code = error?.details?.code;
+    const message = code === "pdok_parcel_unavailable"
+      ? error?.details?.reason === "timeout"
+        ? "De kadastrale perceeldienst (PDOK) reageert te langzaam. Probeer het zo opnieuw; je kunt ondertussen zelf tekenen."
+        : "De kadastrale perceeldienst (PDOK) is tijdelijk niet bereikbaar. Probeer het zo opnieuw; je kunt ondertussen zelf tekenen."
+      : code === "pdok_parcel_invalid_response"
+        ? "De kadastrale perceeldienst (PDOK) gaf geen bruikbaar antwoord. Je kunt opnieuw proberen of zelf het terrein tekenen."
+        : Number(error?.status) >= 500
+          ? "Het ophalen van objectgegevens of perceelgrenzen is tijdelijk mislukt. Probeer opnieuw; je kunt ondertussen zelf tekenen."
+          : null;
+    if (!message) throw error;
+    const readable = new Error(message);
+    readable.status = error.status;
+    readable.requestId = error.requestId;
+    readable.details = error.details;
+    readable.action = error.action;
+    throw readable;
+  }
   return normalizeObjectMapCandidates(result);
+}
+
+export function shouldRetryObjectParcelCandidates(failureCount, error) {
+  // The server already retries temporary PDOK failures twice. Do not multiply
+  // those requests or retry invalid geometry, permissions or scope failures.
+  if (failureCount >= 1 || error?.details?.retryable === false || Number(error?.details?.attempts) >= 2
+    || error?.details?.code === "pdok_parcel_invalid_response") return false;
+  const status = Number(error?.status) || 0;
+  return status === 0 || status === 408 || status === 429 || status >= 500;
 }
 
 export async function updateObjectMapConfiguration({ customerId, objectId, expectedVersion, data, idempotencyKey, invoke = invokeCustomerPlatformMutation }) {

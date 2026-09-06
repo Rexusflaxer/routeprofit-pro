@@ -9,6 +9,7 @@ vi.mock("mapbox-gl", () => {
   class FakeMap {
     constructor(options) {
       this.options = options;
+      this.pitch = options.pitch;
       this.handlers = new globalThis.Map();
       this.interactions = new globalThis.Map();
       this.sources = new globalThis.Map();
@@ -51,11 +52,13 @@ vi.mock("mapbox-gl", () => {
     setFilter() {}
     setLayoutProperty = vi.fn();
     setConfigProperty = vi.fn();
+    setMaxBounds = vi.fn();
     queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
     setFeatureState = vi.fn();
     getCanvas() { return this.canvas; }
     fitBounds() {}
-    easeTo = vi.fn();
+    easeTo = vi.fn(options => { if (options.pitch !== undefined) this.pitch = options.pitch; });
+    getPitch() { return this.pitch; }
     getZoom() { return 17; }
     resize() {}
     remove = vi.fn();
@@ -331,6 +334,74 @@ describe("ObjectMapCanvas", () => {
     expect(map.doubleClickZoom.disable).toHaveBeenCalled();
   });
 
+  it("behoudt dezelfde 3D-kaart en camera bij wisselen tussen gebouwen en terrein", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    map.pitch = 27;
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" parcelsVisible />);
+
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.pitch).toBe(27);
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-satellite-layer", "visibility", "none");
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", true);
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-parcels-fill", "visibility", "visible");
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="buildings" />);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.pitch).toBe(27);
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it("vlakt alleen de gekozen luchtfoto af en herstelt de werkelijk gekozen kaarthoek", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    map.pitch = 29;
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="satellite" />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 0, duration: 350 });
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", false);
+
+    // Drawing and layer updates must not overwrite the remembered normal view.
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="satellite" drawingTarget="terrain" drawingPoints={[[4.48, 51.92]]} parcelsVisible />);
+    expect(map.easeTo).toHaveBeenCalledTimes(1);
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="map" />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 29, duration: 350 });
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+  });
+
+  it.each(["drawingTarget", "editingTarget"])("houdt grondbewerking tijdelijk recht van boven voor %s zonder verplaatsing", async target => {
+    const rendered = renderCanvas({ workspace: "terrain" });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    map.pitch = 33;
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} {...{ [target]: "terrain" }} />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 0, duration: 350 });
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 33, duration: 350 });
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it("maakt bovenaanzicht een expliciete keuze en herstelt na uitschakelen", async () => {
+    const rendered = renderCanvas({ workspace: "terrain" });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    expect(map.options.pitch).toBe(42);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} topDown />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 0, duration: 350 });
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} topDown={false} />);
+    expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 42, duration: 350 });
+  });
+
   it("houdt luchtfoto buiten de gebouwselectie en herstelt native 3D bij terugkeren", async () => {
     const rendered = renderCanvas({ workspace: "terrain", mapView: "satellite" });
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
@@ -410,9 +481,82 @@ describe("ObjectMapCanvas", () => {
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
     const map = mapboxState.instances[0];
 
-    expect(map.options).toMatchObject({ center: [5.2913, 52.1326], zoom: 7, pitch: 0, bearing: 0 });
+    expect(map.options).toMatchObject({ center: [5.2913, 52.1326], zoom: 7, pitch: 0, bearing: 0, minZoom: 6, maxBounds: [[3, 50.6], [7.4, 53.7]], renderWorldCopies: false });
     act(() => map.emit("style.load"));
     expect(map.sources.get("loq-object-map-anchor").data.features).toEqual([]);
+  });
+
+  it("beperkt uitzoomen en verschuiven tot ongeveer een kilometer rond het bevestigde adres", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    const [[west, south], [east, north]] = map.options.maxBounds;
+    expect(map.options).toMatchObject({ center: [4.48, 51.92], zoom: 17, minZoom: 10, renderWorldCopies: false, projection: "mercator" });
+    expect(west).toBeCloseTo(4.4654, 3);
+    expect(east).toBeCloseTo(4.4946, 3);
+    expect(south).toBeCloseTo(51.911, 3);
+    expect(north).toBeCloseTo(51.929, 3);
+    act(() => map.emit("style.load"));
+    expect(screen.getByText("Kaart begrensd tot de omgeving van dit object")).toBeInTheDocument();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" parcelsVisible />);
+    expect(map.setMaxBounds).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it("houdt verder gelegen geldig terrein en gebouwselecties binnen de lokale kaartbegrenzing", async () => {
+    const fartherTerrain = { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "Polygon", coordinates: [[[4.51, 51.92], [4.515, 51.92], [4.515, 51.925], [4.51, 51.925], [4.51, 51.92]]] } }] };
+    renderCanvas({ terrain: fartherTerrain, buildingSelectionPoints: [{ id: "west-building", longitude: 4.44, latitude: 51.92 }] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const [[west], [east]] = mapboxState.instances[0].options.maxBounds;
+    expect(west).toBeLessThan(4.44);
+    expect(west).toBeGreaterThan(4.43);
+    expect(east).toBeGreaterThan(4.515);
+    expect(east).toBeLessThan(4.525);
+  });
+
+  it("actualiseert gewijzigde terreingrenzen zonder de kaart opnieuw te openen of te centreren", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const terrain = { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "MultiPolygon", coordinates: [[[[4.51, 51.92], [4.515, 51.92], [4.515, 51.925], [4.51, 51.925], [4.51, 51.92]]]] } }] };
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} terrain={terrain} />);
+    expect(map.setMaxBounds).toHaveBeenCalledOnce();
+    expect(map.setMaxBounds.mock.calls[0][0][1][0]).toBeGreaterThan(4.515);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} terrain={terrain} workspace="terrain" />);
+    expect(map.setMaxBounds).toHaveBeenCalledOnce();
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it("verruimt de kaart niet door wereldwijde, ongesloten of ongeldige geometrie", async () => {
+    const invalidTerrain = { type: "FeatureCollection", features: [
+      { type: "Feature", geometry: { type: "Polygon", coordinates: [[[-20, 20], [20, 20], [20, 70], [-20, 20]]] } },
+      { type: "Feature", geometry: { type: "Polygon", coordinates: [[[4.51, 51.92], [4.52, 51.92], [4.52, 51.925], [4.51, 51.925]]] } },
+      { type: "Feature", geometry: { type: "Polygon", coordinates: [[[4.48, 51.92], [Infinity, 51.92], [4.49, 51.93], [4.48, 51.92]]] } },
+      { type: "Feature", geometry: { type: "LineString", coordinates: [[4.44, 51.92], [4.52, 51.92]] } },
+    ] };
+    renderCanvas({ terrain: invalidTerrain, buildingSelectionPoints: [{ longitude: 0, latitude: 0 }, { longitude: 4.6, latitude: 51.92 }, { longitude: "4.44", latitude: 51.92 }] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const [[west, south], [east, north]] = mapboxState.instances[0].options.maxBounds;
+    expect(west).toBeCloseTo(4.4654, 3);
+    expect(east).toBeCloseTo(4.4946, 3);
+    expect(south).toBeCloseTo(51.911, 3);
+    expect(north).toBeCloseTo(51.929, 3);
+  });
+
+  it("laat zonder bevestigd adres geen wereldwijde opgeslagen contouren of tekenacties toe", async () => {
+    const onAddDrawingPoint = vi.fn();
+    renderCanvas({ object: { id: "unchecked", name: "Onbevestigd", longitude: 4.48, latitude: 51.92, geocoding_status: "unverified" }, workspace: "terrain", drawingTarget: "terrain", disabled: false, onAddDrawingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    expect(map.options.maxBounds).toEqual([[3, 50.6], [7.4, 53.7]]);
+    act(() => map.emit("style.load"));
+    act(() => map.emit("click", { lngLat: { lng: 4.48, lat: 51.92 } }));
+    expect(onAddDrawingPoint).not.toHaveBeenCalled();
   });
 
   it("gebruikt ook een handmatig vastgelegde 0,0-locatie nooit als kaartanker", async () => {
