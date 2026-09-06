@@ -38,6 +38,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { objectCoordinatePair } from "@/lib/coordinates";
 import {
   Sheet,
   SheetContent,
@@ -103,25 +104,7 @@ function recordIsCurrent(record, today = currentDateKey()) {
 }
 
 function hasCoordinatePair(object) {
-  const latitudeValue = object?.latitude;
-  const longitudeValue = object?.longitude;
-  if (
-    latitudeValue === null
-    || latitudeValue === undefined
-    || String(latitudeValue).trim() === ""
-    || longitudeValue === null
-    || longitudeValue === undefined
-    || String(longitudeValue).trim() === ""
-  ) return false;
-
-  const latitude = Number(latitudeValue);
-  const longitude = Number(longitudeValue);
-  return Number.isFinite(latitude)
-    && latitude >= -90
-    && latitude <= 90
-    && Number.isFinite(longitude)
-    && longitude >= -180
-    && longitude <= 180;
+  return objectCoordinatePair(object) !== null;
 }
 
 function useObjectRecords(entityName, objectId, enabled, sort = "-created_date", extraFilter = {}, fields, limit = TABLE_QUERY_LIMIT) {

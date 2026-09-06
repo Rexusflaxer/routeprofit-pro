@@ -3,10 +3,6 @@ import { createClientFromRequest } from "npm:@base44/sdk@0.8.25";
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
-function safeNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 function secondsFromTime(time) {
   if (!time) return null;
   const [h, m = 0] = String(time).split(":").map(Number);
@@ -548,6 +544,26 @@ async function handleCreateMobileRouteExecution(req) {
     } catch (error) {
       return Response.json({ error: error.message, code: error.code || null, details: error.details || null }, { status: Number(error.status || 409) });
     }
+    const assignedTaskCoordinates = assignments.map((assignment) => {
+      const task = taskById.get(String(assignment.task_id));
+      const object = objectById.get(String(task?.object_id || "")) || {};
+      return {
+        task_id: String(task?.id || assignment.task_id || ""),
+        object_id: String(task?.object_id || ""),
+        ...mobileMapCoordinatePair(object.latitude, object.longitude)
+      };
+    });
+    const invalidTaskCoordinates = assignedTaskCoordinates.filter(({ latitude, longitude }) => latitude === null || longitude === null);
+    if (invalidTaskCoordinates.length) {
+      return Response.json({
+        error: "De route bevat taken zonder geldige objectlocatie. Corrigeer eerst het objectadres.",
+        code: "TASK_EXECUTION_COORDINATES_INVALID",
+        details: {
+          task_ids: unique(invalidTaskCoordinates.map((item) => item.task_id)),
+          object_ids: unique(invalidTaskCoordinates.map((item) => item.object_id))
+        }
+      }, { status: 409 });
+    }
     const operatingCompanyIds = unique(assignedTaskContexts.map((context) => context.operating_company_id));
     if (operatingCompanyIds.length > 1) {
       return Response.json({
@@ -556,6 +572,8 @@ async function handleCreateMobileRouteExecution(req) {
       }, { status: 409 });
     }
     const operatingCompanyId = operatingCompanyIds[0] || route.operating_company_id || null;
+    const startCoordinates = mobileMapCoordinatePair(startOffice?.latitude, startOffice?.longitude);
+    const endCoordinates = mobileMapCoordinatePair(endOffice?.latitude, endOffice?.longitude);
     const routeRoutingSnapshot = {
       status: "not_applicable",
       source: "manual_route_without_employee",
@@ -583,11 +601,11 @@ async function handleCreateMobileRouteExecution(req) {
       shift_start_time: route.time_window_start || "00:00",
       shift_end_time: route.time_window_end || "00:00",
       start_location_name: startOffice?.name || null,
-      start_latitude: safeNumber(startOffice?.latitude),
-      start_longitude: safeNumber(startOffice?.longitude),
+      start_latitude: startCoordinates.latitude,
+      start_longitude: startCoordinates.longitude,
       end_location_name: endOffice?.name || null,
-      end_latitude: safeNumber(endOffice?.latitude),
-      end_longitude: safeNumber(endOffice?.longitude),
+      end_latitude: endCoordinates.latitude,
+      end_longitude: endCoordinates.longitude,
       total_planned_distance_km: route.total_distance_km ?? null,
       total_planned_travel_minutes: route.avg_travel_minutes ?? null,
       total_planned_service_minutes: route.total_service_minutes ?? null,
@@ -605,9 +623,7 @@ async function handleCreateMobileRouteExecution(req) {
       const occurrenceCount = assignment.lock_all_occurrences ? repeatCount : Number(assignment.locked_occurrence_count || 1);
       const repeatIndexes = assignment.repeat_index ? [Number(assignment.repeat_index)] : Array.from({ length: Math.max(1, occurrenceCount) }, (_, index) => index + 1);
       repeatIndexes.forEach((repeatIndex) => {
-        const latitude = safeNumber(object.latitude);
-        const longitude = safeNumber(object.longitude);
-        if (latitude === null || longitude === null) return;
+        const { latitude, longitude } = assignedTaskCoordinates[assignmentIndex];
         const routingProjection = routingProjections[assignmentIndex] || buildTaskExecutionRoutingProjection(assignment, task, object, null, publishedRoutingEvidence[assignmentIndex]);
         taskPayloads.push({
           route_execution_id: routeExecution.id,
@@ -1000,8 +1016,19 @@ async function handleMobileObjectFloorPlan(req) {
 import { createClientFromRequest as createClientFromRequest4 } from "npm:@base44/sdk@0.8.25";
 var OPEN_STATUSES = ["pending", "en_route", "arrived", "started", "postponed", "failed"];
 function safeNumber2(value) {
+  if (!["number", "string"].includes(typeof value) || typeof value === "string" && !value.trim()) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+function mobileMapCoordinatePair(latitudeValue, longitudeValue) {
+  const latitude = safeNumber2(latitudeValue);
+  const longitude = safeNumber2(longitudeValue);
+  if (
+    latitude === null || latitude < -90 || latitude > 90 ||
+    longitude === null || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) return { latitude: null, longitude: null };
+  return { latitude, longitude };
 }
 function mobileGeoJsonHasGeometry(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1164,9 +1191,8 @@ function mobileMapSafeCollection(value, object, kind) {
   try {
     const text = JSON.stringify(value);
     if (new TextEncoder().encode(text).byteLength > MOBILE_MAP_MAX_BYTES) throw new Error("payload_too_large");
-    const latitude = Number(object?.latitude);
-    const longitude = Number(object?.longitude);
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new Error("missing_anchor");
+    const { latitude, longitude } = mobileMapCoordinatePair(object?.latitude, object?.longitude);
+    if (latitude === null || latitude < -90 || latitude > 90 || longitude === null || longitude < -180 || longitude > 180) throw new Error("missing_anchor");
     const rawFeatures = mobileMapFeatures(value);
     const isCollection = value?.type === "FeatureCollection" && Array.isArray(value.features);
     if (!rawFeatures.length && !isCollection) throw new Error("invalid_collection");
@@ -1274,14 +1300,18 @@ async function handleMobileObjectsMap(req) {
     ]);
     const floorPlanByObjectId = new Map(floorPlans.map((fp) => [String(fp.object_id), fp]));
     return Response.json({
-      objects: objects.map((object) => ({ object, geometryState: mobileSafeMapState(object) })).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => {
+      objects: objects.map((object) => {
+        const coordinates = mobileMapCoordinatePair(object.latitude, object.longitude);
+        const mobileObject = { ...object, ...coordinates };
+        return { object: mobileObject, geometryState: mobileSafeMapState(mobileObject) };
+      }).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => {
         const fp = floorPlanByObjectId.get(String(object.id));
         const taskMapState = statusForObject(object.id, tasks);
         return {
           object_id: object.id,
           name: object.name,
-          latitude: safeNumber2(object.latitude),
-          longitude: safeNumber2(object.longitude),
+          latitude: object.latitude,
+          longitude: object.longitude,
           address: object.address || null,
           ...taskMapState,
           building_selection_mode: geometryState.building_selection_mode,
@@ -1299,7 +1329,7 @@ async function handleMobileObjectsMap(req) {
             updated_at: fp.published_at || fp.updated_date || null
           } : null
         };
-      }).filter((object) => object.latitude !== null && object.longitude !== null)
+      }).filter((object) => object.latitude !== null && object.longitude !== null || object.has_task_in_current_route)
     });
   } catch (error) {
     return Response.json({ error: error.message, code: error.code || null }, { status: Number(error.status) || 500 });
@@ -1450,10 +1480,6 @@ function nowIso5() {
 function isPrivileged2(user) {
   return ["admin", "director", "hr", "manager", "planner"].includes(String(user?.role || "").toLowerCase());
 }
-function safeNumber3(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
 async function findEmployee(base44, user) {
   return requireMobilePersonnel(base44, user);
 }
@@ -1505,6 +1531,7 @@ async function buildPackage(base44, routeExecution) {
   const relevantObjectIds = new Set(sortedTasks.map((task) => String(task.object_id)));
   const stops = sortedTasks.map((task) => {
     const object = objectById.get(String(task.object_id)) || {};
+    const coordinates = mobileMapCoordinatePair(task.latitude, task.longitude);
     return {
       task_execution_id: task.id,
       route_execution_id: task.route_execution_id,
@@ -1526,8 +1553,8 @@ async function buildPackage(base44, routeExecution) {
       distance_from_previous_km: task.distance_from_previous_km ?? null,
       travel_to_next_minutes: task.travel_to_next_minutes ?? null,
       distance_to_next_km: task.distance_to_next_km ?? null,
-      latitude: task.latitude,
-      longitude: task.longitude,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
       address: task.address || object.address || null,
       parking_instruction: object.parking_instruction || null,
       entry_instruction: object.entry_instruction || null,
@@ -1542,11 +1569,15 @@ async function buildPackage(base44, routeExecution) {
       report_template_id: taskTemplateId(templates, task.task_type)
     };
   });
-  const objectsOnMap = objects.map((object) => ({ object, geometryState: mobileSafeMapState(object) })).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => ({
+  const objectsOnMap = objects.map((object) => {
+    const coordinates = mobileMapCoordinatePair(object.latitude, object.longitude);
+    const mobileObject = { ...object, ...coordinates };
+    return { object: mobileObject, geometryState: mobileSafeMapState(mobileObject) };
+  }).filter(({ object, geometryState }) => object.show_on_mobile_map !== false && object.is_active_customer_object !== false && geometryState.map_geometry_status !== "needs_review").map(({ object, geometryState }) => ({
     object_id: object.id,
     name: object.name,
-    latitude: safeNumber3(object.latitude),
-    longitude: safeNumber3(object.longitude),
+    latitude: object.latitude,
+    longitude: object.longitude,
     address: object.address || null,
     ...mapStatus(object.id, sortedTasks),
     building_selection_mode: geometryState.building_selection_mode,

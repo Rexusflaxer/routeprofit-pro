@@ -1,18 +1,37 @@
-function normalizeObjectCoordinates(object) {
-  if (!object) return null;
-  const latitude = Number(object.latitude);
-  const longitude = Number(object.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+import { objectCoordinatePair } from "@/lib/coordinates";
+
+export function normalizeRouteCoordinatePair(object) {
+  const coordinates = objectCoordinatePair(object);
+  if (!coordinates) return null;
+  const [longitude, latitude] = coordinates;
 
   if (latitude > 40 && latitude < 60 && longitude > -10 && longitude < 15) {
-    return { ...object, latitude, longitude };
+    return [longitude, latitude];
   }
 
-  if (longitude > 40 && longitude < 60 && latitude > -10 && latitude < 15) {
-    return { ...object, latitude: longitude, longitude: latitude };
+  if (latitude !== 0 && longitude !== 0 && longitude > 40 && longitude < 60 && latitude > -10 && latitude < 15) {
+    return [latitude, longitude];
   }
 
-  return { ...object, latitude, longitude };
+  return [longitude, latitude];
+}
+
+function normalizeObjectCoordinates(object) {
+  const coordinates = normalizeRouteCoordinatePair(object);
+  return coordinates
+    ? { ...object, longitude: coordinates[0], latitude: coordinates[1] }
+    : null;
+}
+
+export function getBuildingProximityFilter(items, radiusMeters = 45) {
+  const coordinates = (items || []).map(normalizeRouteCoordinatePair).filter(Boolean);
+  if (!coordinates.length) return ["in", ["id"], ["literal", []]];
+
+  return [
+    "all",
+    ["==", ["get", "extrude"], "true"],
+    ["<=", ["distance", { type: "MultiPoint", coordinates }], radiusMeters],
+  ];
 }
 
 export function routeStopsFromData(route, tasks, objects) {
@@ -27,7 +46,7 @@ export function routeStopsFromData(route, tasks, objects) {
       const objectIds = task.object_id ? [task.object_id] : (task.selected_object_ids || []);
       return objectIds.map(objectId => ({ task, object: objectById.get(objectId) }));
     })
-    .filter(({ object }) => object?.latitude && object?.longitude)
+    .filter(({ object }) => Boolean(object))
     .filter(({ object }) => {
       if (seen.has(object.id)) return false;
       seen.add(object.id);

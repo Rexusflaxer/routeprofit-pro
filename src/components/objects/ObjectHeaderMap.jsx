@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
+import { objectCoordinatePair, trustedObjectCoordinatePair } from "@/lib/coordinates";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 function objectCoordinates(object) {
-  if (object?.latitude == null || object?.longitude == null || object.latitude === "" || object.longitude === "") return null;
-  const lat = Number(object.latitude);
-  const lng = Number(object.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const pair = trustedObjectCoordinatePair(object);
+  if (!pair) return null;
+  const [lng, lat] = pair;
   return { lat, lng };
 }
 
@@ -35,8 +35,11 @@ export default function ObjectHeaderMap({ object }) {
       .then(result => {
         if (cancelled) return;
         const center = result?.features?.[0]?.center;
-        if (Array.isArray(center) && Number.isFinite(center[0]) && Number.isFinite(center[1])) {
-          setCoords({ lng: center[0], lat: center[1] });
+        const pair = Array.isArray(center)
+          ? objectCoordinatePair({ longitude: center[0], latitude: center[1] })
+          : null;
+        if (pair) {
+          setCoords({ lng: pair[0], lat: pair[1] });
         }
       });
     return () => { cancelled = true; };

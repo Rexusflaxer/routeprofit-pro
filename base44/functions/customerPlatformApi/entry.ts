@@ -3467,12 +3467,32 @@ async function handleDeleteEmptyCustomer(
 }
 
 function objectCoordinate(value: unknown, minimum: number, maximum: number, field: string) {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return null;
+  if (!['number', 'string'].includes(typeof value)) {
+    throw new ApiError(400, `${field} bevat geen geldige coördinaat`);
+  }
   const number = Number(value);
   if (!Number.isFinite(number) || number < minimum || number > maximum) {
     throw new ApiError(400, `${field} bevat geen geldige coördinaat`);
   }
   return number;
+}
+
+function isNullIslandCoordinatePair(latitude: number | null, longitude: number | null) {
+  return latitude === 0 && longitude === 0;
+}
+
+function normalizedObjectCoordinatePair(latitudeValue: unknown, longitudeValue: unknown) {
+  let latitude = objectCoordinate(latitudeValue, -90, 90, 'Breedtegraad');
+  let longitude = objectCoordinate(longitudeValue, -180, 180, 'Lengtegraad');
+  if ((latitude === null) !== (longitude === null)) {
+    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
+  }
+  if (isNullIslandCoordinatePair(latitude, longitude)) {
+    latitude = null;
+    longitude = null;
+  }
+  return { latitude, longitude };
 }
 
 function objectText(value: unknown, field: string, maximumLength: number, nullable = true) {
@@ -4115,7 +4135,12 @@ function safeLocalGeometryProperties(source: 'manual' | 'user_drawn', feature: L
 function objectMapAnchor(object: LooseRecord) {
   const latitude = objectCoordinate(object.latitude, -90, 90, 'Breedtegraad');
   const longitude = objectCoordinate(object.longitude, -180, 180, 'Lengtegraad');
-  if (latitude === null || longitude === null || !['verified', 'manual'].includes(asString(object.geocoding_status))) {
+  if (
+    latitude === null ||
+    longitude === null ||
+    isNullIslandCoordinatePair(latitude, longitude) ||
+    !['verified', 'manual'].includes(asString(object.geocoding_status))
+  ) {
     throw new ApiError(409, 'Controleer eerst de kaartpositie van het object', {
       code: 'object_map_location_unverified',
     });
@@ -4173,8 +4198,16 @@ function objectHasMapConfiguration(object: LooseRecord) {
 }
 
 function safeObjectMapCoordinate(value: unknown, minimum: number, maximum: number) {
+  if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
   const coordinate = Number(value);
   return Number.isFinite(coordinate) && coordinate >= minimum && coordinate <= maximum ? coordinate : null;
+}
+
+function safeObjectMapCoordinatePair(latitudeValue: unknown, longitudeValue: unknown) {
+  const latitude = safeObjectMapCoordinate(latitudeValue, -90, 90);
+  const longitude = safeObjectMapCoordinate(longitudeValue, -180, 180);
+  if (latitude === null || longitude === null || isNullIslandCoordinatePair(latitude, longitude)) return null;
+  return { latitude, longitude };
 }
 
 function existingManualBuildingFeatures(object: LooseRecord) {
@@ -4197,15 +4230,14 @@ function safeStoredBuildingCollection(object: LooseRecord) {
   if (!geoJsonPayloadWasConfigured(object.building_polygon_geojson)) {
     return { value: null, invalid: false };
   }
-  const latitude = safeObjectMapCoordinate(object.latitude, -90, 90);
-  const longitude = safeObjectMapCoordinate(object.longitude, -180, 180);
-  if (latitude === null || longitude === null) return { value: null, invalid: true };
+  const coordinates = safeObjectMapCoordinatePair(object.latitude, object.longitude);
+  if (!coordinates) return { value: null, invalid: true };
   try {
     const normalized = normalizedGeoJsonFeatureCollection(
       object.building_polygon_geojson,
       'Opgeslagen gebouwvlak',
       {
-        anchor: [longitude, latitude],
+        anchor: [coordinates.longitude, coordinates.latitude],
         maxFeatures: OBJECT_MAP_MAX_BUILDING_FEATURES,
         maxAreaSquareMeters: OBJECT_MAP_MAX_BUILDING_AREA_SQM,
         properties: (feature, index) => {
@@ -4240,15 +4272,14 @@ function safeStoredBuildingCollection(object: LooseRecord) {
 
 function safeStoredTerrainCollection(object: LooseRecord) {
   if (!geoJsonPayloadWasConfigured(object.object_area_geojson)) return { value: null, invalid: false };
-  const latitude = safeObjectMapCoordinate(object.latitude, -90, 90);
-  const longitude = safeObjectMapCoordinate(object.longitude, -180, 180);
-  if (latitude === null || longitude === null) return { value: null, invalid: true };
+  const coordinates = safeObjectMapCoordinatePair(object.latitude, object.longitude);
+  if (!coordinates) return { value: null, invalid: true };
   try {
     const normalized = normalizedGeoJsonFeatureCollection(
       object.object_area_geojson,
       'Opgeslagen terreinvlak',
       {
-        anchor: [longitude, latitude],
+        anchor: [coordinates.longitude, coordinates.latitude],
         maxFeatures: OBJECT_MAP_MAX_TERRAIN_FEATURES,
         maxAreaSquareMeters: OBJECT_MAP_MAX_TERRAIN_AREA_SQM,
         properties: (feature, index) => safeLocalGeometryProperties('user_drawn', feature, index),
@@ -4280,6 +4311,7 @@ function safeExistingManualBuildingCollection(object: LooseRecord, safeBuildingV
 
 function safeObjectMapConfiguration(object: LooseRecord) {
   const safeGeometry = safeStoredMapGeometry(object);
+  const coordinates = safeObjectMapCoordinatePair(object.latitude, object.longitude);
   const selectedFeatureIds = selectedBagFeatureIds(safeGeometry.building_polygon_geojson);
   const storedStatus = objectMapGeometryStatus(object);
   const effectiveStatus = safeGeometry.invalid ? 'needs_review' : storedStatus;
@@ -4294,10 +4326,10 @@ function safeObjectMapConfiguration(object: LooseRecord) {
       name: object.name,
       address: object.address,
       status: objectLifecycleStatus(object),
-      latitude: safeObjectMapCoordinate(object.latitude, -90, 90),
-      longitude: safeObjectMapCoordinate(object.longitude, -180, 180),
+      latitude: coordinates?.latitude ?? null,
+      longitude: coordinates?.longitude ?? null,
       geocoding_status: object.geocoding_status || 'unverified',
-      show_on_mobile_map: effectiveStatus !== 'needs_review' && object.show_on_mobile_map !== false,
+      show_on_mobile_map: Boolean(coordinates) && effectiveStatus !== 'needs_review' && object.show_on_mobile_map !== false,
       is_active_customer_object: object.is_active_customer_object !== false,
     },
     building_selection_mode: objectBuildingSelectionMode(object),
@@ -4333,9 +4365,23 @@ async function ensureObjectMapGeometryRevision(
   const mapGeometryStatus = objectMapGeometryStatus(object);
   const entity = getEntity(base44, 'ObjectMapGeometryRevision');
   const existing = await entity.filter({ object_id: object.id, revision }, '-created_date', 5);
+  if (existing.some((record: LooseRecord) => record.customer_id !== object.customer_id)) {
+    throw new ApiError(409, 'De historie voor deze kaartrevisie is niet eenduidig', {
+      code: 'object_map_history_conflict',
+      retryable: false,
+      object_id: object.id,
+      revision,
+    });
+  }
+  // Bewaar legacyrevisies met een ontbrekend of 0,0-anker voor auditdoeleinden,
+  // maar gebruik ze nooit als vertrouwde geometriebron of als blokkade voor
+  // herstel. Een volgende geldige revisie kan zo naast de onbruikbare historie
+  // worden vastgelegd zonder die historie te verwijderen of te overschrijven.
+  const trustedExisting = existing.filter((record: LooseRecord) =>
+    safeObjectMapCoordinatePair(record.anchor_latitude, record.anchor_longitude) !== null);
   let effectiveGeometrySource = geometrySource;
   let safeGeometry = safeStoredMapGeometry(effectiveGeometrySource);
-  if (safeGeometry.invalid && mapGeometryStatus === 'needs_review' && !existing.length) {
+  if (safeGeometry.invalid && mapGeometryStatus === 'needs_review' && !trustedExisting.length) {
     // Herstel na een geslaagde object-CAS maar mislukte historiesnapshot mag
     // niet afhangen van raw GeoJSON in CustomerEvent/recovery. De voorgaande,
     // function-only revisie bevat daarvoor zowel contouren als het oude anker.
@@ -4343,8 +4389,7 @@ async function ensureObjectMapGeometryRevision(
     const sourceRevision = previous.find((record: LooseRecord) =>
       record.customer_id === object.customer_id &&
       Number.isInteger(Number(record.revision)) && Number(record.revision) < revision &&
-      safeObjectMapCoordinate(record.anchor_latitude, -90, 90) !== null &&
-      safeObjectMapCoordinate(record.anchor_longitude, -180, 180) !== null);
+      safeObjectMapCoordinatePair(record.anchor_latitude, record.anchor_longitude) !== null);
     if (sourceRevision) {
       effectiveGeometrySource = {
         ...object,
@@ -4357,8 +4402,8 @@ async function ensureObjectMapGeometryRevision(
     }
   }
   if (safeGeometry.invalid) {
-    if (existing.length === 1 && existing[0].customer_id === object.customer_id) return existing[0];
-    if (existing.length) {
+    if (trustedExisting.length === 1) return trustedExisting[0];
+    if (trustedExisting.length) {
       throw new ApiError(409, 'De historie voor deze kaartrevisie is niet eenduidig', {
         code: 'object_map_history_conflict',
         retryable: false,
@@ -4373,15 +4418,19 @@ async function ensureObjectMapGeometryRevision(
     !safeGeometry.object_area_geojson &&
     mapGeometryStatus === 'unconfigured'
   ) return null;
+  const revisionAnchor = safeObjectMapCoordinatePair(
+    effectiveGeometrySource.latitude,
+    effectiveGeometrySource.longitude,
+  );
+  if (!revisionAnchor) return null;
   const geometryHash = await sha256(JSON.stringify(mapGeometryHashProjection({
     building_selection_mode: buildingSelectionMode,
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     object_area_geojson: safeGeometry.object_area_geojson,
   })));
-  const matching = existing.find((record: LooseRecord) =>
-    record.customer_id === object.customer_id && record.geometry_hash === geometryHash);
+  const matching = trustedExisting.find((record: LooseRecord) => record.geometry_hash === geometryHash);
   if (matching) return matching;
-  if (existing.length) {
+  if (trustedExisting.length) {
     throw new ApiError(409, 'De historie voor deze kaartrevisie is niet eenduidig', {
       code: 'object_map_history_conflict',
       retryable: false,
@@ -4398,8 +4447,8 @@ async function ensureObjectMapGeometryRevision(
     map_geometry_status: mapGeometryStatus,
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     object_area_geojson: safeGeometry.object_area_geojson,
-    anchor_latitude: safeObjectMapCoordinate(effectiveGeometrySource.latitude, -90, 90),
-    anchor_longitude: safeObjectMapCoordinate(effectiveGeometrySource.longitude, -180, 180),
+    anchor_latitude: revisionAnchor.latitude,
+    anchor_longitude: revisionAnchor.longitude,
     recorded_at: nowIso(),
     recorded_by_user_id: actorUserId || null,
     source_action: asString(sourceAction).slice(0, 100) || 'map_configuration_snapshot',
@@ -9965,11 +10014,9 @@ function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
   }
 
   if (coordinatePairProvided) {
-    patch.latitude = objectCoordinate(patch.latitude, -90, 90, 'Breedtegraad');
-    patch.longitude = objectCoordinate(patch.longitude, -180, 180, 'Lengtegraad');
-    if ((patch.latitude === null) !== (patch.longitude === null)) {
-      throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
-    }
+    const coordinates = normalizedObjectCoordinatePair(patch.latitude, patch.longitude);
+    patch.latitude = coordinates.latitude;
+    patch.longitude = coordinates.longitude;
     if (addressChanged && !Object.prototype.hasOwnProperty.call(patch, 'bag_address_id')) {
       patch.bag_address_id = null;
     }
@@ -9984,16 +10031,12 @@ function objectIdentityPatch(data: LooseRecord, object: LooseRecord) {
   const address = asString(merged.address);
   const objectType = asString(merged.object_type);
   const geocodingStatus = asString(merged.geocoding_status) || 'unverified';
-  const latitude = objectCoordinate(merged.latitude, -90, 90, 'Breedtegraad');
-  const longitude = objectCoordinate(merged.longitude, -180, 180, 'Lengtegraad');
+  const { latitude, longitude } = normalizedObjectCoordinatePair(merged.latitude, merged.longitude);
   if (!name) throw new ApiError(400, 'Objectnaam is verplicht');
   if (name.length > 160) throw new ApiError(400, 'Objectnaam mag maximaal 160 tekens bevatten');
   if (!address) throw new ApiError(400, 'Objectadres is verplicht');
   if (!OBJECT_TYPES.has(objectType)) throw new ApiError(400, 'Kies een geldig objecttype');
   if (!OBJECT_GEOCODING_STATUSES.has(geocodingStatus)) throw new ApiError(400, 'Ongeldige geocodestatus');
-  if ((latitude === null) !== (longitude === null)) {
-    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
-  }
   if (geocodingStatus !== 'unverified' && latitude === null) {
     throw new ApiError(400, 'Een geverifieerde of handmatige locatie vereist geldige coördinaten');
   }
@@ -10039,7 +10082,7 @@ function objectOperationsPatch(data: LooseRecord, object: LooseRecord) {
     }
     const latitude = objectCoordinate(object.latitude, -90, 90, 'Breedtegraad');
     const longitude = objectCoordinate(object.longitude, -180, 180, 'Lengtegraad');
-    if (latitude === null || longitude === null) {
+    if (latitude === null || longitude === null || isNullIslandCoordinatePair(latitude, longitude)) {
       throw new ApiError(409, 'Het object heeft geldige locatiecoördinaten nodig voor de mobiele kaart');
     }
     if (!['verified', 'manual'].includes(object.geocoding_status)) {
@@ -10597,11 +10640,7 @@ async function handleCreateCustomerObject(
   if (latitudeProvided !== longitudeProvided) {
     throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
   }
-  const latitude = objectCoordinate(data.latitude, -90, 90, 'Breedtegraad');
-  const longitude = objectCoordinate(data.longitude, -180, 180, 'Lengtegraad');
-  if ((latitude === null) !== (longitude === null)) {
-    throw new ApiError(400, 'Breedte- en lengtegraad moeten samen worden ingevuld');
-  }
+  const { latitude, longitude } = normalizedObjectCoordinatePair(data.latitude, data.longitude);
   const requestedGeocodingStatus = asString(data.geocoding_status) || 'unverified';
   if (!OBJECT_GEOCODING_STATUSES.has(requestedGeocodingStatus)) {
     throw new ApiError(400, 'Ongeldige geocodestatus');
@@ -10760,6 +10799,18 @@ async function handleUpdateCustomerObjectIdentity(
   const requested = pick(requireObject(body), OBJECT_IDENTITY_PATCH_FIELDS);
   const changedInput = Object.fromEntries(Object.entries(requested).filter(([field, value]) =>
     JSON.stringify(canonicalMutationValue(object[field])) !== JSON.stringify(canonicalMutationValue(value))));
+  const latitudeRequested = Object.prototype.hasOwnProperty.call(requested, 'latitude');
+  const longitudeRequested = Object.prototype.hasOwnProperty.call(requested, 'longitude');
+  // Coördinaten en hun vertrouwensstatus vormen één invoercontract. Behoud het
+  // expliciet aangeleverde paar voor validatie, ook wanneer één coördinaat of de
+  // status numeriek gelijk bleef aan legacydata (bijvoorbeeld verified 0,0).
+  if (latitudeRequested || longitudeRequested) {
+    if (latitudeRequested) changedInput.latitude = requested.latitude;
+    if (longitudeRequested) changedInput.longitude = requested.longitude;
+    if (Object.prototype.hasOwnProperty.call(requested, 'geocoding_status')) {
+      changedInput.geocoding_status = requested.geocoding_status;
+    }
+  }
   if (!Object.keys(changedInput).length) throw new ApiError(400, 'Er zijn geen gewijzigde objectgegevens om op te slaan');
   const normalizedPatch = objectIdentityPatch(changedInput, object);
   const patch = Object.fromEntries(Object.entries(normalizedPatch).filter(([field, value]) =>

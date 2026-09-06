@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, LocateFixed, MousePointer2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
+import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import {
   editableVertices,
   featureCollectionBounds,
@@ -148,10 +149,9 @@ function addWorkspaceLayers(map, data) {
 }
 
 function anchorCollection(object) {
-  const lng = Number(object?.longitude);
-  const lat = Number(object?.latitude);
-  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return featureCollection();
-  return featureCollection([{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [lng, lat] } }]);
+  const coordinates = trustedObjectCoordinatePair(object);
+  if (!coordinates) return featureCollection();
+  return featureCollection([{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates } }]);
 }
 
 export default function ObjectMapCanvas({
@@ -230,15 +230,14 @@ export default function ObjectMapCanvas({
       if (cancelled || !containerRef.current) return;
       const mapboxgl = module.default;
       mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
-      const lng = Number(object?.longitude);
-      const lat = Number(object?.latitude);
+      const coordinates = trustedObjectCoordinatePair(object);
       map = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/standard",
-        center: Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : [5.2913, 52.1326],
-        zoom: Number.isFinite(lng) && Number.isFinite(lat) ? 17 : 7,
-        pitch: Number.isFinite(lng) && Number.isFinite(lat) ? 42 : 0,
-        bearing: Number.isFinite(lng) && Number.isFinite(lat) ? -12 : 0,
+        center: coordinates || [5.2913, 52.1326],
+        zoom: coordinates ? 17 : 7,
+        pitch: coordinates ? 42 : 0,
+        bearing: coordinates ? -12 : 0,
         minZoom: 5,
         attributionControl: true,
       });
@@ -345,7 +344,7 @@ export default function ObjectMapCanvas({
       map?.remove();
       mapRef.current = null;
     };
-  }, [object?.id, object?.latitude, object?.longitude]);
+  }, [object?.id, object?.latitude, object?.longitude, object?.geocoding_status]);
 
   useEffect(() => {
     const map = mapRef.current;

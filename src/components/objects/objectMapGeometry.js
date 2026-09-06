@@ -1,3 +1,5 @@
+import { safeCoordinateNumber } from "@/lib/coordinates";
+
 const EARTH_RADIUS_METERS = 6378137;
 
 export const emptyFeatureCollection = () => ({ type: "FeatureCollection", features: [] });
@@ -154,8 +156,10 @@ function featureDistanceSquared(feature, coordinate) {
 }
 
 export function suggestAutomaticBuildingIds(candidates, anchor) {
-  const coordinate = [Number(anchor?.[0]), Number(anchor?.[1])];
-  if (!coordinate.every(Number.isFinite)) return [];
+  const longitude = safeCoordinateNumber(anchor?.[0], -180, 180);
+  const latitude = safeCoordinateNumber(anchor?.[1], -90, 90);
+  if (longitude === null || latitude === null || (longitude === 0 && latitude === 0)) return [];
+  const coordinate = [longitude, latitude];
   const ranked = (candidates || [])
     .map(feature => ({ feature, id: featureSourceId(feature), distance: featureDistanceSquared(feature, coordinate) }))
     .filter(candidate => candidate.id && Number.isFinite(candidate.distance))

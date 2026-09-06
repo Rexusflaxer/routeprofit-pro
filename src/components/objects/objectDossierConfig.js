@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { objectStatus, objectTypeLabel } from "@/components/customers/customerObjectConfig";
+import { objectCoordinatePair } from "@/lib/coordinates";
 
 export const OBJECT_DOSSIER_TABS = [
   { key: "overview", label: "Overzicht", icon: LayoutDashboard },
@@ -76,27 +77,7 @@ export function getObjectTypeLabel(value) {
 }
 
 export function objectHasCoordinates(object) {
-  const latitudeValue = object?.latitude;
-  const longitudeValue = object?.longitude;
-  if (
-    latitudeValue === null
-    || latitudeValue === undefined
-    || String(latitudeValue).trim() === ""
-    || longitudeValue === null
-    || longitudeValue === undefined
-    || String(longitudeValue).trim() === ""
-  ) {
-    return false;
-  }
-
-  const latitude = Number(latitudeValue);
-  const longitude = Number(longitudeValue);
-  return Number.isFinite(latitude)
-    && latitude >= -90
-    && latitude <= 90
-    && Number.isFinite(longitude)
-    && longitude >= -180
-    && longitude <= 180;
+  return Boolean(objectCoordinatePair(object));
 }
 
 export function objectInstructionCount(object) {

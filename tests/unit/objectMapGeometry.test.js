@@ -79,5 +79,8 @@ describe("objectkaartgeometrie", () => {
     expect(suggestAutomaticBuildingIds([nearby, containing], [4, 52])).toEqual(["bag-containing"]);
     expect(suggestAutomaticBuildingIds([nearby], [4, 52])).toEqual(["bag-near"]);
     expect(suggestAutomaticBuildingIds([nearby], [Number.NaN, 52])).toEqual([]);
+    expect(suggestAutomaticBuildingIds([nearby], [null, null])).toEqual([]);
+    expect(suggestAutomaticBuildingIds([nearby], ["", " "])).toEqual([]);
+    expect(suggestAutomaticBuildingIds([nearby], [0, 0])).toEqual([]);
   });
 });
