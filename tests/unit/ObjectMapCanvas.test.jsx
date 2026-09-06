@@ -238,6 +238,126 @@ describe("ObjectMapCanvas", () => {
     expect(map.sources.get("loq-object-map-building-hover").setData.mock.lastCall[0].features).toEqual([]);
   });
 
+  it.each([false, true])("houdt alle delen met dezelfde native identiteit geselecteerd, onafhankelijk van volgorde (%s)", async reverse => {
+    const part = (left, right) => ({ ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[left, 51.92], [right, 51.92], [right, 51.922], [left, 51.922], [left, 51.92]]] } });
+    const west = part(4.48, 4.481), east = part(4.481, 4.482);
+    const point = { id: "point-west", longitude: 4.4805, latitude: 51.921 };
+    const onToggleBuildingPoint = vi.fn();
+    renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, buildingSelectionPoints: [point], onToggleBuildingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = reverse ? [east, west] : [west, east];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: true });
+    map.setFeatureState.mockClear();
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: east, lngLat: { lng: 4.4815, lat: 51.921 }, originalEvent: {} }));
+    expect(onToggleBuildingPoint).toHaveBeenCalledExactlyOnceWith(point);
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: false, highlight: false });
+  });
+
+  it("behandelt een volledige en een geknipte geometrie met dezelfde native identiteit niet als twee gebouwen", async () => {
+    const full = { ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[4.48, 51.92], [4.482, 51.92], [4.482, 51.922], [4.48, 51.922], [4.48, 51.92]]] } };
+    const clipped = { ...full, geometry: { type: "Polygon", coordinates: [[[4.48, 51.92], [4.481, 51.92], [4.481, 51.922], [4.48, 51.922], [4.48, 51.92]]] } };
+    renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, buildingSelectionPoints: [{ id: "point-1", longitude: 4.4805, latitude: 51.921 }] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [full, clipped];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: true });
+  });
+
+  it("voegt geen ongelinkt punt toe wanneer een andere vleugel van hetzelfde gebouw al via BAG geselecteerd is", async () => {
+    const west = { ...standardBuilding, geometry: candidate.geometry };
+    const east = { ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[4.482, 51.92], [4.483, 51.92], [4.483, 51.921], [4.482, 51.92]]] } };
+    const onToggleBuildingPoint = vi.fn();
+    const { props } = renderCanvas({ onToggleBuildingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [west, east];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: east, lngLat: { lng: 4.4827, lat: 51.9202 }, originalEvent: {} }));
+    expect(props.onToggleCandidate).toHaveBeenCalledExactlyOnceWith("bag-1");
+    expect(onToggleBuildingPoint).not.toHaveBeenCalled();
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: false, highlight: false });
+  });
+
+  it("maakt bij bestaande BAG-plus-punt duplicaten geen willekeurige keuze en laat beide records intact", async () => {
+    const onToggleBuildingPoint = vi.fn(), onBuildingMatchUnavailable = vi.fn();
+    const point = { id: "duplicate-point", longitude: 4.4807, latitude: 51.9202 };
+    const { props } = renderCanvas({ buildingSelectionPoints: [point], onToggleBuildingPoint, onBuildingMatchUnavailable });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9203 }, originalEvent: {} }));
+    expect(onBuildingMatchUnavailable).toHaveBeenCalledWith(expect.stringContaining("meerdere opgeslagen selecties"));
+    expect(onToggleBuildingPoint).not.toHaveBeenCalled();
+    expect(props.onToggleCandidate).not.toHaveBeenCalled();
+  });
+
+  it("behoudt een bewezen selectie en lijsthighlight als na zoomen alleen een andere gebouwvleugel zichtbaar is", async () => {
+    const west = { ...standardBuilding, geometry: candidate.geometry };
+    const east = { ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[4.482, 51.92], [4.483, 51.92], [4.483, 51.921], [4.482, 51.92]]] } };
+    const point = { id: "west-point", longitude: 4.4807, latitude: 51.9202 };
+    const onToggleBuildingPoint = vi.fn();
+    const rendered = renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, buildingSelectionPoints: [point], onToggleBuildingPoint });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [west, east];
+    act(() => map.emit("style.load"));
+    map.renderedFeatures = [east];
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedBuildingKey="point:west-point" />);
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: false, highlight: true });
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedBuildingKey={null} />);
+    expect(map.setFeatureState.mock.calls.at(-1)[1]).toEqual({ select: true, highlight: false });
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: east, lngLat: { lng: 4.4827, lat: 51.9202 }, originalEvent: {} }));
+    expect(onToggleBuildingPoint).toHaveBeenCalledExactlyOnceWith(point);
+  });
+
+  it("herstelt multipart gebouwselecties na stijlherladen uit de opgeslagen punten, zonder oude native ids te hergebruiken", async () => {
+    const otherPart = { ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[4.482, 51.92], [4.483, 51.92], [4.483, 51.921], [4.482, 51.92]]] } };
+    const point = { id: "saved-point", longitude: 4.4807, latitude: 51.9202 };
+    renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, buildingSelectionPoints: [point] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding, otherPart];
+    act(() => map.emit("style.load"));
+    map.setFeatureState.mockClear();
+    map.renderedFeatures = [{ ...otherPart, id: "new-native-id" }, { ...standardBuilding, id: "new-native-id" }];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState).toHaveBeenCalledWith(expect.objectContaining({ id: "new-native-id" }), { select: true });
+    expect(map.setFeatureState.mock.calls.every(([feature]) => feature.id === "new-native-id")).toBe(true);
+  });
+
+  it("voegt een eerste klik in meerdere delen van hetzelfde gebouw slechts als één eigen punt toe", async () => {
+    const clipped = { ...standardBuilding, geometry: { type: "Polygon", coordinates: [[[4.4805, 51.92], [4.481, 51.92], [4.481, 51.9204], [4.4805, 51.92]]] } };
+    const onToggleBuildingPoint = vi.fn(), onBuildingMatchUnavailable = vi.fn();
+    renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, onToggleBuildingPoint, onBuildingMatchUnavailable });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding, clipped];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: clipped, lngLat: { lng: 4.4808, lat: 51.9201 }, originalEvent: {} }));
+    expect(onToggleBuildingPoint).toHaveBeenCalledOnce();
+    expect(onBuildingMatchUnavailable).not.toHaveBeenCalled();
+    const saved = onToggleBuildingPoint.mock.calls[0][0];
+    expect(saved).toEqual({ id: expect.any(String), source: "user_selected", provider: "mapbox", bag_status: "unlinked", longitude: 4.4808, latitude: 51.9201 });
+    expect(saved).not.toHaveProperty("geometry");
+    expect(saved.id).not.toBe(String(standardBuilding.id));
+  });
+
+  it("behandelt verschillende native namespaces niet als één gebouw, ook niet met hetzelfde id of dezelfde contour", async () => {
+    const onToggleBuildingPoint = vi.fn(), onBuildingMatchUnavailable = vi.fn();
+    renderCanvas({ candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty, onToggleBuildingPoint, onBuildingMatchUnavailable });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding, { ...standardBuilding, namespace: "other-building-namespace" }];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4807, lat: 51.9202 }, originalEvent: {} }));
+    expect(onToggleBuildingPoint).not.toHaveBeenCalled();
+    expect(onBuildingMatchUnavailable).toHaveBeenCalledWith(expect.stringContaining("overlappen twee gebouwen"));
+  });
+
   it("gebruikt een exacte hovercontour als de kaart geen native gebouwfeature aanbiedt", async () => {
     const manual = { ...candidate, properties: { source: "manual", local_id: "legacy-1" } };
     const rendered = renderCanvas({ selectedBuildings: { type: "FeatureCollection", features: [manual] }, highlightedBuildingKey: "manual:legacy-1" });
@@ -248,6 +368,44 @@ describe("ObjectMapCanvas", () => {
     expect(map.sources.get("loq-object-map-building-hover").setData.mock.lastCall[0].features).toEqual([manual]);
     rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedBuildingKey={null} />);
     expect(map.sources.get("loq-object-map-building-hover").setData.mock.lastCall[0].features).toEqual([]);
+  });
+
+  it("schrijft onveranderde hovergeometrie niet bij elke idle opnieuw en voorkomt een redraw-lus", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const source = map.sources.get("loq-object-map-building-hover");
+    source.setData.mockClear();
+    act(() => { map.emit("idle"); map.emit("idle"); map.emit("idle"); });
+    expect(source.setData).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedBuildingKey="bag:bag-1" />);
+    expect(source.setData).toHaveBeenCalledOnce();
+    act(() => { map.emit("idle"); map.emit("idle"); });
+    expect(source.setData).toHaveBeenCalledOnce();
+    act(() => map.emit("style.load"));
+    expect(source.setData).toHaveBeenCalledTimes(2);
+  });
+
+  it("schrijft tijdens native lijsthover geen identieke feature-state op iedere idle", async () => {
+    const rendered = renderCanvas({ highlightedBuildingKey: "bag:bag-1" });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: false, highlight: true });
+    const source = map.sources.get("loq-object-map-building-hover");
+    map.setFeatureState.mockClear();
+    source.setData.mockClear();
+    act(() => { map.emit("idle"); map.emit("idle"); map.emit("idle"); });
+    expect(map.setFeatureState).not.toHaveBeenCalled();
+    expect(source.setData).not.toHaveBeenCalled();
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedBuildingKey={null} />);
+    expect(map.setFeatureState).toHaveBeenCalledExactlyOnceWith(standardBuilding, { select: true, highlight: false });
+    act(() => { map.emit("idle"); map.emit("idle"); });
+    expect(map.setFeatureState).toHaveBeenCalledOnce();
+    expect(source.setData).not.toHaveBeenCalled();
   });
 
   it("geeft ongeldige puntverplaatsingen niet door en laat een rechter muisklik nooit slepen", async () => {

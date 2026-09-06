@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { union as unionPolygons } from "martinez-polygon-clipping";
 import { Building2, LandPlot, Loader2, LocateFixed, MousePointer2, RotateCcw, RotateCw, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
@@ -185,8 +186,10 @@ function sourceData(map, id, data) {
 function mapboxBuildingFeatureKey(feature) {
   const id = feature?.id;
   const namespace = String(feature?.namespace || "");
-  if (id !== undefined && id !== null && String(id) !== "") return `${namespace}:${String(id)}`;
-  return `${namespace}:geometry:${JSON.stringify(feature?.geometry || null)}`;
+  const target = feature?.target || STANDARD_BUILDINGS_TARGET;
+  const scope = `${target.importId || "basemap"}:${target.featuresetId || "buildings"}:${namespace}`;
+  if (["number", "string"].includes(typeof id) && String(id) !== "") return `${scope}:${typeof id}:${String(id)}`;
+  return `${scope}:geometry:${buildingFootprintKey(feature)}`;
 }
 
 function buildingFootprintKey(feature) {
@@ -206,10 +209,46 @@ function buildingFootprintKey(feature) {
   return polygons.map(polygon => polygon.map(ringKey).sort().join("/")).sort().join("|");
 }
 
-function pointBuildingAssociations(features, points) {
+function groupStandardBuildings(features) {
+  const identities = new globalThis.Map();
+  (features || []).forEach(feature => {
+    const key = mapboxBuildingFeatureKey(feature);
+    if (!identities.has(key)) identities.set(key, { identities: new globalThis.Map([[key, feature]]), parts: new globalThis.Map() });
+    identities.get(key).parts.set(buildingFootprintKey(feature), feature);
+  });
+  const equivalent = new globalThis.Map();
+  identities.forEach(group => {
+    const feature = group.identities.values().next().value;
+    const target = feature?.target || STANDARD_BUILDINGS_TARGET;
+    // Only exact complete footprint equality aliases separate tile IDs. An
+    // overlap, bounding box or proximity never establishes building identity.
+    const key = `${target.importId || "basemap"}:${target.featuresetId || "buildings"}:${feature.namespace || ""}:${[...group.parts.keys()].sort().join("||")}`;
+    if (!equivalent.has(key)) equivalent.set(key, group);
+    else group.identities.forEach((part, identity) => equivalent.get(key).identities.set(identity, part));
+  });
+  return [...equivalent.values()].map(group => {
+    const parts = [...group.parts.values()];
+    let coordinates = null;
+    try {
+      parts.forEach(part => {
+        const polygons = part.geometry?.type === "Polygon" ? [part.geometry.coordinates]
+          : part.geometry?.type === "MultiPolygon" ? part.geometry.coordinates : null;
+        if (polygons?.length) coordinates = coordinates ? unionPolygons(coordinates, polygons) : polygons;
+      });
+    } catch { coordinates = null; }
+    return { ...group, parts, geometry: coordinates ? { type: "Feature", properties: {}, geometry: { type: "MultiPolygon", coordinates } } : null };
+  });
+}
+
+function groupContainsCoordinate(group, coordinate) {
+  return featureStrictlyContainsCoordinate(group.geometry, coordinate)
+    || group.parts.some(part => featureStrictlyContainsCoordinate(part, coordinate));
+}
+
+function pointBuildingAssociations(groups, points) {
   return new globalThis.Map((points || []).map(point => {
-    const containing = (features || []).filter(feature => featureStrictlyContainsCoordinate(feature, [point.longitude, point.latitude]));
-    return [point.id, new Set(containing.map(buildingFootprintKey))];
+    const containing = groups.filter(group => groupContainsCoordinate(group, [point.longitude, point.latitude]));
+    return [point.id, new Set(containing)];
   }));
 }
 
@@ -471,6 +510,7 @@ export default function ObjectMapCanvas({
     let map;
     let resizeObserver;
     let standardBuildingInteractionsInstalled = false;
+    let hoverSourceFingerprint = null;
     import("mapbox-gl").then(module => {
       if (cancelled || !containerRef.current) return;
       const mapboxgl = module.default;
@@ -541,10 +581,28 @@ export default function ObjectMapCanvas({
       };
       applyWorkspaceViewRef.current = applyWorkspaceView;
 
-      const rememberStandardBuilding = (feature, bagFeatureId, selected, selectionPointId = null) => {
-        const key = mapboxBuildingFeatureKey(feature);
-        standardBuildingStatesRef.current.set(key, { feature, bagFeatureId, selectionPointId, selected });
-        return key;
+      const rememberStandardBuildingGroup = (group, bagFeatureIds, selectionPointIds, selected, listHighlight = false) => {
+        group.identities.forEach((feature, key) => standardBuildingStatesRef.current.set(key,
+          { feature, bagFeatureIds, selectionPointIds, selected, listHighlight }));
+      };
+      const writeStandardBuildingGroup = (group, state) => group.identities.forEach(feature => setStandardBuildingState(map, feature, state));
+      const selectedGroupEntries = (group, interaction, pointAssociations) => {
+        const selectedCandidates = interaction.candidates.filter(candidate => interaction.selectedBagFeatureIds.has(featureSourceId(candidate)));
+        const bagFeatureIds = selectedCandidates.filter(candidate => group.geometry && matchMapboxBuildingToBagCandidate(group.geometry, [candidate])).map(featureSourceId);
+        const selectionPoints = (interaction.buildingSelectionPoints || []).filter(point => pointAssociations.get(point.id)?.size === 1
+          && pointAssociations.get(point.id).has(group));
+        // A tile may show only the other wing after panning. A proven binding
+        // for this current native identity survives that clipped view, but is
+        // discarded on style reload and never stored in the configuration.
+        group.identities.forEach((_, key) => {
+          const previous = standardBuildingStatesRef.current.get(key);
+          (previous?.bagFeatureIds || []).forEach(id => { if (interaction.selectedBagFeatureIds.has(id) && !bagFeatureIds.includes(id)) bagFeatureIds.push(id); });
+          (previous?.selectionPointIds || []).forEach(id => {
+            const point = (interaction.buildingSelectionPoints || []).find(item => item.id === id);
+            if (point && pointAssociations.get(id)?.size === 0 && !selectionPoints.some(item => item.id === id)) selectionPoints.push(point);
+          });
+        });
+        return { bagFeatureIds, selectionPoints };
       };
       const clearStandardBuildingHover = () => {
         hoveredStandardBuildingsRef.current.forEach(feature => setStandardBuildingState(map, feature, { highlight: false }));
@@ -556,24 +614,6 @@ export default function ObjectMapCanvas({
       const syncStandardBuildingStates = () => {
         if (cancelled || !map || typeof map.queryRenderedFeatures !== "function") return;
         const interaction = interactionsRef.current;
-        const selectedIds = interaction.selectedBagFeatureIds || new Set();
-        const selectedPointIds = new Set((interaction.buildingSelectionPoints || []).map(point => point.id));
-        const selectedCandidates = interaction.candidates.filter(candidate => selectedIds.has(featureSourceId(candidate)));
-
-        standardBuildingStatesRef.current.forEach(record => {
-          const selected = selectedIds.has(record.bagFeatureId) || selectedPointIds.has(record.selectionPointId);
-          const listHighlight = interaction.highlightedBuildingKey === `bag:${record.bagFeatureId}`
-            || interaction.highlightedBuildingKey === `point:${record.selectionPointId}`;
-          if (listHighlight || record.listHighlight) {
-            setStandardBuildingState(map, record.feature, { select: selected && !listHighlight, highlight: listHighlight });
-            record.listHighlight = listHighlight;
-            record.selected = selected;
-            return;
-          }
-          if (record.selected === selected) return;
-          if (setStandardBuildingState(map, record.feature, { select: selected })) record.selected = selected;
-        });
-
         let visibleBuildings = [];
         try {
           visibleBuildings = map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || [];
@@ -582,29 +622,31 @@ export default function ObjectMapCanvas({
           // geometry/selection-point hover fallback.
           visibleBuildings = [];
         }
-        const pointAssociations = pointBuildingAssociations(visibleBuildings, interaction.buildingSelectionPoints);
-        visibleBuildings.forEach(feature => {
-          // Prefer an already selected stable BAG contour while restoring
-          // visual state. This prevents an overlapping unselected candidate
-          // from making a saved selection appear uncoloured after panning.
-          const bagCandidate = matchMapboxBuildingToBagCandidate(feature, selectedCandidates)
-            || matchMapboxBuildingToBagCandidate(feature, interaction.candidates);
-          const bagFeatureId = featureSourceId(bagCandidate);
-          const selectionPoint = (interaction.buildingSelectionPoints || []).find(point => pointAssociations.get(point.id)?.size === 1 && featureStrictlyContainsCoordinate(feature, [point.longitude, point.latitude]));
-          const selected = selectedIds.has(bagFeatureId) || Boolean(selectionPoint);
-          const key = mapboxBuildingFeatureKey(feature);
-          const previous = standardBuildingStatesRef.current.get(key);
-          if (!bagFeatureId && !selectionPoint && !previous) return;
-          if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
-          const listHighlight = interaction.highlightedBuildingKey === `bag:${bagFeatureId}`
-            || interaction.highlightedBuildingKey === `point:${selectionPoint?.id}`;
-          if (listHighlight) setStandardBuildingState(map, feature, { select: false, highlight: true });
-          const stateKey = rememberStandardBuilding(feature, bagFeatureId, selected, selectionPoint?.id || null);
-          standardBuildingStatesRef.current.get(stateKey).listHighlight = listHighlight;
+        const groups = groupStandardBuildings(visibleBuildings);
+        const pointAssociations = pointBuildingAssociations(groups, interaction.buildingSelectionPoints);
+        groups.forEach(group => {
+          const { bagFeatureIds, selectionPoints } = selectedGroupEntries(group, interaction, pointAssociations);
+          const selected = bagFeatureIds.length > 0 || selectionPoints.length > 0;
+          const listHighlight = bagFeatureIds.some(id => interaction.highlightedBuildingKey === `bag:${id}`)
+            || selectionPoints.some(point => interaction.highlightedBuildingKey === `point:${point.id}`);
+          group.identities.forEach((feature, key) => {
+            const previous = standardBuildingStatesRef.current.get(key);
+            if (!selected && !previous) return;
+            if (listHighlight || previous?.listHighlight) {
+              // Mapbox schedules another render even for identical state.
+              // Only write an actual transition, otherwise row-hover creates
+              // a perpetual render -> idle -> setFeatureState loop.
+              if (!previous || previous.selected !== selected || previous.listHighlight !== listHighlight) {
+                setStandardBuildingState(map, feature, { select: selected && !listHighlight, highlight: listHighlight });
+              }
+            }
+            else if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
+          });
+          rememberStandardBuildingGroup(group, bagFeatureIds, selectionPoints.map(point => point.id), selected, listHighlight);
         });
         // Fallback only when no native building can be highlighted, including
         // legacy hand-drawn buildings. Never persist rendered Mapbox geometry.
-        const nativeHighlighted = [...standardBuildingStatesRef.current.values()].some(record => record.listHighlight);
+        const nativeHighlighted = groups.some(group => [...group.identities.keys()].some(key => standardBuildingStatesRef.current.get(key)?.listHighlight));
         const fallbackFeatures = nativeHighlighted || !interaction.highlightedBuildingKey ? []
           : (dataRef.current?.selected.features || []).filter(feature => {
             const key = feature.properties?.source === "manual" ? `manual:${feature.properties.local_id || feature.id}` : `bag:${featureSourceId(feature)}`;
@@ -614,11 +656,17 @@ export default function ObjectMapCanvas({
           const point = (interaction.buildingSelectionPoints || []).find(item => `point:${item.id}` === interaction.highlightedBuildingKey);
           if (point) fallbackFeatures.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [point.longitude, point.latitude] } });
         }
-        sourceData(map, SOURCE.hover, featureCollection(fallbackFeatures));
+        const hoverData = featureCollection(fallbackFeatures);
+        const nextHoverFingerprint = JSON.stringify(hoverData);
+        if (hoverSourceFingerprint !== nextHoverFingerprint) {
+          hoverSourceFingerprint = nextHoverFingerprint;
+          sourceData(map, SOURCE.hover, hoverData);
+        }
       };
       const resetAndSyncStandardBuildingStates = () => {
         standardBuildingStatesRef.current.clear();
         hoveredStandardBuildingsRef.current.clear();
+        hoverSourceFingerprint = null;
         syncStandardBuildingStates();
       };
       syncStandardBuildingStatesRef.current = syncStandardBuildingStates;
@@ -658,52 +706,56 @@ export default function ObjectMapCanvas({
             const interaction = interactionsRef.current;
             if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
             const clickCoordinate = event.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null;
-            const existingPoints = (interaction.buildingSelectionPoints || []).filter(point => featureStrictlyContainsCoordinate(event.feature, [point.longitude, point.latitude]));
-            if (existingPoints.length > 1) {
+            let groups;
+            try {
+              groups = groupStandardBuildings([...(map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || []), event.feature]);
+            } catch {
+              interaction.onBuildingMatchUnavailable?.("De kaart wordt nog geladen. Probeer het gebouw over een moment opnieuw te selecteren.");
+              return true;
+            }
+            const group = groups.find(item => item.identities.has(mapboxBuildingFeatureKey(event.feature)));
+            if (!group) return true;
+            const pointAssociations = pointBuildingAssociations(groups, interaction.buildingSelectionPoints);
+            const selectedEntries = selectedGroupEntries(group, interaction, pointAssociations);
+            const existingPoints = (interaction.buildingSelectionPoints || []).filter(point => groupContainsCoordinate(group, [point.longitude, point.latitude])
+              || selectedEntries.selectionPoints.some(item => item.id === point.id));
+            if (existingPoints.length + selectedEntries.bagFeatureIds.length > 1) {
               interaction.onBuildingMatchUnavailable?.("Dit gebouw bevat meerdere opgeslagen selecties. Verwijder de gewenste selectie uit de lijst naast de kaart.");
               return true;
             }
             const existingPoint = existingPoints[0];
             if (existingPoint) {
-              let visiblePointFootprints;
-              try {
-                const visible = [...(map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || []), event.feature];
-                visiblePointFootprints = pointBuildingAssociations(visible, [existingPoint]).get(existingPoint.id);
-              } catch {
-                interaction.onBuildingMatchUnavailable?.("De kaart wordt nog geladen. Probeer het gebouw over een moment opnieuw te selecteren.");
-                return true;
-              }
-              if (visiblePointFootprints?.size !== 1) {
+              if (pointAssociations.get(existingPoint.id)?.size > 1) {
                 interaction.onBuildingMatchUnavailable?.("Deze opgeslagen selectie ligt onder meerdere gebouwen. Verwijder haar uit de lijst en kies het gebouw opnieuw van bovenaf.");
                 return true;
               }
               interaction.buildingSelectionPoints = interaction.buildingSelectionPoints.filter(point => point.id !== existingPoint.id);
-              setStandardBuildingState(map, event.feature, { select: false, highlight: false });
-              rememberStandardBuilding(event.feature, null, false, existingPoint.id);
+              writeStandardBuildingGroup(group, { select: false, highlight: false });
+              rememberStandardBuildingGroup(group, [], [], false);
               interaction.onToggleBuildingPoint?.(existingPoint);
               return true;
             }
-            const bagCandidate = matchMapboxBuildingToBagCandidate(event.feature, interaction.candidates, clickCoordinate);
+            // Existing BAG membership belongs to the whole native building,
+            // not merely the roof/tile part under this particular click.
+            if (selectedEntries.bagFeatureIds.length === 1) {
+              const id = selectedEntries.bagFeatureIds[0];
+              interaction.selectedBagFeatureIds.delete(id);
+              writeStandardBuildingGroup(group, { select: false, highlight: false });
+              rememberStandardBuildingGroup(group, [], [], false);
+              interaction.onToggleCandidate?.(id);
+              return true;
+            }
+            const bagCandidate = group.geometry && matchMapboxBuildingToBagCandidate(group.geometry, interaction.candidates, clickCoordinate);
             const bagFeatureId = featureSourceId(bagCandidate);
             if (!bagFeatureId) {
               // Persist only the operator's own click location. Mapbox's
               // transient feature IDs and building geometry stay in memory.
-              if (!clickCoordinate || !featureStrictlyContainsCoordinate(event.feature, clickCoordinate)) {
+              if (!clickCoordinate || !groupContainsCoordinate(group, clickCoordinate)) {
                 map.easeTo({ pitch: 0, zoom: Math.max(map.getZoom(), 18), duration: 450 });
                 interaction.onBuildingMatchUnavailable?.("Klik nogmaals op het gebouw van bovenaf.");
                 return true;
               }
-              let clickBuildings;
-              try {
-                clickBuildings = [...(map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || []), event.feature];
-              } catch {
-                interaction.onBuildingMatchUnavailable?.("De kaart wordt nog geladen. Probeer het gebouw over een moment opnieuw te selecteren.");
-                return true;
-              }
-              const clickFootprints = new Set(clickBuildings
-                .filter(feature => featureStrictlyContainsCoordinate(feature, clickCoordinate))
-                .map(buildingFootprintKey));
-              if (clickFootprints.size !== 1) {
+              if (groups.filter(item => groupContainsCoordinate(item, clickCoordinate)).length !== 1) {
                 map.easeTo({ pitch: 0, zoom: Math.max(map.getZoom(), 18), duration: 450 });
                 interaction.onBuildingMatchUnavailable?.("Hier overlappen twee gebouwen. Klik van bovenaf op een vrij deel van het gewenste gebouw.");
                 return true;
@@ -718,8 +770,8 @@ export default function ObjectMapCanvas({
                 latitude: clickCoordinate[1],
               };
               interaction.buildingSelectionPoints = [...interaction.buildingSelectionPoints, selectionPoint];
-              setStandardBuildingState(map, event.feature, { select: true, highlight: false });
-              rememberStandardBuilding(event.feature, null, true, selectionPoint.id);
+              writeStandardBuildingGroup(group, { select: true, highlight: false });
+              rememberStandardBuildingGroup(group, [], [selectionPoint.id], true);
               interaction.onToggleBuildingPoint(selectionPoint);
               return true;
             }
@@ -728,8 +780,8 @@ export default function ObjectMapCanvas({
             if (selected) selectedIds.add(bagFeatureId);
             else selectedIds.delete(bagFeatureId);
             interaction.selectedBagFeatureIds = selectedIds;
-            setStandardBuildingState(map, event.feature, { select: selected, highlight: false });
-            rememberStandardBuilding(event.feature, bagFeatureId, selected);
+            writeStandardBuildingGroup(group, { select: selected, highlight: false });
+            rememberStandardBuildingGroup(group, selected ? [bagFeatureId] : [], [], selected);
             interaction.onToggleCandidate?.(bagFeatureId);
             return true;
           },
