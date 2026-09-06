@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "next-themes";
 import { union as unionPolygons } from "martinez-polygon-clipping";
-import { Building2, LandPlot, Loader2, LocateFixed, MousePointer2, RotateCcw, RotateCw, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
+import { Building2, LandPlot, Loader2, MousePointer2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ObjectMapControls from "./ObjectMapControls";
+import useObjectMapBuildingLabels from "./useObjectMapBuildingLabels";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import {
@@ -279,7 +282,12 @@ function addSource(map, id, data) {
 }
 
 function addLayer(map, definition) {
-  if (!map.getLayer(definition.id)) map.addLayer(definition);
+  if (map.getLayer(definition.id)) return;
+  // Operational outlines/handles must remain legible under Standard's night
+  // lighting. Raster photographs keep their original pixels and brightness.
+  const emissive = ["fill", "line", "circle"].includes(definition.type)
+    ? { [`${definition.type}-emissive-strength`]: 1 } : {};
+  map.addLayer({ ...definition, paint: { ...emissive, ...definition.paint } });
 }
 
 function addWorkspaceLayers(map, data) {
@@ -383,7 +391,14 @@ export default function ObjectMapCanvas({
   onRemoveTerrainFeature,
   onEditError,
   highlightedBuildingKey = null,
+  buildingLabels,
 }) {
+  const { resolvedTheme } = useTheme();
+  const [lightingMode, setLightingMode] = useState("app");
+  const effectiveLightPreset = lightingMode === "app" ? (resolvedTheme === "dark" ? "night" : "day") : lightingMode;
+  const lightPresetRef = useRef(effectiveLightPreset);
+  lightPresetRef.current = effectiveLightPreset;
+  const applyMapLightingRef = useRef(null);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const readyRef = useRef(false);
@@ -432,6 +447,9 @@ export default function ObjectMapCanvas({
     if (reportedEditErrorRef.current !== message) onEditError?.(message);
     reportedEditErrorRef.current = message;
   };
+
+  const buildingLabelsError = useObjectMapBuildingLabels({ map: mapRef.current, ready, selectedBuildings, buildingSelectionPoints,
+    buildingLabels, highlightedBuildingKey, workspace, editingTarget, drawingTarget });
 
   useEffect(() => {
     if (editingTarget !== "terrain" || (expectedTerrainRef.current && expectedTerrainRef.current !== JSON.stringify(terrain))) {
@@ -542,6 +560,7 @@ export default function ObjectMapCanvas({
         attributionControl: true,
         config: {
           basemap: {
+            lightPreset: lightPresetRef.current,
             colorBuildingHighlight: "#93c5fd",
             colorBuildingSelect: "#1f7aff",
             show3dObjects: !appliedGroundView,
@@ -552,7 +571,22 @@ export default function ObjectMapCanvas({
         },
       });
       appliedNavigationBoundsRef.current = JSON.stringify(navigationBoundsRef.current);
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), "bottom-right");
+      let appliedLightPreset = null;
+      const applyMapLighting = (force = false) => {
+        const preset = lightPresetRef.current;
+        if (!force && appliedLightPreset === preset) return;
+        try {
+          // Updating config keeps the camera, all sources and feature states;
+          // replacing the style would discard the operator's current context.
+          map.setConfigProperty("basemap", "lightPreset", preset);
+          appliedLightPreset = preset;
+        } catch {
+          // The basemap import can still be loading. Both import/load events
+          // retry the latest choice, including theme changes during startup.
+          appliedLightPreset = null;
+        }
+      };
+      applyMapLightingRef.current = applyMapLighting;
 
       const applyWorkspaceView = () => {
         const interaction = interactionsRef.current;
@@ -792,6 +826,7 @@ export default function ObjectMapCanvas({
       const ensureWorkspace = () => {
         if (cancelled || !map) return;
         try {
+          applyMapLighting(true);
           addWorkspaceLayers(map, dataRef.current);
           applyWorkspaceView();
           installStandardBuildingInteractions();
@@ -806,7 +841,7 @@ export default function ObjectMapCanvas({
         }
       };
       map.on("style.load", ensureWorkspace);
-      map.on("style.import.load", resetAndSyncStandardBuildingStates);
+      map.on("style.import.load", () => { applyMapLighting(true); resetAndSyncStandardBuildingStates(); });
       map.on("idle", syncStandardBuildingStates);
       map.on("error", event => {
         if (!readyRef.current && !cancelled) setError(event?.error || new Error("De kaart kon niet worden geladen."));
@@ -976,6 +1011,7 @@ export default function ObjectMapCanvas({
       syncStandardBuildingStatesRef.current = null;
       clearStandardBuildingHoverRef.current = null;
       applyWorkspaceViewRef.current = null;
+      applyMapLightingRef.current = null;
       standardBuildingStatesRef.current.clear();
       hoveredStandardBuildingsRef.current.clear();
       resizeObserver?.disconnect();
@@ -983,6 +1019,10 @@ export default function ObjectMapCanvas({
       mapRef.current = null;
     };
   }, [object?.id, object?.latitude, object?.longitude, object?.geocoding_status]);
+
+  useEffect(() => {
+    if (ready) applyMapLightingRef.current?.();
+  }, [effectiveLightPreset, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1037,8 +1077,9 @@ export default function ObjectMapCanvas({
       }} />
       {!ready && !error && <div className="absolute inset-0 flex items-center justify-center bg-background/75 text-sm text-muted-foreground backdrop-blur-sm"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Kaart laden...</div>}
       {error && <div className="absolute inset-x-4 top-4 rounded-xl border border-destructive/30 bg-background/95 p-4 text-sm text-destructive shadow-lg backdrop-blur-xl">{error.message}</div>}
+      {buildingLabelsError && <div role="status" className="pointer-events-none absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{buildingLabelsError}</div>}
       {editError && <div role="alert" className="absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{editError}</div>}
-      {ready && <div className="pointer-events-none absolute bottom-12 left-3 rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-xl">{trustedObjectCoordinatePair(object) ? "Kaart begrensd tot de omgeving van dit object" : "Nederland-overzicht · bevestig eerst het objectadres"}</div>}
+      {ready && <div className="pointer-events-none absolute bottom-8 left-3 max-w-[calc(100%-165px)] rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-xl">{trustedObjectCoordinatePair(object) ? "Kaart begrensd tot de omgeving van dit object" : "Nederland-overzicht · bevestig eerst het objectadres"}</div>}
       {drawingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <MousePointer2 className="h-3.5 w-3.5 text-violet-600" />
@@ -1059,11 +1100,20 @@ export default function ObjectMapCanvas({
       {editingTarget === "terrain" && !interactionDisabled && <div className="pointer-events-none absolute left-3 top-3 max-w-[calc(100%-110px)] rounded-xl border border-emerald-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
         Klik op de groene grens voor een punt · sleep het punt · rechtermuisknop: verwijderen
       </div>}
-      {ready && <div className="absolute right-3 top-3 grid grid-cols-2 gap-1 rounded-xl border bg-background/95 p-1 shadow-lg" role="group" aria-label="Kaart draaien en kantelen">
-        <Button type="button" size="icon" variant="ghost" aria-label="Kaart linksom draaien" title="Linksom draaien · rechtermuisknop + slepen werkt ook" onClick={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() - 15, duration: 250 })}><RotateCcw className="h-4 w-4" /></Button>
-        <Button type="button" size="icon" variant="ghost" aria-label="Kaart rechtsom draaien" title="Rechtsom draaien · rechtermuisknop + slepen werkt ook" onClick={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() + 15, duration: 250 })}><RotateCw className="h-4 w-4" /></Button>
-        <Button type="button" size="icon" variant="ghost" aria-label="3D-kijkhoek vergroten" title={groundEditing ? "Tijdens grens aanpassen en luchtfoto blijft de kaart vlak voor nauwkeurigheid" : "Meer 3D · rechtermuisknop + verticaal slepen"} disabled={groundEditing} onClick={() => mapRef.current?.easeTo({ pitch: Math.min(65, mapRef.current.getPitch() + 10), duration: 250 })}><ChevronUp className="h-4 w-4" /></Button>
-        <Button type="button" size="icon" variant="ghost" aria-label="3D-kijkhoek verkleinen" title={groundEditing ? "Tijdens grens aanpassen en luchtfoto blijft de kaart vlak voor nauwkeurigheid" : "Minder 3D · rechtermuisknop + verticaal slepen"} disabled={groundEditing} onClick={() => mapRef.current?.easeTo({ pitch: Math.max(0, mapRef.current.getPitch() - 10), duration: 250 })}><ChevronDown className="h-4 w-4" /></Button>
+      {ready && <div className="absolute bottom-8 right-3 z-10">
+        <ObjectMapControls ready={ready} groundEditing={groundEditing} lightingMode={lightingMode} effectiveLightPreset={effectiveLightPreset}
+          onLightingModeChange={setLightingMode}
+          onZoomIn={() => mapRef.current?.zoomIn({ duration: 250 })}
+          onZoomOut={() => mapRef.current?.zoomOut({ duration: 250 })}
+          onRotateLeft={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() - 15, duration: 250 })}
+          onRotateRight={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() + 15, duration: 250 })}
+          onPitchUp={() => mapRef.current?.easeTo({ pitch: Math.min(65, mapRef.current.getPitch() + 10), duration: 250 })}
+          onPitchDown={() => mapRef.current?.easeTo({ pitch: Math.max(0, mapRef.current.getPitch() - 10), duration: 250 })}
+          onResetNorth={() => mapRef.current?.easeTo({ bearing: 0, duration: 250 })}
+          onFitBounds={() => {
+            const bounds = featureCollectionBounds(selectedBuildings, selectedPointCollection, terrain, mapData.anchor);
+            if (bounds) mapRef.current?.fitBounds([[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]], { padding: 90, maxZoom: 18.5, duration: 500 });
+          }} />
       </div>}
       {pointMenu && editingTarget === "terrain" && <div role="menu" aria-label="Grenspunt" className="absolute z-20 rounded-xl border bg-background p-1 shadow-xl" style={{ left: pointMenu.x, top: pointMenu.y }} onKeyDown={event => {
         if (event.key === "Escape") { setPointMenu(null); containerRef.current?.focus(); }
@@ -1082,14 +1132,6 @@ export default function ObjectMapCanvas({
           containerRef.current?.focus();
         }}><Trash2 className="mr-2 h-4 w-4" /> Punt verwijderen</Button>
       </div>}
-      <Button type="button" size="sm" variant="secondary" className="absolute bottom-3 left-3 bg-background/90 shadow-md backdrop-blur-xl" onClick={() => {
-        const map = mapRef.current;
-        const bounds = featureCollectionBounds(selectedBuildings, selectedPointCollection, terrain, mapData.anchor);
-        if (!map || !bounds) return;
-        map.fitBounds([[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]], { padding: 70, maxZoom: 18.5, duration: 500 });
-      }} disabled={!ready}>
-        <LocateFixed className="h-4 w-4" /> Passend tonen
-      </Button>
     </div>
   );
 }

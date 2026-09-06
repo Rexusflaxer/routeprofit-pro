@@ -2,15 +2,18 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mapboxState = vi.hoisted(() => ({ instances: [] }));
+const mapboxState = vi.hoisted(() => ({ instances: [], markers: [] }));
+const themeState = vi.hoisted(() => ({ theme: "system", resolvedTheme: "light" }));
 
 vi.mock("@/components/navigation/mapboxConfig", () => ({ MAPBOX_PUBLIC_TOKEN: "test-mapbox-token" }));
+vi.mock("next-themes", () => ({ useTheme: () => themeState }));
 vi.mock("mapbox-gl", () => {
   class FakeMap {
     constructor(options) {
       this.options = options;
       this.pitch = options.pitch;
       this.bearing = options.bearing;
+      this.zoom = options.zoom;
       this.handlers = new globalThis.Map();
       this.interactions = new globalThis.Map();
       this.sources = new globalThis.Map();
@@ -44,7 +47,7 @@ vi.mock("mapbox-gl", () => {
       return this.interactions.get(id)?.handler(event);
     }
 
-    addControl() {}
+    addControl = vi.fn();
     addInteraction(id, interaction) { this.interactions.set(id, interaction); return this; }
     addSource(id, definition) { this.sources.set(id, { ...definition, setData: vi.fn() }); }
     getSource(id) { return this.sources.get(id); }
@@ -59,20 +62,31 @@ vi.mock("mapbox-gl", () => {
     queryRenderedFeatures = vi.fn(() => this.renderedFeatures);
     setFeatureState = vi.fn();
     getCanvas() { return this.canvas; }
-    fitBounds() {}
+    getCanvasContainer() { return this.removed ? undefined : this.options.container; }
+    fitBounds = vi.fn();
     easeTo = vi.fn(options => { if (options.pitch !== undefined) this.pitch = options.pitch; if (options.bearing !== undefined) this.bearing = options.bearing; });
     getPitch() { return this.pitch; }
     getBearing() { return this.bearing; }
     project(coordinate) { return { x: (coordinate[0] - 4.48) * 100_000, y: (coordinate[1] - 51.92) * 100_000 }; }
-    getZoom() { return 17; }
+    getZoom() { return this.zoom; }
+    zoomIn = vi.fn(() => { this.zoom += 1; });
+    zoomOut = vi.fn(() => { this.zoom -= 1; });
     resize() {}
-    remove = vi.fn();
+    remove = vi.fn(() => { this.removed = true; });
+  }
+
+  class FakeMarker {
+    constructor(options) { this.options = options; mapboxState.markers.push(this); }
+    setLngLat = vi.fn(coordinate => { this.coordinate = coordinate; return this; });
+    addTo(map) { map.options.container.append(this.options.element); return this; }
+    remove = vi.fn(() => this.options.element.remove());
   }
 
   return {
     default: {
       accessToken: "",
       Map: FakeMap,
+      Marker: FakeMarker,
       NavigationControl: class NavigationControl {},
     },
   };
@@ -118,9 +132,20 @@ function renderCanvas(overrides = {}) {
   return { ...render(<ObjectMapCanvas {...props} />), props };
 }
 
+const lightPresetCalls = map => map.setConfigProperty.mock.calls.filter(([, property]) => property === "lightPreset");
+
+async function chooseMapLighting(name) {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Kaartverlichting" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name, exact: true }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Kaartverlichting" })).toHaveAttribute("data-state", "closed"));
+}
+
 describe("ObjectMapCanvas", () => {
   beforeEach(() => {
     mapboxState.instances.length = 0;
+    mapboxState.markers.length = 0;
+    themeState.theme = "system";
+    themeState.resolvedTheme = "light";
   });
 
   it("biedt draaien, kantelen en standaard muisbesturing zonder de kaart opnieuw op te bouwen", async () => {
@@ -131,6 +156,12 @@ describe("ObjectMapCanvas", () => {
     expect(map.options).toMatchObject({ dragRotate: true, touchZoomRotate: true, pitchWithRotate: true, maxPitch: 65 });
     expect(map.dragRotate.disable).not.toHaveBeenCalled();
     expect(map.touchZoomRotate.disableRotation).not.toHaveBeenCalled();
+    expect(map.addControl).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Kaartbediening" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Inzoomen" }));
+    expect(map.zoomIn).toHaveBeenCalledExactlyOnceWith({ duration: 250 });
+    fireEvent.click(screen.getByRole("button", { name: "Uitzoomen" }));
+    expect(map.zoomOut).toHaveBeenCalledExactlyOnceWith({ duration: 250 });
     fireEvent.click(screen.getByRole("button", { name: "Kaart linksom draaien" }));
     expect(map.easeTo).toHaveBeenLastCalledWith({ bearing: -27, duration: 250 });
     fireEvent.click(screen.getByRole("button", { name: "Kaart rechtsom draaien" }));
@@ -139,6 +170,11 @@ describe("ObjectMapCanvas", () => {
     expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 52, duration: 250 });
     fireEvent.click(screen.getByRole("button", { name: "3D-kijkhoek verkleinen" }));
     expect(map.easeTo).toHaveBeenLastCalledWith({ pitch: 42, duration: 250 });
+    fireEvent.click(screen.getByRole("button", { name: "Noord boven" }));
+    expect(map.easeTo).toHaveBeenLastCalledWith({ bearing: 0, duration: 250 });
+    expect(map.getPitch()).toBe(42);
+    fireEvent.click(screen.getByRole("button", { name: "Passend tonen" }));
+    expect(map.fitBounds).toHaveBeenCalledOnce();
     rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" editingTarget="terrain" />);
     expect(screen.getByRole("button", { name: "3D-kijkhoek vergroten" })).toBeDisabled();
     expect(map.setMaxPitch).toHaveBeenLastCalledWith(0);
@@ -146,6 +182,134 @@ describe("ObjectMapCanvas", () => {
     rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
     expect(map.setMaxPitch).toHaveBeenLastCalledWith(65);
     expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it.each([["light", "day"], ["dark", "night"]])("volgt het opgeloste app-/systeemthema %s bij de eerste kaartopbouw", async (resolvedTheme, preset) => {
+    themeState.theme = "system";
+    themeState.resolvedTheme = resolvedTheme;
+    renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    expect(map.options.config.basemap.lightPreset).toBe(preset);
+    act(() => map.emit("style.load"));
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", preset]);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("past het app-thema tijdens laden toe zodra de stijl beschikbaar komt", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    expect(map.options.config.basemap.lightPreset).toBe("day");
+    themeState.resolvedTheme = "dark";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    act(() => map.emit("style.load"));
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it("kan dag of nacht kiezen los van het app-thema en daarna het app-thema weer volgen", async () => {
+    themeState.resolvedTheme = "dark";
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    await chooseMapLighting("Dag");
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
+    const manualCalls = lightPresetCalls(map).length;
+    themeState.resolvedTheme = "light";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    themeState.resolvedTheme = "dark";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(lightPresetCalls(map)).toHaveLength(manualCalls);
+    await chooseMapLighting("App volgen");
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    themeState.resolvedTheme = "light";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
+    await chooseMapLighting("Nacht");
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
+  });
+
+  it("herstelt de gekozen verlichting bij een stijl- of importreload zonder idle-herhalingen", async () => {
+    renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    await chooseMapLighting("Nacht");
+    map.setConfigProperty.mockClear();
+    act(() => map.emit("style.load"));
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    map.setConfigProperty.mockClear();
+    act(() => map.emit("style.import.load", { importId: "basemap" }));
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    map.setConfigProperty.mockClear();
+    act(() => { map.emit("idle"); map.emit("idle"); map.emit("idle"); });
+    expect(lightPresetCalls(map)).toHaveLength(0);
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.remove).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it("houdt camera en selecties intact bij themawisselen in dezelfde kaart en luchtfoto", async () => {
+    const onTerrainGeometryChange = vi.fn();
+    const terrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-1" }] };
+    const rendered = renderCanvas({ terrain, onTerrainGeometryChange });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    fireEvent.click(screen.getByRole("button", { name: "Kaart rechtsom draaien" }));
+    const bearing = map.getBearing();
+    map.easeTo.mockClear();
+    themeState.resolvedTheme = "dark";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="satellite" />);
+    expect(map.getPitch()).toBe(0);
+    expect(map.getBearing()).toBe(bearing);
+    map.easeTo.mockClear();
+    themeState.resolvedTheme = "light";
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="satellite" />);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(map.getPitch()).toBe(0);
+    expect(map.getBearing()).toBe(bearing);
+    expect(map.getSource("loq-object-map-terrain").setData.mock.lastCall[0].features[0].geometry).toEqual(candidate.geometry);
+    expect(map.getSource("loq-object-map-selected").setData.mock.lastCall[0].features[0].id).toBe("bag-1");
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(onTerrainGeometryChange).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(map.getPitch()).toBe(42);
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it("behoudt een benoemd gebouwlabel bij verlichting wijzigen en toont het weer na de terreinwerkruimte", async () => {
+    const rendered = renderCanvas({ buildingLabels: { "bag:bag-1": "Receptie" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const label = await screen.findByText("Receptie");
+    expect(label.closest("[data-building-key]")).toHaveAttribute("data-building-key", "bag:bag-1");
+    await chooseMapLighting("Nacht");
+    expect(screen.getByText("Receptie")).toBe(label);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" />);
+    expect(screen.queryByText("Receptie")).not.toBeInTheDocument();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect((await screen.findByText("Receptie")).closest("[data-building-key]")).toHaveAttribute("data-building-key", "bag:bag-1");
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
   });
 
   it("kleurt alleen het werkelijke terrein groen en laat bronpercelen transparant", async () => {

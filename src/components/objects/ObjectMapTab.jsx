@@ -795,6 +795,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             onToggleParcel={toggleParcel}
             onRemoveTerrainFeature={index => { if (!readOnly && !editingTarget) updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) })); }}
             buildingSelectionPoints={form.building_selection_mode === "manual" ? form.building_selection_points : []}
+            buildingLabels={form.building_labels || {}}
             onToggleBuildingPoint={toggleBuildingPoint}
             candidates={candidates}
             selectedBagFeatureIds={displayedBagFeatureIds}
