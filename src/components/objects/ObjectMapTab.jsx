@@ -514,6 +514,13 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     onRegisterNavigationGuard,
   });
 
+  const notifyBuildingMatchUnavailable = useCallback(() => {
+    toast({
+      title: "Dit 3D-gebouw heeft geen eenduidige BAG-koppeling",
+      description: "Zoom iets verder in en probeer opnieuw. Ontbreekt het pand echt in BAG, gebruik dan alleen daarvoor een handmatige contour.",
+    });
+  }, [toast]);
+
   const toggleCandidate = sourceId => {
     if (!sourceId || readOnly) return;
     updateWithHistory(current => {
@@ -669,7 +676,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-card/35 p-2 backdrop-blur-xl">
             {workspace === "buildings" ? <>
               <Button type="button" size="sm" variant={!drawingTarget && editingTarget !== "building" ? "secondary" : "ghost"} onClick={() => { cancelDrawing(); setEditingTarget(null); }} disabled={readOnly || drawingPoints.length > 0}><MousePointer2 className="h-4 w-4" /> Selecteren</Button>
-              <Button type="button" size="sm" variant={drawingTarget === "building" ? "secondary" : "ghost"} onClick={() => startDrawing("building")} disabled={readOnly || drawingPoints.length > 0}><PencilRuler className="h-4 w-4" /> Gebouwcontour tekenen</Button>
+              <Button type="button" size="sm" variant={drawingTarget === "building" ? "secondary" : "ghost"} onClick={() => startDrawing("building")} disabled={readOnly || drawingPoints.length > 0} aria-label="Gebouwcontour tekenen"><PencilRuler className="h-4 w-4" /> Contour tekenen (uitzondering)</Button>
               <Button type="button" size="sm" variant={editingTarget === "building" ? "secondary" : "ghost"} onClick={() => { cancelDrawing(); setEditingTarget(value => value === "building" ? null : "building"); }} disabled={readOnly || drawingPoints.length > 0 || !form.manual_building_geojson.features.length}><MousePointer2 className="h-4 w-4" /> Getekende contour bewerken</Button>
             </> : <>
               <Button type="button" size="sm" variant={drawingTarget === "terrain" ? "secondary" : "ghost"} onClick={() => startDrawing("terrain")} disabled={readOnly || drawingPoints.length > 0}><PencilRuler className="h-4 w-4" /> Terreindeel tekenen</Button>
@@ -700,8 +707,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             onVertexDragStart={startVertexDrag}
             onMoveVertex={moveVertex}
             onVertexDragEnd={finishVertexDrag}
+            onBuildingMatchUnavailable={notifyBuildingMatchUnavailable}
           />
-          <p className="text-[11px] text-muted-foreground">Gebouwcontouren: BAG/Kadaster via PDOK · kaartondergrond: Mapbox. Opgeslagen geometrie gebruikt lengtegraad, breedtegraad (WGS84).</p>
+          <p className="text-[11px] text-muted-foreground">Selectie en kleur: echte Mapbox 3D-gebouwen · duurzame koppeling: BAG/Kadaster via PDOK. Opgeslagen geometrie gebruikt lengtegraad, breedtegraad (WGS84).</p>
         </div>
 
         <aside className="space-y-3">

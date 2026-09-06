@@ -1,6 +1,10 @@
 import { safeCoordinateNumber } from "@/lib/coordinates";
+import { intersection as intersectPolygons } from "martinez-polygon-clipping";
 
 const EARTH_RADIUS_METERS = 6378137;
+const MIN_BUILDING_MATCH_AREA_SQUARE_METERS = 0.25;
+const MIN_BUILDING_MATCH_COVERAGE = 0.1;
+const COMPARABLE_BUILDING_MATCH_RATIO = 0.5;
 
 export const emptyFeatureCollection = () => ({ type: "FeatureCollection", features: [] });
 
@@ -153,6 +157,148 @@ function featureDistanceSquared(feature, coordinate) {
     }
   }));
   return minimum;
+}
+
+function featureBounds(feature) {
+  const bounds = { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity };
+  walkGeometryCoordinates(feature?.geometry, coordinate => {
+    const longitude = Number(coordinate?.[0]);
+    const latitude = Number(coordinate?.[1]);
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
+    bounds.minLng = Math.min(bounds.minLng, longitude);
+    bounds.minLat = Math.min(bounds.minLat, latitude);
+    bounds.maxLng = Math.max(bounds.maxLng, longitude);
+    bounds.maxLat = Math.max(bounds.maxLat, latitude);
+  });
+  return Number.isFinite(bounds.minLng) ? bounds : null;
+}
+
+function boundsOverlapRatio(left, right) {
+  if (!left || !right) return 0;
+  const averageLatitude = (left.minLat + left.maxLat + right.minLat + right.maxLat) / 4;
+  const longitudeScale = Math.max(0.1, Math.cos(averageLatitude * Math.PI / 180));
+  const overlapWidth = Math.max(0, Math.min(left.maxLng, right.maxLng) - Math.max(left.minLng, right.minLng)) * longitudeScale;
+  const overlapHeight = Math.max(0, Math.min(left.maxLat, right.maxLat) - Math.max(left.minLat, right.minLat));
+  const leftArea = Math.max(0, left.maxLng - left.minLng) * longitudeScale * Math.max(0, left.maxLat - left.minLat);
+  const rightArea = Math.max(0, right.maxLng - right.minLng) * longitudeScale * Math.max(0, right.maxLat - right.minLat);
+  const comparisonArea = Math.min(leftArea, rightArea);
+  if (comparisonArea <= 0) return 0;
+  return (overlapWidth * overlapHeight) / comparisonArea;
+}
+
+function asPolygonFeature(value) {
+  const feature = value?.type === "Feature"
+    ? value
+    : value?.geometry
+      ? { type: "Feature", properties: value.properties || {}, geometry: value.geometry }
+      : { type: "Feature", properties: {}, geometry: value };
+  return ["Polygon", "MultiPolygon"].includes(feature?.geometry?.type) ? feature : null;
+}
+
+function polygonRings(feature) {
+  if (feature?.geometry?.type === "Polygon") return feature.geometry.coordinates || [];
+  if (feature?.geometry?.type === "MultiPolygon") return (feature.geometry.coordinates || []).flatMap(polygon => polygon || []);
+  return [];
+}
+
+function coordinateOnRingBoundary(ring, coordinate) {
+  if (!Array.isArray(ring) || !Array.isArray(coordinate)) return false;
+  const epsilon = 1e-11;
+  for (let index = 1; index < ring.length; index += 1) {
+    const start = ring[index - 1];
+    const end = ring[index];
+    const deltaX = Number(end?.[0]) - Number(start?.[0]);
+    const deltaY = Number(end?.[1]) - Number(start?.[1]);
+    const offsetX = Number(coordinate[0]) - Number(start?.[0]);
+    const offsetY = Number(coordinate[1]) - Number(start?.[1]);
+    const cross = deltaX * offsetY - deltaY * offsetX;
+    if (Math.abs(cross) > epsilon) continue;
+    if (Number(coordinate[0]) >= Math.min(start[0], end[0]) - epsilon
+      && Number(coordinate[0]) <= Math.max(start[0], end[0]) + epsilon
+      && Number(coordinate[1]) >= Math.min(start[1], end[1]) - epsilon
+      && Number(coordinate[1]) <= Math.max(start[1], end[1]) + epsilon) return true;
+  }
+  return false;
+}
+
+function featureStrictlyContainsCoordinate(feature, coordinate) {
+  return featureContainsCoordinate(feature, coordinate)
+    && !polygonRings(feature).some(ring => coordinateOnRingBoundary(ring, coordinate));
+}
+
+function geometryAreaSquareMeters(geometry) {
+  if (geometry?.type === "Polygon") return polygonAreaSquareMeters(geometry.coordinates);
+  if (geometry?.type === "MultiPolygon") {
+    return (geometry.coordinates || []).reduce((total, polygon) => total + polygonAreaSquareMeters(polygon), 0);
+  }
+  return 0;
+}
+
+function featureIntersectionMetrics(left, right, leftBounds, rightBounds) {
+  if (boundsOverlapRatio(leftBounds, rightBounds) <= 0) return null;
+  let coordinates;
+  try {
+    coordinates = intersectPolygons(left.geometry.coordinates, right.geometry.coordinates);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(coordinates) || !coordinates.length) return null;
+  const intersectionArea = geometryAreaSquareMeters({ type: "MultiPolygon", coordinates });
+  const leftArea = geometryAreaSquareMeters(left.geometry);
+  const rightArea = geometryAreaSquareMeters(right.geometry);
+  const comparisonArea = Math.min(leftArea, rightArea);
+  if (comparisonArea <= 0 || intersectionArea < MIN_BUILDING_MATCH_AREA_SQUARE_METERS) return null;
+  const coverage = intersectionArea / comparisonArea;
+  return coverage >= MIN_BUILDING_MATCH_COVERAGE ? { coverage } : null;
+}
+
+/**
+ * Resolves a temporary Mapbox Standard building to one stable BAG candidate.
+ * Mapbox identifiers and geometry deliberately never leave the browser; the
+ * returned value is the existing PDOK feature whose id can be persisted.
+ */
+export function matchMapboxBuildingToBagCandidate(mapboxBuilding, candidates, clickCoordinate = null) {
+  const building = asPolygonFeature(mapboxBuilding);
+  const buildingBounds = featureBounds(building);
+  if (!building || !buildingBounds) return null;
+
+  const click = Array.isArray(clickCoordinate)
+    && clickCoordinate.length >= 2
+    && clickCoordinate.slice(0, 2).map(Number).every(Number.isFinite)
+    ? clickCoordinate.slice(0, 2).map(Number)
+    : null;
+
+  const matches = (candidates || []).map(candidate => {
+    const id = featureSourceId(candidate);
+    const candidateFeature = asPolygonFeature(candidate);
+    const candidateBounds = featureBounds(candidateFeature);
+    if (!id || !candidateFeature || !candidateBounds) return null;
+
+    const intersection = featureIntersectionMetrics(building, candidateFeature, buildingBounds, candidateBounds);
+    const clickInside = Boolean(click && featureStrictlyContainsCoordinate(candidateFeature, click));
+    if (!intersection) return null;
+
+    return {
+      candidate,
+      id,
+      clickInside,
+      coverage: intersection.coverage,
+    };
+  }).filter(Boolean);
+
+  if (matches.length === 1) return matches[0].candidate;
+  if (matches.length === 0) return null;
+
+  const strongestCoverage = Math.max(...matches.map(match => match.coverage));
+  const comparableMatches = matches.filter(match => match.coverage >= strongestCoverage * COMPARABLE_BUILDING_MATCH_RATIO);
+  if (comparableMatches.length === 1) return comparableMatches[0].candidate;
+
+  // Mapbox and BAG can legitimately split the same visible structure in
+  // different ways. Never persist a guess based on bounding boxes: only an
+  // explicit click strictly inside one comparably overlapping BAG contour
+  // resolves this.
+  const clickedMatches = comparableMatches.filter(match => match.clickInside);
+  return clickedMatches.length === 1 ? clickedMatches[0].candidate : null;
 }
 
 export function suggestAutomaticBuildingIds(candidates, anchor) {

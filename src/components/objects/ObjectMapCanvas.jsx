@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, LocateFixed, MousePointer2 } from "lucide-react";
+import { Building2, Loader2, LocateFixed, MousePointer2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
@@ -7,6 +7,7 @@ import {
   editableVertices,
   featureCollectionBounds,
   featureSourceId,
+  matchMapboxBuildingToBagCandidate,
   normalizeFeatureCollection,
 } from "./objectMapGeometry";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -23,7 +24,6 @@ const SOURCE = {
 const LAYER = {
   candidatesFill: "loq-object-map-candidates-fill",
   candidatesLine: "loq-object-map-candidates-line",
-  candidatesHover: "loq-object-map-candidates-hover",
   selectedFill: "loq-object-map-selected-fill",
   selectedLine: "loq-object-map-selected-line",
   terrainFill: "loq-object-map-terrain-fill",
@@ -33,6 +33,13 @@ const LAYER = {
   draftPoints: "loq-object-map-draft-points",
   vertices: "loq-object-map-vertices-layer",
   anchor: "loq-object-map-anchor-layer",
+};
+
+const STANDARD_BUILDINGS_TARGET = { featuresetId: "buildings", importId: "basemap" };
+const STANDARD_BUILDING_INTERACTION = {
+  click: "loq-object-map-standard-building-click",
+  mouseenter: "loq-object-map-standard-building-mouseenter",
+  mouseleave: "loq-object-map-standard-building-mouseleave",
 };
 
 function featureCollection(features = []) {
@@ -79,8 +86,39 @@ function candidateCollection(candidates, selectedIds) {
   }));
 }
 
+function buildingMatchCandidates(candidates, selectedBuildings, selectedIds) {
+  const selected = new Set(selectedIds || []);
+  const byId = new globalThis.Map();
+  (candidates || []).forEach(feature => {
+    const id = featureSourceId(feature);
+    if (id) byId.set(id, feature);
+  });
+  normalizeFeatureCollection(selectedBuildings).features.forEach(feature => {
+    const id = featureSourceId(feature);
+    if (id && selected.has(id) && !byId.has(id)) byId.set(id, feature);
+  });
+  return [...byId.values()];
+}
+
 function sourceData(map, id, data) {
   map.getSource(id)?.setData(data);
+}
+
+function mapboxBuildingFeatureKey(feature) {
+  const id = feature?.id;
+  const namespace = String(feature?.namespace || "");
+  if (id !== undefined && id !== null && String(id) !== "") return `${namespace}:${String(id)}`;
+  return `${namespace}:geometry:${JSON.stringify(feature?.geometry || null)}`;
+}
+
+function setStandardBuildingState(map, feature, state) {
+  if (!feature || typeof map?.setFeatureState !== "function") return false;
+  try {
+    map.setFeatureState(feature, state);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function featureEventHandled(event, handledEvents) {
@@ -116,29 +154,23 @@ function addWorkspaceLayers(map, data) {
     type: "fill",
     source: SOURCE.candidates,
     paint: {
-      "fill-color": ["case", ["==", ["get", "loq_selected"], true], "#1f7aff", ["==", ["get", "loq_conflict"], true], "#f59e0b", "#64748b"],
-      "fill-opacity": ["case", ["==", ["get", "loq_selected"], true], 0.48, ["==", ["get", "loq_conflict"], true], 0.28, 0.12],
+      "fill-color": "#f59e0b",
+      "fill-opacity": ["case", ["==", ["get", "loq_conflict"], true], 0.08, 0],
     },
-  });
-  addLayer(map, {
-    id: LAYER.candidatesHover,
-    type: "line",
-    source: SOURCE.candidates,
-    filter: ["==", ["id"], ""],
-    paint: { "line-color": "#ffffff", "line-width": 4, "line-opacity": 0.95 },
   });
   addLayer(map, {
     id: LAYER.candidatesLine,
     type: "line",
     source: SOURCE.candidates,
+    filter: ["==", ["get", "loq_conflict"], true],
     paint: {
-      "line-color": ["case", ["==", ["get", "loq_selected"], true], "#0f5fd7", ["==", ["get", "loq_conflict"], true], "#d97706", "#64748b"],
-      "line-width": ["case", ["==", ["get", "loq_selected"], true], 2.6, 1.3],
-      "line-opacity": 0.92,
+      "line-color": "#d97706",
+      "line-width": 1.5,
+      "line-opacity": 0.82,
     },
   });
-  addLayer(map, { id: LAYER.selectedFill, type: "fill", source: SOURCE.selected, paint: { "fill-color": ["case", ["==", ["get", "source"], "manual"], "#8b5cf6", "#1f7aff"], "fill-opacity": 0.34 } });
-  addLayer(map, { id: LAYER.selectedLine, type: "line", source: SOURCE.selected, paint: { "line-color": ["case", ["==", ["get", "source"], "manual"], "#7c3aed", "#0759d3"], "line-width": 3 } });
+  addLayer(map, { id: LAYER.selectedFill, type: "fill", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.34 } });
+  addLayer(map, { id: LAYER.selectedLine, type: "line", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "line-color": "#7c3aed", "line-width": 3 } });
   addLayer(map, { id: LAYER.terrainFill, type: "fill", source: SOURCE.terrain, paint: { "fill-color": "#10b981", "fill-opacity": 0.18 } });
   addLayer(map, { id: LAYER.terrainLine, type: "line", source: SOURCE.terrain, paint: { "line-color": "#059669", "line-width": 3, "line-dasharray": [2, 1] } });
   addLayer(map, { id: LAYER.draftFill, type: "fill", source: SOURCE.draft, filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.18 } });
@@ -171,6 +203,7 @@ export default function ObjectMapCanvas({
   onVertexDragStart,
   onMoveVertex,
   onVertexDragEnd,
+  onBuildingMatchUnavailable,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -180,14 +213,21 @@ export default function ObjectMapCanvas({
     disabled: true,
     drawingTarget: null,
     editingTarget: null,
+    candidates: [],
+    selectedBagFeatureIds: new Set(),
     onToggleCandidate: null,
     onAddDrawingPoint: null,
     onVertexDragStart: null,
     onMoveVertex: null,
     onVertexDragEnd: null,
+    onBuildingMatchUnavailable: null,
   });
   const dragRef = useRef(null);
   const handledEventsRef = useRef(new WeakSet());
+  const standardBuildingStatesRef = useRef(new globalThis.Map());
+  const hoveredStandardBuildingsRef = useRef(new globalThis.Map());
+  const syncStandardBuildingStatesRef = useRef(null);
+  const clearStandardBuildingHoverRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
 
@@ -203,16 +243,23 @@ export default function ObjectMapCanvas({
         : featureCollection(),
     anchor: anchorCollection(object),
   }), [candidates, drawingPoints, editingTarget, manualBuildings, object, selectedBagFeatureIds, selectedBuildings, terrain]);
+  const matchCandidates = useMemo(
+    () => buildingMatchCandidates(candidates, selectedBuildings, selectedBagFeatureIds),
+    [candidates, selectedBagFeatureIds, selectedBuildings],
+  );
   dataRef.current = mapData;
   interactionsRef.current = {
     disabled,
     drawingTarget,
     editingTarget,
+    candidates: matchCandidates,
+    selectedBagFeatureIds: new Set(selectedBagFeatureIds || []),
     onToggleCandidate,
     onAddDrawingPoint,
     onVertexDragStart,
     onMoveVertex,
     onVertexDragEnd,
+    onBuildingMatchUnavailable,
   };
 
   useEffect(() => {
@@ -226,6 +273,7 @@ export default function ObjectMapCanvas({
     let cancelled = false;
     let map;
     let resizeObserver;
+    let standardBuildingInteractionsInstalled = false;
     import("mapbox-gl").then(module => {
       if (cancelled || !containerRef.current) return;
       const mapboxgl = module.default;
@@ -240,15 +288,132 @@ export default function ObjectMapCanvas({
         bearing: coordinates ? -12 : 0,
         minZoom: 5,
         attributionControl: true,
+        config: {
+          basemap: {
+            colorBuildingHighlight: "#93c5fd",
+            colorBuildingSelect: "#1f7aff",
+            show3dBuildings: true,
+            show3dFacades: true,
+            show3dLandmarks: false,
+          },
+        },
       });
       map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), "bottom-right");
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
 
+      const rememberStandardBuilding = (feature, bagFeatureId, selected) => {
+        const key = mapboxBuildingFeatureKey(feature);
+        standardBuildingStatesRef.current.set(key, { feature, bagFeatureId, selected });
+        return key;
+      };
+      const clearStandardBuildingHover = () => {
+        hoveredStandardBuildingsRef.current.forEach(feature => setStandardBuildingState(map, feature, { highlight: false }));
+        hoveredStandardBuildingsRef.current.clear();
+        if (!dragRef.current) map.getCanvas().style.cursor = "";
+      };
+      clearStandardBuildingHoverRef.current = clearStandardBuildingHover;
+
+      const syncStandardBuildingStates = () => {
+        if (cancelled || !map || typeof map.queryRenderedFeatures !== "function") return;
+        const interaction = interactionsRef.current;
+        const selectedIds = interaction.selectedBagFeatureIds || new Set();
+        const selectedCandidates = interaction.candidates.filter(candidate => selectedIds.has(featureSourceId(candidate)));
+
+        standardBuildingStatesRef.current.forEach(record => {
+          const selected = selectedIds.has(record.bagFeatureId);
+          if (record.selected === selected) return;
+          if (setStandardBuildingState(map, record.feature, { select: selected })) record.selected = selected;
+        });
+
+        let visibleBuildings = [];
+        try {
+          visibleBuildings = map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || [];
+        } catch {
+          return;
+        }
+        visibleBuildings.forEach(feature => {
+          // Prefer an already selected stable BAG contour while restoring
+          // visual state. This prevents an overlapping unselected candidate
+          // from making a saved selection appear uncoloured after panning.
+          const bagCandidate = matchMapboxBuildingToBagCandidate(feature, selectedCandidates)
+            || matchMapboxBuildingToBagCandidate(feature, interaction.candidates);
+          const bagFeatureId = featureSourceId(bagCandidate);
+          if (!bagFeatureId) return;
+          const selected = selectedIds.has(bagFeatureId);
+          const key = mapboxBuildingFeatureKey(feature);
+          const previous = standardBuildingStatesRef.current.get(key);
+          if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
+          rememberStandardBuilding(feature, bagFeatureId, selected);
+        });
+      };
+      const resetAndSyncStandardBuildingStates = () => {
+        standardBuildingStatesRef.current.clear();
+        hoveredStandardBuildingsRef.current.clear();
+        syncStandardBuildingStates();
+      };
+      syncStandardBuildingStatesRef.current = syncStandardBuildingStates;
+
+      const installStandardBuildingInteractions = () => {
+        if (standardBuildingInteractionsInstalled || typeof map.addInteraction !== "function") return;
+        map.addInteraction(STANDARD_BUILDING_INTERACTION.mouseenter, {
+          type: "mouseenter",
+          target: STANDARD_BUILDINGS_TARGET,
+          handler: event => {
+            const interaction = interactionsRef.current;
+            if (interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
+            const key = mapboxBuildingFeatureKey(event.feature);
+            hoveredStandardBuildingsRef.current.set(key, event.feature);
+            setStandardBuildingState(map, event.feature, { highlight: true });
+            map.getCanvas().style.cursor = "pointer";
+            return true;
+          },
+        });
+        map.addInteraction(STANDARD_BUILDING_INTERACTION.mouseleave, {
+          type: "mouseleave",
+          target: STANDARD_BUILDINGS_TARGET,
+          handler: event => {
+            if (event.feature) {
+              setStandardBuildingState(map, event.feature, { highlight: false });
+              hoveredStandardBuildingsRef.current.delete(mapboxBuildingFeatureKey(event.feature));
+            }
+            if (!dragRef.current) map.getCanvas().style.cursor = "";
+            return false;
+          },
+        });
+        map.addInteraction(STANDARD_BUILDING_INTERACTION.click, {
+          type: "click",
+          target: STANDARD_BUILDINGS_TARGET,
+          handler: event => {
+            const interaction = interactionsRef.current;
+            if (interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
+            const clickCoordinate = event.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null;
+            const bagCandidate = matchMapboxBuildingToBagCandidate(event.feature, interaction.candidates, clickCoordinate);
+            const bagFeatureId = featureSourceId(bagCandidate);
+            if (!bagFeatureId) {
+              interaction.onBuildingMatchUnavailable?.();
+              return true;
+            }
+            const selectedIds = new Set(interaction.selectedBagFeatureIds || []);
+            const selected = !selectedIds.has(bagFeatureId);
+            if (selected) selectedIds.add(bagFeatureId);
+            else selectedIds.delete(bagFeatureId);
+            interaction.selectedBagFeatureIds = selectedIds;
+            setStandardBuildingState(map, event.feature, { select: selected, highlight: false });
+            rememberStandardBuilding(event.feature, bagFeatureId, selected);
+            interaction.onToggleCandidate?.(bagFeatureId);
+            return true;
+          },
+        });
+        standardBuildingInteractionsInstalled = true;
+      };
+
       const ensureWorkspace = () => {
         if (cancelled || !map) return;
         try {
           addWorkspaceLayers(map, dataRef.current);
+          installStandardBuildingInteractions();
+          resetAndSyncStandardBuildingStates();
           readyRef.current = true;
           setError(null);
           setReady(true);
@@ -259,12 +424,15 @@ export default function ObjectMapCanvas({
         }
       };
       map.on("style.load", ensureWorkspace);
+      map.on("style.import.load", resetAndSyncStandardBuildingStates);
+      map.on("idle", syncStandardBuildingStates);
       map.on("error", event => {
         if (!readyRef.current && !cancelled) setError(event?.error || new Error("De kaart kon niet worden geladen."));
       });
 
       const toggleFeature = event => {
         const interaction = interactionsRef.current;
+        if (standardBuildingInteractionsInstalled) return;
         if (featureEventHandled(event, handledEventsRef.current)) return;
         if (interaction.disabled || interaction.drawingTarget || interaction.editingTarget) return;
         const feature = event.features?.[0];
@@ -274,17 +442,11 @@ export default function ObjectMapCanvas({
         interaction.onToggleCandidate?.(featureSourceId(feature));
       };
       map.on("click", LAYER.candidatesFill, toggleFeature);
-      map.on("click", LAYER.selectedFill, toggleFeature);
-      [LAYER.candidatesFill, LAYER.selectedFill].forEach(layerId => {
-        map.on("mousemove", layerId, event => {
-          if (!interactionsRef.current.disabled && !interactionsRef.current.drawingTarget) map.getCanvas().style.cursor = "pointer";
-          const id = event.features?.[0]?.id;
-          if (map.getLayer(LAYER.candidatesHover)) map.setFilter(LAYER.candidatesHover, ["==", ["id"], id ?? ""]);
-        });
-        map.on("mouseleave", layerId, () => {
-          if (!dragRef.current) map.getCanvas().style.cursor = "";
-          if (map.getLayer(LAYER.candidatesHover)) map.setFilter(LAYER.candidatesHover, ["==", ["id"], ""]);
-        });
+      map.on("mousemove", LAYER.candidatesFill, () => {
+        if (!standardBuildingInteractionsInstalled && !interactionsRef.current.disabled && !interactionsRef.current.drawingTarget) map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", LAYER.candidatesFill, () => {
+        if (!standardBuildingInteractionsInstalled && !dragRef.current) map.getCanvas().style.cursor = "";
       });
 
       map.on("click", event => {
@@ -340,6 +502,10 @@ export default function ObjectMapCanvas({
       cancelled = true;
       readyRef.current = false;
       setReady(false);
+      syncStandardBuildingStatesRef.current = null;
+      clearStandardBuildingHoverRef.current = null;
+      standardBuildingStatesRef.current.clear();
+      hoveredStandardBuildingsRef.current.clear();
       resizeObserver?.disconnect();
       map?.remove();
       mapRef.current = null;
@@ -355,7 +521,13 @@ export default function ObjectMapCanvas({
     sourceData(map, SOURCE.draft, mapData.draft);
     sourceData(map, SOURCE.vertices, mapData.vertices);
     sourceData(map, SOURCE.anchor, mapData.anchor);
+    syncStandardBuildingStatesRef.current?.();
   }, [mapData, ready]);
+
+  useEffect(() => {
+    if (!disabled && !drawingTarget && !editingTarget) return;
+    clearStandardBuildingHoverRef.current?.();
+  }, [disabled, drawingTarget, editingTarget]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -378,6 +550,12 @@ export default function ObjectMapCanvas({
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
           <MousePointer2 className="h-3.5 w-3.5 text-violet-600" />
           Klik hoekpunten op de kaart en sluit daarna het vlak
+        </div>
+      )}
+      {!drawingTarget && !editingTarget && !disabled && (
+        <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-blue-300/50 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
+          <Building2 className="h-3.5 w-3.5 text-primary" />
+          Klik op een 3D-gebouw; het gebouw zelf kleurt blauw
         </div>
       )}
       <Button type="button" size="sm" variant="secondary" className="absolute bottom-3 left-3 bg-background/90 shadow-md backdrop-blur-xl" onClick={() => {
