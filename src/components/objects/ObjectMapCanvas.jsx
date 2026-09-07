@@ -274,6 +274,39 @@ function pointBuildingAssociations(groups, points) {
   }));
 }
 
+function queryStandardBuildingGroups(map, points = [], extraFeatures = []) {
+  const features = [...(map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || []), ...extraFeatures];
+  const initialFeatureCount = features.length;
+  let groups = groupStandardBuildings(features);
+  let pointAssociations = pointBuildingAssociations(groups, points);
+  // A viewport featureset query deduplicates native IDs before returning them.
+  // For a building crossing a tile boundary it can return only the OTHER wing.
+  // Query unresolved saved click locations as well, just as an actual click
+  // supplies its tile part. Keep all geometry/IDs transient, and require strict
+  // containment: a screen hit alone never authorizes a nearby building.
+  for (const point of points) {
+    if (pointAssociations.get(point.id)?.size) continue;
+    const coordinate = [point.longitude, point.latitude];
+    if (!coordinate.every(Number.isFinite)) continue;
+    const projected = map.project(coordinate);
+    const canvas = map.getCanvas();
+    if (![projected.x, projected.y].every(Number.isFinite)
+      || (canvas.clientWidth > 0 && (projected.x < 0 || projected.x > canvas.clientWidth))
+      || (canvas.clientHeight > 0 && (projected.y < 0 || projected.y > canvas.clientHeight))) continue;
+    try {
+      features.push(...(map.queryRenderedFeatures(projected, { target: STANDARD_BUILDINGS_TARGET }) || [])
+        .filter(feature => featureStrictlyContainsCoordinate(feature, coordinate)));
+    } catch {
+      // Tiles may still be loading; idle/moveend retries without losing data.
+    }
+  }
+  if (features.length !== initialFeatureCount) {
+    groups = groupStandardBuildings(features);
+    pointAssociations = pointBuildingAssociations(groups, points);
+  }
+  return { features, groups, pointAssociations };
+}
+
 function setStandardBuildingState(map, feature, state) {
   if (!feature || typeof map?.setFeatureState !== "function") return false;
   try {
@@ -361,8 +394,8 @@ function addWorkspaceLayers(map, data) {
   });
   addLayer(map, { id: LAYER.selectedFill, type: "fill", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.34 } });
   addLayer(map, { id: LAYER.selectedLine, type: "line", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "line-color": "#7c3aed", "line-width": 3 } });
-  addLayer(map, { id: LAYER.terrainFill, type: "fill", source: SOURCE.terrain, paint: { "fill-color": "#10b981", "fill-opacity": 0.18 } });
-  addLayer(map, { id: LAYER.terrainLine, type: "line", source: SOURCE.terrain, paint: { "line-color": "#047857", "line-width": 3 } });
+  addLayer(map, { id: LAYER.terrainFill, type: "fill", slot: "middle", source: SOURCE.terrain, paint: { "fill-color": "#10b981", "fill-opacity": 0.18 } });
+  addLayer(map, { id: LAYER.terrainLine, type: "line", slot: "middle", source: SOURCE.terrain, paint: { "line-color": "#047857", "line-width": 3 } });
   addLayer(map, { id: LAYER.hoverLine, type: "line", source: SOURCE.hover, filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#f59e0b", "line-width": 5 } });
   addLayer(map, { id: LAYER.hoverPoint, type: "circle", source: SOURCE.hover, filter: ["==", ["geometry-type"], "Point"], paint: { "circle-color": "#f59e0b", "circle-radius": 10, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
   addLayer(map, { id: LAYER.draftFill, type: "fill", source: SOURCE.draft, filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.18 } });
@@ -448,6 +481,7 @@ export default function ObjectMapCanvas({
   const dragRef = useRef(null);
   const handledEventsRef = useRef(new WeakSet());
   const standardBuildingStatesRef = useRef(new globalThis.Map());
+  const appliedStandardBuildingStatesRef = useRef(new globalThis.Map());
   const standardBuildingRoofGroupsRef = useRef([]);
   const hoveredStandardBuildingsRef = useRef(new globalThis.Map());
   const syncStandardBuildingStatesRef = useRef(null);
@@ -658,6 +692,12 @@ export default function ObjectMapCanvas({
         const interaction = interactionsRef.current;
         const terrainWorkspace = interaction.workspace === "terrain";
         const groundView = usesGroundView(interaction);
+        // Standard's middle slot keeps the ground below its 3D buildings.
+        // In the flat editing/aerial view, keep it above the unslotted photo.
+        const terrainSlot = groundView ? null : "middle";
+        [LAYER.terrainFill, LAYER.terrainLine].forEach(id => {
+          if ((map.getSlot(id) ?? null) !== terrainSlot) map.setSlot(id, terrainSlot);
+        });
         map.setLayoutProperty(LAYER.satellite, "visibility", terrainWorkspace && interaction.mapView === "satellite" ? "visible" : "none");
         const parcelVisibility = terrainWorkspace && interaction.parcelsVisible ? "visible" : "none";
         map.setLayoutProperty(LAYER.parcelsFill, "visibility", parcelVisibility);
@@ -681,11 +721,22 @@ export default function ObjectMapCanvas({
       };
       applyWorkspaceViewRef.current = applyWorkspaceView;
 
+      const applyStandardBuildingState = (feature, state) => {
+        if (!setStandardBuildingState(map, feature, state)) return false;
+        const key = mapboxBuildingFeatureKey(feature);
+        appliedStandardBuildingStatesRef.current.set(key, { ...appliedStandardBuildingStatesRef.current.get(key), ...state });
+        return true;
+      };
       const rememberStandardBuildingGroup = (group, bagFeatureIds, selectionPointIds, selected, listHighlight = false) => {
         group.identities.forEach((feature, key) => standardBuildingStatesRef.current.set(key,
           { feature, bagFeatureIds, selectionPointIds, selected, listHighlight }));
       };
-      const writeStandardBuildingGroup = (group, state) => group.identities.forEach(feature => setStandardBuildingState(map, feature, state));
+      const writeStandardBuildingGroup = (group, state) => group.identities.forEach((feature, key) => {
+        // A committed click ends its preview highlight, even while the pointer
+        // is still over the roof. Do not revive that preview on the next idle.
+        if (state.highlight === false) hoveredStandardBuildingsRef.current.delete(key);
+        applyStandardBuildingState(feature, state);
+      });
       const selectedGroupEntries = (group, interaction, pointAssociations) => {
         const selectedCandidates = interaction.candidates.filter(candidate => interaction.selectedBagFeatureIds.has(featureSourceId(candidate)));
         const bagFeatureIds = selectedCandidates.filter(candidate => group.geometry && matchMapboxBuildingToBagCandidate(group.geometry, [candidate])).map(featureSourceId);
@@ -705,7 +756,7 @@ export default function ObjectMapCanvas({
         return { bagFeatureIds, selectionPoints };
       };
       const clearStandardBuildingHover = () => {
-        hoveredStandardBuildingsRef.current.forEach(feature => setStandardBuildingState(map, feature, { highlight: false }));
+        hoveredStandardBuildingsRef.current.forEach(feature => applyStandardBuildingState(feature, { highlight: false }));
         hoveredStandardBuildingsRef.current.clear();
         if (!dragRef.current) map.getCanvas().style.cursor = "";
       };
@@ -716,15 +767,15 @@ export default function ObjectMapCanvas({
         standardBuildingRoofGroupsRef.current = [];
         const interaction = interactionsRef.current;
         let visibleBuildings = [];
+        let groups = [];
+        let pointAssociations = new globalThis.Map();
         try {
-          visibleBuildings = map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || [];
+          ({ features: visibleBuildings, groups, pointAssociations } = queryStandardBuildingGroups(map, interaction.buildingSelectionPoints));
         } catch {
           // A style without Standard features still supports an exact stored
           // geometry/selection-point hover fallback.
           visibleBuildings = [];
         }
-        const groups = groupStandardBuildings(visibleBuildings);
-        const pointAssociations = pointBuildingAssociations(groups, interaction.buildingSelectionPoints);
         const visiblePartsByIdentity = new globalThis.Map();
         visibleBuildings.forEach(feature => {
           const key = mapboxBuildingFeatureKey(feature);
@@ -738,16 +789,20 @@ export default function ObjectMapCanvas({
             || selectionPoints.some(point => interaction.highlightedBuildingKey === `point:${point.id}`);
           group.identities.forEach((feature, key) => {
             const previous = standardBuildingStatesRef.current.get(key);
-            if (!selected && !previous) return;
-            if (listHighlight || previous?.listHighlight) {
-              // Mapbox schedules another render even for identical state.
-              // Only write an actual transition, otherwise row-hover creates
-              // a perpetual render -> idle -> setFeatureState loop.
-              if (!previous || previous.selected !== selected || previous.listHighlight !== listHighlight) {
-                setStandardBuildingState(map, feature, { select: selected && !listHighlight, highlight: listHighlight });
-              }
+            const applied = appliedStandardBuildingStatesRef.current.get(key);
+            const highlighted = listHighlight || hoveredStandardBuildingsRef.current.has(key);
+            if (!selected && !highlighted && !applied && !previous?.selected && !previous?.listHighlight) return;
+            // Geometry association is not proof that a state write succeeded.
+            // Retry failed writes on the next map event, but never schedule a
+            // render/idle loop for already applied select/highlight values.
+            const select = selected && !listHighlight;
+            const nextState = {};
+            if (applied?.select !== select) nextState.select = select;
+            if ((applied?.highlight ?? false) !== highlighted) {
+              nextState.select = select;
+              nextState.highlight = highlighted;
             }
-            else if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
+            if (Object.keys(nextState).length) applyStandardBuildingState(feature, nextState);
           });
           rememberStandardBuildingGroup(group, bagFeatureIds, selectionPoints.map(point => point.id), selected, listHighlight);
           // Reuse this sync's native query/associations for every label. The
@@ -779,6 +834,7 @@ export default function ObjectMapCanvas({
       };
       const resetAndSyncStandardBuildingStates = () => {
         standardBuildingStatesRef.current.clear();
+        appliedStandardBuildingStatesRef.current.clear();
         standardBuildingRoofGroupsRef.current = [];
         hoveredStandardBuildingsRef.current.clear();
         hoverSourceFingerprint = null;
@@ -796,7 +852,7 @@ export default function ObjectMapCanvas({
             if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
             const key = mapboxBuildingFeatureKey(event.feature);
             hoveredStandardBuildingsRef.current.set(key, event.feature);
-            setStandardBuildingState(map, event.feature, { highlight: true });
+            applyStandardBuildingState(event.feature, { highlight: true });
             map.getCanvas().style.cursor = "pointer";
             return true;
           },
@@ -807,7 +863,7 @@ export default function ObjectMapCanvas({
           handler: event => {
             if (event.feature) {
               const record = standardBuildingStatesRef.current.get(mapboxBuildingFeatureKey(event.feature));
-              setStandardBuildingState(map, event.feature, { highlight: Boolean(record?.listHighlight) });
+              applyStandardBuildingState(event.feature, { highlight: Boolean(record?.listHighlight) });
               hoveredStandardBuildingsRef.current.delete(mapboxBuildingFeatureKey(event.feature));
             }
             if (!dragRef.current) map.getCanvas().style.cursor = "";
@@ -822,15 +878,15 @@ export default function ObjectMapCanvas({
             if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
             const clickCoordinate = event.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null;
             let groups;
+            let pointAssociations;
             try {
-              groups = groupStandardBuildings([...(map.queryRenderedFeatures({ target: STANDARD_BUILDINGS_TARGET }) || []), event.feature]);
+              ({ groups, pointAssociations } = queryStandardBuildingGroups(map, interaction.buildingSelectionPoints, [event.feature]));
             } catch {
               interaction.onBuildingMatchUnavailable?.("De kaart wordt nog geladen. Probeer het gebouw over een moment opnieuw te selecteren.");
               return true;
             }
             const group = groups.find(item => item.identities.has(mapboxBuildingFeatureKey(event.feature)));
             if (!group) return true;
-            const pointAssociations = pointBuildingAssociations(groups, interaction.buildingSelectionPoints);
             const selectedEntries = selectedGroupEntries(group, interaction, pointAssociations);
             const existingPoints = (interaction.buildingSelectionPoints || []).filter(point => groupContainsCoordinate(group, [point.longitude, point.latitude])
               || selectedEntries.selectionPoints.some(item => item.id === point.id));
@@ -1102,6 +1158,7 @@ export default function ObjectMapCanvas({
       applyWorkspaceViewRef.current = null;
       applyMapLightingRef.current = null;
       standardBuildingStatesRef.current.clear();
+      appliedStandardBuildingStatesRef.current.clear();
       standardBuildingRoofGroupsRef.current = [];
       hoveredStandardBuildingsRef.current.clear();
       resizeObserver?.disconnect();

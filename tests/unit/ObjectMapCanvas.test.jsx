@@ -61,6 +61,8 @@ vi.mock("mapbox-gl", () => {
     getSource(id) { return this.sources.get(id); }
     addLayer(definition) { this.layers.set(definition.id, definition); }
     getLayer(id) { return this.layers.get(id); }
+    getSlot(id) { return this.layers.get(id)?.slot ?? null; }
+    setSlot = vi.fn((id, slot) => { this.layers.get(id).slot = slot; return this; });
     setFilter() {}
     setLayoutProperty = vi.fn();
     setPaintProperty = vi.fn();
@@ -693,6 +695,22 @@ describe("ObjectMapCanvas", () => {
     expect(onRemoveTerrainFeature).toHaveBeenCalledWith(0);
   });
 
+  it("houdt een aangeklikt gebouw blauw zonder de oude dakhover bij idle terug te zetten", async () => {
+    renderCanvas({ selectedBagFeatureIds: [], selectedBuildings: empty });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-mouseenter", { feature: standardBuilding }));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", {
+      feature: standardBuilding, lngLat: { lng: 4.4807, lat: 51.9202 },
+    }));
+    expect(map.setFeatureState).toHaveBeenLastCalledWith(standardBuilding, { select: true, highlight: false });
+    map.setFeatureState.mockClear();
+    act(() => map.emit("idle"));
+    expect(map.setFeatureState).not.toHaveBeenCalled();
+  });
+
   it("highlight een gebouw vanuit de lijst en herstelt de blauwe selectie wanneer de muis vertrekt", async () => {
     const rendered = renderCanvas();
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
@@ -1098,6 +1116,104 @@ describe("ObjectMapCanvas", () => {
     act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9202 } }));
     expect(onToggleBuildingPoint).not.toHaveBeenCalled();
     expect(onBuildingMatchUnavailable).toHaveBeenCalledWith("Deze opgeslagen selectie ligt onder meerdere gebouwen. Verwijder haar uit de lijst en kies het gebouw opnieuw van bovenaf.");
+  });
+
+  it.each([false, true])("plaatst terrein in beide 3D-werkruimten onder de gebouwen (kaartviewer: %s)", async viewOnly => {
+    const rendered = renderCanvas({ viewOnly, terrain: { type: "FeatureCollection", features: [candidate] } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const terrainLayerIds = ["loq-object-map-terrain-fill", "loq-object-map-terrain-line"];
+    terrainLayerIds.forEach(id => expect(map.getSlot(id)).toBe("middle"));
+    expect(map.getSlot("loq-object-map-satellite-layer")).toBeNull();
+    expect(map.getLayer("loq-object-map-vertices-layer")).toBeDefined();
+    expect(map.getSlot("loq-object-map-vertices-layer")).toBeNull();
+    expect(map.getSlot("loq-object-map-selected-fill")).toBeNull();
+
+    map.pitch = 31;
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" parcelsVisible />);
+    terrainLayerIds.forEach(id => expect(map.getSlot(id)).toBe("middle"));
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="buildings" />);
+    terrainLayerIds.forEach(id => expect(map.getSlot(id)).toBe("middle"));
+
+    expect(map.setSlot).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.pitch).toBe(31);
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["luchtfoto", { mapView: "satellite" }],
+    ["grensbewerking", { editingTarget: "terrain" }],
+    ["oude tekenmodus", { drawingTarget: "terrain" }],
+  ])("houdt terrein bij %s boven de vlakke ondergrond en herstelt daarna de grondlaag", async (_name, groundViewProps) => {
+    const terrain = { type: "FeatureCollection", features: [candidate] };
+    const rendered = renderCanvas({ workspace: "terrain", terrain });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const terrainLayerIds = ["loq-object-map-terrain-fill", "loq-object-map-terrain-line"];
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} {...groundViewProps} />);
+
+    terrainLayerIds.forEach(id => {
+      expect(map.getSlot(id)).toBeNull();
+      expect(map.setSlot).toHaveBeenCalledWith(id, null);
+    });
+    expect(map.getSlot("loq-object-map-satellite-layer")).toBeNull();
+    const layerOrder = [...map.layers.keys()];
+    expect(layerOrder.indexOf("loq-object-map-satellite-layer")).toBeLessThan(layerOrder.indexOf("loq-object-map-terrain-fill"));
+    expect(layerOrder.indexOf("loq-object-map-terrain-line")).toBeLessThan(layerOrder.indexOf("loq-object-map-vertices-layer"));
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", false);
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+
+    terrainLayerIds.forEach(id => {
+      expect(map.getSlot(id)).toBe("middle");
+      expect(map.setSlot).toHaveBeenCalledWith(id, "middle");
+    });
+    expect(map.sources.get("loq-object-map-terrain").setData).toHaveBeenLastCalledWith(expect.objectContaining({
+      features: [expect.objectContaining({ geometry: candidate.geometry })],
+    }));
+    expect(map.setConfigProperty).toHaveBeenCalledWith("basemap", "show3dBuildings", true);
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
+  });
+
+  it.each(["map", "satellite"])("herstelt de terreinlaag na stijlherladen in %s zonder herhaalde slotupdates", async mapView => {
+    const rendered = renderCanvas({ workspace: "terrain", mapView, terrain: { type: "FeatureCollection", features: [candidate] } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    const terrainSlot = mapView === "satellite" ? null : "middle";
+
+    // A real style replacement drops its custom layers and sources.
+    map.layers.clear();
+    map.sources.clear();
+    act(() => map.emit("style.load"));
+    expect(map.getSlot("loq-object-map-terrain-fill")).toBe(terrainSlot);
+    expect(map.getSlot("loq-object-map-terrain-line")).toBe(terrainSlot);
+    map.setSlot.mockClear();
+    const terrainSource = map.sources.get("loq-object-map-terrain");
+    terrainSource.setData.mockClear();
+
+    act(() => {
+      map.emit("idle");
+      map.emit("moveend");
+      map.emit("style.import.load");
+    });
+    expect(terrainSource.setData).not.toHaveBeenCalled();
+    // Repeated readiness events must not schedule another style merge.
+    act(() => map.emit("style.load"));
+
+    expect(map.setSlot).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(mapboxState.instances).toHaveLength(1);
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
   });
 
   it("houdt de kaart en getekende punten intact bij wisselen naar luchtfoto en toont terrein van bovenaf", async () => {
