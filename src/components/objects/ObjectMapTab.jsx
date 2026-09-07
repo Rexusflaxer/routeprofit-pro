@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  ArrowLeft,
   Building2,
   Check,
   CircleOff,
@@ -30,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import ObjectMapCanvas from "./ObjectMapCanvas";
+import ObjectMapOverview from "./ObjectMapOverview";
 import {
   emptyFeatureCollection,
   featureCollectionAreaSquareMeters,
@@ -142,14 +144,14 @@ function keepSelectedBuildingLabels(form) {
   return Object.fromEntries(Object.entries(form.building_labels || {}).filter(([key]) => keys.has(key)));
 }
 
-function BuildingSelectionRow({ selectionKey, label, caption, colorClass, disabled, onHighlight, onRename, onRemove, removeLabel }) {
+function BuildingSelectionRow({ selectionKey, label, caption, colorClass, disabled, viewOnly, onHighlight, onRename, onRemove, removeLabel }) {
   return <div role="listitem" tabIndex={0} aria-label={label} className="flex items-center gap-2 p-3 outline-none transition hover:bg-primary/10 focus-within:bg-primary/10"
     onMouseEnter={() => onHighlight(selectionKey)} onMouseLeave={() => onHighlight(null)}
     onFocus={() => onHighlight(selectionKey)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) onHighlight(null); }}>
     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${colorClass}`} />
     <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium" title={label}>{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{caption}</p></div>
-    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={() => onRename(selectionKey, label)} aria-label={`${label} naam wijzigen`}><Pencil className="h-3.5 w-3.5" /></Button>
-    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={onRemove} aria-label={removeLabel || `${label} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button>
+    {!viewOnly && <><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={() => onRename(selectionKey, label)} aria-label={`${label} naam wijzigen`}><Pencil className="h-3.5 w-3.5" /></Button>
+    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={onRemove} aria-label={removeLabel || `${label} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></>}
   </div>;
 }
 
@@ -215,6 +217,9 @@ function ChoiceCard({ active, icon: Icon, title, description, onClick, disabled 
 export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [screen, setScreen] = useState("overview");
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [workspace, setWorkspace] = useState("buildings");
   const [mapView, setMapView] = useState("map");
   const [parcelsVisible, setParcelsVisible] = useState(false);
@@ -252,8 +257,12 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const mapObject = useMemo(() => ({ ...object, ...((appliedConfiguration || configurationQuery.data)?.object || {}) }), [appliedConfiguration, configurationQuery.data, object]);
   const verified = Boolean(trustedObjectCoordinatePair(mapObject));
   const archived = mapObject?.status === "archived";
-  const readOnly = archived || !verified;
+  const canEdit = !archived && verified;
+  const viewOnly = screen === "view";
+  const readOnly = screen !== "edit" || !canEdit || saving;
   const mobileEligible = mapObject?.status === "active" && mapObject?.is_active_customer_object !== false;
+  const usesBuildingCandidates = screen === "edit"
+    || (viewOnly && appliedConfiguration?.building_selection_mode !== "manual");
   const candidateConfigurationVersion = appliedConfiguration?.expected_version
     ?? configurationQuery.data?.expected_version
     ?? null;
@@ -264,7 +273,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor
       ? lastPage.next_cursor
       : undefined,
-    enabled: verified && Boolean(configurationQuery.data),
+    enabled: verified && Boolean(configurationQuery.data) && usesBuildingCandidates,
     retry: 1,
     staleTime: 5 * 60 * 1000,
   });
@@ -276,7 +285,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     getNextPageParam: (lastPage, allPages) => lastPage?.next_cursor && !allPages.some(page => page.cursor === lastPage.next_cursor)
       ? { cursor: lastPage.next_cursor, transport: lastPage.transport, expectedCenter: lastPage.center }
       : undefined,
-    enabled: verified && Boolean(configurationQuery.data) && workspace === "terrain" && parcelsVisible,
+    enabled: !readOnly && Boolean(configurationQuery.data) && workspace === "terrain" && parcelsVisible,
     retry: shouldRetryObjectParcelCandidates,
     staleTime: 5 * 60 * 1000,
   });
@@ -285,7 +294,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const parcelPageCount = parcelPages.length;
   const parcelPaginationCycle = Boolean(parcelPages.at(-1)?.next_cursor
     && parcelPages.some(page => page.cursor === parcelPages.at(-1).next_cursor));
-  const autoLoadingParcels = workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage
+  const autoLoadingParcels = !readOnly && workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage
     && parcelPageCount < 20 && !parcelsQuery.isError;
   useEffect(() => {
     if (autoLoadingParcels && !parcelsQuery.isFetching) void parcelsQuery.fetchNextPage();
@@ -350,7 +359,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const displayedBagFeatureIds = form?.building_selection_mode === "manual"
     ? form.selected_bag_feature_ids
     : automaticBagFeatureIds;
-  const selectedBuildings = useMemo(() => selectedBuildingCollection(form, candidates, displayedBagFeatureIds), [candidates, displayedBagFeatureIds, form]);
+  // A viewer uses the saved contours, not a newer candidate response that has
+  // never been applied to this object's configuration.
+  const selectedBuildings = useMemo(() => selectedBuildingCollection(form, viewOnly && form?.building_selection_mode === "manual" ? [] : candidates, displayedBagFeatureIds), [candidates, displayedBagFeatureIds, form, viewOnly]);
   const terrainArea = featureCollectionAreaSquareMeters(form?.object_area_geojson);
   const buildingArea = featureCollectionAreaSquareMeters(selectedBuildings);
   const selectedCandidates = useMemo(() => {
@@ -394,6 +405,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   }, [candidateConflicts, newlyConflictingFeatureIds, serverOverlapConflicts]);
 
   const updateWithHistory = useCallback(updater => {
+    if (readOnly || savingRef.current) return;
     setForm(current => {
       if (!current) return current;
       const updated = updater(current);
@@ -407,7 +419,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       mutationKeyRef.current = null;
       return next;
     });
-  }, []);
+  }, [readOnly]);
 
   const undo = () => {
     setUndoStack(stack => {
@@ -475,7 +487,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   });
 
   const saveNow = useCallback(async (reason, conflictFingerprint = null) => {
-    if (!formRef.current || readOnly) return;
+    if (!formRef.current || readOnly || savingRef.current) throw new Error("De kaart kan op dit moment niet worden opgeslagen.");
     if (hasVersionDrift(baseFormRef.current, latestConfigurationRef.current)) {
       const staleError = Object.assign(new Error("Er staat inmiddels een nieuwere kaartconfiguratie klaar."), {
         status: 409,
@@ -485,11 +497,15 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       throw staleError;
     }
     mutationKeyRef.current ||= createObjectMapMutationKey();
+    savingRef.current = true;
+    setSaving(true);
     setConflictNotice(null);
     if (!conflictFingerprint) setOverlapFingerprint(null);
     try {
       const saved = await saveMutation.mutateAsync({ reason: reason || "", conflictFingerprint });
       applyConfiguration(saved);
+      setScreen("overview");
+      setParcelsVisible(false);
       queryClient.setQueryData(["object-card", object.id, "map-configuration"], saved);
       await Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ["objects", "detail", object.id] }),
@@ -518,6 +534,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         setOverlapReason("");
       }
       throw error;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }, [applyConfiguration, mobileEligible, object.customer_id, object.id, queryClient, readOnly, saveMutation, toast]);
 
@@ -569,9 +588,25 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       }
     },
     onDiscard: discard,
-    saving: saveMutation.isPending,
+    saving,
     onRegisterNavigationGuard,
   });
+
+  const openMap = nextScreen => {
+    if (savingRef.current || (nextScreen === "edit" && !canEdit)) return;
+    saveMutation.reset();
+    setEditingTarget(null);
+    setHighlightedBuildingKey(null);
+    setParcelsVisible(nextScreen === "edit" && workspace === "terrain");
+    setScreen(nextScreen);
+  };
+  const returnToOverview = () => navigation.requestNavigation(() => {
+    setScreen("overview");
+    setEditingTarget(null);
+    setHighlightedBuildingKey(null);
+    setParcelsVisible(false);
+    saveMutation.reset();
+  }, { destinationLabel: "het overzicht" });
 
   const notifyBuildingMatchUnavailable = useCallback(message => {
     toast({
@@ -660,15 +695,15 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     if (nextWorkspace === workspace) return;
     setWorkspace(nextWorkspace);
     setHighlightedBuildingKey(null);
-    if (nextWorkspace === "terrain") {
+    if (nextWorkspace === "terrain" && !readOnly) {
       setParcelsVisible(true);
     }
     setEditingTarget(null);
   };
 
-  const startVertexDrag = () => { dragStartRef.current = formRef.current; };
+  const startVertexDrag = () => { if (!readOnly) dragStartRef.current = formRef.current; };
   const moveVertex = (target, reference, coordinate) => {
-    if (target !== "terrain") return;
+    if (readOnly || savingRef.current || target !== "terrain") return;
     mutationKeyRef.current = null;
     setOverlapReason("");
     setOverlapFingerprint(null);
@@ -678,7 +713,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const finishVertexDrag = () => {
     const before = dragStartRef.current;
     dragStartRef.current = null;
-    if (!before || sameForm(before, formRef.current)) return;
+    if (readOnly || !before || sameForm(before, formRef.current)) return;
     setUndoStack(stack => [...stack, before].slice(-50));
     setRedoStack([]);
   };
@@ -743,14 +778,17 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       : null;
 
   return (
-    <div className="flex min-h-[700px] flex-col bg-card/30 backdrop-blur-xl">
+    <div className="flex min-h-[480px] flex-col bg-card/30 backdrop-blur-xl">
       <div className="flex flex-col gap-3 border-b border-border/70 bg-card/30 px-4 py-3 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold text-foreground">Kaart & terrein</h2><Badge variant="outline" className={status.className}>{status.label}</Badge>{dirty && <Badge variant="outline" className="border-blue-300/70 bg-blue-500/10 text-blue-700 dark:text-blue-300">Niet opgeslagen</Badge>}</div>
-          <p className="mt-1 text-xs text-muted-foreground">Selecteer de gebouwen die bij dit object horen en leg het te bewaken terrein vast. Opgeslagen wijzigingen worden ook in de mobiele app toegepast bij de volgende synchronisatie.</p>
+          <p className="mt-1 text-xs text-muted-foreground">{screen === "overview" ? "Opgeslagen gebouwen en terrein bij dit object. Bekijk de kaart of wijzig de inrichting." : viewOnly ? "Je bekijkt de opgeslagen inrichting. Gebouwen en terrein blijven ongewijzigd." : "Selecteer de gebouwen en het te bewaken terrein. Opgeslagen wijzigingen worden bij de volgende synchronisatie ook in de mobiele app toegepast."}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || (!dirty && !needsMobileActivation) || saveMutation.isPending || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {screen === "overview" ? <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => openMap("view")}><MapIcon className="h-4 w-4" /> Weergeven op kaart</Button>
+            : <Button type="button" size="sm" variant="outline" disabled={saving} onClick={returnToOverview}><ArrowLeft className="h-4 w-4" /> Terug naar overzicht</Button>}
+          {screen === "edit" ? <Button type="button" size="sm" onClick={requestSave} disabled={readOnly || (!dirty && !needsMobileActivation) || saveMutation.isPending || staleConfiguration}>{saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Opslaan en toepassen</Button>
+            : <Button type="button" size="sm" disabled={!canEdit || saving} onClick={() => openMap("edit")}><Pencil className="h-4 w-4" /> Wijzigen</Button>}
         </div>
       </div>
 
@@ -759,7 +797,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       {appliedConfiguration.map_geometry_status === "needs_review" && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-amber-300/50 bg-amber-500/10 p-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><div><p className="font-medium">Controleer deze kaart opnieuw</p><p className="mt-0.5 text-xs text-muted-foreground">{["location_changed", "object_location_changed"].includes(appliedConfiguration.map_geometry_review_reason) ? "Het objectadres of de locatie is gewijzigd." : "De opgeslagen geometrie vraagt om een nieuwe controle."} Sla de gecontroleerde inrichting opnieuw op voordat mobiele kaartweergave wordt geactiveerd.</p></div></div>}
       {(configurationQuery.isRefetchError || (configurationQuery.error && configurationQuery.data)) && <ErrorPanel title="De opgeslagen kaart blijft zichtbaar, maar vernieuwen is mislukt." error={configurationQuery.error} onRetry={() => configurationQuery.refetch()} />}
       {(conflictNotice || staleConfiguration) && <div className="m-4 mb-0 rounded-xl border border-destructive/30 bg-destructive/10 p-4"><p className="text-sm font-medium text-destructive">De kaart is ondertussen door iemand anders gewijzigd.</p><p className="mt-1 text-xs text-muted-foreground">Uw lokale wijzigingen zijn niet overschreven. Laad de actuele versie en pas ze daarna opnieuw toe.</p><Button type="button" size="sm" variant="outline" className="mt-3" onClick={reloadCurrentConfiguration}><RefreshCw className="h-4 w-4" /> Actuele versie laden</Button></div>}
-      {saveMutation.isError && (!isOverlapError(saveMutation.error) || !overlapConflictFingerprint(saveMutation.error)) && !conflictNotice && !staleConfiguration && !overlapDialog && <ErrorPanel title="Kaart en terrein konden niet worden opgeslagen." error={saveMutation.error} onRetry={requestSave} />}
+      {screen === "edit" && saveMutation.isError && (!isOverlapError(saveMutation.error) || !overlapConflictFingerprint(saveMutation.error)) && !conflictNotice && !staleConfiguration && !overlapDialog && <ErrorPanel title="Kaart en terrein konden niet worden opgeslagen." error={saveMutation.error} onRetry={requestSave} />}
 
       <div className="border-b border-border/70 px-4 pt-3">
         <div className="flex gap-1" role="tablist" aria-label="Kaartwerkruimte">
@@ -768,9 +806,12 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_350px]">
+      {screen === "overview" ? <>
+        <ObjectMapOverview configuration={appliedConfiguration} workspace={workspace} />
+        <div className="mt-auto border-t border-border/70 px-4 py-3 text-xs text-muted-foreground">Revisie {appliedConfiguration.map_geometry_revision || 0} · Laatst gewijzigd: {formatDateTime(appliedConfiguration.map_geometry_updated_at)}</div>
+      </> : <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_350px]">
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-card/35 p-2 backdrop-blur-xl">
+          {!viewOnly && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-card/35 p-2 backdrop-blur-xl">
             {workspace === "buildings" ? <>
               <Button type="button" size="sm" variant="secondary" disabled={readOnly}><MousePointer2 className="h-4 w-4" /> Selecteren</Button>
               <span className="px-2 text-xs text-muted-foreground">Klik op een 3D-gebouw om het toe te voegen of te verwijderen.</span>
@@ -781,36 +822,38 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             <span className="mx-1 h-6 w-px bg-border/70" />
             <Button type="button" size="sm" variant="ghost" onClick={undo} disabled={readOnly || !undoStack.length} aria-label="Wijziging ongedaan maken"><Undo2 className="h-4 w-4" /> Ongedaan</Button>
             <Button type="button" size="sm" variant="ghost" onClick={redo} disabled={readOnly || !redoStack.length} aria-label="Wijziging opnieuw uitvoeren"><Redo2 className="h-4 w-4" /> Opnieuw</Button>
-          </div>
+          </div>}
           {workspace === "terrain" && <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-1 rounded-lg border border-border/70 bg-card/35 p-1" role="group" aria-label="Kaartweergave">
               <Button type="button" size="sm" variant={mapView === "map" ? "secondary" : "ghost"} aria-pressed={mapView === "map"} onClick={() => setMapView("map")}><MapIcon className="h-4 w-4" /> Kaart</Button>
               <Button type="button" size="sm" variant={mapView === "satellite" ? "secondary" : "ghost"} aria-pressed={mapView === "satellite"} onClick={() => setMapView("satellite")}><Satellite className="h-4 w-4" /> Luchtfoto</Button>
             </div>
-            <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={setParcelsVisible} /> Perceelgrenzen</Label>
+            {!viewOnly && <Label className="flex items-center gap-2 text-xs"><Switch aria-label="Kadastrale perceelgrenzen tonen" checked={parcelsVisible} onCheckedChange={setParcelsVisible} /> Perceelgrenzen</Label>}
           </div>}
-          {workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{editingTarget ? "Klik op de groene grenslijn om een bewerkpunt te plaatsen. Versleep dat punt om de grens te veranderen. Met rechts klikken op een punt kun je het verwijderen. Alleen jouw terrein is groen; grijze lijnen zijn kadastrale grenzen." : "Klik op een perceel om het aan je terrein toe te voegen. Klik op het geselecteerde terrein om het weer te verwijderen. Alleen het gekozen gebied is groen. Gebruik Luchtfoto voor extra detail."}</p>}
+          {viewOnly && <p className="text-xs leading-relaxed text-muted-foreground">Alleen bekijken · De gebouwen en het gekozen terrein worden samen getoond. Je kunt zoomen, draaien en de kaartverlichting aanpassen.</p>}
+          {!viewOnly && workspace === "terrain" && <p className="text-xs leading-relaxed text-muted-foreground">{editingTarget ? "Klik op de groene grenslijn om een bewerkpunt te plaatsen. Versleep dat punt om de grens te veranderen. Met rechts klikken op een punt kun je het verwijderen. Alleen jouw terrein is groen; grijze lijnen zijn kadastrale grenzen." : "Klik op een perceel om het aan je terrein toe te voegen. Klik op het geselecteerde terrein om het weer te verwijderen. Alleen het gekozen gebied is groen. Gebruik Luchtfoto voor extra detail."}</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Kadastrale percelen laden…</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.isError && <ErrorPanel optional retrying={parcelsQuery.isFetching} title={parcelCandidates.length ? "Niet alle perceelgrenzen konden worden geladen. Geladen percelen en je eigen terrein blijven beschikbaar." : "Perceelgrenzen konden niet worden geladen. Je bestaande terrein blijft bewaard en aanpasbaar."} error={parcelsQuery.error} onRetry={() => parcelsQuery.isFetchNextPageError ? parcelsQuery.fetchNextPage() : parcelsQuery.refetch()} />}
           {workspace === "terrain" && parcelsVisible && autoLoadingParcels && <p role="status" className="text-xs text-muted-foreground">Meer percelen ophalen… {parcelCandidates.length} geladen.</p>}
           {workspace === "terrain" && parcelsVisible && parcelPaginationCycle && <p role="status" className="text-xs text-amber-700">De bron herhaalt een vervolgpagina. Niet alle percelen zijn geladen; vernieuw de kaart om opnieuw te proberen.</p>}
           {workspace === "terrain" && parcelsVisible && parcelsQuery.hasNextPage && !autoLoadingParcels && !parcelsQuery.isError && <div className="space-y-2"><p className="text-xs text-muted-foreground">Er zijn veel percelen in dit gebied. Niet alles is geladen; haal zo nodig de volgende pagina op.</p><Button type="button" size="sm" variant="outline" disabled={parcelsQuery.isFetchingNextPage} onClick={() => parcelsQuery.fetchNextPage()}>{parcelsQuery.isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Meer percelen laden</Button></div>}
-          {candidatesQuery.isError && !candidatesQuery.data && workspace === "buildings" && <ErrorPanel title="BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
-          {candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="Meer BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.fetchNextPage()} />}
-          {candidatesQuery.isRefetchError && candidatesQuery.data && !candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="De geladen BAG-gebouwen blijven zichtbaar, maar vernieuwen is mislukt." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
+          {usesBuildingCandidates && candidatesQuery.isError && !candidatesQuery.data && workspace === "buildings" && <ErrorPanel title="BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
+          {usesBuildingCandidates && candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="Meer BAG-gebouwen konden niet worden geladen." error={candidatesQuery.error} onRetry={() => candidatesQuery.fetchNextPage()} />}
+          {usesBuildingCandidates && candidatesQuery.isRefetchError && candidatesQuery.data && !candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="De geladen BAG-gebouwen blijven zichtbaar, maar vernieuwen is mislukt." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
           <ObjectMapCanvas
+            viewOnly={viewOnly}
             object={mapObject}
             workspace={workspace}
             mapView={mapView}
             parcelCandidates={parcelCandidates}
             parcelsVisible={parcelsVisible}
-            parcelSelectionEnabled={workspace === "terrain" && parcelsVisible && !editingTarget}
+            parcelSelectionEnabled={!readOnly && workspace === "terrain" && parcelsVisible && !editingTarget}
             onToggleParcel={toggleParcel}
             onRemoveTerrainFeature={index => { if (!readOnly && !editingTarget) updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) })); }}
             buildingSelectionPoints={form.building_selection_mode === "manual" ? form.building_selection_points : []}
             buildingLabels={form.building_labels || {}}
             onToggleBuildingPoint={toggleBuildingPoint}
-            candidates={candidates}
+            candidates={viewOnly && form.building_selection_mode === "manual" ? [] : candidates}
             selectedBagFeatureIds={displayedBagFeatureIds}
             selectedBuildings={selectedBuildings}
             manualBuildings={form.manual_building_geojson}
@@ -833,7 +876,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
 
         <aside className="space-y-3">
           {workspace === "buildings" ? <>
-            <section className="space-y-2 rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
+            {!viewOnly && <section className="space-y-2 rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <div><p className="text-sm font-semibold">Bepaling van gebouwen</p><p className="mt-1 text-xs text-muted-foreground">Handmatig voorkomt verkeerde markeringen bij gedeelde adressen.</p></div>
               <ChoiceCard active={form.building_selection_mode === "automatic"} icon={RotateCcw} title="Automatisch bepalen" description="Gebruik de bestaande adresnabijheid zolang geen exacte selectie nodig is." disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, building_selection_mode: "automatic", selected_bag_feature_ids: [], building_selection_points: [], manual_building_geojson: emptyFeatureCollection() }))} />
               <ChoiceCard active={form.building_selection_mode === "manual"} icon={Building2} title="Exact vastleggen" description="Gebruik uitsluitend jouw aangeklikte gebouwen, met of zonder BAG-koppeling." disabled={readOnly} onClick={() => updateWithHistory(current => ({
@@ -844,13 +887,15 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
                   : current.selected_bag_feature_ids,
               }))} />
               <Button type="button" variant="outline" size="sm" className="w-full" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, building_selection_mode: "manual", selected_bag_feature_ids: [], building_selection_points: [], manual_building_geojson: emptyFeatureCollection() }))}><CircleOff className="h-4 w-4" /> Bewust geen gebouwen markeren</Button>
-            </section>
+            </section>}
             <section className="rounded-xl border border-border/70 bg-card/45 backdrop-blur-xl">
-              <div className="border-b border-border/70 p-4"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold">{form.building_selection_mode === "automatic" ? "Automatische indicatie" : "Geselecteerde gebouwen"}</p>{form.building_selection_mode === "automatic" && <p className="mt-0.5 text-[11px] text-muted-foreground">Wordt als uitgangspunt gebruikt wanneer u Exact vastleggen kiest.</p>}</div><Badge variant="secondary">{displayedBagFeatureIds.length + (form.building_selection_mode === "manual" ? form.manual_building_geojson.features.length + form.building_selection_points.length : 0)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{candidatesQuery.isLoading ? "Gebouwen rond het object ophalen..." : `${candidates.length} BAG-kandidaten binnen 250 meter geladen`}</p>{candidateMetadata?.has_more && !candidateMetadata?.next_cursor && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">Alleen de eerste 100 gebouwen worden getoond; deze bron levert geen geldige vervolgcodelink.</p>}</div>
+              <div className="border-b border-border/70 p-4"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold">{form.building_selection_mode === "automatic" ? "Automatische indicatie" : "Geselecteerde gebouwen"}</p>{form.building_selection_mode === "automatic" && <p className="mt-0.5 text-[11px] text-muted-foreground">{viewOnly ? "Indicatie op basis van adresnabijheid; geen exact opgeslagen selectie." : "Wordt als uitgangspunt gebruikt wanneer u Exact vastleggen kiest."}</p>}</div><Badge variant="secondary">{displayedBagFeatureIds.length + (form.building_selection_mode === "manual" ? form.manual_building_geojson.features.length + form.building_selection_points.length : 0)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{viewOnly && form.building_selection_mode === "manual" ? "Opgeslagen selectie · wijs een gebouw in de lijst aan om het in beeld te brengen." : candidatesQuery.isLoading ? "Gebouwen rond het object ophalen..." : `${candidates.length} BAG-kandidaten binnen 250 meter geladen`}</p>{!viewOnly && candidateMetadata?.has_more && !candidateMetadata?.next_cursor && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">Alleen de eerste 100 gebouwen worden getoond; deze bron levert geen geldige vervolgcodelink.</p>}</div>
               <div role="list" aria-label="Gebouwen bij dit object" className="max-h-72 divide-y divide-border/60 overflow-y-auto">
-                {!displayedBagFeatureIds.length && !(form.building_selection_mode === "manual" && (form.manual_building_geojson.features.length || form.building_selection_points.length)) && <p className="p-4 text-xs text-muted-foreground">{form.building_selection_mode === "manual" ? "Er wordt bewust geen gebouw gemarkeerd. Klik op een pand op de kaart om het toe te voegen." : candidatesQuery.isLoading ? "Automatische adresnabijheid wordt bepaald…" : "Er is geen passend BAG-pand gevonden; de mobiele app blijft de bestaande adresnabijheid gebruiken."}</p>}
+                {!displayedBagFeatureIds.length && !(form.building_selection_mode === "manual" && (form.manual_building_geojson.features.length || form.building_selection_points.length)) && <p className="p-4 text-xs text-muted-foreground">{form.building_selection_mode === "manual" ? viewOnly ? "Er wordt bewust geen gebouw gemarkeerd." : "Er wordt bewust geen gebouw gemarkeerd. Klik op een pand op de kaart om het toe te voegen." : candidatesQuery.isLoading ? "Automatische adresnabijheid wordt bepaald…" : "Er is geen passend BAG-pand gevonden; de mobiele app blijft de bestaande adresnabijheid gebruiken."}</p>}
                 {displayedBagFeatureIds.map(id => {
-                  const feature = candidates.find(item => featureSourceId(item) === id) || appliedConfiguration.building_polygon_geojson.features.find(item => featureSourceId(item) === id);
+                  const feature = (!viewOnly && candidates.find(item => featureSourceId(item) === id))
+                    || appliedConfiguration.building_polygon_geojson.features.find(item => featureSourceId(item) === id)
+                    || (usesBuildingCandidates && candidates.find(item => featureSourceId(item) === id));
                   const recordedConflict = [...(appliedConfiguration.conflicts || []), ...serverOverlapConflicts]
                     .find(conflict => String(conflict?.source_feature_id || "") === id);
                   const conflictCount = Math.max(
@@ -861,37 +906,37 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
                   const key = `bag:${id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || (feature ? candidateLabel(feature) : `BAG-pand ${id.slice(0, 12)}`)}
                     caption={conflictCount ? `Gekoppeld aan ${conflictCount} ander object` : form.building_selection_mode === "automatic" ? "Automatisch voorgesteld · PDOK BAG" : "PDOK BAG"}
-                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
+                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
                 })}
                 {form.building_selection_mode === "manual" && form.building_selection_points.map((point, index) => {
                   const key = `point:${point.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Gebouw ${index + 1} · Zonder BAG-koppeling`}
-                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
+                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
                 })}
                 {form.building_selection_mode === "manual" && form.manual_building_geojson.features.map((feature, index) => {
                   const key = `manual:${feature.properties?.local_id || feature.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Eerder ingetekend gebouw ${index + 1}`}
-                    caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding}
+                    caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding}
                     onRemove={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} />;
                 })}
               </div>
               {form.building_selection_mode === "manual" && form.building_selection_points.length > 0 && <p className="border-t border-border/70 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">Zonder BAG-koppeling bewaren we jouw gekozen plek. Controleer gedeeld gebruik zelf: verschillende selecties in hetzelfde gebouw zijn niet altijd automatisch als overlap herkenbaar.</p>}
-              {candidatesQuery.hasNextPage && <div className="border-t border-border/70 p-3"><Button type="button" size="sm" variant="outline" className="w-full" disabled={candidatesQuery.isFetchingNextPage} onClick={() => candidatesQuery.fetchNextPage()}>{candidatesQuery.isFetchingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Meer gebouwen laden</Button></div>}
+              {!viewOnly && candidatesQuery.hasNextPage && <div className="border-t border-border/70 p-3"><Button type="button" size="sm" variant="outline" className="w-full" disabled={candidatesQuery.isFetchingNextPage} onClick={() => candidatesQuery.fetchNextPage()}>{candidatesQuery.isFetchingNextPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Meer gebouwen laden</Button></div>}
               {buildingArea > 0 && <div className="border-t border-border/70 px-4 py-3 text-xs text-muted-foreground">Oppervlakte bekende gebouwcontouren: {formatArea(buildingArea)}</div>}
             </section>
           </> : <>
-            <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
+            {!viewOnly && <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <p className="text-sm font-semibold">Klik je terrein bij elkaar</p>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Klik direct op percelen om ze toe te voegen of te verwijderen. Met Grens aanpassen plaats je zelf bewerkpunten op de grenslijn.</p>
               <p className="mt-2 text-xs text-muted-foreground">Zoekgebied: 1 km rond het objectadres. Vervolgpagina’s worden automatisch opgehaald.</p>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Een perceel is een hulpmiddel, geen bevestiging van eigendom of bewakingsopdracht. Controleer de grens op de luchtfoto en pas hem zo nodig aan.</p>
               {parcelsQuery.data && <p className="mt-2 text-[11px] text-muted-foreground">{parcelCandidates.length} percelen rond het object geladen · <a className="underline" href="https://www.pdok.nl/introductie/-/article/kadastrale-kaart" target="_blank" rel="noreferrer">PDOK Kadastrale kaart</a></p>}
-            </section>
+            </section>}
             <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold">Terreinbegrenzing</p><p className="mt-1 text-xs text-muted-foreground">Deze grens staat los van de gebouwselectie en wordt voorbereid voor toekomstige locatieondersteuning.</p></div><Badge variant="secondary">{form.object_area_geojson.features.length} vlak{form.object_area_geojson.features.length === 1 ? "" : "ken"}</Badge></div>
               <div className="mt-4 rounded-lg border border-border/60 bg-background/35 p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Totale oppervlakte</p><p className="mt-1 text-lg font-semibold">{formatArea(terrainArea)}</p></div>
-              <div className="mt-3 space-y-2">{form.object_area_geojson.features.map((_, index) => <div key={`terrain-${index}`} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/35 px-3 py-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /><span className="flex-1 text-xs font-medium">Terreindeel {index + 1}</span><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) }))} aria-label={`Terreindeel ${index + 1} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></div>)}</div>
-              {form.object_area_geojson.features.length > 0 && <Button type="button" variant="outline" size="sm" className="mt-3 w-full text-destructive hover:text-destructive" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: emptyFeatureCollection() }))}><Eraser className="h-4 w-4" /> Hele terreinbegrenzing wissen</Button>}
+              <div className="mt-3 space-y-2">{form.object_area_geojson.features.map((_, index) => <div key={`terrain-${index}`} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/35 px-3 py-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /><span className="flex-1 text-xs font-medium">Terreindeel {index + 1}</span>{!viewOnly && <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) }))} aria-label={`Terreindeel ${index + 1} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button>}</div>)}</div>
+              {!viewOnly && form.object_area_geojson.features.length > 0 && <Button type="button" variant="outline" size="sm" className="mt-3 w-full text-destructive hover:text-destructive" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: emptyFeatureCollection() }))}><Eraser className="h-4 w-4" /> Hele terreinbegrenzing wissen</Button>}
             </section>
           </>}
 
@@ -900,7 +945,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-muted-foreground"><dt>Revisie</dt><dd className="text-right text-foreground">{appliedConfiguration.map_geometry_revision || 0}</dd><dt>Bron</dt><dd className="text-right text-foreground">{candidateMetadata?.source || "BAG/Kadaster via PDOK"}</dd><dt>Bron opgehaald</dt><dd className="text-right text-foreground">{formatDateTime(candidateMetadata?.source_retrieved_at || appliedConfiguration.source_retrieved_at)}</dd><dt>Laatst gewijzigd</dt><dd className="text-right text-foreground">{formatDateTime(appliedConfiguration.map_geometry_updated_at)}</dd>{(appliedConfiguration.map_geometry_updated_by_name || appliedConfiguration.map_geometry_updated_by_user_id) && <><dt>Door</dt><dd className="break-all text-right text-foreground">{appliedConfiguration.map_geometry_updated_by_name || appliedConfiguration.map_geometry_updated_by_user_id}</dd></>}</dl>
           </section>
         </aside>
-      </div>
+      </div>}
 
       <Dialog open={Boolean(renamingBuilding)} onOpenChange={open => { if (!open) setRenamingBuilding(null); }}>
         <DialogContent className="sm:max-w-md">

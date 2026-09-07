@@ -157,6 +157,171 @@ describe("ObjectMapCanvas", () => {
     labelHookState.resolveBuildingRoofAnchor = null;
   });
 
+  it.each(["buildings", "terrain"])("toont in alleen-lezen %s alle opgeslagen lagen en namen, met camerabediening maar zonder mutaties", async workspace => {
+    const callbacks = Object.fromEntries([
+      "onToggleCandidate", "onToggleBuildingPoint", "onToggleParcel", "onRemoveTerrainFeature",
+      "onAddDrawingPoint", "onFinishDrawing", "onCancelDrawing", "onRemoveLastDrawingPoint",
+      "onVertexDragStart", "onMoveVertex", "onVertexDragEnd", "onTerrainGeometryChange", "onEditError",
+    ].map(name => [name, vi.fn()]));
+    const terrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-1" }] };
+    renderCanvas({ ...callbacks, workspace, terrain, viewOnly: true, disabled: false,
+      // Stale editor props must never expose editing state in the viewer.
+      drawingTarget: "terrain", editingTarget: "terrain",
+      drawingPoints: [[4.48, 51.92], [4.481, 51.92], [4.481, 51.921]],
+      parcelCandidates: [candidate], parcelsVisible: true, parcelSelectionEnabled: true,
+      buildingLabels: { "bag:bag-1": "Hoofdgebouw" },
+    });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    expect(await screen.findByText("Hoofdgebouw")).toBeInTheDocument();
+    expect(map.getSource("loq-object-map-selected").data.features[0]).toEqual(candidate);
+    expect(map.getSource("loq-object-map-terrain").data.features[0].geometry).toEqual(candidate.geometry);
+    expect(map.setFeatureState).toHaveBeenCalledWith(standardBuilding, { select: true });
+    expect(map.getSource("loq-object-map-draft").data.features).toEqual([]);
+    expect(map.getSource("loq-object-map-vertices").data.features).toEqual([]);
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    map.fitBounds.mockClear();
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("loq-object-map-parcels-fill", "visibility", "none");
+    expect(screen.queryByText(/Klik op een 3D-gebouw|Klik een perceel|Klik op de groene grens|Klik hoekpunten/)).not.toBeInTheDocument();
+
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4807, lat: 51.9202 } });
+      map.emitInteraction("loq-object-map-standard-building-mouseenter", { feature: standardBuilding });
+      map.emitLayer("click", "loq-object-map-candidates-fill", { features: [candidate] });
+      map.emitLayer("click", "loq-object-map-parcels-fill", { features: [candidate] });
+      map.emitLayer("click", "loq-object-map-terrain-fill", { features: [{ properties: { loq_feature_index: 0 } }] });
+      map.emitLayer("click", "loq-object-map-draft-points", { features: [{ properties: { point_index: 0 } }] });
+      map.emitLayer("mousedown", "loq-object-map-vertices-layer", { features: [{ properties: { target: "terrain", feature_index: 0, vertex_index: 0 } }] });
+      map.emitLayer("contextmenu", "loq-object-map-vertices-layer", { features: [{ properties: { feature_index: 0, vertex_index: 0 } }] });
+      map.emit("click", { point: { x: 50, y: 0 }, lngLat: { lng: 4.4805, lat: 51.92 } });
+      map.emit("mousemove", { lngLat: { lng: 4.4805, lat: 51.9202 } });
+      map.emit("mouseup");
+    });
+    const canvas = screen.getByLabelText("Kaart en terrein van Testobject");
+    ["Enter", "Backspace", "Escape"].forEach(key => fireEvent.keyDown(canvas, { key }));
+    expect(screen.queryByRole("menu", { name: "Grenspunt" })).not.toBeInTheDocument();
+    expect(map.getCanvas().style.cursor).not.toBe("pointer");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inzoomen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Kaart rechtsom draaien" }));
+    fireEvent.click(screen.getByRole("button", { name: "3D-kijkhoek vergroten" }));
+    fireEvent.click(screen.getByRole("button", { name: "Passend tonen" }));
+    toggleMapLighting();
+    expect(map.zoomIn).toHaveBeenCalledOnce();
+    expect(map.getPitch()).toBe(52);
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(screen.getByText("Hoofdgebouw")).toBeInTheDocument();
+    expect(mapboxState.instances).toHaveLength(1);
+    Object.values(callbacks).forEach(callback => expect(callback).not.toHaveBeenCalled());
+  });
+
+  it("toont bij openen van de viewer alle lokale opgeslagen gebouwen, selectiepunten en terrein precies eenmaal passend", async () => {
+    const terrain = { type: "FeatureCollection", features: [{ ...candidate, geometry: { type: "Polygon", coordinates: [[[4.49, 51.92], [4.491, 51.92], [4.491, 51.922], [4.49, 51.922], [4.49, 51.92]]] } }] };
+    const rendered = renderCanvas({ viewOnly: true, terrain, buildingSelectionPoints: [{ id: "west", longitude: 4.475, latitude: 51.919 }] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    act(() => map.emit("style.load"));
+    expect(map.fitBounds).toHaveBeenCalledExactlyOnceWith([[4.475, 51.919], [4.491, 51.922]], { padding: 90, maxZoom: 18.5, duration: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Kaart rechtsom draaien" }));
+    const bearing = map.getBearing();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" />);
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="buildings" />);
+    // Refetching geometry and reloading styles must not undo manual navigation.
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} terrain={empty} />);
+    act(() => {
+      map.emit("resize");
+      map.emit("style.load");
+      map.emit("style.import.load", { importId: "basemap" });
+      map.emit("idle");
+    });
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    expect(map.getBearing()).toBe(bearing);
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it("neemt geen ongeldige, verre, kandidaat- of conceptgeometrie mee in automatisch of handmatig passend tonen", async () => {
+    const invalid = { ...candidate, geometry: { type: "Polygon", coordinates: [[[-20, 20], [20, 20], [20, 70], [-20, 20]]] } };
+    const open = { ...candidate, geometry: { type: "Polygon", coordinates: [[[4.49, 51.92], [4.491, 51.92], [4.491, 51.922], [4.49, 51.922]]] } };
+    renderCanvas({ viewOnly: true, selectedBuildings: { type: "FeatureCollection", features: [candidate, invalid] },
+      terrain: { type: "FeatureCollection", features: [open, invalid] }, candidates: [invalid],
+      drawingTarget: "terrain", drawingPoints: [[0, 0], [20, 20], [10, 10]],
+      buildingSelectionPoints: [{ id: "far", longitude: 4.6, latitude: 51.92 }, { id: "string", longitude: "4.49", latitude: 51.92 }, { id: "nan", longitude: NaN, latitude: 51.92 }],
+    });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    expect(map.fitBounds).toHaveBeenCalledExactlyOnceWith([[4.48, 51.92], [4.481, 51.921]], { padding: 90, maxZoom: 18.5, duration: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Passend tonen" }));
+    expect(map.fitBounds).toHaveBeenLastCalledWith([[4.48, 51.92], [4.481, 51.921]], { padding: 90, maxZoom: 18.5, duration: 500 });
+  });
+
+  it("verandert het eerste camerabeeld van de editor niet en past bij een onbevestigde viewer geen geometrie passend", async () => {
+    const editor = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    expect(map.options.zoom).toBe(17);
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    editor.rerender(<ObjectMapCanvas {...editor.props} viewOnly />);
+    act(() => map.emit("style.load"));
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    editor.unmount();
+
+    renderCanvas({ viewOnly: true, object: { id: "unverified", name: "Onbevestigd", longitude: 0, latitude: 0, geocoding_status: "unverified" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(2));
+    const viewer = mapboxState.instances[1];
+    act(() => viewer.emit("style.load"));
+    fireEvent.click(screen.getByRole("button", { name: "Passend tonen" }));
+    expect(viewer.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it.each([{ viewOnly: true }, { disabled: true }])("annuleert een lopende grenssleep zonder mutatie na overschakelen naar %j", async restriction => {
+    const rendered = renderCanvas({ workspace: "terrain", editingTarget: "terrain", terrain: { type: "FeatureCollection", features: [candidate] } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    act(() => map.emit("click", { point: { x: 100, y: 0 }, originalEvent: {} }));
+    const handle = map.getSource("loq-object-map-vertices").setData.mock.lastCall[0].features[0];
+    act(() => map.emitLayer("mousedown", "loq-object-map-vertices-layer", { features: [handle], originalEvent: { button: 0 }, preventDefault: vi.fn() }));
+    expect(rendered.props.onVertexDragStart).toHaveBeenCalledOnce();
+    expect(map.dragPan.disable).toHaveBeenCalledOnce();
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} {...restriction} />);
+    act(() => {
+      map.emit("mousemove", { lngLat: { lng: 4.4805, lat: 51.9199 } });
+      map.emit("mouseup");
+      map.emit("mouseout");
+    });
+    expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
+    expect(rendered.props.onVertexDragEnd).not.toHaveBeenCalled();
+    expect(map.dragPan.enable).toHaveBeenCalled();
+    expect(map.getCanvas().style.cursor).toBe("");
+    expect(map.getSource("loq-object-map-vertices").setData.mock.lastCall[0].features).toEqual([]);
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
+  it.each([{ viewOnly: true }, { disabled: true }])("sluit een grenspuntmenu zonder verwijderen na overschakelen naar %j", async restriction => {
+    const onTerrainGeometryChange = vi.fn();
+    const rendered = renderCanvas({ workspace: "terrain", editingTarget: "terrain", terrain: { type: "FeatureCollection", features: [candidate] }, onTerrainGeometryChange });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    act(() => map.emit("click", { point: { x: 100, y: 0 }, originalEvent: {} }));
+    const handle = map.getSource("loq-object-map-vertices").setData.mock.lastCall[0].features[0];
+    act(() => map.emitLayer("contextmenu", "loq-object-map-vertices-layer", { features: [handle], point: { x: 50, y: 10 }, originalEvent: {} }));
+    expect(screen.getByRole("menu", { name: "Grenspunt" })).toBeInTheDocument();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} {...restriction} />);
+    expect(screen.queryByRole("menu", { name: "Grenspunt" })).not.toBeInTheDocument();
+    act(() => map.emitLayer("contextmenu", "loq-object-map-vertices-layer", { features: [handle], point: { x: 50, y: 10 }, originalEvent: {} }));
+    expect(screen.queryByRole("menu", { name: "Grenspunt" })).not.toBeInTheDocument();
+    expect(onTerrainGeometryChange).not.toHaveBeenCalled();
+  });
+
   it("biedt draaien, kantelen en standaard muisbesturing zonder de kaart opnieuw op te bouwen", async () => {
     const rendered = renderCanvas();
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));

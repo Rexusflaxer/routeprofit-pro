@@ -3,6 +3,7 @@ import { featureSourceId, featureStrictlyContainsCoordinate, normalizeFeatureCol
 
 const HOVER_DELAY_MS = 180;
 const MAX_BUILDINGS = 100;
+const LABEL_BACKGROUND = "rgba(8, 13, 20, 0.94)";
 
 function validCoordinate(coordinate) {
   return Array.isArray(coordinate) && coordinate.length >= 2
@@ -124,30 +125,24 @@ function roofAltitude(resolveBuildingRoofAnchor, entry) {
 
 function labelPointer() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 18 26");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "26");
+  svg.setAttribute("viewBox", "0 0 14 9");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "9");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   svg.setAttribute("data-building-pointer", "true");
   svg.style.display = "block";
   svg.style.flexShrink = "0";
-  svg.style.marginTop = "-1px";
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  line.setAttribute("d", "M9 0V16");
-  line.setAttribute("stroke", "white");
-  line.setAttribute("stroke-width", "5");
-  const center = line.cloneNode();
-  center.setAttribute("stroke", "currentColor");
-  center.setAttribute("stroke-width", "3");
+  svg.style.marginTop = "-2px";
   const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  // The final tip is exactly at the bottom-center Marker anchor, including
-  // when Mapbox projects it at roof altitude in a tilted 3D camera.
-  arrow.setAttribute("d", "M2 15L9 26L16 15Z");
-  arrow.setAttribute("fill", "currentColor");
-  arrow.setAttribute("stroke", "white");
-  arrow.setAttribute("stroke-width", "1");
-  svg.append(line, center, arrow);
+  // A short triangle joins the mobile-style pill directly, without a stem or
+  // icon. Its stroked tip ends at the bottom-center roof/ground Marker anchor.
+  arrow.setAttribute("d", "M1 0L7 8L13 0");
+  arrow.setAttribute("fill", LABEL_BACKGROUND);
+  arrow.setAttribute("stroke", "currentColor");
+  arrow.setAttribute("stroke-width", "2");
+  arrow.setAttribute("stroke-linejoin", "round");
+  svg.append(arrow);
   return svg;
 }
 
@@ -242,10 +237,13 @@ export default function useObjectMapBuildingLabels({
       const highlighted = highlightedBuildingKey === entry.key;
       record.label.textContent = entry.text;
       record.element.dataset.highlighted = String(highlighted);
-      record.pointer.style.color = highlighted ? "#d97706" : "#2563eb";
+      const accentColor = highlighted ? "#f59e0b" : "#2563eb";
+      record.pointer.style.color = accentColor;
+      record.label.style.backgroundColor = LABEL_BACKGROUND;
+      record.label.style.borderColor = accentColor;
       // The outer element belongs to Mapbox: replacing its className would
       // discard marker positioning/anchor classes and break camera tracking.
-      record.label.className = `pointer-events-none max-w-[220px] truncate rounded-lg border bg-background/95 px-2.5 py-1 text-xs font-semibold text-foreground shadow-md ${highlighted ? "border-amber-400 ring-2 ring-amber-300/60" : "border-primary/50"}`;
+      record.label.className = "pointer-events-none max-w-[220px] truncate rounded-full border-2 px-3 py-1.5 text-xs font-bold leading-4 text-white shadow-md";
       try {
         if (!liveMapContainer(map)) { visible.delete(entry.key); return; }
         if (record.coordinate[0] !== entry.coordinate[0] || record.coordinate[1] !== entry.coordinate[1]) {

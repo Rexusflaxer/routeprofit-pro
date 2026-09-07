@@ -110,7 +110,7 @@ describe("buildingLabelCoordinate", () => {
 });
 
 describe("useObjectMapBuildingLabels", () => {
-  it("verbindt de naam met een duidelijke pin waarvan de punt exact op het betrouwbare dakanker eindigt", async () => {
+  it("toont een compacte donkere mobiele pill met aansluitend driehoekje op het betrouwbare dakanker", async () => {
     const coordinate = buildingLabelCoordinate(building);
     const resolver = vi.fn(({ coordinate: anchor }) => ({ coordinate: anchor, altitude: 14 }));
     const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Receptie" }, resolveBuildingRoofAnchor: resolver });
@@ -122,13 +122,36 @@ describe("useObjectMapBuildingLabels", () => {
     expect(marker.options.element).toHaveClass("mapboxgl-marker", "mapboxgl-marker-anchor-bottom");
     const pointer = marker.options.element.querySelector("svg[data-building-pointer]");
     expect(pointer).not.toBeNull();
-    expect(pointer).toHaveAttribute("viewBox", "0 0 18 26");
-    expect(pointer.lastChild).toHaveAttribute("d", "M2 15L9 26L16 15Z");
+    expect(pointer).toHaveAttribute("viewBox", "0 0 14 9");
+    expect(pointer).toHaveAttribute("height", "9");
+    expect(pointer.style.marginTop).toBe("-2px");
+    expect(pointer.querySelectorAll("path")).toHaveLength(1);
+    expect(pointer.firstChild).toHaveAttribute("d", "M1 0L7 8L13 0");
+    expect(pointer.firstChild).toHaveAttribute("fill", "rgba(8, 13, 20, 0.94)");
+    const pill = marker.options.element.firstChild;
+    expect(pill).toHaveClass("rounded-full", "text-xs", "font-bold", "text-white");
+    expect(pill).toHaveStyle({ backgroundColor: "rgba(8, 13, 20, 0.94)", borderColor: "#2563eb" });
+    expect(pill.children).toHaveLength(0);
     expect(pointer).toHaveAttribute("aria-hidden", "true");
     expect(marker.options.element.style.pointerEvents).toBe("none");
     expect(rendered.map.container.textContent).toBe("Receptie");
     expect(marker.setAltitude).not.toHaveBeenCalled();
     expect(rendered.map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it("behoudt de donkere pill bij aanwijzen en past alleen de gezamenlijke accentkleur aan", async () => {
+    const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Receptie" } });
+    const marker = markerState.instances[0];
+    const pill = marker.options.element.firstChild;
+    const pointer = marker.options.element.querySelector("svg[data-building-pointer]");
+    rendered.rerender({ ...rendered.props, highlightedBuildingKey: "bag:bag-1" });
+    expect(pill).toHaveStyle({ backgroundColor: "rgba(8, 13, 20, 0.94)", borderColor: "#f59e0b" });
+    expect(pointer).toHaveStyle({ color: "#f59e0b" });
+    expect(pointer.firstChild).toHaveAttribute("fill", "rgba(8, 13, 20, 0.94)");
+    expect(marker.options.element).toHaveClass("mapboxgl-marker", "mapboxgl-marker-anchor-bottom");
+    expect(markerState.instances).toHaveLength(1);
+    expect(marker.setLngLat).toHaveBeenCalledOnce();
+    expect(marker.setAltitude).not.toHaveBeenCalled();
   });
 
   it.each([

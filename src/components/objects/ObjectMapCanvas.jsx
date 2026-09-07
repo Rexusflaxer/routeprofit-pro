@@ -9,7 +9,6 @@ import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import {
   editableVertices,
-  featureCollectionBounds,
   featureSourceId,
   featureStrictlyContainsCoordinate,
   matchMapboxBuildingToBagCandidate,
@@ -54,6 +53,7 @@ const NETHERLANDS_MAP_BOUNDS = [[3, 50.6], [7.4, 53.7]];
 const LOCAL_MAP_RADIUS_METERS = 1_000;
 const MAP_GEOMETRY_MAX_DISTANCE_METERS = 5_000; // Same locality limit as customerPlatformApi.
 const MAP_BOUNDS_PADDING_METERS = 150;
+const NO_DRAWING_POINTS = Object.freeze([]);
 
 function nearbyMapCoordinate(coordinate, anchor) {
   if (!Array.isArray(coordinate) || coordinate.length < 2) return false;
@@ -114,6 +114,25 @@ function objectNavigationBounds(object, selectedBuildings, terrain, buildingSele
     if (nearbyMapCoordinate(coordinate, anchor)) include(coordinate);
   });
   return bounds.map(([lng, lat]) => [Math.max(-180, Math.min(180, lng)), Math.max(-85, Math.min(85, lat))]);
+}
+
+function objectGeometryBounds(object, selectedBuildings, terrain, buildingSelectionPoints) {
+  const anchor = trustedObjectCoordinatePair(object);
+  if (!anchor || !nearbyMapCoordinate(anchor, anchor)) return null;
+  const coordinates = [anchor];
+  [selectedBuildings, terrain].forEach(collection => {
+    normalizeFeatureCollection(collection).features.slice(0, 100).forEach(feature => {
+      coordinates.push(...localGeometryCoordinates(feature.geometry, anchor));
+    });
+  });
+  (buildingSelectionPoints || []).slice(0, 100).forEach(point => {
+    const coordinate = [point.longitude, point.latitude];
+    if (nearbyMapCoordinate(coordinate, anchor)) coordinates.push(coordinate);
+  });
+  return coordinates.reduce((bounds, [lng, lat]) => [
+    [Math.min(bounds[0][0], lng), Math.min(bounds[0][1], lat)],
+    [Math.max(bounds[1][0], lng), Math.max(bounds[1][1], lat)],
+  ], [[anchor[0], anchor[1]], [anchor[0], anchor[1]]]);
 }
 
 const STANDARD_BUILDINGS_TARGET = { featuresetId: "buildings", importId: "basemap" };
@@ -366,10 +385,11 @@ export default function ObjectMapCanvas({
   selectedBuildings,
   manualBuildings,
   terrain,
-  drawingTarget,
-  drawingPoints,
-  editingTarget,
+  drawingTarget: requestedDrawingTarget,
+  drawingPoints: requestedDrawingPoints,
+  editingTarget: requestedEditingTarget,
   disabled,
+  viewOnly = false,
   onToggleCandidate,
   onAddDrawingPoint,
   onVertexDragStart,
@@ -381,8 +401,8 @@ export default function ObjectMapCanvas({
   workspace = "buildings",
   mapView = "map",
   parcelCandidates = [],
-  parcelsVisible = false,
-  parcelSelectionEnabled = false,
+  parcelsVisible: requestedParcelsVisible = false,
+  parcelSelectionEnabled: requestedParcelSelectionEnabled = false,
   onToggleParcel,
   onFinishDrawing,
   onRemoveLastDrawingPoint,
@@ -393,6 +413,13 @@ export default function ObjectMapCanvas({
   highlightedBuildingKey = null,
   buildingLabels,
 }) {
+  // Viewing is independent of editor state left in the parent. Keep the same
+  // map/camera, but never expose a draft, editable handle or parcel action.
+  const drawingTarget = viewOnly ? null : requestedDrawingTarget;
+  const drawingPoints = viewOnly ? NO_DRAWING_POINTS : requestedDrawingPoints;
+  const editingTarget = viewOnly ? null : requestedEditingTarget;
+  const parcelsVisible = !viewOnly && requestedParcelsVisible;
+  const parcelSelectionEnabled = !viewOnly && requestedParcelSelectionEnabled;
   const { resolvedTheme } = useTheme();
   // Follow the app on opening. A button click overrides only this mounted map;
   // reopening starts afresh, without writing a form value or saved preference.
@@ -428,6 +455,7 @@ export default function ObjectMapCanvas({
   const applyWorkspaceViewRef = useRef(null);
   const appliedNavigationBoundsRef = useRef(null);
   const navigationBoundsRef = useRef(null);
+  const geometryBoundsRef = useRef(null);
   const previewPointRef = useRef(null);
   const handlesRef = useRef([]);
   const expectedTerrainRef = useRef(null);
@@ -438,11 +466,13 @@ export default function ObjectMapCanvas({
   const [editError, setEditError] = useState(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
-  const interactionDisabled = disabled || !trustedObjectCoordinatePair(object);
+  const interactionDisabled = viewOnly || disabled || !trustedObjectCoordinatePair(object);
   const navigationBounds = useMemo(() => objectNavigationBounds(object, selectedBuildings, terrain, buildingSelectionPoints),
     [object?.latitude, object?.longitude, object?.geocoding_status, selectedBuildings, terrain, buildingSelectionPoints]);
   const navigationBoundsKey = JSON.stringify(navigationBounds);
   navigationBoundsRef.current = navigationBounds;
+  geometryBoundsRef.current = useMemo(() => objectGeometryBounds(object, selectedBuildings, terrain, buildingSelectionPoints),
+    [object?.latitude, object?.longitude, object?.geocoding_status, selectedBuildings, terrain, buildingSelectionPoints]);
   const groundEditing = workspace === "terrain" && (mapView === "satellite" || Boolean(editingTarget) || Boolean(drawingTarget));
   const updateHandles = next => { handlesRef.current = next; setHandles(next); };
   const reportEditError = message => {
@@ -452,7 +482,7 @@ export default function ObjectMapCanvas({
   };
 
   const resolveBuildingRoofAnchor = useCallback(({ key, coordinate }) => {
-    if (!readyRef.current || interactionsRef.current.workspace !== "buildings"
+    if (!readyRef.current || (interactionsRef.current.workspace !== "buildings" && !interactionsRef.current.viewOnly)
       || !Array.isArray(coordinate) || coordinate.length < 2 || !coordinate.slice(0, 2).every(Number.isFinite)) return null;
     const containing = standardBuildingRoofGroupsRef.current.filter(({ group }) => groupContainsCoordinate(group, coordinate));
     // A coordinate shared by unrelated native buildings or multiple stored
@@ -470,7 +500,24 @@ export default function ObjectMapCanvas({
   }, []);
 
   const buildingLabelsError = useObjectMapBuildingLabels({ map: mapRef.current, ready, selectedBuildings, buildingSelectionPoints,
-    buildingLabels, highlightedBuildingKey, workspace, editingTarget, drawingTarget, resolveBuildingRoofAnchor });
+    buildingLabels, highlightedBuildingKey, workspace: viewOnly ? "buildings" : workspace, editingTarget, drawingTarget, resolveBuildingRoofAnchor });
+
+  useEffect(() => {
+    if (!interactionDisabled) return;
+    // A mode/permission change can happen before mouseup. Cancel the edit,
+    // without firing a completion callback into the now read-only parent.
+    dragRef.current = null;
+    previewPointRef.current = null;
+    suppressBoundaryClickRef.current = false;
+    handlesRef.current = [];
+    setHandles([]);
+    setPointMenu(null);
+    setEditError(null);
+    reportedEditErrorRef.current = null;
+    const map = mapRef.current;
+    map?.dragPan.enable();
+    if (map) map.getCanvas().style.cursor = "";
+  }, [interactionDisabled]);
 
   useEffect(() => {
     if (editingTarget !== "terrain" || (expectedTerrainRef.current && expectedTerrainRef.current !== JSON.stringify(terrain))) {
@@ -501,14 +548,10 @@ export default function ObjectMapCanvas({
     () => buildingMatchCandidates(candidates, selectedBuildings, selectedBagFeatureIds),
     [candidates, selectedBagFeatureIds, selectedBuildings],
   );
-  const selectedPointCollection = useMemo(() => featureCollection(buildingSelectionPoints.map(point => ({
-    type: "Feature",
-    properties: {},
-    geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
-  }))), [buildingSelectionPoints]);
   dataRef.current = mapData;
   interactionsRef.current = {
     disabled: interactionDisabled,
+    viewOnly,
     drawingTarget,
     editingTarget,
     candidates: matchCandidates,
@@ -555,6 +598,8 @@ export default function ObjectMapCanvas({
       const mapboxgl = module.default;
       mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
       const coordinates = trustedObjectCoordinatePair(object);
+      const initiallyViewOnly = interactionsRef.current.viewOnly;
+      let initialViewerBoundsApplied = false;
       const usesGroundView = interaction => interaction.workspace === "terrain"
         && (interaction.mapView === "satellite" || Boolean(interaction.drawingTarget) || Boolean(interaction.editingTarget));
       let appliedGroundView = usesGroundView(interactionsRef.current);
@@ -867,6 +912,10 @@ export default function ObjectMapCanvas({
           applyWorkspaceView();
           installStandardBuildingInteractions();
           resetAndSyncStandardBuildingStates();
+          if (initiallyViewOnly && interactionsRef.current.viewOnly && !initialViewerBoundsApplied && geometryBoundsRef.current) {
+            map.fitBounds(geometryBoundsRef.current, { padding: 90, maxZoom: 18.5, duration: 0 });
+            initialViewerBoundsApplied = true;
+          }
           readyRef.current = true;
           setError(null);
           setReady(true);
@@ -1003,6 +1052,7 @@ export default function ObjectMapCanvas({
       });
       map.on("mousemove", event => {
         const interaction = interactionsRef.current;
+        if (interaction.disabled) return;
         if (dragRef.current) {
           suppressBoundaryClickRef.current = true;
           if (dragRef.current.target === "terrain") {
@@ -1026,7 +1076,7 @@ export default function ObjectMapCanvas({
         dragRef.current = null;
         map.dragPan.enable();
         map.getCanvas().style.cursor = "";
-        interactionsRef.current.onVertexDragEnd?.(target);
+        if (!interactionsRef.current.disabled) interactionsRef.current.onVertexDragEnd?.(target);
       };
       map.on("mouseup", finishDrag);
       map.on("mouseout", finishDrag);
@@ -1095,9 +1145,9 @@ export default function ObjectMapCanvas({
   }, [navigationBoundsKey, ready]);
 
   useEffect(() => {
-    if (workspace === "buildings" && !disabled && !drawingTarget && !editingTarget) return;
+    if (workspace === "buildings" && !interactionDisabled && !drawingTarget && !editingTarget) return;
     clearStandardBuildingHoverRef.current?.();
-  }, [disabled, drawingTarget, editingTarget, workspace]);
+  }, [interactionDisabled, drawingTarget, editingTarget, workspace]);
 
   return (
     <div className="relative h-[540px] min-h-[420px] overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-inner lg:h-[680px]">
@@ -1118,7 +1168,7 @@ export default function ObjectMapCanvas({
       {!ready && !error && <div className="absolute inset-0 flex items-center justify-center bg-background/75 text-sm text-muted-foreground backdrop-blur-sm"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Kaart laden...</div>}
       {error && <div className="absolute inset-x-4 top-4 rounded-xl border border-destructive/30 bg-background/95 p-4 text-sm text-destructive shadow-lg backdrop-blur-xl">{error.message}</div>}
       {buildingLabelsError && <div role="status" className="pointer-events-none absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{buildingLabelsError}</div>}
-      {editError && <div role="alert" className="absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{editError}</div>}
+      {editError && !interactionDisabled && <div role="alert" className="absolute inset-x-3 top-16 rounded-lg border border-amber-400/60 bg-background/95 p-3 text-xs text-amber-800 shadow-lg dark:text-amber-200">{editError}</div>}
       {ready && <div className="pointer-events-none absolute bottom-8 left-3 max-w-[calc(100%-165px)] rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-xl">{trustedObjectCoordinatePair(object) ? "Kaart begrensd tot de omgeving van dit object" : "Nederland-overzicht · bevestig eerst het objectadres"}</div>}
       {drawingTarget && !interactionDisabled && (
         <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur-xl">
@@ -1151,14 +1201,14 @@ export default function ObjectMapCanvas({
           onPitchDown={() => mapRef.current?.easeTo({ pitch: Math.max(0, mapRef.current.getPitch() - 10), duration: 250 })}
           onResetNorth={() => mapRef.current?.easeTo({ bearing: 0, duration: 250 })}
           onFitBounds={() => {
-            const bounds = featureCollectionBounds(selectedBuildings, selectedPointCollection, terrain, mapData.anchor);
-            if (bounds) mapRef.current?.fitBounds([[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]], { padding: 90, maxZoom: 18.5, duration: 500 });
+            if (geometryBoundsRef.current) mapRef.current?.fitBounds(geometryBoundsRef.current, { padding: 90, maxZoom: 18.5, duration: 500 });
           }} />
       </div>}
-      {pointMenu && editingTarget === "terrain" && <div role="menu" aria-label="Grenspunt" className="absolute z-20 rounded-xl border bg-background p-1 shadow-xl" style={{ left: pointMenu.x, top: pointMenu.y }} onKeyDown={event => {
+      {pointMenu && editingTarget === "terrain" && !interactionDisabled && <div role="menu" aria-label="Grenspunt" className="absolute z-20 rounded-xl border bg-background p-1 shadow-xl" style={{ left: pointMenu.x, top: pointMenu.y }} onKeyDown={event => {
         if (event.key === "Escape") { setPointMenu(null); containerRef.current?.focus(); }
       }}>
         <Button type="button" role="menuitem" variant="ghost" size="sm" autoFocus onClick={() => {
+          if (interactionDisabled || editingTarget !== "terrain") return;
           const result = removeBoundaryHandle(terrain, pointMenu.reference);
           if (result.error) reportEditError(result.error);
           else {
