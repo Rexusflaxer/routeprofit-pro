@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { union as unionPolygons } from "martinez-polygon-clipping";
 import { Building2, LandPlot, Loader2, MousePointer2, Trash2 } from "lucide-react";
@@ -394,8 +394,10 @@ export default function ObjectMapCanvas({
   buildingLabels,
 }) {
   const { resolvedTheme } = useTheme();
-  const [lightingMode, setLightingMode] = useState("app");
-  const effectiveLightPreset = lightingMode === "app" ? (resolvedTheme === "dark" ? "night" : "day") : lightingMode;
+  // Follow the app on opening. A button click overrides only this mounted map;
+  // reopening starts afresh, without writing a form value or saved preference.
+  const [lightPresetOverride, setLightPresetOverride] = useState(null);
+  const effectiveLightPreset = lightPresetOverride ?? (resolvedTheme === "dark" ? "night" : "day");
   const lightPresetRef = useRef(effectiveLightPreset);
   lightPresetRef.current = effectiveLightPreset;
   const applyMapLightingRef = useRef(null);
@@ -419,6 +421,7 @@ export default function ObjectMapCanvas({
   const dragRef = useRef(null);
   const handledEventsRef = useRef(new WeakSet());
   const standardBuildingStatesRef = useRef(new globalThis.Map());
+  const standardBuildingRoofGroupsRef = useRef([]);
   const hoveredStandardBuildingsRef = useRef(new globalThis.Map());
   const syncStandardBuildingStatesRef = useRef(null);
   const clearStandardBuildingHoverRef = useRef(null);
@@ -448,8 +451,26 @@ export default function ObjectMapCanvas({
     reportedEditErrorRef.current = message;
   };
 
+  const resolveBuildingRoofAnchor = useCallback(({ key, coordinate }) => {
+    if (!readyRef.current || interactionsRef.current.workspace !== "buildings"
+      || !Array.isArray(coordinate) || coordinate.length < 2 || !coordinate.slice(0, 2).every(Number.isFinite)) return null;
+    const containing = standardBuildingRoofGroupsRef.current.filter(({ group }) => groupContainsCoordinate(group, coordinate));
+    // A coordinate shared by unrelated native buildings or multiple stored
+    // selections cannot safely borrow one of their heights. Keep its own
+    // ground anchor instead; never move a label onto the nearest roof.
+    if (containing.length !== 1 || containing[0].keys.size !== 1 || !containing[0].keys.has(key)) return null;
+    const roofParts = containing[0].parts.filter(part => part.properties?.group === "building-3d"
+      && featureStrictlyContainsCoordinate(part, coordinate));
+    if (!roofParts.length || roofParts.some(part => typeof part.properties.height !== "number"
+      || !Number.isFinite(part.properties.height) || part.properties.height <= 0 || part.properties.height > 1000)) return null;
+    // Several stacked parts of the SAME identity may cover this point. Keep
+    // all raw current parts (not just deduplicated footprints), so tile order
+    // cannot replace the roof height with that of the lower building body.
+    return { coordinate: [...coordinate], altitude: Math.max(...roofParts.map(part => part.properties.height)) };
+  }, []);
+
   const buildingLabelsError = useObjectMapBuildingLabels({ map: mapRef.current, ready, selectedBuildings, buildingSelectionPoints,
-    buildingLabels, highlightedBuildingKey, workspace, editingTarget, drawingTarget });
+    buildingLabels, highlightedBuildingKey, workspace, editingTarget, drawingTarget, resolveBuildingRoofAnchor });
 
   useEffect(() => {
     if (editingTarget !== "terrain" || (expectedTerrainRef.current && expectedTerrainRef.current !== JSON.stringify(terrain))) {
@@ -647,6 +668,7 @@ export default function ObjectMapCanvas({
 
       const syncStandardBuildingStates = () => {
         if (cancelled || !map || typeof map.queryRenderedFeatures !== "function") return;
+        standardBuildingRoofGroupsRef.current = [];
         const interaction = interactionsRef.current;
         let visibleBuildings = [];
         try {
@@ -658,6 +680,12 @@ export default function ObjectMapCanvas({
         }
         const groups = groupStandardBuildings(visibleBuildings);
         const pointAssociations = pointBuildingAssociations(groups, interaction.buildingSelectionPoints);
+        const visiblePartsByIdentity = new globalThis.Map();
+        visibleBuildings.forEach(feature => {
+          const key = mapboxBuildingFeatureKey(feature);
+          if (!visiblePartsByIdentity.has(key)) visiblePartsByIdentity.set(key, []);
+          visiblePartsByIdentity.get(key).push(feature);
+        });
         groups.forEach(group => {
           const { bagFeatureIds, selectionPoints } = selectedGroupEntries(group, interaction, pointAssociations);
           const selected = bagFeatureIds.length > 0 || selectionPoints.length > 0;
@@ -677,6 +705,13 @@ export default function ObjectMapCanvas({
             else if (!previous || previous.selected !== selected) setStandardBuildingState(map, feature, { select: selected });
           });
           rememberStandardBuildingGroup(group, bagFeatureIds, selectionPoints.map(point => point.id), selected, listHighlight);
+          // Reuse this sync's native query/associations for every label. The
+          // resolver performs no extra map query or geometry union per label.
+          standardBuildingRoofGroupsRef.current.push({
+            group,
+            keys: new Set([...bagFeatureIds.map(id => `bag:${id}`), ...selectionPoints.map(point => `point:${point.id}`)]),
+            parts: [...group.identities.keys()].flatMap(key => visiblePartsByIdentity.get(key) || []),
+          });
         });
         // Fallback only when no native building can be highlighted, including
         // legacy hand-drawn buildings. Never persist rendered Mapbox geometry.
@@ -699,6 +734,7 @@ export default function ObjectMapCanvas({
       };
       const resetAndSyncStandardBuildingStates = () => {
         standardBuildingStatesRef.current.clear();
+        standardBuildingRoofGroupsRef.current = [];
         hoveredStandardBuildingsRef.current.clear();
         hoverSourceFingerprint = null;
         syncStandardBuildingStates();
@@ -843,6 +879,9 @@ export default function ObjectMapCanvas({
       map.on("style.load", ensureWorkspace);
       map.on("style.import.load", () => { applyMapLighting(true); resetAndSyncStandardBuildingStates(); });
       map.on("idle", syncStandardBuildingStates);
+      // Installed before the label hook's moveend listener: label heights see
+      // the newly rendered parts after camera movement, not a previous tile.
+      map.on("moveend", syncStandardBuildingStates);
       map.on("error", event => {
         if (!readyRef.current && !cancelled) setError(event?.error || new Error("De kaart kon niet worden geladen."));
       });
@@ -1013,6 +1052,7 @@ export default function ObjectMapCanvas({
       applyWorkspaceViewRef.current = null;
       applyMapLightingRef.current = null;
       standardBuildingStatesRef.current.clear();
+      standardBuildingRoofGroupsRef.current = [];
       hoveredStandardBuildingsRef.current.clear();
       resizeObserver?.disconnect();
       map?.remove();
@@ -1101,8 +1141,8 @@ export default function ObjectMapCanvas({
         Klik op de groene grens voor een punt · sleep het punt · rechtermuisknop: verwijderen
       </div>}
       {ready && <div className="absolute bottom-8 right-3 z-10">
-        <ObjectMapControls ready={ready} groundEditing={groundEditing} lightingMode={lightingMode} effectiveLightPreset={effectiveLightPreset}
-          onLightingModeChange={setLightingMode}
+        <ObjectMapControls ready={ready} groundEditing={groundEditing} effectiveLightPreset={effectiveLightPreset}
+          onToggleLighting={() => setLightPresetOverride(effectiveLightPreset === "night" ? "day" : "night")}
           onZoomIn={() => mapRef.current?.zoomIn({ duration: 250 })}
           onZoomOut={() => mapRef.current?.zoomOut({ duration: 250 })}
           onRotateLeft={() => mapRef.current?.easeTo({ bearing: mapRef.current.getBearing() - 15, duration: 250 })}

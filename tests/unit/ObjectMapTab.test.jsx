@@ -380,7 +380,7 @@ describe("ObjectMapTab", () => {
   });
 
   it("biedt bij een versieconflict een veilige herlaadactie", async () => {
-    const conflict = Object.assign(new Error("Versieconflict"), { status: 409 });
+    const conflict = Object.assign(new Error("Versieconflict"), { status: 409, details: { code: "object_map_version_conflict" } });
     updateConfiguration.mockRejectedValue(conflict);
     renderTab();
     fireEvent.click(await screen.findByRole("button", { name: /Exact vastleggen/ }));
@@ -388,6 +388,62 @@ describe("ObjectMapTab", () => {
 
     expect(await screen.findByText("De kaart is ondertussen door iemand anders gewijzigd.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Actuele versie laden" })).toBeInTheDocument();
+  });
+
+  it.each([
+    { status: "concept", is_active_customer_object: false },
+    { status: "inactive", is_active_customer_object: false },
+    { status: "active", is_active_customer_object: false },
+  ])("slaat kaartinstellingen op zonder een niet-operationeel object te activeren (%j)", async lifecycle => {
+    const current = { ...object, ...lifecycle, show_on_mobile_map: false };
+    getConfiguration.mockResolvedValue({ ...configuration, object: current, show_on_mobile_map: false });
+    updateConfiguration.mockImplementation(async ({ data, expectedVersion }) => {
+      if (data.show_on_mobile_map) throw Object.assign(new Error("Alleen een actief object kan op de mobiele objectkaart worden getoond"), { status: 409 });
+      return { ...configuration, ...data, object: current, expected_version: expectedVersion + 1 };
+    });
+    // The authoritative configuration must win over stale active parent props.
+    renderTab({ ...object, is_active_customer_object: true });
+    await screen.findByText("Automatische indicatie");
+    expect(screen.getByRole("button", { name: "Opslaan en toepassen" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Exact vastleggen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      expectedVersion: 4,
+      data: expect.objectContaining({ show_on_mobile_map: false, selected_bag_feature_ids: ["bag-1"] }),
+    })));
+    await waitFor(() => expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument());
+    expect(screen.queryByText("De kaart is ondertussen door iemand anders gewijzigd.")).not.toBeInTheDocument();
+    expect(screen.getByText(/Dit object is nog niet operationeel actief/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Opslaan en toepassen" })).toBeDisabled();
+  });
+
+  it.each([
+    ["Alleen een actief object kan op de mobiele objectkaart worden getoond", null],
+    ["Een andere object- of kaartwijziging is nog in verwerking; probeer opnieuw", { retryable: true }],
+    ["De historie voor deze kaartrevisie is niet eenduidig", { code: "object_map_history_conflict" }],
+  ])("toont de echte opslagreden in plaats van een verzonnen versieconflict: %s", async (message, details) => {
+    updateConfiguration.mockRejectedValue(Object.assign(new Error(message), { status: 409, details, requestId: "safe-save-reference" }));
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Exact vastleggen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByText(/Referentie safe-save-reference/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Actuele versie laden" })).not.toBeInTheDocument();
+    expect(screen.getByText("Niet opgeslagen")).toBeInTheDocument();
+  });
+
+  it("gebruikt bij achtereenvolgende opslagacties steeds de zojuist opgeslagen objectversie", async () => {
+    updateConfiguration.mockImplementation(async ({ data, expectedVersion }) => ({ ...configuration, ...data, expected_version: expectedVersion + 1 }));
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Exact vastleggen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument());
+    await renameBuildingLabel("BAG-pand 012345", "Portier");
+    fireEvent.click(screen.getByRole("button", { name: "Opslaan en toepassen" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledTimes(2));
+    expect(updateConfiguration.mock.calls.map(([input]) => input.expectedVersion)).toEqual([4, 5]);
+    await waitFor(() => expect(screen.queryByText("Niet opgeslagen")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Actuele versie laden" })).not.toBeInTheDocument();
   });
 
   it("toont een echte laadfout en kan de eerste configuratie opnieuw ophalen", async () => {

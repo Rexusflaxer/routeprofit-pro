@@ -110,6 +110,53 @@ function removeLabel(record) {
   record.element?.remove();
 }
 
+function roofAltitude(resolveBuildingRoofAnchor, entry) {
+  const anchor = typeof resolveBuildingRoofAnchor === "function"
+    ? resolveBuildingRoofAnchor({ key: entry.key, coordinate: [...entry.coordinate] }) : null;
+  // The Canvas owns the current native-building association. It may only raise
+  // our stored interior anchor, never move it to a nearby building or tile part.
+  if (!anchor || !validCoordinate(anchor.coordinate)
+    || anchor.coordinate[0] !== entry.coordinate[0] || anchor.coordinate[1] !== entry.coordinate[1]
+    || typeof anchor.altitude !== "number" || !Number.isFinite(anchor.altitude)
+    || anchor.altitude <= 0 || anchor.altitude > 1000) return 0;
+  return anchor.altitude;
+}
+
+function labelPointer() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 18 26");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "26");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("data-building-pointer", "true");
+  svg.style.display = "block";
+  svg.style.flexShrink = "0";
+  svg.style.marginTop = "-1px";
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("d", "M9 0V16");
+  line.setAttribute("stroke", "white");
+  line.setAttribute("stroke-width", "5");
+  const center = line.cloneNode();
+  center.setAttribute("stroke", "currentColor");
+  center.setAttribute("stroke-width", "3");
+  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  // The final tip is exactly at the bottom-center Marker anchor, including
+  // when Mapbox projects it at roof altitude in a tilted 3D camera.
+  arrow.setAttribute("d", "M2 15L9 26L16 15Z");
+  arrow.setAttribute("fill", "currentColor");
+  arrow.setAttribute("stroke", "white");
+  arrow.setAttribute("stroke-width", "1");
+  svg.append(line, center, arrow);
+  return svg;
+}
+
+function updateMarkerAltitude(record, altitude) {
+  if (record.altitude !== altitude) record.marker.setAltitude(altitude);
+  record.altitude = altitude;
+  record.element.dataset.anchorKind = altitude > 0 ? "roof" : "ground";
+}
+
 const LABEL_ERROR = "Een gebouw kon niet op de kaart worden aangewezen. Je kaart en wijzigingen blijven bewaard.";
 
 export default function useObjectMapBuildingLabels({
@@ -122,11 +169,14 @@ export default function useObjectMapBuildingLabels({
   workspace = "buildings",
   editingTarget = null,
   drawingTarget = null,
+  resolveBuildingRoofAnchor = null,
 }) {
   const entries = useMemo(() => labelEntries(selectedBuildings, buildingSelectionPoints, buildingLabels),
     [selectedBuildings, buildingSelectionPoints, buildingLabels]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const roofResolverRef = useRef(resolveBuildingRoofAnchor);
+  roofResolverRef.current = resolveBuildingRoofAnchor;
   const markersRef = useRef(new Map());
   const [MarkerConstructor, setMarkerConstructor] = useState(null);
   const [labelError, setLabelError] = useState(null);
@@ -158,18 +208,26 @@ export default function useObjectMapBuildingLabels({
     if (map && active && MarkerConstructor && liveMapContainer(map)) entries.forEach(entry => {
       if ((!entry.name && highlightedBuildingKey !== entry.key) || !coordinateInMapBounds(map, entry.coordinate)) return;
       if (!liveMapContainer(map)) return;
+      let altitude;
+      try { altitude = roofAltitude(roofResolverRef.current, entry); }
+      catch { if (liveMapContainer(map)) failed = true; return; }
+      if (!liveMapContainer(map)) return;
       visible.add(entry.key);
       let record = markersRef.current.get(entry.key);
       if (!record) {
         const element = document.createElement("div");
         element.style.pointerEvents = "none";
+        element.style.display = "flex";
+        element.style.flexDirection = "column";
+        element.style.alignItems = "center";
         element.setAttribute("aria-hidden", "true");
         element.dataset.buildingKey = entry.key;
         const label = document.createElement("div");
-        element.append(label);
+        const pointer = labelPointer();
+        element.append(label, pointer);
         let marker;
         try {
-          marker = new MarkerConstructor({ element, anchor: "bottom", offset: [0, -12], pitchAlignment: "viewport", rotationAlignment: "viewport" });
+          marker = new MarkerConstructor({ element, anchor: "bottom", offset: [0, 0], altitude, pitchAlignment: "viewport", rotationAlignment: "viewport" });
           marker.setLngLat(entry.coordinate);
           if (!liveMapContainer(map)) { removeLabel({ marker, element }); return; }
           marker.addTo(map);
@@ -178,24 +236,26 @@ export default function useObjectMapBuildingLabels({
           if (liveMapContainer(map)) failed = true;
           return;
         }
-        record = { marker, element, label, coordinate: entry.coordinate };
+        record = { marker, element, label, pointer, coordinate: entry.coordinate, altitude };
         markersRef.current.set(entry.key, record);
       }
       const highlighted = highlightedBuildingKey === entry.key;
       record.label.textContent = entry.text;
       record.element.dataset.highlighted = String(highlighted);
+      record.pointer.style.color = highlighted ? "#d97706" : "#2563eb";
       // The outer element belongs to Mapbox: replacing its className would
       // discard marker positioning/anchor classes and break camera tracking.
       record.label.className = `pointer-events-none max-w-[220px] truncate rounded-lg border bg-background/95 px-2.5 py-1 text-xs font-semibold text-foreground shadow-md ${highlighted ? "border-amber-400 ring-2 ring-amber-300/60" : "border-primary/50"}`;
-      if (record.coordinate[0] !== entry.coordinate[0] || record.coordinate[1] !== entry.coordinate[1]) {
-        try {
-          if (!liveMapContainer(map)) { visible.delete(entry.key); return; }
+      try {
+        if (!liveMapContainer(map)) { visible.delete(entry.key); return; }
+        if (record.coordinate[0] !== entry.coordinate[0] || record.coordinate[1] !== entry.coordinate[1]) {
           record.marker.setLngLat(entry.coordinate);
           record.coordinate = entry.coordinate;
-        } catch {
-          visible.delete(entry.key);
-          if (liveMapContainer(map)) failed = true;
         }
+        updateMarkerAltitude(record, altitude);
+      } catch {
+        visible.delete(entry.key);
+        if (liveMapContainer(map)) failed = true;
       }
     });
     markersRef.current.forEach((record, key) => {
@@ -206,6 +266,31 @@ export default function useObjectMapBuildingLabels({
     if (failed) setLabelError(LABEL_ERROR);
     else if (MarkerConstructor) setLabelError(null);
   }, [map, active, MarkerConstructor, entries, highlightedBuildingKey]);
+
+  useEffect(() => {
+    if (!map || !active) return undefined;
+    const syncRoofAltitude = () => {
+      if (!liveMapContainer(map)) return;
+      markersRef.current.forEach((record, key) => {
+        const entry = entriesRef.current.get(key);
+        if (!entry || !liveMapContainer(map)) return;
+        // A geometry render can precede its marker reconciliation. Do not put
+        // a new location's height on the marker still at the previous location.
+        if (record.coordinate[0] !== entry.coordinate[0] || record.coordinate[1] !== entry.coordinate[1]) return;
+        try { updateMarkerAltitude(record, roofAltitude(roofResolverRef.current, entry)); }
+        catch {
+          removeLabel(record);
+          markersRef.current.delete(key);
+          if (liveMapContainer(map)) setLabelError(LABEL_ERROR);
+        }
+      });
+    };
+    // Canvas refreshes its transient association before these handlers. Tile
+    // loads/style changes can supply or invalidate a roof without a React render.
+    const events = ["idle", "moveend", "style.load", "style.import.load"];
+    events.forEach(event => map.on?.(event, syncRoofAltitude));
+    return () => events.forEach(event => map.off?.(event, syncRoofAltitude));
+  }, [map, active]);
 
   useEffect(() => {
     if (!map || !active || !highlightedBuildingKey || !liveMapContainer(map)) return undefined;

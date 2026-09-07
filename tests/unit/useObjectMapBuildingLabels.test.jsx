@@ -9,11 +9,13 @@ vi.mock("mapbox-gl", () => ({
     Marker: class Marker {
       constructor(options) {
         this.options = options;
+        this.altitude = options.altitude || 0;
         options.element.classList.add("mapboxgl-marker", "mapboxgl-marker-anchor-bottom");
         markerState.instances.push(this);
         markerState.onCreate?.();
       }
       setLngLat = vi.fn(coordinate => { this.coordinate = coordinate; return this; });
+      setAltitude = vi.fn(altitude => { this.altitude = altitude; return this; });
       addTo = vi.fn(map => {
         if (markerState.addError) throw markerState.addError;
         map.getCanvasContainer().appendChild(this.options.element);
@@ -63,6 +65,7 @@ function createMap() {
     off: vi.fn(unsubscribe),
     remove: () => { removed = true; container.remove(); emit("remove"); },
     finishMovement,
+    emit,
     startOtherMovement: () => { moving = true; },
   };
 }
@@ -107,6 +110,102 @@ describe("buildingLabelCoordinate", () => {
 });
 
 describe("useObjectMapBuildingLabels", () => {
+  it("verbindt de naam met een duidelijke pin waarvan de punt exact op het betrouwbare dakanker eindigt", async () => {
+    const coordinate = buildingLabelCoordinate(building);
+    const resolver = vi.fn(({ coordinate: anchor }) => ({ coordinate: anchor, altitude: 14 }));
+    const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Receptie" }, resolveBuildingRoofAnchor: resolver });
+    const marker = markerState.instances[0];
+    expect(resolver).toHaveBeenCalledWith({ key: "bag:bag-1", coordinate });
+    expect(marker.options).toMatchObject({ anchor: "bottom", offset: [0, 0], altitude: 14, pitchAlignment: "viewport", rotationAlignment: "viewport" });
+    expect(marker.coordinate).toEqual(coordinate);
+    expect(marker.options.element).toHaveAttribute("data-anchor-kind", "roof");
+    expect(marker.options.element).toHaveClass("mapboxgl-marker", "mapboxgl-marker-anchor-bottom");
+    const pointer = marker.options.element.querySelector("svg[data-building-pointer]");
+    expect(pointer).not.toBeNull();
+    expect(pointer).toHaveAttribute("viewBox", "0 0 18 26");
+    expect(pointer.lastChild).toHaveAttribute("d", "M2 15L9 26L16 15Z");
+    expect(pointer).toHaveAttribute("aria-hidden", "true");
+    expect(marker.options.element.style.pointerEvents).toBe("none");
+    expect(rendered.map.container.textContent).toBe("Receptie");
+    expect(marker.setAltitude).not.toHaveBeenCalled();
+    expect(rendered.map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    { coordinate: [4.49, 51.92], altitude: 12 },
+    { coordinate: buildingLabelCoordinate(building), altitude: "12" },
+    { coordinate: buildingLabelCoordinate(building), altitude: NaN },
+    { coordinate: buildingLabelCoordinate(building), altitude: -1 },
+    { coordinate: buildingLabelCoordinate(building), altitude: 1001 },
+  ])("behoudt de exacte grondlocatie als een dakanker ontbreekt of niet betrouwbaar is (%j)", async anchor => {
+    const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Kantoor" }, resolveBuildingRoofAnchor: () => anchor });
+    const marker = markerState.instances[0];
+    expect(marker.coordinate).toEqual(buildingLabelCoordinate(building));
+    expect(marker.altitude).toBe(0);
+    expect(marker.options.element).toHaveAttribute("data-anchor-kind", "ground");
+    expect(rendered.result.current).toBeNull();
+  });
+
+  it("werkt dakhoogte bij na kaart-/tegelwijzigingen zonder verplaatsen, extra idle-writes of nieuwe hovervlucht", async () => {
+    let altitude = 0;
+    const resolver = vi.fn(({ coordinate }) => altitude ? { coordinate, altitude } : null);
+    const rendered = await renderLabels({ highlightedBuildingKey: "bag:bag-1", buildingLabels: { "bag:bag-1": "Kantoor" }, resolveBuildingRoofAnchor: resolver });
+    const marker = markerState.instances[0];
+    expect(marker.altitude).toBe(0);
+    act(() => vi.advanceTimersByTime(180));
+    expect(rendered.map.easeTo).toHaveBeenCalledOnce();
+    altitude = 18;
+    act(() => rendered.map.emit("idle"));
+    expect(marker.setAltitude).toHaveBeenCalledExactlyOnceWith(18);
+    expect(marker.options.element).toHaveAttribute("data-anchor-kind", "roof");
+    act(() => { rendered.map.emit("idle"); rendered.map.emit("idle"); rendered.map.finishMovement(); });
+    expect(marker.setAltitude).toHaveBeenCalledOnce();
+    altitude = 22;
+    act(() => rendered.map.finishMovement());
+    expect(marker.setAltitude).toHaveBeenLastCalledWith(22);
+    altitude = 0;
+    act(() => rendered.map.emit("style.load"));
+    expect(marker.setAltitude).toHaveBeenLastCalledWith(0);
+    expect(marker.options.element).toHaveAttribute("data-anchor-kind", "ground");
+    altitude = 16;
+    act(() => rendered.map.emit("style.import.load"));
+    expect(marker.setAltitude).toHaveBeenLastCalledWith(16);
+    expect(marker.setLngLat).toHaveBeenCalledOnce();
+    expect(rendered.map.easeTo).toHaveBeenCalledOnce();
+    expect(markerState.instances).toHaveLength(1);
+  });
+
+  it("gebruikt de nieuwste dakresolver zonder labels/camera opnieuw te maken en ruimt alle hoogtehandlers op", async () => {
+    const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Kantoor" } });
+    const marker = markerState.instances[0];
+    const resolver = vi.fn(({ coordinate }) => ({ coordinate, altitude: 20 }));
+    rendered.rerender({ ...rendered.props, resolveBuildingRoofAnchor: resolver });
+    act(() => rendered.map.emit("idle"));
+    expect(marker.altitude).toBe(20);
+    expect(markerState.instances).toHaveLength(1);
+    expect(rendered.map.easeTo).not.toHaveBeenCalled();
+    rendered.unmount();
+    resolver.mockClear();
+    act(() => { rendered.map.emit("idle"); rendered.map.emit("moveend"); rendered.map.emit("style.load"); rendered.map.emit("style.import.load"); });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(marker.remove).toHaveBeenCalledOnce();
+  });
+
+  it("laat een echte hoogtefout de kaart niet crashen en schrijft niet op verwijderde markers", async () => {
+    const resolver = vi.fn(({ coordinate }) => ({ coordinate, altitude: 15 }));
+    const rendered = await renderLabels({ buildingLabels: { "bag:bag-1": "Kantoor" }, resolveBuildingRoofAnchor: resolver });
+    const marker = markerState.instances[0];
+    resolver.mockImplementation(() => { throw new Error("Native roof query failed"); });
+    act(() => rendered.map.emit("idle"));
+    expect(rendered.result.current).toMatch(/Je kaart en wijzigingen blijven bewaard/);
+    expect(marker.remove).toHaveBeenCalledOnce();
+    resolver.mockClear();
+    act(() => { rendered.map.remove(); rendered.map.emit("idle"); });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(marker.setAltitude).not.toHaveBeenCalled();
+  });
+
   it("toont benoemde BAG-, eigen punt- en bestaande handmatige selecties als veilige niet-klikbare tekst", async () => {
     const manual = { ...building, id: "old-id", properties: { source: "manual", local_id: "manual-1" } };
     const name = '<img src=x onerror="alert(1)">';

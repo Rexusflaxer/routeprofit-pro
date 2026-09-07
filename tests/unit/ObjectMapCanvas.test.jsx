@@ -4,9 +4,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mapboxState = vi.hoisted(() => ({ instances: [], markers: [] }));
 const themeState = vi.hoisted(() => ({ theme: "system", resolvedTheme: "light" }));
+const labelHookState = vi.hoisted(() => ({ resolveBuildingRoofAnchor: null }));
 
 vi.mock("@/components/navigation/mapboxConfig", () => ({ MAPBOX_PUBLIC_TOKEN: "test-mapbox-token" }));
 vi.mock("next-themes", () => ({ useTheme: () => themeState }));
+vi.mock("@/components/objects/useObjectMapBuildingLabels", async importOriginal => {
+  const actual = await importOriginal();
+  return { ...actual, default: props => {
+    labelHookState.resolveBuildingRoofAnchor = props.resolveBuildingRoofAnchor;
+    return actual.default(props);
+  } };
+});
 vi.mock("mapbox-gl", () => {
   class FakeMap {
     constructor(options) {
@@ -76,8 +84,10 @@ vi.mock("mapbox-gl", () => {
   }
 
   class FakeMarker {
-    constructor(options) { this.options = options; mapboxState.markers.push(this); }
+    constructor(options) { this.options = options; this.altitude = options.altitude ?? 0; mapboxState.markers.push(this); }
     setLngLat = vi.fn(coordinate => { this.coordinate = coordinate; return this; });
+    setAltitude = vi.fn(altitude => { this.altitude = altitude; return this; });
+    getAltitude() { return this.altitude; }
     addTo(map) { map.options.container.append(this.options.element); return this; }
     remove = vi.fn(() => this.options.element.remove());
   }
@@ -134,10 +144,8 @@ function renderCanvas(overrides = {}) {
 
 const lightPresetCalls = map => map.setConfigProperty.mock.calls.filter(([, property]) => property === "lightPreset");
 
-async function chooseMapLighting(name) {
-  fireEvent.keyDown(screen.getByRole("button", { name: "Kaartverlichting" }), { key: "ArrowDown" });
-  fireEvent.click(await screen.findByRole("menuitemradio", { name, exact: true }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Kaartverlichting" })).toHaveAttribute("data-state", "closed"));
+function toggleMapLighting() {
+  fireEvent.click(screen.getByRole("button", { name: "Kaartverlichting", exact: true }));
 }
 
 describe("ObjectMapCanvas", () => {
@@ -146,6 +154,7 @@ describe("ObjectMapCanvas", () => {
     mapboxState.markers.length = 0;
     themeState.theme = "system";
     themeState.resolvedTheme = "light";
+    labelHookState.resolveBuildingRoofAnchor = null;
   });
 
   it("biedt draaien, kantelen en standaard muisbesturing zonder de kaart opnieuw op te bouwen", async () => {
@@ -211,13 +220,13 @@ describe("ObjectMapCanvas", () => {
     expect(map.easeTo).not.toHaveBeenCalled();
   });
 
-  it("kan dag of nacht kiezen los van het app-thema en daarna het app-thema weer volgen", async () => {
+  it("wisselt direct dag en nacht met een tijdelijke keuze los van het app-thema", async () => {
     themeState.resolvedTheme = "dark";
     const rendered = renderCanvas();
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
     const map = mapboxState.instances[0];
     act(() => map.emit("style.load"));
-    await chooseMapLighting("Dag");
+    toggleMapLighting();
     expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
     const manualCalls = lightPresetCalls(map).length;
     themeState.resolvedTheme = "light";
@@ -225,13 +234,15 @@ describe("ObjectMapCanvas", () => {
     themeState.resolvedTheme = "dark";
     rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
     expect(lightPresetCalls(map)).toHaveLength(manualCalls);
-    await chooseMapLighting("App volgen");
+    toggleMapLighting();
     expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
     themeState.resolvedTheme = "light";
     rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
-    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
-    await chooseMapLighting("Nacht");
     expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    toggleMapLighting();
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
+    expect(screen.queryByText("App volgen")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(mapboxState.instances).toHaveLength(1);
     expect(map.easeTo).not.toHaveBeenCalled();
     expect(map.fitBounds).not.toHaveBeenCalled();
@@ -239,12 +250,50 @@ describe("ObjectMapCanvas", () => {
     expect(rendered.props.onMoveVertex).not.toHaveBeenCalled();
   });
 
+  it("begint na sluiten en opnieuw openen opnieuw bij het actuele app-thema", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const firstMap = mapboxState.instances[0];
+    act(() => firstMap.emit("style.load"));
+    toggleMapLighting();
+    expect(lightPresetCalls(firstMap).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    rendered.unmount();
+    expect(firstMap.remove).toHaveBeenCalledOnce();
+
+    // Reopening forgets the night override, even when the app theme did not
+    // change. No persisted map preference is carried into the new component.
+    const reopened = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(2));
+    const secondMap = mapboxState.instances[1];
+    expect(secondMap.options.config.basemap.lightPreset).toBe("day");
+    act(() => secondMap.emit("style.load"));
+    expect(lightPresetCalls(secondMap).at(-1)).toEqual(["basemap", "lightPreset", "day"]);
+    themeState.resolvedTheme = "dark";
+    reopened.rerender(<ObjectMapCanvas {...reopened.props} />);
+    expect(lightPresetCalls(secondMap).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(secondMap.easeTo).not.toHaveBeenCalled();
+    expect(secondMap.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("behoudt de tijdelijke lichtkeuze bij wisselen tussen gebouwen, terrein en luchtfoto", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    toggleMapLighting();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" mapView="satellite" />);
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} />);
+    expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
+    expect(mapboxState.instances).toHaveLength(1);
+  });
+
   it("herstelt de gekozen verlichting bij een stijl- of importreload zonder idle-herhalingen", async () => {
     renderCanvas();
     await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
     const map = mapboxState.instances[0];
     act(() => map.emit("style.load"));
-    await chooseMapLighting("Nacht");
+    toggleMapLighting();
     map.setConfigProperty.mockClear();
     act(() => map.emit("style.load"));
     expect(lightPresetCalls(map).at(-1)).toEqual(["basemap", "lightPreset", "night"]);
@@ -300,7 +349,7 @@ describe("ObjectMapCanvas", () => {
     act(() => map.emit("style.load"));
     const label = await screen.findByText("Receptie");
     expect(label.closest("[data-building-key]")).toHaveAttribute("data-building-key", "bag:bag-1");
-    await chooseMapLighting("Nacht");
+    toggleMapLighting();
     expect(screen.getByText("Receptie")).toBe(label);
     expect(map.easeTo).not.toHaveBeenCalled();
     rendered.rerender(<ObjectMapCanvas {...rendered.props} workspace="terrain" />);
@@ -310,6 +359,106 @@ describe("ObjectMapCanvas", () => {
     expect(mapboxState.instances).toHaveLength(1);
     expect(map.easeTo).not.toHaveBeenCalled();
     expect(map.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("geeft dakhoogte boven het eigen BAG-anker onafhankelijk van overlappende native-deelvolgorde", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    const body = { ...standardBuilding, properties: { group: "building-3d", height: 8 } };
+    const roof = { ...body, properties: { group: "building-3d", height: 14 } };
+    const coordinate = [4.48075, 51.92025];
+    map.renderedFeatures = [roof, body];
+    act(() => map.emit("style.load"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toEqual({ coordinate, altitude: 14 });
+    map.renderedFeatures = [body, roof];
+    act(() => map.emit("idle"));
+    map.queryRenderedFeatures.mockClear();
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toEqual({ coordinate, altitude: 14 });
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:other", coordinate })).toBeNull();
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "manual:legacy", coordinate })).toBeNull();
+    expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+    expect(candidate.geometry.coordinates[0][0]).toEqual([4.48, 51.92]);
+  });
+
+  it("verbindt het echte naamlabel met de actuele dakhoogte zonder marker- of camerajitter", async () => {
+    const rendered = renderCanvas({ buildingLabels: { "bag:bag-1": "Daklabel" } });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 12 } }];
+    act(() => map.emit("style.load"));
+    const label = await screen.findByText("Daklabel");
+    const element = label.closest("[data-building-key]");
+    const marker = mapboxState.markers.find(item => item.options.element === element);
+    expect(marker.options.altitude).toBe(12);
+    expect(element).toHaveAttribute("data-anchor-kind", "roof");
+    expect(element.querySelector("[data-building-pointer]")).not.toBeNull();
+    const coordinate = [...marker.coordinate];
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 16 } }];
+    act(() => map.emit("moveend"));
+    expect(marker.setAltitude).toHaveBeenLastCalledWith(16);
+    marker.setAltitude.mockClear();
+    act(() => { map.emit("idle"); map.emit("idle"); });
+    expect(marker.setAltitude).not.toHaveBeenCalled();
+    expect(marker.coordinate).toEqual(coordinate);
+    expect(marker.setLngLat).toHaveBeenCalledOnce();
+    expect(mapboxState.markers).toHaveLength(1);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(rendered.props.onToggleCandidate).not.toHaveBeenCalled();
+  });
+
+  it("gebruikt alleen de dakhoogte bij de eigen eenduidige opgeslagen gebouwselectie", async () => {
+    const coordinate = [4.48075, 51.92025];
+    const point = { id: "point-1", longitude: coordinate[0], latitude: coordinate[1] };
+    const rendered = renderCanvas({ selectedBuildings: empty, selectedBagFeatureIds: [], buildingSelectionPoints: [point] });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 8 } }];
+    act(() => map.emit("style.load"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "point:point-1", coordinate })).toEqual({ coordinate, altitude: 8 });
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "point:point-1", coordinate: [4.479, 51.92] })).toBeNull();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} selectedBagFeatureIds={["bag-1"]} selectedBuildings={{ type: "FeatureCollection", features: [candidate] }} />);
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "point:point-1", coordinate })).toBeNull();
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toBeNull();
+  });
+
+  it("kiest geen dak van een ander overlappend gebouw of onbetrouwbare hoogte", async () => {
+    renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    const coordinate = [4.48075, 51.92025];
+    const roof = { ...standardBuilding, properties: { group: "building-3d", height: 8 } };
+    const overlapping = { ...roof, id: 992, geometry: { type: "Polygon", coordinates: [[[4.4805, 51.92], [4.481, 51.92], [4.481, 51.9205], [4.4805, 51.9205], [4.4805, 51.92]]] } };
+    map.renderedFeatures = [roof, overlapping];
+    act(() => map.emit("style.load"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toBeNull();
+    for (const properties of [{ group: "building-2d", height: 8 }, { group: "building-3d" }, { group: "building-3d", height: "8" }, { group: "building-3d", height: Infinity }, { group: "building-3d", height: -1 }, { group: "building-3d", height: 1001 }]) {
+      map.renderedFeatures = [{ ...roof, properties }];
+      act(() => map.emit("idle"));
+      expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toBeNull();
+    }
+  });
+
+  it("ververst dakhoogte na bewegen en verwijdert oude dakgegevens bij stijlreload en sluiten", async () => {
+    const rendered = renderCanvas();
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    const coordinate = [4.48075, 51.92025];
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 8 } }];
+    act(() => map.emit("style.load"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })?.altitude).toBe(8);
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 12 } }];
+    act(() => map.emit("moveend"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })?.altitude).toBe(12);
+    map.renderedFeatures = [];
+    act(() => map.emit("style.import.load"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toBeNull();
+    map.renderedFeatures = [{ ...standardBuilding, properties: { group: "building-3d", height: 16 } }];
+    act(() => map.emit("idle"));
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })?.altitude).toBe(16);
+    rendered.unmount();
+    expect(labelHookState.resolveBuildingRoofAnchor({ key: "bag:bag-1", coordinate })).toBeNull();
   });
 
   it("kleurt alleen het werkelijke terrein groen en laat bronpercelen transparant", async () => {

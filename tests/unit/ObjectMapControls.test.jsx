@@ -35,8 +35,11 @@ describe("ObjectMapControls", () => {
   });
 
   it("schakelt kaartacties uit tot de kaart geladen is", () => {
-    render(<ObjectMapControls />);
+    const onToggleLighting = vi.fn();
+    render(<ObjectMapControls onToggleLighting={onToggleLighting} />);
     screen.getAllByRole("button").forEach(button => expect(button).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Kaartverlichting", exact: true }));
+    expect(onToggleLighting).not.toHaveBeenCalled();
   });
 
   it("houdt tijdens grondbewerking alleen de kijkhoek vast en laat de overige besturing bruikbaar", () => {
@@ -49,27 +52,27 @@ describe("ObjectMapControls", () => {
     }
   });
 
-  it("laat expliciet App volgen, Dag en Nacht kiezen zonder het globale thema te veranderen", async () => {
-    const onLightingModeChange = vi.fn();
+  it("wisselt verlichting met één klik zonder menu, App volgen-optie of globale themawijziging", () => {
+    const onToggleLighting = vi.fn();
     const beforeClass = document.documentElement.className;
-    render(<ObjectMapControls ready lightingMode="app" effectiveLightPreset="night" onLightingModeChange={onLightingModeChange} />);
+    render(<ObjectMapControls ready effectiveLightPreset="night" onToggleLighting={onToggleLighting} />);
     const trigger = screen.getByRole("button", { name: "Kaartverlichting", exact: true });
-    expect(trigger).toHaveAttribute("title", "Kaartverlichting: App volgen · nacht");
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    const app = await screen.findByRole("menuitemradio", { name: "App volgen", exact: true });
-    expect(app).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("menuitemradio", { name: "Dag", exact: true })).toHaveAttribute("aria-checked", "false");
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Nacht", exact: true }));
-    expect(onLightingModeChange).toHaveBeenCalledExactlyOnceWith("night");
+    fireEvent.click(trigger);
+    expect(onToggleLighting).toHaveBeenCalledOnce();
+    expect(trigger).not.toHaveAttribute("aria-haspopup");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio")).not.toBeInTheDocument();
+    expect(screen.queryByText("App volgen")).not.toBeInTheDocument();
     expect(document.documentElement.className).toBe(beforeClass);
   });
 
-  it.each([["day", "Dag", "day", "dag"], ["night", "Nacht", "night", "nacht"]])("toont de expliciete kaartverlichting %s als gekozen optie", async (mode, label, preset, effectiveLabel) => {
-    render(<ObjectMapControls ready lightingMode={mode} effectiveLightPreset={preset} />);
+  it.each([["day", "Dag", "nacht", "sun"], ["night", "Nacht", "dag", "moon"]])("toont huidige stand %s en de tegenovergestelde actie", (preset, current, next, icon) => {
+    render(<ObjectMapControls ready effectiveLightPreset={preset} />);
     const trigger = screen.getByRole("button", { name: "Kaartverlichting", exact: true });
-    expect(trigger).toHaveAttribute("title", `Kaartverlichting: ${label} · ${effectiveLabel}`);
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(await screen.findByRole("menuitemradio", { name: label, exact: true })).toHaveAttribute("aria-checked", "true");
+    const description = `${current}weergave actief · ${next}weergave inschakelen · alleen tijdelijk voor deze kaart`;
+    expect(trigger).toHaveAttribute("title", description);
+    expect(trigger).toHaveAttribute("aria-description", description);
+    expect(trigger.querySelector(`.lucide-${icon}`)).not.toBeNull();
   });
 
   it("laat de ouder de hele bediening plaatsen zodat kaartattributie vrij blijft", () => {

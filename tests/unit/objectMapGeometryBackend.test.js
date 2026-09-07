@@ -965,6 +965,100 @@ describe("Kaart en terrein backendcontract", () => {
     expect(state().show_on_mobile_map).toBe(true);
   });
 
+  it.each([
+    ["inactief object", { status: "inactive", is_active_customer_object: false }],
+    ["actieve status met inactieve klantobjectvlag", { status: "active", is_active_customer_object: false }],
+  ])("bewaart de geometrie van een %s zonder het operationeel te activeren", async (_label, lifecycle) => {
+    const setup = mockCustomerPlatform({ ...lifecycle, show_on_mobile_map: false });
+    const terrain = { type: "FeatureCollection", features: [squareFeature("terrain-1")] };
+    vi.stubGlobal("fetch", vi.fn());
+
+    const result = await customerBackend.handleUpdateObjectMapConfiguration(
+      setup.base44,
+      { id: "admin-1" },
+      {
+        customer_id: "customer-1", object_id: "object-1",
+        data: {
+          building_selection_mode: "manual",
+          selected_bag_feature_ids: ["bag-building-1"],
+          building_labels: { "bag:bag-building-1": "Hoofdgebouw" },
+          object_area_geojson: terrain,
+          show_on_mobile_map: false,
+        },
+      },
+      3, "map-inactive-geometry", "fingerprint-inactive-geometry",
+      "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    );
+
+    expect(setup.state()).toMatchObject({
+      ...lifecycle, show_on_mobile_map: false, version: 4, map_geometry_revision: 3,
+      building_labels: { "bag:bag-building-1": "Hoofdgebouw" },
+      object_area_geojson: { features: [expect.objectContaining({ geometry: terrain.features[0].geometry })] },
+    });
+    expect(result.configuration.object).toMatchObject({ ...lifecycle, show_on_mobile_map: false });
+    expect(result.configuration.terrain_summary).toMatchObject({ feature_count: 1 });
+    expect(setup.surveillanceEntity.updateMany).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["inactief object", { status: "inactive", is_active_customer_object: false }],
+    ["actieve status met inactieve klantobjectvlag", { status: "active", is_active_customer_object: false }],
+  ])("weigert mobiele activering van een %s expliciet, niet als versieconflict", async (_label, lifecycle) => {
+    const setup = mockCustomerPlatform({ ...lifecycle, show_on_mobile_map: false });
+    const error = await rejectedError(customerBackend.handleUpdateObjectMapConfiguration(
+      setup.base44,
+      { id: "admin-1" },
+      { customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], show_on_mobile_map: true,
+      } },
+      3, "map-ineligible-mobile", "fingerprint-ineligible-mobile",
+      "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    ));
+
+    expect(error).toMatchObject({
+      status: 409,
+      details: { code: "object_map_mobile_not_eligible", retryable: false },
+    });
+    expect(setup.state()).toMatchObject({ ...lifecycle, show_on_mobile_map: false, version: 3, map_geometry_revision: 2 });
+    expect(setup.surveillanceEntity.updateMany).not.toHaveBeenCalled();
+    expect(setup.mapGeometryRevisions).toEqual([]);
+  });
+
+  it("past opgeslagen geometrie direct mobiel toe voor een actief klantobject met eerder verborgen kaart", async () => {
+    const setup = mockCustomerPlatform({ show_on_mobile_map: false });
+    const result = await customerBackend.handleUpdateObjectMapConfiguration(
+      setup.base44,
+      { id: "admin-1" },
+      { customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], show_on_mobile_map: true,
+      } },
+      3, "map-enable-active-mobile", "fingerprint-enable-active-mobile",
+      "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    );
+
+    expect(setup.state()).toMatchObject({ status: "active", is_active_customer_object: true, show_on_mobile_map: true, version: 4 });
+    expect(result.configuration.object.show_on_mobile_map).toBe(true);
+  });
+
+  it("weigert een echte achterhaalde objectversie ook bij een inactief object zonder mobiele activering", async () => {
+    const setup = mockCustomerPlatform({ status: "inactive", is_active_customer_object: false, show_on_mobile_map: false });
+    await expect(customerBackend.handleUpdateObjectMapConfiguration(
+      setup.base44,
+      { id: "admin-1" },
+      { customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"], show_on_mobile_map: false,
+      } },
+      2, "map-inactive-stale-version", "fingerprint-inactive-stale-version",
+      "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
+    )).rejects.toMatchObject({
+      status: 409,
+      details: expect.objectContaining({ code: "object_map_version_conflict", retryable: true, expected_version: 2, current_version: 3 }),
+    });
+    expect(setup.state()).toMatchObject({ version: 3, show_on_mobile_map: false, status: "inactive" });
+    expect(setup.surveillanceEntity.updateMany).not.toHaveBeenCalled();
+  });
+
   it("accepteert in automatic-modus lege client-FeatureCollections als bewust geen handmatige geometrie", async () => {
     const { base44 } = mockCustomerPlatform({
       building_polygon_geojson: null,
@@ -1370,7 +1464,10 @@ describe("Kaart en terrein backendcontract", () => {
       "map-archived",
       "fingerprint-archived",
       "update_object_map_configuration|customer_id:customer-1|object_id:object-1",
-    )).rejects.toMatchObject({ status: 409 });
+    )).rejects.toMatchObject({
+      status: 409,
+      details: { code: "object_map_object_archived", retryable: false },
+    });
 
     const wrongScope = mockCustomerPlatform({ customer_id: "customer-2" });
     await expect(customerBackend.handleGetObjectMapConfiguration(wrongScope.base44, {

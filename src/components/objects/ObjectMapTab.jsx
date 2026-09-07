@@ -51,7 +51,7 @@ import { useObjectModuleNavigationGuard } from "./useObjectModuleNavigationGuard
 
 const STATUS = {
   unconfigured: { label: "Niet ingesteld", className: "border-slate-300/70 bg-slate-500/10 text-slate-700 dark:text-slate-200" },
-  configured: { label: "Actief", className: "border-emerald-300/70 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
+  configured: { label: "Ingesteld", className: "border-emerald-300/70 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
   needs_review: { label: "Controle nodig", className: "border-amber-300/70 bg-amber-500/10 text-amber-700 dark:text-amber-300" },
 };
 
@@ -168,7 +168,14 @@ function overlapConflictFingerprint(error) {
 }
 
 function isVersionConflictError(error) {
-  return Number(error?.status) === 409 && ["", "object_map_version_conflict", "version_conflict"].includes(apiErrorCode(error));
+  if (Number(error?.status) !== 409) return false;
+  if (["object_map_version_conflict", "version_conflict"].includes(apiErrorCode(error))) return true;
+  // Older backends may return CAS details without a code. Other 409s (for
+  // example inactive objects or busy reservations) are not version conflicts.
+  const details = error?.details;
+  return !apiErrorCode(error) && details?.entity === "SurveillanceObject"
+    && Number.isInteger(details.expected_version) && Number.isInteger(details.current_version)
+    && details.expected_version !== details.current_version;
 }
 
 function hasVersionDrift(base, latestConfiguration) {
@@ -246,6 +253,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const verified = Boolean(trustedObjectCoordinatePair(mapObject));
   const archived = mapObject?.status === "archived";
   const readOnly = archived || !verified;
+  const mobileEligible = mapObject?.status === "active" && mapObject?.is_active_customer_object !== false;
   const candidateConfigurationVersion = appliedConfiguration?.expected_version
     ?? configurationQuery.data?.expected_version
     ?? null;
@@ -315,7 +323,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const dirty = formDirty;
   // Previously hidden objects are activated only by an explicit save, never
   // merely by opening this workspace or treating the saved state as dirty.
-  const needsMobileActivation = form?.show_on_mobile_map === false;
+  const needsMobileActivation = mobileEligible && form?.show_on_mobile_map === false;
   const staleConfiguration = dirty && hasVersionDrift(baseForm, configurationQuery.data);
   const candidatePages = candidatesQuery.data?.pages || [];
   const candidateMetadata = candidatePages.at(-1) || candidatePages[0] || null;
@@ -455,7 +463,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         idempotencyKey: mutationKeyRef.current || createObjectMapMutationKey(),
         data: {
           ...persistedForm(formRef.current),
-          show_on_mobile_map: true,
+          // Saving a map is not permission to activate a draft/inactive object.
+          // The server still validates eligibility and the exact object version.
+          show_on_mobile_map: mobileEligible,
           ...(reason && conflictFingerprint ? { overlap_confirmation: { confirmed: true, reason, conflict_fingerprint: conflictFingerprint } } : {}),
         },
       });
@@ -487,7 +497,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         queryClient.invalidateQueries({ queryKey: ["object-card", object.id, "logbook"] }),
         queryClient.invalidateQueries({ queryKey: ["customer-dossier", object.customer_id, "SurveillanceObject"] }),
       ]);
-      toast({ title: "Kaart en terrein toegepast", description: "De mobiele app ontvangt deze inrichting bij de volgende synchronisatie." });
+      toast({ title: "Kaart en terrein opgeslagen", description: mobileEligible
+        ? "De mobiele app ontvangt deze inrichting bij de volgende synchronisatie."
+        : "De inrichting is bewaard. Dit object blijft buiten de mobiele kaart zolang het niet operationeel actief is." });
     } catch (error) {
       if (isOverlapError(error)) {
         const nextFingerprint = overlapConflictFingerprint(error);
@@ -507,7 +519,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       }
       throw error;
     }
-  }, [applyConfiguration, object.customer_id, object.id, queryClient, readOnly, saveMutation, toast]);
+  }, [applyConfiguration, mobileEligible, object.customer_id, object.id, queryClient, readOnly, saveMutation, toast]);
 
   const openOverlapDialog = useCallback(fingerprint => {
     if (!fingerprint) return false;
@@ -743,6 +755,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       </div>
 
       {disabledReason && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-amber-300/50 bg-amber-500/10 p-3 text-sm"><Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><p>{disabledReason}</p></div>}
+      {!readOnly && !mobileEligible && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm"><Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /><p>Dit object is nog niet operationeel actief. Je kunt de gebouwen en het terrein wel opslaan; daarmee wordt het object niet geactiveerd of mobiel zichtbaar.</p></div>}
       {appliedConfiguration.map_geometry_status === "needs_review" && <div className="m-4 mb-0 flex items-start gap-3 rounded-xl border border-amber-300/50 bg-amber-500/10 p-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><div><p className="font-medium">Controleer deze kaart opnieuw</p><p className="mt-0.5 text-xs text-muted-foreground">{["location_changed", "object_location_changed"].includes(appliedConfiguration.map_geometry_review_reason) ? "Het objectadres of de locatie is gewijzigd." : "De opgeslagen geometrie vraagt om een nieuwe controle."} Sla de gecontroleerde inrichting opnieuw op voordat mobiele kaartweergave wordt geactiveerd.</p></div></div>}
       {(configurationQuery.isRefetchError || (configurationQuery.error && configurationQuery.data)) && <ErrorPanel title="De opgeslagen kaart blijft zichtbaar, maar vernieuwen is mislukt." error={configurationQuery.error} onRetry={() => configurationQuery.refetch()} />}
       {(conflictNotice || staleConfiguration) && <div className="m-4 mb-0 rounded-xl border border-destructive/30 bg-destructive/10 p-4"><p className="text-sm font-medium text-destructive">De kaart is ondertussen door iemand anders gewijzigd.</p><p className="mt-1 text-xs text-muted-foreground">Uw lokale wijzigingen zijn niet overschreven. Laad de actuele versie en pas ze daarna opnieuw toe.</p><Button type="button" size="sm" variant="outline" className="mt-3" onClick={reloadCurrentConfiguration}><RefreshCw className="h-4 w-4" /> Actuele versie laden</Button></div>}

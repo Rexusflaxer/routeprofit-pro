@@ -5200,7 +5200,10 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
 ) {
   const { object } = await requireCustomerObjectForMutation(base44, body);
   if (objectLifecycleStatus(object) === 'archived') {
-    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld');
+    throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld', {
+      code: 'object_map_object_archived',
+      retryable: false,
+    });
   }
   const anchor = objectMapAnchor(object);
   const data = requireObject(body);
@@ -5333,10 +5336,16 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
   if (typeof showOnMobileMap !== 'boolean') throw new ApiError(400, 'show_on_mobile_map moet ja of nee zijn');
   if (showOnMobileMap) {
     if (objectLifecycleStatus(object) !== 'active' || object.is_active_customer_object === false) {
-      throw new ApiError(409, 'Alleen een actief object kan op de mobiele objectkaart worden getoond');
+      throw new ApiError(409, 'Alleen een actief object kan op de mobiele objectkaart worden getoond', {
+        code: 'object_map_mobile_not_eligible',
+        retryable: false,
+      });
     }
     if (!['verified', 'manual'].includes(asString(object.geocoding_status))) {
-      throw new ApiError(409, 'Controleer de kaartpositie voordat het object mobiel zichtbaar wordt');
+      throw new ApiError(409, 'Controleer de kaartpositie voordat het object mobiel zichtbaar wordt', {
+        code: 'object_map_mobile_position_unverified',
+        retryable: false,
+      });
     }
   }
 
