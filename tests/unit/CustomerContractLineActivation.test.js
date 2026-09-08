@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,7 @@ beforeAll(async () => {
   globalThis.TextDecoder = NodeTextDecoder;
   globalThis.Uint8Array = new NodeTextEncoder().encode("").constructor;
   const { transform } = await import("esbuild");
-  const compiled = await transform(source.replace(
+  const compiled = await transform((await inlineBackendImports(source, path.join(root, "base44/functions/customerPlatformApi/entry.ts"))).replace(
     /^import \{ createClientFromRequest \} from 'npm:@base44\/sdk@[^']+';$/m,
     "const createClientFromRequest = () => ({});",
   ), { format: "esm", loader: "ts", target: "es2022" });
@@ -400,9 +401,12 @@ describe("Collectiefmutatie onder klantcontract-routinglock", () => {
     expect(collectivePageSource).not.toContain("base44.entities.Collectief.create");
     expect(collectivePageSource).not.toContain("base44.entities.Collectief.update");
     expect(collectivePageSource).not.toContain("base44.entities.Collectief.delete");
-    expect(collectivePageSource).toContain('action: "create_collective"');
-    expect(collectivePageSource).toContain('action: "update_collective"');
-    expect(collectivePageSource).toContain('action: "delete_collective"');
+    expect(collectivePageSource).toContain('"create_collective_dossier"');
+    expect(collectivePageSource).toContain('"update_collective_dossier"');
+    expect(collectivePageSource).toContain("collectiveMutationRequest");
+    const workflow = fs.readFileSync(path.join(root, "src/components/collectief/collectiveDossierWorkflow.js"), "utf8");
+    expect(workflow).toContain("invokeCustomerPlatformMutation");
+    expect(workflow).toContain("idempotency_key:");
   });
 
   it("valideert klant en objecten ook bij idempotente server-side aanmaak", async () => {

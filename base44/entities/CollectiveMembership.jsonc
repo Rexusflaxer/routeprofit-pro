@@ -1,0 +1,68 @@
+{
+  "name": "CollectiveMembership",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collective_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    },
+    "starts_on": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "ends_on": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    }
+  },
+  "required": [
+    "collective_id",
+    "object_id",
+    "status"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

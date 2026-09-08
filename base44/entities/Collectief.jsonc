@@ -15,22 +15,26 @@
       "enum": [
         "regio_groep",
         "bedrijventerrein",
-        "bedrijfsverzamelgebouw"
+        "bedrijfsverzamelgebouw",
+        "woonwijk"
       ],
       "description": "Type collectief",
       "default": "bedrijventerrein"
     },
     "customer_id": {
-      "type": "string",
-      "description": "ID van de beherende klant"
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Legacy commerciële klantbinding; nieuwe dossierbeheerder staat los in manager_customer_id."
     },
     "parent_collectief_id": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "ID van het bovenliggende collectief (optioneel, voor nesting)"
     },
     "object_ids": {
       "type": "array",
-      "description": "IDs van objecten die tot dit collectief behoren",
+      "description": "Legacy commerciële objectdekking; nieuwe klantoverstijgende deelnames staan uitsluitend in CollectiveMembership.",
       "items": {
         "type": "string"
       }
@@ -44,8 +48,8 @@
       "description": "Opmerkingen"
     },
     "version": {
-      "type": "number",
-      "description": "Versienummer voor conflictveilige wijzigingen",
+      "type": "integer",
+      "minimum": 1,
       "default": 1
     },
     "idempotency_key": {
@@ -61,12 +65,264 @@
         "null"
       ],
       "description": "Server-side vingerafdruk waarmee hergebruik van een aanmaaksleutel met andere inhoud wordt geweigerd."
+    },
+    "latitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Breedtegraad"
+    },
+    "longitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Lengtegraad"
+    },
+    "geocoding_status": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "verified",
+        "manual"
+      ],
+      "default": "unverified"
+    },
+    "bag_address_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optionele BAG-identificatie van het gekozen adres"
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "NL"
+    },
+    "country_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "Nederland"
+    },
+    "building_polygon_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Canonieke WGS84 FeatureCollection met BAG-pandcontouren en eventuele expliciet handmatig getekende gebouwcontouren"
+    },
+    "building_selection_points": {
+      "type": "array",
+      "maxItems": 100,
+      "default": [],
+      "description": "Door de gebruiker aangeklikte WGS84-posities voor 3D-gebouwen zonder BAG-koppeling. Bevat geen Mapbox-contouren of tijdelijke Mapbox-feature-ID's.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "user_selected"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mapbox"
+            ]
+          },
+          "bag_status": {
+            "type": "string",
+            "enum": [
+              "unlinked"
+            ]
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "provider",
+          "bag_status",
+          "longitude",
+          "latitude"
+        ]
+      }
+    },
+    "building_labels": {
+      "type": "object",
+      "maxProperties": 100,
+      "default": {},
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "description": "Gebruikersnamen voor geselecteerde gebouwen, gekoppeld via bag:<PDOK-id>, point:<lokaal aanklikpunt-id> of manual:<local_id>. Alleen opslaan via de kaartconfiguratie; geen namen in logboek of recoverypayloads."
+    },
+    "object_area_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Canonieke WGS84 FeatureCollection met operationele terreinvlakken, eventueel begonnen vanuit een PDOK-perceel met gesaneerde herkomstverwijzing"
+    },
+    "building_selection_mode": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual"
+      ],
+      "default": "automatic",
+      "description": "Automatic gebruikt de legacy nabijheidslogica; manual gebruikt uitsluitend de expliciet opgeslagen contouren en mag bewust leeg zijn"
+    },
+    "map_geometry_status": {
+      "type": "string",
+      "enum": [
+        "unconfigured",
+        "configured",
+        "needs_review"
+      ],
+      "default": "unconfigured",
+      "description": "Reviewstatus van de gebouw- en terreinconfiguratie; een relevante adreswijziging zet bestaande geometrie op needs_review"
+    },
+    "map_geometry_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Monotoon oplopende revisie waarmee mobiele kaartcaches exact kunnen worden ververst"
+    },
+    "map_geometry_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80,
+      "description": "SHA-256 van de canonieke gebouwmodus en opgeslagen gebouw- en terreingeometrie"
+    },
+    "map_geometry_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "map_geometry_updated_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Backofficegebruiker die de kaartconfiguratie het laatst heeft opgeslagen of reviewplichtig heeft gemaakt"
+    },
+    "map_geometry_review_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500,
+      "description": "Technische, niet-gevoelige reden waarom de kaartconfiguratie opnieuw gecontroleerd moet worden"
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manager_customer_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optionele beherende klant. Verandert geen commerciële klantdekking."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "dossier_version": {
+      "type": "integer",
+      "default": 1
+    },
+    "map_mutation_receipt": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Veilige herstelreferentie; bevat nooit coördinaten of ruwe geometrie."
     }
   },
   "required": [
     "name",
-    "collectief_type",
-    "customer_id"
+    "collectief_type"
   ],
   "rls": {
     "create": {

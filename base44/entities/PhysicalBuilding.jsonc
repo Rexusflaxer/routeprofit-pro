@@ -1,0 +1,92 @@
+{
+  "name": "PhysicalBuilding",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "building_key": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "pdok_bag",
+        "user_selected"
+      ]
+    },
+    "bag_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selection_object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selection_point_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "longitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -180,
+      "maximum": 180
+    },
+    "latitude": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -90,
+      "maximum": 90
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "building_key",
+    "source",
+    "status"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

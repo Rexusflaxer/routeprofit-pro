@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -35,7 +36,7 @@ beforeAll(async () => {
       reserveGlobalObjectCodeMutation,
       safeObjectMutationSummary
     };`);
-  const compiled = await transform(testableSource, {
+  const compiled = await transform(await inlineBackendImports(testableSource, entryPath), {
     format: "esm",
     loader: "ts",
     target: "es2022",

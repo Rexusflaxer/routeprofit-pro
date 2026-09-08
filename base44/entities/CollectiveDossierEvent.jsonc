@@ -1,0 +1,69 @@
+{
+  "name": "CollectiveDossierEvent",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collective_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_user_id": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "resource_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "actor_user_id",
+    "action",
+    "summary",
+    "occurred_at"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

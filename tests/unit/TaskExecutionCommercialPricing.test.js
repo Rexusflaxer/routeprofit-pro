@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -11,7 +12,7 @@ const backendModules = new Map();
 async function loadResolver(relativePath) {
   const source = fs.readFileSync(path.join(root, relativePath), "utf8");
   const { transform } = await import("esbuild");
-  const compiled = await transform(source.replace(
+  const compiled = await transform((await inlineBackendImports(source, path.join(root, relativePath))).replace(
     /^import \{ createClientFromRequest \} from 'npm:@base44\/sdk@[^']+';$/m,
     "const createClientFromRequest = () => ({});",
   ), { format: "esm", loader: "ts", target: "es2022" });

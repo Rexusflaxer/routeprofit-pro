@@ -5,6 +5,8 @@ import { Building2, LandPlot, Loader2, MousePointer2, Trash2 } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import ObjectMapControls from "./ObjectMapControls";
 import useObjectMapBuildingLabels from "./useObjectMapBuildingLabels";
+import useObjectMapTerrainHighlight from "./useObjectMapTerrainHighlight";
+import { terrainFeatureKey } from "./objectMapTerrainHighlight";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import {
@@ -394,8 +396,14 @@ function addWorkspaceLayers(map, data) {
   });
   addLayer(map, { id: LAYER.selectedFill, type: "fill", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.34 } });
   addLayer(map, { id: LAYER.selectedLine, type: "line", source: SOURCE.selected, filter: ["==", ["get", "source"], "manual"], paint: { "line-color": "#7c3aed", "line-width": 3 } });
-  addLayer(map, { id: LAYER.terrainFill, type: "fill", slot: "middle", source: SOURCE.terrain, paint: { "fill-color": "#10b981", "fill-opacity": 0.18 } });
-  addLayer(map, { id: LAYER.terrainLine, type: "line", slot: "middle", source: SOURCE.terrain, paint: { "line-color": "#047857", "line-width": 3 } });
+  addLayer(map, { id: LAYER.terrainFill, type: "fill", slot: "middle", source: SOURCE.terrain, paint: {
+    "fill-color": ["case", ["==", ["get", "loq_list_highlight"], true], "#f59e0b", "#10b981"],
+    "fill-opacity": ["case", ["==", ["get", "loq_list_highlight"], true], 0.28, 0.18],
+  } });
+  addLayer(map, { id: LAYER.terrainLine, type: "line", slot: "middle", source: SOURCE.terrain, paint: {
+    "line-color": ["case", ["==", ["get", "loq_list_highlight"], true], "#f59e0b", "#047857"],
+    "line-width": ["case", ["==", ["get", "loq_list_highlight"], true], 5, 3],
+  } });
   addLayer(map, { id: LAYER.hoverLine, type: "line", source: SOURCE.hover, filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#f59e0b", "line-width": 5 } });
   addLayer(map, { id: LAYER.hoverPoint, type: "circle", source: SOURCE.hover, filter: ["==", ["geometry-type"], "Point"], paint: { "circle-color": "#f59e0b", "circle-radius": 10, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
   addLayer(map, { id: LAYER.draftFill, type: "fill", source: SOURCE.draft, filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#8b5cf6", "fill-opacity": 0.18 } });
@@ -431,6 +439,8 @@ export default function ObjectMapCanvas({
   onBuildingMatchUnavailable,
   buildingSelectionPoints = [],
   onToggleBuildingPoint,
+  nearbyBuildingSelections = [],
+  onBuildingAssociations,
   workspace = "buildings",
   mapView = "map",
   parcelCandidates = [],
@@ -444,6 +454,7 @@ export default function ObjectMapCanvas({
   onRemoveTerrainFeature,
   onEditError,
   highlightedBuildingKey = null,
+  highlightedTerrainKey = null,
   buildingLabels,
 }) {
   // Viewing is independent of editor state left in the parent. Keep the same
@@ -500,6 +511,7 @@ export default function ObjectMapCanvas({
   const [editError, setEditError] = useState(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
+  const [draggingVertex, setDraggingVertex] = useState(false);
   const interactionDisabled = viewOnly || disabled || !trustedObjectCoordinatePair(object);
   const navigationBounds = useMemo(() => objectNavigationBounds(object, selectedBuildings, terrain, buildingSelectionPoints),
     [object?.latitude, object?.longitude, object?.geocoding_status, selectedBuildings, terrain, buildingSelectionPoints]);
@@ -535,12 +547,14 @@ export default function ObjectMapCanvas({
 
   const buildingLabelsError = useObjectMapBuildingLabels({ map: mapRef.current, ready, selectedBuildings, buildingSelectionPoints,
     buildingLabels, highlightedBuildingKey, workspace: viewOnly ? "buildings" : workspace, editingTarget, drawingTarget, resolveBuildingRoofAnchor });
+  useObjectMapTerrainHighlight({ map: mapRef.current, ready, terrain, highlightedTerrainKey, navigationBounds, dragging: draggingVertex });
 
   useEffect(() => {
     if (!interactionDisabled) return;
     // A mode/permission change can happen before mouseup. Cancel the edit,
     // without firing a completion callback into the now read-only parent.
     dragRef.current = null;
+    setDraggingVertex(false);
     previewPointRef.current = null;
     suppressBoundaryClickRef.current = false;
     handlesRef.current = [];
@@ -565,7 +579,10 @@ export default function ObjectMapCanvas({
   const mapData = useMemo(() => ({
     candidates: candidateCollection(candidates, selectedBagFeatureIds),
     selected: normalizeFeatureCollection(selectedBuildings),
-    terrain: featureCollection(normalizeFeatureCollection(terrain).features.map((feature, index) => ({ ...feature, properties: { ...feature.properties, loq_feature_index: index } }))),
+    terrain: featureCollection(normalizeFeatureCollection(terrain).features.map((feature, index) => ({ ...feature, properties: {
+      ...feature.properties, loq_feature_index: index,
+      loq_list_highlight: Boolean(highlightedTerrainKey) && terrainFeatureKey(feature) === highlightedTerrainKey,
+    } }))),
     draft: drawingCollection(drawingPoints),
     vertices: editingTarget === "terrain"
       ? boundaryHandleCollection(terrain, handles)
@@ -577,7 +594,7 @@ export default function ObjectMapCanvas({
       ...feature,
       properties: { source_feature_id: featureSourceId(feature), loq_selected: feature.properties?.loq_selected === true },
     }))),
-  }), [candidates, drawingPoints, editingTarget, handles, manualBuildings, object, parcelCandidates, selectedBagFeatureIds, selectedBuildings, terrain]);
+  }), [candidates, drawingPoints, editingTarget, handles, highlightedTerrainKey, manualBuildings, object, parcelCandidates, selectedBagFeatureIds, selectedBuildings, terrain]);
   const matchCandidates = useMemo(
     () => buildingMatchCandidates(candidates, selectedBuildings, selectedBagFeatureIds),
     [candidates, selectedBagFeatureIds, selectedBuildings],
@@ -598,6 +615,8 @@ export default function ObjectMapCanvas({
     onBuildingMatchUnavailable,
     buildingSelectionPoints,
     onToggleBuildingPoint,
+    nearbyBuildingSelections,
+    onBuildingAssociations,
     workspace,
     mapView,
     parcelsVisible,
@@ -944,6 +963,8 @@ export default function ObjectMapCanvas({
               writeStandardBuildingGroup(group, { select: true, highlight: false });
               rememberStandardBuildingGroup(group, [], [selectionPoint.id], true);
               interaction.onToggleBuildingPoint(selectionPoint);
+              interaction.onBuildingAssociations?.(`selection:${object.id}:${selectionPoint.id}`,
+                interaction.nearbyBuildingSelections.filter(peer => groupContainsCoordinate(group, [peer.longitude, peer.latitude])));
               return true;
             }
             const selectedIds = new Set(interaction.selectedBagFeatureIds || []);
@@ -954,6 +975,8 @@ export default function ObjectMapCanvas({
             writeStandardBuildingGroup(group, { select: selected, highlight: false });
             rememberStandardBuildingGroup(group, selected ? [bagFeatureId] : [], [], selected);
             interaction.onToggleCandidate?.(bagFeatureId);
+            if (selected) interaction.onBuildingAssociations?.(`bag:${bagFeatureId}`,
+              interaction.nearbyBuildingSelections.filter(peer => groupContainsCoordinate(group, [peer.longitude, peer.latitude])));
             return true;
           },
         });
@@ -1102,6 +1125,7 @@ export default function ObjectMapCanvas({
           polygon_index: Number(feature.properties?.polygon_index || 0),
           vertex_index: Number(feature.properties?.vertex_index),
         };
+        setDraggingVertex(true);
         map.dragPan.disable();
         map.getCanvas().style.cursor = "grabbing";
         interaction.onVertexDragStart?.(dragRef.current.target);
@@ -1130,6 +1154,7 @@ export default function ObjectMapCanvas({
         if (!dragRef.current) return;
         const target = dragRef.current.target;
         dragRef.current = null;
+        setDraggingVertex(false);
         map.dragPan.enable();
         map.getCanvas().style.cursor = "";
         if (!interactionsRef.current.disabled) interactionsRef.current.onVertexDragEnd?.(target);

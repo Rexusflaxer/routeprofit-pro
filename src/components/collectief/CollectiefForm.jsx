@@ -1,294 +1,63 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useState } from "react";
+import { Loader2, MapPin, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Check, Loader2, ArrowLeft, Building, MapPin, X, Search } from "lucide-react";
-import { base44 } from "@/api/base44Client";
-import CustomerSelect from "../ui-custom/CustomerSelect";
+import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { formatAddress } from "@/lib/addressFormatting";
+import { trustedObjectCoordinatePair } from "@/lib/coordinates";
+import { useObjectModuleNavigationGuard } from "@/components/objects/useObjectModuleNavigationGuard";
+import { COLLECTIVE_TYPES, collectiveManagerId, collectiveParentOptions } from "./collectiveDossierWorkflow";
+import CollectiveLocationPicker from "./CollectiveLocationPicker";
 
-const TYPE_OPTIONS = [
-  { value: "regio_groep", label: "Regio / Groep", description: "Een geografische regio of logische groepering van objecten" },
-  { value: "bedrijventerrein", label: "Bedrijventerrein", description: "Een terrein met meerdere bedrijven van verschillende klanten" },
-  { value: "bedrijfsverzamelgebouw", label: "Bedrijfsverzamelgebouw", description: "Een gebouw met meerdere huurders/bedrijven" },
-];
+export const collectiveSelectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-export default function CollectiefForm({ collectief, customers, objects, collectieven, onSave, onCancel, saving }) {
-  const [form, setForm] = useState({
-    object_code: collectief?.object_code || "",
-    name: collectief?.name || "",
-    collectief_type: collectief?.collectief_type || "bedrijventerrein",
-    customer_id: collectief?.customer_id || "",
-    parent_collectief_id: collectief?.parent_collectief_id || "",
-    object_ids: collectief?.object_ids || [],
-    address: collectief?.address || "",
-    notes: collectief?.notes || "",
-  });
+export function CollectiveField({ label, id, children, hint }) {
+  return <div className="space-y-2"><Label htmlFor={id}>{label}</Label>{children}{hint && <p className="text-xs text-muted-foreground">{hint}</p>}</div>;
+}
 
-  const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
-
-  const toggleObject = (id) => {
-    setForm(prev => ({
-      ...prev,
-      object_ids: prev.object_ids.includes(id)
-        ? prev.object_ids.filter(o => o !== id)
-        : [...prev.object_ids, id],
-    }));
+export default function CollectiefForm({ collectief, customers = [], collectieven = [], onSave, onCancel, saving, error, onRegisterNavigationGuard }) {
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [form, setForm] = useState(() => ({
+    name: collectief?.name || "", collectief_type: collectief?.collectief_type || "bedrijventerrein",
+    manager_customer_id: collectiveManagerId(collectief), parent_collectief_id: collectief?.parent_collectief_id || "",
+    address: collectief?.address || "", notes: collectief?.notes || "",
+    street_name: collectief?.street_name || "", house_number: collectief?.house_number || "", house_number_addition: collectief?.house_number_addition || "",
+    postal_code: collectief?.postal_code || "", city: collectief?.city || "", country_code: collectief?.country_code || "NL", country_name: collectief?.country_name || "Nederland",
+    latitude: collectief?.latitude ?? null, longitude: collectief?.longitude ?? null,
+    geocoding_status: collectief?.geocoding_status || "unverified", bag_address_id: collectief?.bag_address_id || null,
+  }));
+  const initialRef = useRef(JSON.stringify(form));
+  const dirty = initialRef.current !== JSON.stringify(form);
+  const set = (key, value) => setForm(current => ({ ...current, [key]: value }));
+  const save = async () => {
+    if (!form.name.trim()) throw new Error("Geef het collectief een naam.");
+    const coordinates = trustedObjectCoordinatePair(form);
+    await onSave({ ...form, latitude: coordinates?.[1] ?? null, longitude: coordinates?.[0] ?? null, geocoding_status: coordinates ? form.geocoding_status : "unverified", name: form.name.trim(), manager_customer_id: form.manager_customer_id || null, parent_collectief_id: form.parent_collectief_id || null });
   };
+  const navigation = useObjectModuleNavigationGuard({ dirty, moduleName: "Collectief", saving, onSave: save, onDiscard: () => {}, onRegisterNavigationGuard });
+  const coordinatesValid = Boolean(trustedObjectCoordinatePair(form));
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.name.trim() || !form.customer_id) return;
-    const data = { ...form };
-    if (!data.parent_collectief_id) delete data.parent_collectief_id;
-    onSave(data);
-  };
-
-  const [objectSearch, setObjectSearch] = useState("");
-
-  // Exclude self from parent options
-  const parentOptions = collectieven.filter(c => c.id !== collectief?.id);
-
-  // Object IDs die al in een ander collectief zitten (niet het huidige)
-  const takenObjectIds = new Set(
-    collectieven
-      .filter(c => c.id !== collectief?.id)
-      .flatMap(c => c.object_ids || [])
-  );
-
-  // Address autocomplete
-  const [addressSuggestions, setAddressSuggestions] = useState([]);
-  const [addressLoading, setAddressLoading] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const addressDebounceRef = useRef(null);
-  const addressWrapperRef = useRef(null);
-
-  const handleAddressChange = (value) => {
-    handleChange("address", value);
-    clearTimeout(addressDebounceRef.current);
-    if (value.length < 3) { setAddressSuggestions([]); setShowSuggestions(false); return; }
-    addressDebounceRef.current = setTimeout(async () => {
-      setAddressLoading(true);
-      const res = await base44.functions.invoke("lookupService", { action: "search_address", query: value });
-      setAddressSuggestions(res.data?.suggestions || []);
-      setShowSuggestions(true);
-      setAddressLoading(false);
-    }, 400);
-  };
-
-  const selectAddress = (suggestion) => {
-    handleChange("address", suggestion.address);
-    setShowSuggestions(false);
-    setAddressSuggestions([]);
-  };
-
-  useEffect(() => {
-    const handleClick = (e) => {
-      if (addressWrapperRef.current && !addressWrapperRef.current.contains(e.target)) {
-        setShowSuggestions(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  return (
-    <Card className="border-0 shadow-lg">
-      <CardContent className="p-6 sm:p-8">
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-slate-900">{collectief ? "Collectief bewerken" : "Nieuw collectief"}</h2>
-          <p className="text-slate-500 text-sm mt-1">Koppel objecten en stel het type in</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-
-          {/* Type selectie */}
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type collectief *</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {TYPE_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleChange("collectief_type", opt.value)}
-                  className={`text-left border-2 rounded-xl p-4 transition-all ${
-                    form.collectief_type === opt.value
-                      ? "border-slate-800 bg-slate-50"
-                      : "border-slate-200 hover:border-slate-400"
-                  }`}
-                >
-                  <p className="font-semibold text-sm text-slate-900">{opt.label}</p>
-                  <p className="text-xs text-slate-500 mt-1 leading-snug">{opt.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Objectcode (alleen voor bedrijfsverzamelgebouw) */}
-          {form.collectief_type === "bedrijfsverzamelgebouw" && (
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objectcode</Label>
-              <Input
-                value={form.object_code}
-                onChange={(e) => handleChange("object_code", e.target.value)}
-                placeholder="Bijv. OBJ-001"
-              />
-            </div>
-          )}
-
-          {/* Naam & klant */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam *</Label>
-              <Input
-                value={form.name}
-                onChange={(e) => handleChange("name", e.target.value)}
-                placeholder="Bijv. H2O Bedrijventerrein Noord"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Beheerder (klant) *</Label>
-              <CustomerSelect customers={customers} value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)} placeholder="Selecteer klant..." />
-            </div>
-          </div>
-
-          {/* Adres & parent collectief */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2" ref={addressWrapperRef}>
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Adres / Locatie</Label>
-              <div className="relative">
-                <Input
-                  value={form.address}
-                  onChange={(e) => handleAddressChange(e.target.value)}
-                  onFocus={() => addressSuggestions.length > 0 && setShowSuggestions(true)}
-                  placeholder="Bijv. Industrieweg 1, Enschede"
-                  autoComplete="off"
-                />
-                {addressLoading && (
-                  <Loader2 className="absolute right-3 top-2.5 w-4 h-4 animate-spin text-slate-400" />
-                )}
-                {showSuggestions && addressSuggestions.length > 0 && (
-                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-                    {addressSuggestions.map((s, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className="w-full text-left flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 text-sm border-b border-slate-100 last:border-0"
-                        onMouseDown={() => selectAddress(s)}
-                      >
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                        <span className="truncate">{s.address}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valt onder collectief (optioneel)</Label>
-              <Select
-                value={form.parent_collectief_id || "none"}
-                onValueChange={(v) => handleChange("parent_collectief_id", v === "none" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Geen (top-niveau)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Geen (top-niveau)</SelectItem>
-                  {parentOptions.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Objecten koppelen */}
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Objecten in dit collectief
-              {form.object_ids.length > 0 && (
-                <span className="ml-2 normal-case font-normal text-slate-400">({form.object_ids.length} geselecteerd)</span>
-              )}
-            </Label>
-            {objects.length === 0 ? (
-              <p className="text-sm text-slate-400 italic">Geen objecten beschikbaar. Voeg eerst objecten toe.</p>
-            ) : (
-              <div className="space-y-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={objectSearch}
-                  onChange={e => setObjectSearch(e.target.value)}
-                  placeholder="Zoek op naam, code of adres..."
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400"
-                />
-              </div>
-              <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
-                {objects.filter(obj => {
-                  const q = objectSearch.toLowerCase();
-                  return !q || obj.name?.toLowerCase().includes(q) || obj.object_code?.toLowerCase().includes(q) || obj.address?.toLowerCase().includes(q);
-                }).map((obj, i) => {
-                  const isTaken = takenObjectIds.has(obj.id);
-                  const takenBy = isTaken
-                    ? collectieven.find(c => c.id !== collectief?.id && (c.object_ids || []).includes(obj.id))
-                    : null;
-                  return (
-                    <label
-                      key={obj.id}
-                      className={`flex items-center gap-3 px-4 py-3 transition-colors ${i > 0 ? "border-t border-slate-100" : ""} ${isTaken ? "opacity-50 cursor-not-allowed bg-slate-50" : "cursor-pointer hover:bg-slate-50"}`}
-                    >
-                      <Checkbox
-                        checked={form.object_ids.includes(obj.id)}
-                        onCheckedChange={() => !isTaken && toggleObject(obj.id)}
-                        disabled={isTaken}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-900">
-                          {obj.object_code ? <span className="text-slate-400 mr-1">[{obj.object_code}]</span> : null}
-                          {obj.name}
-                        </p>
-                        {isTaken
-                          ? <p className="text-xs text-amber-600">Al in gebruik: {takenBy?.name}</p>
-                          : obj.address && <p className="text-xs text-slate-400 truncate">{obj.address}</p>
-                        }
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            )}
-          </div>
-
-          {/* Notities */}
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Opmerkingen</Label>
-            <Textarea
-              value={form.notes}
-              onChange={(e) => handleChange("notes", e.target.value)}
-              rows={2}
-              placeholder="Extra informatie over dit collectief..."
-            />
-          </div>
-
-          <div className="flex justify-between items-center pt-2">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              <ArrowLeft className="w-4 h-4 mr-1" /> Annuleren
-            </Button>
-            <Button type="submit" disabled={saving || !form.name.trim() || !form.customer_id} className="bg-slate-900 hover:bg-slate-800">
-              {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Check className="w-4 h-4 mr-1" />}
-              {collectief ? "Opslaan" : "Aanmaken"}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
-  );
+  return <section className="rounded-2xl border border-border/70 bg-card/40 p-5 sm:p-7">
+    <h2 className="text-lg font-semibold">{collectief?.id ? "Collectief wijzigen" : "Nieuw collectief"}</h2>
+    <p className="mt-1 text-sm text-muted-foreground">Een gezamenlijk gebied of gebouw. Deelnemers en dienstverlening richt je daarna in.</p>
+    <form className="mt-6 space-y-5" onSubmit={event => { event.preventDefault(); if (!saving) void save().catch(() => {}); }}>
+      <CollectiveField label="Naam *" id="collective-name"><Input id="collective-name" required maxLength={180} value={form.name} onChange={event => set("name", event.target.value)} placeholder="Bijvoorbeeld Bedrijventerrein Ir. van der Zeelaan" /></CollectiveField>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <CollectiveField label="Type collectief" id="collective-type"><select id="collective-type" className={collectiveSelectClass} value={form.collectief_type} onChange={event => set("collectief_type", event.target.value)}>{Object.entries(COLLECTIVE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></CollectiveField>
+        <CollectiveField label="Beherende klant (optioneel)" id="collective-manager" hint="Een woonwijk of gebied kan zonder beheerder bestaan. Dit wijzigt geen factuurafspraken."><select id="collective-manager" className={collectiveSelectClass} value={form.manager_customer_id} onChange={event => set("manager_customer_id", event.target.value)}><option value="">Geen beheerder</option>{customers.filter(customer => customer.status !== "archived" || customer.id === form.manager_customer_id).map(customer => <option key={customer.id} value={customer.id}>{customer.name || customer.trade_name}</option>)}</select></CollectiveField>
+      </div>
+      <CollectiveField label="Bovenliggend collectief (optioneel)" id="collective-parent" hint="Bijvoorbeeld een bedrijfsverzamelgebouw dat op een bedrijventerrein ligt."><select id="collective-parent" className={collectiveSelectClass} value={form.parent_collectief_id} onChange={event => set("parent_collectief_id", event.target.value)}><option value="">Zelfstandig collectief</option>{collectiveParentOptions(collectieven, collectief?.id).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></CollectiveField>
+      <CollectiveField label="Adres of centrale locatie" id="collective-address" hint="Kies een gevonden adres, of wijs een gebied zonder adres direct op de kaart aan. Een huisnummer is voor collectieven niet verplicht.">
+        <AddressAutocomplete id="collective-address" value={form} onQueryChange={address => setForm(current => ({ ...current, address, street_name: "", house_number: "", house_number_addition: "", postal_code: "", city: "", latitude: null, longitude: null, bag_address_id: null, geocoding_status: "unverified" }))} onAddressSelect={address => setForm(current => ({ ...current, ...address, address: formatAddress(address, { omitDefaultCountry: true }), country_name: address.country || "Nederland" }))} />
+        <p className={`text-xs ${coordinatesValid ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{coordinatesValid ? "Kaartlocatie bevestigd." : "Nog geen bevestigde kaartlocatie. Je kunt het dossier alvast aanmaken."}</p>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setLocationPickerOpen(current => !current)}><MapPin className="h-4 w-4" />{locationPickerOpen ? "Kaart sluiten" : "Gebied op kaart aanwijzen"}</Button>
+        {locationPickerOpen && <CollectiveLocationPicker location={form} referenceLocation={collectieven.find(item => item.id === form.parent_collectief_id)} onCancel={() => setLocationPickerOpen(false)} onConfirm={coordinates => { setForm(current => ({ ...current, ...coordinates })); setLocationPickerOpen(false); }} />}
+      </CollectiveField>
+      <CollectiveField label="Notities" id="collective-notes"><Textarea id="collective-notes" maxLength={12000} value={form.notes} onChange={event => set("notes", event.target.value)} rows={3} /></CollectiveField>
+      {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error.message || "Opslaan is niet gelukt. Je invoer blijft behouden."}</p>}
+      <div className="flex justify-end gap-2 border-t border-border pt-4"><Button type="button" variant="outline" disabled={saving} onClick={() => navigation.requestNavigation(onCancel)}>Annuleren</Button><Button type="submit" disabled={saving || !form.name.trim()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {collectief?.id ? "Wijzigingen opslaan" : "Collectief aanmaken"}</Button></div>
+    </form>{navigation.dialog}
+  </section>;
 }

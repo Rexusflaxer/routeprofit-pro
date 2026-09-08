@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -28,7 +29,7 @@ beforeAll(async () => {
       normalizedObjectModuleStatusReason,
       projectedObjectModuleStatus
     };`);
-  const compiled = await transform(testableSource, { format: "esm", loader: "ts", target: "es2022" });
+  const compiled = await transform(await inlineBackendImports(testableSource, entryPath), { format: "esm", loader: "ts", target: "es2022" });
   backend = await import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString("base64")}`);
 });
 

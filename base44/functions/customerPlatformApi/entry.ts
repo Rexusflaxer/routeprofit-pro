@@ -1,4 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { createCollectiveDossierHandlers } from './collectiveDossier.ts';
 
 type LooseRecord = Record<string, any>;
 
@@ -13,6 +14,23 @@ class ApiError extends Error {
     this.details = details;
   }
 }
+
+const collectiveDossierHandlers = createCollectiveDossierHandlers({
+  entity: getEntity,
+  ApiError,
+  casUpdate,
+  applyCollectiveBuildingToObject,
+  validateCollectiveBuildingAttachment,
+  withMutationLock: async (base44: LooseRecord, body: LooseRecord, user: LooseRecord, run: (reservation: LooseRecord) => Promise<any>) => {
+    const reservation = await reserveGlobalObjectCodeMutation(base44, user, body.idempotency_key, mutationTarget(body.action, body), 'collectiefinrichting');
+    try {
+      await assertGlobalObjectCodeMutation(base44, reservation, 'collectiefinrichting');
+      return await run(reservation);
+    } finally {
+      await releaseGlobalObjectCodeMutation(base44, reservation, 'collectiefinrichting');
+    }
+  },
+});
 
 const QUOTE_TRANSITIONS: Record<string, string[]> = {
   draft: ['review', 'withdrawn'],
@@ -79,6 +97,7 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 };
 
 const READ_ACTIONS = new Set([
+  ...collectiveDossierHandlers.readActions,
   'get_customer_overview',
   'search_customer_objects',
   'get_object_map_configuration',
@@ -106,6 +125,7 @@ const HANDBOOK_ENTITY_MUTATION_ACTIONS = new Set([
 ]);
 
 const MUTATION_ACTIONS = new Set([
+  ...collectiveDossierHandlers.mutationActions,
   'create_customer',
   'update_customer',
   'set_customer_status',
@@ -4614,7 +4634,9 @@ async function ensureObjectMapGeometryRevisionUnderGlobalLock(
   );
   try {
     await assertGlobalObjectCodeMutation(base44, reservation, 'kaarthistorieherstel');
-    return await ensureObjectMapGeometryRevision(base44, object, user.id, sourceAction);
+    const revision = await ensureObjectMapGeometryRevision(base44, object, user.id, sourceAction);
+    if (sourceAction.includes('map_configuration')) await collectiveDossierHandlers.registerCanonicalBuildings(base44, 'object', object.id, object);
+    return revision;
   } finally {
     await releaseGlobalObjectCodeMutation(base44, reservation, 'kaarthistorieherstel');
   }
@@ -4947,19 +4969,64 @@ async function buildingAssignmentConflicts(
     }));
 }
 
-async function handleGetObjectMapConfiguration(base44: LooseRecord, body: LooseRecord) {
-  const { object } = await requireCustomerObjectScope(base44, body);
+async function requireMapDossierScope(base44: LooseRecord, body: LooseRecord, mutation = false) {
+  if (!body.collective_id) return mutation ? requireCustomerObjectForMutation(base44, body) : requireCustomerObjectScope(base44, body);
+  if (body.object_id || body.customer_id) throw new ApiError(400, 'Kies één kaartdossier: object of collectief');
+  const collective = await requireRecord(base44, 'Collectief', requireString(body, 'collective_id'), 'Collectief');
+  if (mutation && collective.status === 'archived') throw new ApiError(409, 'Herstel het collectief voordat je de kaart wijzigt');
+  return { object: { ...collective, __dossier_kind: 'collective', show_on_mobile_map: false, is_active_customer_object: false } };
+}
+
+function safeMapDossierConfiguration(object: LooseRecord) {
   const configuration = safeObjectMapConfiguration(object);
+  return object.__dossier_kind === 'collective'
+    ? { ...configuration, object_id: null, customer_id: null, collective_id: object.id,
+      object: { ...configuration.object, customer_id: null, show_on_mobile_map: false } }
+    : configuration;
+}
+
+async function handleGetObjectMapConfiguration(base44: LooseRecord, body: LooseRecord) {
+  const { object } = await requireMapDossierScope(base44, body);
+  const configuration = safeMapDossierConfiguration(object);
   return {
     configuration,
     conflicts: publicBuildingAssignmentConflicts(
-      await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson, null, configuration.building_selection_points),
+      object.__dossier_kind === 'collective' ? [] : await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson, null, configuration.building_selection_points),
     ),
   };
 }
 
-async function handleListObjectBuildingCandidates(base44: LooseRecord, body: LooseRecord) {
+async function handleBuildingAssociationSuggestions(base44: LooseRecord, body: LooseRecord) {
   const { object } = await requireCustomerObjectScope(base44, body);
+  if (!Object.hasOwn(body, 'selected_bag_feature_ids') && !Object.hasOwn(body, 'building_selection_points')) {
+    return collectiveDossierHandlers.inspectBuildingAssociations(base44, object, safeStoredBuildingCollection(object).value, safeStoredBuildingSelectionPoints(object).value);
+  }
+  if (!Array.isArray(body.selected_bag_feature_ids) || body.selected_bag_feature_ids.length > OBJECT_MAP_MAX_BUILDING_FEATURES) {
+    throw new ApiError(400, 'Ongeldige gebouwselectie');
+  }
+  const anchor = objectMapAnchor(object);
+  const ids = [...new Set(body.selected_bag_feature_ids.map(safePdokFeatureId))];
+  const stored = geoJsonFeatures(object.building_polygon_geojson);
+  const selected = await Promise.all(ids.map(id => {
+    const known = stored.find(feature => feature.properties?.source === 'pdok_bag' && feature.properties.source_feature_id === id);
+    if (known) {
+      try {
+        return canonicalPdokBuildingFeature({
+          type: 'Feature', id, geometry: known.geometry,
+          properties: { identificatie: known.properties?.source_identificatie, status: known.properties?.source_status },
+        }, anchor, known.properties?.source_retrieved_at || nowIso());
+      } catch {
+        // Invalid historical source metadata must be revalidated against PDOK.
+      }
+    }
+    return fetchPdokBuildingById(id, anchor, nowIso());
+  }));
+  const points = normalizedBuildingSelectionPoints(body.building_selection_points || [], anchor);
+  return collectiveDossierHandlers.inspectBuildingAssociations(base44, object, { type: 'FeatureCollection', features: selected }, points);
+}
+
+async function handleListObjectBuildingCandidates(base44: LooseRecord, body: LooseRecord) {
+  const { object } = await requireMapDossierScope(base44, body);
   const anchor = objectMapAnchor(object);
   const radiusMeters = Number(body.radius_meters ?? OBJECT_MAP_DEFAULT_RADIUS_METERS);
   if (!Number.isInteger(radiusMeters) || radiusMeters < OBJECT_MAP_MIN_RADIUS_METERS || radiusMeters > OBJECT_MAP_MAX_RADIUS_METERS) {
@@ -5142,7 +5209,7 @@ function canonicalPdokParcelFeature(feature: LooseRecord, anchor: number[], retr
 }
 
 async function handleListObjectParcelCandidates(base44: LooseRecord, body: LooseRecord) {
-  const { object } = await requireCustomerObjectScope(base44, body);
+  const { object } = await requireMapDossierScope(base44, body);
   const anchor = objectMapAnchor(object);
   const radiusMeters = Number(body.radius_meters ?? OBJECT_MAP_MAX_PARCEL_RADIUS_METERS);
   if (!Number.isInteger(radiusMeters) || radiusMeters < OBJECT_MAP_MIN_RADIUS_METERS || radiusMeters > OBJECT_MAP_MAX_PARCEL_RADIUS_METERS) {
@@ -5197,8 +5264,13 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
   requestFingerprint: string,
   target: string,
   reservation: LooseRecord,
+  validation: { preflight?: boolean; deferSharedGroup?: boolean } = {},
 ) {
-  const { object } = await requireCustomerObjectForMutation(base44, body);
+  const { object } = await requireMapDossierScope(base44, body, true);
+  if (validation.preflight && versionOf(object) !== expectedVersion) {
+    throw new ApiError(409, 'De kaart is ondertussen gewijzigd', { code: 'object_map_version_conflict', expected_version: expectedVersion, actual_version: versionOf(object) });
+  }
+  const isCollective = object.__dossier_kind === 'collective';
   if (objectLifecycleStatus(object) === 'archived') {
     throw new ApiError(409, 'Gearchiveerd object moet eerst worden hersteld', {
       code: 'object_map_object_archived',
@@ -5330,7 +5402,7 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
     : null;
   const objectAreaGeoJson = normalizedObjectAreaGeoJson?.features?.length ? normalizedObjectAreaGeoJson : null;
 
-  const showOnMobileMap = Object.prototype.hasOwnProperty.call(data, 'show_on_mobile_map')
+  const showOnMobileMap = isCollective ? false : Object.prototype.hasOwnProperty.call(data, 'show_on_mobile_map')
     ? data.show_on_mobile_map
     : object.show_on_mobile_map !== false;
   if (typeof showOnMobileMap !== 'boolean') throw new ApiError(400, 'show_on_mobile_map moet ja of nee zijn');
@@ -5349,7 +5421,7 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
     }
   }
 
-  const detectedConflicts = await buildingAssignmentConflicts(
+  const detectedConflicts = isCollective ? [] : await buildingAssignmentConflicts(
     base44,
     object,
     buildingPolygonGeoJson,
@@ -5362,6 +5434,14 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
   const conflictsRequiringConfirmation = showOnMobileMap && object.show_on_mobile_map === false
     ? detectedConflicts
     : newlyConflicting;
+  // Shared occupancy is an explicit dossier relationship, not just permission
+  // to paint two customer objects. Unchanged legacy selections remain readable.
+  if (!isCollective && newlyConflicting.length && !validation.deferSharedGroup) {
+    await collectiveDossierHandlers.validateObjectBuildingSharing(base44, object, buildingPolygonGeoJson, buildingSelectionPoints);
+  }
+  // Reverse collective attachment validates the full prospective map before
+  // creating memberships. The explicit shared group is established afterwards.
+  if (validation.preflight) return { validated: true };
   const {
     reason: overlapReason,
     conflictFingerprint,
@@ -5436,6 +5516,13 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
     });
   }
   const auditChangedFields = [...new Set(changes.map(change => asString(change.field)).filter(Boolean))];
+  if (isCollective) {
+    await assertGlobalObjectCodeMutation(base44, reservation, 'kaartwijziging');
+    return persistCollectiveMapConfiguration(base44, user, object, patch, expectedVersion, idempotencyKey, requestFingerprint, {
+      building_summary: newBuildingSummary, terrain_summary: newTerrainSummary,
+      changes: changes.filter(change => change.field !== 'show_on_mobile_map'),
+    });
+  }
   const prepared = await customerObjectPatchWithRecovery({
     object,
     patch,
@@ -5493,6 +5580,7 @@ async function handleUpdateObjectMapConfigurationUnderReservation(
       : null,
   });
   await ensureObjectMapGeometryRevision(base44, updated, user.id, 'update_object_map_configuration');
+  await collectiveDossierHandlers.registerCanonicalBuildings(base44, 'object', updated.id, updated);
   return {
     ...auditResult,
     configuration: safeObjectMapConfiguration(updated),
@@ -5518,6 +5606,23 @@ async function handleUpdateObjectMapConfiguration(
     'kaartwijziging',
   );
   try {
+    if (body.collective_id) {
+      const { object } = await requireMapDossierScope(base44, body, true);
+      const durableHash = await sha256(JSON.stringify([user.id, idempotencyKey]));
+      const durable = (await getEntity(base44, 'CollectiveMutationReceipt').filter({ mutation_key_hash: durableHash }, '-created_date', 2))[0];
+      if (durable && (durable.actor_user_id !== user.id || durable.request_fingerprint !== requestFingerprint || durable.action !== body.action)) rejectIdempotencyReuse();
+      // Repair the last committed mutation before accepting another one. Only
+      // summaries live in receipts; geometry remains in its private revision.
+      if (object.map_mutation_receipt) await finishCollectiveMapMutation(base44, object);
+      if (durable?.status === 'completed') {
+        return { ...durable.result, configuration: safeMapDossierConfiguration(object), replayed: true };
+      }
+      const receipt = object.map_mutation_receipt;
+      if (receipt?.idempotency_key === idempotencyKey) {
+        if (receipt.actor_id !== user.id || receipt.request_fingerprint !== requestFingerprint) rejectIdempotencyReuse();
+        return { ...receipt.result, configuration: safeMapDossierConfiguration(object), replayed: true };
+      }
+    }
     return await handleUpdateObjectMapConfigurationUnderReservation(
       base44,
       user,
@@ -5531,6 +5636,144 @@ async function handleUpdateObjectMapConfiguration(
   } finally {
     await releaseGlobalObjectCodeMutation(base44, reservation, 'kaartwijziging');
   }
+}
+
+async function finishCollectiveMapMutation(base44: LooseRecord, collective: LooseRecord) {
+  const receipt = collective.map_mutation_receipt;
+  if (!receipt?.idempotency_key || !receipt.actor_id) return;
+  await ensureCollectiveMapSnapshot(base44, collective, receipt.actor_id);
+  await collectiveDossierHandlers.registerCanonicalBuildings(base44, 'collective', collective.id, collective);
+  const hash = await sha256(JSON.stringify([receipt.actor_id, receipt.idempotency_key]));
+  const events = getEntity(base44, 'CollectiveDossierEvent');
+  if (!(await events.filter({ creation_key: hash }, '-created_date', 1)).length) {
+    const counts = (receipt.result.changes || []).find((change: LooseRecord) => change.field === 'building_count');
+    const area = (receipt.result.changes || []).find((change: LooseRecord) => change.field === 'terrain_area_sqm');
+    await events.create({
+      creation_key: hash, collective_id: collective.id, actor_user_id: receipt.actor_id,
+      action: 'update_object_map_configuration', resource_id: collective.id,
+      summary: `Kaart en terrein bijgewerkt. Gebouwen: ${counts ? `${counts.before} → ${counts.after}` : receipt.result.building_summary?.feature_count || 0}. Terrein: ${area ? `${area.before} → ${area.after}` : receipt.result.terrain_summary?.area_sqm || 0} m².`,
+      occurred_at: collective.map_geometry_updated_at || nowIso(), version: 1,
+    });
+  }
+  const receipts = getEntity(base44, 'CollectiveMutationReceipt');
+  const saved = (await receipts.filter({ mutation_key_hash: hash }, '-created_date', 1))[0];
+  if (!saved) {
+    await receipts.create({ mutation_key_hash: hash, actor_user_id: receipt.actor_id,
+      request_fingerprint: receipt.request_fingerprint, action: 'update_object_map_configuration',
+      status: 'completed', result: receipt.result, version: 1 });
+  } else if (saved.request_fingerprint !== receipt.request_fingerprint || saved.actor_user_id !== receipt.actor_id || saved.action !== 'update_object_map_configuration') {
+    rejectIdempotencyReuse();
+  } else if (saved.status !== 'completed') {
+    await casUpdate(base44, 'CollectiveMutationReceipt', saved, versionOf(saved), { status: 'completed', result: receipt.result });
+  }
+}
+
+async function ensureCollectiveMapSnapshot(base44: LooseRecord, collective: LooseRecord, actorId: string) {
+  const revision = objectMapGeometryRevision(collective);
+  if (!revision && !objectHasMapConfiguration(collective)) return;
+  const entity = getEntity(base44, 'CollectiveMapGeometryRevision');
+  const existing = await entity.filter({ collective_id: collective.id, revision }, '-created_date', 2);
+  if (existing.length) return;
+  const geometry = safeStoredMapGeometry(collective);
+  // An invalid previous anchor must never prevent restoring a valid location.
+  if (geometry.invalid) return;
+  await entity.create({
+    collective_id: collective.id, revision,
+    geometry_hash: collective.map_geometry_hash || await sha256(JSON.stringify(geometry)),
+    building_selection_mode: objectBuildingSelectionMode(collective),
+    map_geometry_status: objectMapGeometryStatus(collective),
+    ...geometry,
+    building_labels: collective.building_labels || {},
+    anchor_latitude: collective.latitude, anchor_longitude: collective.longitude,
+    recorded_at: nowIso(), recorded_by_user_id: actorId,
+    source_action: 'update_collective_map_configuration',
+  });
+}
+
+async function applyCollectiveBuildingToObject(
+  base44: LooseRecord, user: LooseRecord, object: LooseRecord, source: LooseRecord,
+  sourceSelectionKey: string, body: LooseRecord, reservation: LooseRecord,
+  validationOnly = false,
+) {
+  const key = `${body.idempotency_key}:object-map`;
+  const keyHash = await sha256(key);
+  const current = await requireRecord(base44, 'SurveillanceObject', object.id, 'Object');
+  const sourceBagId = sourceSelectionKey.startsWith('bag:') ? sourceSelectionKey.slice(4) : null;
+  const sourcePoint = sourceBagId ? null : (source.building_selection_points || []).find((point: LooseRecord) => sourceSelectionKey === `selection:${source.id}:${point.id}`);
+  if (!sourceBagId && !sourcePoint) throw new ApiError(409, 'Deze gebouwselectie bestaat niet meer in het collectief');
+  const pointId = sourcePoint ? `linked-${source.id}-${sourcePoint.id}`.slice(0, 120) : null;
+  const targetSelectionKey = sourceBagId ? `bag:${sourceBagId}` : `selection:${object.id}:${pointId}`;
+  if (current.customer_platform_mutation_key_hashes?.includes(keyHash) || current.customer_platform_last_mutation_key_hash === keyHash) {
+    // The enclosing collective receipt validates user, fingerprint and source
+    // before this callback. Repair post-CAS work under the same reservation.
+    if (!validationOnly) {
+      await ensureObjectMapGeometryRevision(base44, current, user.id, 'update_object_map_configuration');
+      await collectiveDossierHandlers.registerCanonicalBuildings(base44, 'object', current.id, current);
+    }
+    return { object: current, target_selection_key: targetSelectionKey };
+  }
+  const configuration = safeObjectMapConfiguration(current);
+  const sourceLabelKey = sourceBagId ? `bag:${sourceBagId}` : `point:${sourcePoint.id}`;
+  const targetLabelKey = sourceBagId ? `bag:${sourceBagId}` : `point:${pointId}`;
+  const points = [...configuration.building_selection_points];
+  if (sourcePoint && !points.some(point => point.id === pointId)) points.push({ ...sourcePoint, id: pointId });
+  const mapBody = {
+    action: 'update_object_map_configuration', object_id: current.id, customer_id: current.customer_id,
+    expected_version: body.expected_version, idempotency_key: key,
+    data: {
+      building_selection_mode: 'manual',
+      selected_bag_feature_ids: [...new Set([...configuration.selected_bag_feature_ids, ...(sourceBagId ? [sourceBagId] : [])])],
+      building_selection_points: points,
+      building_labels: { ...configuration.building_labels, ...(source.building_labels?.[sourceLabelKey] ? { [targetLabelKey]: source.building_labels[sourceLabelKey] } : {}) },
+      manual_building_geojson: configuration.manual_building_geojson,
+      object_area_geojson: configuration.object_area_geojson,
+      // Linking in the backoffice is never authority to activate a mobile map.
+      show_on_mobile_map: objectLifecycleStatus(current) === 'active' && current.is_active_customer_object !== false && current.show_on_mobile_map !== false,
+    },
+  };
+  if (!validationOnly) {
+    const proposed = {
+      type: 'FeatureCollection', features: [...geoJsonFeatures(current.building_polygon_geojson),
+        ...geoJsonFeatures(source.building_polygon_geojson).filter(feature => sourceBagId && feature.properties?.source_feature_id === sourceBagId)],
+    };
+    const sharing = await collectiveDossierHandlers.validateObjectBuildingSharing(base44, current, proposed, points);
+    const conflicts = await buildingAssignmentConflicts(base44, current, proposed, safeStoredBuildingCollection(current).value, points, safeStoredBuildingSelectionPoints(current).value);
+    if (conflicts.length && sharing.matches.every((match: LooseRecord) => !match.shared_building_required)) {
+      Object.assign(mapBody.data, { overlap_confirmation: {
+        confirmed: true, reason: 'Bedrijfsverzamelgebouw expliciet bevestigd',
+        conflict_fingerprint: await buildingConflictFingerprint(conflicts.filter(conflict => conflict.new_conflict_object_ids.length)),
+      } });
+    }
+  }
+  await handleUpdateObjectMapConfigurationUnderReservation(base44, user, mapBody, body.expected_version, key,
+    await mutationRequestFingerprint(mapBody.action, mapBody), mutationTarget(mapBody.action, mapBody), reservation,
+    { preflight: validationOnly, deferSharedGroup: validationOnly && (body.association_type === 'shared_building' || source.collectief_type === 'bedrijfsverzamelgebouw') });
+  return { object: await requireRecord(base44, 'SurveillanceObject', current.id, 'Object'), target_selection_key: targetSelectionKey };
+}
+
+async function validateCollectiveBuildingAttachment(
+  base44: LooseRecord, user: LooseRecord, object: LooseRecord, source: LooseRecord,
+  sourceSelectionKey: string, body: LooseRecord, reservation: LooseRecord,
+) {
+  return applyCollectiveBuildingToObject(base44, user, object, source, sourceSelectionKey, body, reservation, true);
+}
+
+async function persistCollectiveMapConfiguration(
+  base44: LooseRecord, user: LooseRecord, collective: LooseRecord, patch: LooseRecord,
+  expectedVersion: number, idempotencyKey: string, requestFingerprint: string, summary: LooseRecord,
+) {
+  await ensureCollectiveMapSnapshot(base44, collective, user.id);
+  const { show_on_mobile_map: _mobile, ...configurationPatch } = patch;
+  const result = {
+    collective_id: collective.id, resource_type: 'Collectief', resource_id: collective.id,
+    category: 'operations', summary: 'Kaart en terrein van collectief bijgewerkt', ...summary,
+  };
+  const updated = await casUpdate(base44, 'Collectief', collective, expectedVersion, {
+    ...configurationPatch,
+    map_mutation_receipt: { idempotency_key: idempotencyKey, request_fingerprint: requestFingerprint, actor_id: user.id, result },
+  });
+  await finishCollectiveMapMutation(base44, updated);
+  return { ...result, configuration: safeMapDossierConfiguration({ ...updated, __dossier_kind: 'collective' }), audit_result: result };
 }
 
 function safeThirdPartyOrganization(record: LooseRecord) {
@@ -17841,6 +18084,9 @@ async function executeMutation(
   requestFingerprint: string,
   target: string,
 ): Promise<LooseRecord> {
+  if (collectiveDossierHandlers.mutationActions.has(action)) {
+    return collectiveDossierHandlers.mutate(base44, user, action, body, expectedVersion, idempotencyKey);
+  }
   switch (action) {
     case 'create_customer':
       return handleCreateCustomer(base44, body, expectedVersion, idempotencyKey);
@@ -18118,6 +18364,8 @@ export async function handleCustomerPlatformRequest(req: Request) {
     if (!action) throw new ApiError(400, 'action is verplicht');
 
     if (READ_ACTIONS.has(action)) {
+      if (action === 'list_building_associations') return json(await handleBuildingAssociationSuggestions(base44, body));
+      if (collectiveDossierHandlers.readActions.has(action)) return json(await collectiveDossierHandlers.read(base44, user, action, body));
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
       if (action === 'search_customer_objects') return json(await handleSearchCustomerObjects(base44, body));
       if (action === 'get_object_map_configuration') return json(await handleGetObjectMapConfiguration(base44, body));
@@ -18154,6 +18402,12 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const { idempotencyKey, expectedVersion } = requireMutationEnvelope(body);
     const requestFingerprint = await mutationRequestFingerprint(action, body);
     const target = mutationTarget(action, body);
+    // Collective handlers have their own customer-independent safe receipts.
+    // Do not route collective maps through the object-specific recovery path.
+    if (collectiveDossierHandlers.mutationActions.has(action) || (body.collective_id && action === 'update_object_map_configuration')) {
+      const result = await executeMutation(base44, user, action, body, expectedVersion, idempotencyKey, requestFingerprint, target);
+      return json({ ok: true, ...result, replayed: Boolean(result.replayed) }, action.startsWith('create_') ? 201 : 200);
+    }
     const replay = await mutationReplay(base44, user, action, body, idempotencyKey, requestFingerprint, target);
     if (replay) return json({ ok: true, ...replay, replayed: true });
     const recovered = await relationshipMutationMarkerReplay(

@@ -143,6 +143,27 @@ describe("ObjectMapTab", () => {
     updateConfiguration.mockResolvedValue({ ...configuration, expected_version: 5, building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"], map_geometry_status: "configured", map_geometry_revision: 1 });
   });
 
+  it.each(["view", "edit"])("koppelt terreinhover en toetsenbordfocus aan de stabiele id in %s zonder het dossier te wijzigen", async mode => {
+    const terrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-stable", properties: { source: "user_drawn" } }] };
+    getConfiguration.mockResolvedValue({ ...configuration, object_area_geojson: terrain });
+    renderOverview();
+    if (mode === "edit") await openEditor();
+    else fireEvent.click(await screen.findByRole("button", { name: "Weergeven op kaart" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Terrein" }));
+    const row = screen.getByRole("button", { name: "Terreindeel 1 weergeven op kaart" });
+    fireEvent.mouseEnter(row);
+    expect(canvasProps.mock.calls.at(-1)[0].highlightedTerrainKey).toBe("terrain-stable");
+    fireEvent.mouseLeave(row);
+    expect(canvasProps.mock.calls.at(-1)[0].highlightedTerrainKey).toBeNull();
+    fireEvent.focus(row);
+    expect(canvasProps.mock.calls.at(-1)[0].highlightedTerrainKey).toBe("terrain-stable");
+    fireEvent.blur(row);
+    expect(canvasProps.mock.calls.at(-1)[0].highlightedTerrainKey).toBeNull();
+    expect(canvasProps.mock.calls.at(-1)[0].terrain).toEqual(terrain);
+    expect(guardState.mock.calls.at(-1)[0].dirty).toBe(false);
+    expect(updateConfiguration).not.toHaveBeenCalled();
+  });
+
   it("opent met opgeslagen tabellen zonder kaart, kandidaten, percelen of mutaties te laden", async () => {
     const terrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-1", properties: { source: "user_drawn", derived_from: "pdok_brk", derived_from_id: "parcel-1" } }] };
     getConfiguration.mockResolvedValue({ ...configuration, building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"],

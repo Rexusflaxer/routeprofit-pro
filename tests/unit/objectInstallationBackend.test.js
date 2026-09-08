@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
@@ -38,7 +39,7 @@ beforeAll(async () => {
       normalizedInstallationData,
       safeExplicitLogbookChanges
     };`);
-  const compiled = await transform(testableSource, {
+  const compiled = await transform(await inlineBackendImports(testableSource, entryPath), {
     format: "esm",
     loader: "ts",
     target: "es2022",

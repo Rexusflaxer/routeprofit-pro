@@ -1,0 +1,79 @@
+{
+  "name": "ObjectCustomerResponsibility",
+  "type": "object",
+  "properties": {
+    "starts_on": { "type": ["string", "null"], "format": "date" },
+    "ends_on": { "type": ["string", "null"], "format": "date" },
+    "notes": { "type": "string", "maxLength": 12000 },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "joint_responsible",
+        "manager",
+        "client"
+      ],
+      "default": "joint_responsible"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    },
+    "billing_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "report_access_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "key_access_enabled": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "object_id",
+    "customer_id",
+    "role",
+    "status"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import CustomerContactWizard from "./CustomerContactWizard";
 import CustomerObjectWizard from "./CustomerObjectWizard";
+import CustomerSharedObjects from "./CustomerSharedObjects";
 import {
   contactMatchesObject,
   formatContactObjectScope,
@@ -851,6 +852,7 @@ export function ObjectsTab({
                   />
                 )}
               />
+              <CustomerSharedObjects customerId={customerId} navigate={navigate} />
             </div>
           </div>
         );

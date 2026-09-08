@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder, TextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,7 @@ async function loadBackend(relativePath, exports) {
     (_match, alias) => `const ${alias || "createClientFromRequest"} = () => ({});`,
   );
   const { transform } = await import("esbuild");
-  const compiled = await transform(`${source}\nexport { ${exports.join(", ")} };`, { format: "esm", loader: "ts", target: "es2022" });
+  const compiled = await transform(await inlineBackendImports(`${source}\nexport { ${exports.join(", ")} };`, path.join(root, relativePath)), { format: "esm", loader: "ts", target: "es2022" });
   return import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString("base64")}`);
 }
 beforeAll(async () => {
@@ -52,6 +53,21 @@ function backendMock(overrides = {}, others = []) {
   let customer = { id: "customer-1", status: "active", version: 1, object_code_mutation_lock: null };
   const revisions = [];
   const entities = {
+    ...Object.fromEntries(["Collectief", "CollectiveMembership", "BuildingDossierLink", "PhysicalBuilding"].map(name => {
+      const rows = [];
+      return [name, {
+        list: vi.fn(async (_sort, limit = 5000, skip = 0) => rows.slice(skip, skip + limit)),
+        filter: vi.fn(async query => rows.filter(row => Object.entries(query).every(([key, value]) => row[key] === value))),
+        get: vi.fn(async id => rows.find(row => row.id === id) || null),
+        create: vi.fn(async value => { const row = { id: `${name}-${rows.length + 1}`, ...value }; rows.push(row); return row; }),
+        updateMany: vi.fn(async (query, update) => {
+          const index = rows.findIndex(row => row.id === query.id && row.version === query.version);
+          if (index < 0) return { success: true, updated: 0 };
+          rows[index] = { ...rows[index], ...update.$set, version: rows[index].version + Number(update.$inc?.version || 0) };
+          return { success: true, updated: 1 };
+        }),
+      }];
+    })),
     Customer: {
       get: vi.fn(async id => id === customer.id ? { ...customer } : null),
       list: vi.fn(async () => [{ ...customer }]),

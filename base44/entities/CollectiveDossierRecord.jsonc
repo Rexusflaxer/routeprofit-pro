@@ -1,0 +1,89 @@
+{
+  "name": "CollectiveDossierRecord",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collective_id": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string",
+      "enum": [
+        "tasks",
+        "security-plan",
+        "modules",
+        "handbook",
+        "floor-plan",
+        "warning-addresses",
+        "relationships",
+        "keys",
+        "installations"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "operational": {
+      "type": "boolean",
+      "default": false
+    },
+    "updated_by_user_id": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "collective_id",
+    "section",
+    "title",
+    "status",
+    "operational"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

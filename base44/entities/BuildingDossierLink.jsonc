@@ -1,0 +1,75 @@
+{
+  "name": "BuildingDossierLink",
+  "type": "object",
+  "properties": {
+    "map_managed": { "type": "boolean", "default": true },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "creation_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_key_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mutation_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "building_id": {
+      "type": "string"
+    },
+    "dossier_kind": {
+      "type": "string",
+      "enum": [
+        "object",
+        "collective"
+      ]
+    },
+    "dossier_id": {
+      "type": "string"
+    },
+    "selection_key": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    },
+    "attestation": {
+      "type": "string",
+      "enum": [
+        "source_match",
+        "user_confirmed"
+      ],
+      "default": "source_match"
+    }
+  },
+  "required": [
+    "building_id",
+    "dossier_kind",
+    "dossier_id",
+    "selection_key",
+    "status"
+  ],
+  "rls": {
+    "create": false,
+    "read": false,
+    "update": false,
+    "delete": false
+  }
+}

@@ -29,9 +29,14 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
+import { invokeCustomerPlatformRead } from "@/components/customers/customerDossierUtils";
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import ObjectMapCanvas from "./ObjectMapCanvas";
 import ObjectMapOverview from "./ObjectMapOverview";
+import BuildingAssociationPanel from "./BuildingAssociationPanel";
+import CollectiveBuildingLinks from "@/components/collectief/CollectiveBuildingLinks";
+import TerrainSelectionRow from "./TerrainSelectionRow";
+import { normalizeTerrainFeatureIds, terrainFeatureKey } from "./objectMapTerrainHighlight";
 import {
   emptyFeatureCollection,
   featureCollectionAreaSquareMeters,
@@ -84,7 +89,7 @@ function mapForm(configuration, object) {
     building_labels: configuration?.building_labels || {},
     persisted_building_geojson: normalizeFeatureCollection(configuration?.building_polygon_geojson),
     manual_building_geojson: normalizeFeatureCollection(configuration?.manual_building_geojson),
-    object_area_geojson: normalizeFeatureCollection(configuration?.object_area_geojson),
+    object_area_geojson: normalizeTerrainFeatureIds(configuration?.object_area_geojson),
     show_on_mobile_map: showOnMobileMap,
   };
 }
@@ -214,7 +219,11 @@ function ChoiceCard({ active, icon: Icon, title, description, onClick, disabled 
   );
 }
 
-export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
+export default function ObjectMapTab({ object: customerObject, collective, onRegisterNavigationGuard }) {
+  const object = collective || customerObject;
+  const collectiveId = collective?.id;
+  const mapScope = collectiveId ? { collectiveId } : { customerId: object.customer_id, objectId: object.id };
+  const queryRoot = collectiveId ? "collective-card" : "object-card";
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [screen, setScreen] = useState("overview");
@@ -224,6 +233,9 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const [mapView, setMapView] = useState("map");
   const [parcelsVisible, setParcelsVisible] = useState(false);
   const [highlightedBuildingKey, setHighlightedBuildingKey] = useState(null);
+  const [highlightedTerrainKey, setHighlightedTerrainKey] = useState(null);
+  const highlightBuilding = key => { setHighlightedBuildingKey(key); if (key) setHighlightedTerrainKey(null); };
+  const highlightTerrain = key => { setHighlightedTerrainKey(key); if (key) setHighlightedBuildingKey(null); };
   const [renamingBuilding, setRenamingBuilding] = useState(null);
   const [buildingName, setBuildingName] = useState("");
   const [form, setForm] = useState(null);
@@ -236,6 +248,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const [overlapReason, setOverlapReason] = useState("");
   const [overlapFingerprint, setOverlapFingerprint] = useState(null);
   const [serverOverlapConflicts, setServerOverlapConflicts] = useState([]);
+  const [associationMatches, setAssociationMatches] = useState([]);
   const [conflictNotice, setConflictNotice] = useState(null);
   const mutationKeyRef = useRef(null);
   const dragStartRef = useRef(null);
@@ -245,30 +258,49 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   const overlapContinuationRef = useRef(null);
   const formRef = useRef(form);
   formRef.current = form;
+  useEffect(() => {
+    const keys = new Set(form?.building_selection_mode === "manual" ? [
+      ...(form.selected_bag_feature_ids || []).map(id => `bag:${id}`),
+      ...(form.building_selection_points || []).map(point => `selection:${object.id}:${point.id}`),
+    ] : []);
+    setAssociationMatches(previous => {
+      const next = previous.filter(match => keys.has(match.selection_key));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [form?.selected_bag_feature_ids, form?.building_selection_points, form?.building_selection_mode, object.id]);
   baseFormRef.current = baseForm;
   appliedConfigurationRef.current = appliedConfiguration;
 
   const configurationQuery = useQuery({
-    queryKey: ["object-card", object.id, "map-configuration"],
-    queryFn: () => getObjectMapConfiguration({ customerId: object.customer_id, objectId: object.id }),
+    queryKey: [queryRoot, object.id, "map-configuration"],
+    queryFn: () => getObjectMapConfiguration(mapScope),
     retry: 1,
   });
   latestConfigurationRef.current = configurationQuery.data;
-  const mapObject = useMemo(() => ({ ...object, ...((appliedConfiguration || configurationQuery.data)?.object || {}) }), [appliedConfiguration, configurationQuery.data, object]);
+  const mapObject = useMemo(() => {
+    const configuration = appliedConfiguration || configurationQuery.data;
+    return { ...object, ...(configuration?.object || {}), version: configuration?.expected_version ?? object.version };
+  }, [appliedConfiguration, configurationQuery.data, object]);
   const verified = Boolean(trustedObjectCoordinatePair(mapObject));
   const archived = mapObject?.status === "archived";
   const canEdit = !archived && verified;
   const viewOnly = screen === "view";
   const readOnly = screen !== "edit" || !canEdit || saving;
-  const mobileEligible = mapObject?.status === "active" && mapObject?.is_active_customer_object !== false;
+  const mobileEligible = !collectiveId && mapObject?.status === "active" && mapObject?.is_active_customer_object !== false;
   const usesBuildingCandidates = screen === "edit"
     || (viewOnly && appliedConfiguration?.building_selection_mode !== "manual");
+  const peersQuery = useQuery({
+    queryKey: ["nearby-building-selections", object.id],
+    queryFn: () => invokeCustomerPlatformRead({ action: "list_building_associations", object_id: object.id, customer_id: object.customer_id }),
+    enabled: !collectiveId && screen === "edit" && verified,
+    retry: false,
+  });
   const candidateConfigurationVersion = appliedConfiguration?.expected_version
     ?? configurationQuery.data?.expected_version
     ?? null;
   const candidatesQuery = useInfiniteQuery({
-    queryKey: ["object-card", object.id, "map-building-candidates", candidateConfigurationVersion],
-    queryFn: ({ pageParam }) => listObjectBuildingCandidates({ customerId: object.customer_id, objectId: object.id, radiusMeters: 250, limit: 100, cursor: pageParam }),
+    queryKey: [queryRoot, object.id, "map-building-candidates", candidateConfigurationVersion],
+    queryFn: ({ pageParam }) => listObjectBuildingCandidates({ ...mapScope, radiusMeters: 250, limit: 100, cursor: pageParam }),
     initialPageParam: null,
     getNextPageParam: lastPage => lastPage?.next_cursor && lastPage.next_cursor !== lastPage.cursor
       ? lastPage.next_cursor
@@ -279,8 +311,8 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
   });
 
   const parcelsQuery = useInfiniteQuery({
-    queryKey: ["object-card", object.id, "map-parcel-candidates", candidateConfigurationVersion],
-    queryFn: ({ pageParam }) => listObjectParcelCandidates({ customerId: object.customer_id, objectId: object.id, ...(typeof pageParam === "object" && pageParam ? pageParam : { cursor: pageParam }) }),
+    queryKey: [queryRoot, object.id, "map-parcel-candidates", candidateConfigurationVersion],
+    queryFn: ({ pageParam }) => listObjectParcelCandidates({ ...mapScope, ...(typeof pageParam === "object" && pageParam ? pageParam : { cursor: pageParam }) }),
     initialPageParam: null,
     getNextPageParam: (lastPage, allPages) => lastPage?.next_cursor && !allPages.some(page => page.cursor === lastPage.next_cursor)
       ? { cursor: lastPage.next_cursor, transport: lastPage.transport, expectedCenter: lastPage.center }
@@ -312,11 +344,13 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
     setRedoStack([]);
     setEditingTarget(null);
     setHighlightedBuildingKey(null);
+    setHighlightedTerrainKey(null);
     setRenamingBuilding(null);
     setConflictNotice(null);
     setOverlapReason("");
     setOverlapFingerprint(null);
     setServerOverlapConflicts([]);
+    setAssociationMatches([]);
     mutationKeyRef.current = null;
   }, [object]);
 
@@ -469,8 +503,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       const reason = String(variables?.reason || "");
       const conflictFingerprint = variables?.conflictFingerprint || null;
       return updateObjectMapConfiguration({
-        customerId: object.customer_id,
-        objectId: object.id,
+        ...mapScope,
         expectedVersion: baseFormRef.current?.expected_version,
         idempotencyKey: mutationKeyRef.current || createObjectMapMutationKey(),
         data: {
@@ -488,6 +521,11 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
 
   const saveNow = useCallback(async (reason, conflictFingerprint = null) => {
     if (!formRef.current || readOnly || savingRef.current) throw new Error("De kaart kan op dit moment niet worden opgeslagen.");
+    if (associationMatches.some(match => match.shared_building_required)) {
+      const error = new Error("Bevestig eerst het bedrijfsverzamelgebouw bij Gebouwkoppelingen controleren, of verwijder deze gebouwselectie.");
+      toast({ title: "Gedeeld gebouw controleren", description: error.message, variant: "destructive" });
+      throw error;
+    }
     if (hasVersionDrift(baseFormRef.current, latestConfigurationRef.current)) {
       const staleError = Object.assign(new Error("Er staat inmiddels een nieuwere kaartconfiguratie klaar."), {
         status: 409,
@@ -506,17 +544,20 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       applyConfiguration(saved);
       setScreen("overview");
       setParcelsVisible(false);
-      queryClient.setQueryData(["object-card", object.id, "map-configuration"], saved);
+      queryClient.setQueryData([queryRoot, object.id, "map-configuration"], saved);
       await Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ["objects", "detail", object.id] }),
         queryClient.invalidateQueries({ queryKey: ["objects"] }),
+        queryClient.invalidateQueries({ queryKey: ["collective-dossiers"] }),
+        queryClient.invalidateQueries({ queryKey: ["collective-dossier", object.id] }),
         queryClient.invalidateQueries({ queryKey: ["object-card", object.id, "logbook"] }),
         queryClient.invalidateQueries({ queryKey: ["customer-dossier", object.customer_id, "SurveillanceObject"] }),
       ]);
-      toast({ title: "Kaart en terrein opgeslagen", description: mobileEligible
+      toast({ title: "Kaart en terrein opgeslagen", description: collectiveId ? "De inrichting van het collectief is bewaard in de backoffice." : mobileEligible
         ? "De mobiele app ontvangt deze inrichting bij de volgende synchronisatie."
         : "De inrichting is bewaard. Dit object blijft buiten de mobiele kaart zolang het niet operationeel actief is." });
     } catch (error) {
+      if (apiErrorCode(error) === "SHARED_BUILDING_REQUIRED") setAssociationMatches(error.details?.matches || []);
       if (isOverlapError(error)) {
         const nextFingerprint = overlapConflictFingerprint(error);
         setServerOverlapConflicts(Array.isArray(error?.details?.conflicts) ? error.details.conflicts : []);
@@ -538,7 +579,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [applyConfiguration, mobileEligible, object.customer_id, object.id, queryClient, readOnly, saveMutation, toast]);
+  }, [applyConfiguration, mobileEligible, collectiveId, object.customer_id, object.id, queryRoot, queryClient, readOnly, saveMutation, toast, associationMatches]);
 
   const openOverlapDialog = useCallback(fingerprint => {
     if (!fingerprint) return false;
@@ -782,7 +823,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
       <div className="flex flex-col gap-3 border-b border-border/70 bg-card/30 px-4 py-3 backdrop-blur-xl xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold text-foreground">Kaart & terrein</h2><Badge variant="outline" className={status.className}>{status.label}</Badge>{dirty && <Badge variant="outline" className="border-blue-300/70 bg-blue-500/10 text-blue-700 dark:text-blue-300">Niet opgeslagen</Badge>}</div>
-          <p className="mt-1 text-xs text-muted-foreground">{screen === "overview" ? "Opgeslagen gebouwen en terrein bij dit object. Bekijk de kaart of wijzig de inrichting." : viewOnly ? "Je bekijkt de opgeslagen inrichting. Gebouwen en terrein blijven ongewijzigd." : "Selecteer de gebouwen en het te bewaken terrein. Opgeslagen wijzigingen worden bij de volgende synchronisatie ook in de mobiele app toegepast."}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{screen === "overview" ? `Opgeslagen gebouwen en terrein bij dit ${collectiveId ? "collectief" : "object"}. Bekijk de kaart of wijzig de inrichting.` : viewOnly ? "Je bekijkt de opgeslagen inrichting. Gebouwen en terrein blijven ongewijzigd." : collectiveId ? "Selecteer de gebouwen en het terrein van dit collectief. Deze inrichting blijft in de backoffice; koppelingen met klantobjecten bevestig je afzonderlijk." : "Selecteer de gebouwen en het te bewaken terrein. Opgeslagen wijzigingen worden bij de volgende synchronisatie ook in de mobiele app toegepast."}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {screen === "overview" ? <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => openMap("view")}><MapIcon className="h-4 w-4" /> Weergeven op kaart</Button>
@@ -853,6 +894,16 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             buildingSelectionPoints={form.building_selection_mode === "manual" ? form.building_selection_points : []}
             buildingLabels={form.building_labels || {}}
             onToggleBuildingPoint={toggleBuildingPoint}
+            nearbyBuildingSelections={peersQuery.data?.nearby_selection_points || []}
+            onBuildingAssociations={(selectionKey, peers) => {
+              if (collectiveId || !peers.length) return;
+              const objects = peers.filter(peer => peer.dossier_kind === "object" && peer.dossier_id !== object.id)
+                .map(peer => ({ ...peer, id: peer.dossier_id, source_selection_key: peer.selection_key }));
+              const collectives = peers.filter(peer => peer.dossier_kind === "collective")
+                .map(peer => ({ ...peer, id: peer.dossier_id, source_selection_key: peer.selection_key, member: false }));
+              setAssociationMatches(previous => [...previous.filter(match => match.selection_key !== selectionKey),
+                { selection_key: selectionKey, objects, collectives, shared_building_required: objects.length > 0 }]);
+            }}
             candidates={viewOnly && form.building_selection_mode === "manual" ? [] : candidates}
             selectedBagFeatureIds={displayedBagFeatureIds}
             selectedBuildings={selectedBuildings}
@@ -864,6 +915,7 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             disabled={readOnly}
             onToggleCandidate={toggleCandidate}
             highlightedBuildingKey={highlightedBuildingKey}
+            highlightedTerrainKey={highlightedTerrainKey}
             onTerrainGeometryChange={collection => { if (!readOnly) updateWithHistory(current => ({ ...current, object_area_geojson: collection })); }}
             onEditError={message => toast({ title: "Grens controleren", description: message, variant: "destructive" })}
             onVertexDragStart={startVertexDrag}
@@ -875,6 +927,17 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
         </div>
 
         <aside className="space-y-3">
+          {collectiveId && workspace === "buildings" && <CollectiveBuildingLinks collective={mapObject}
+            configuration={appliedConfiguration} dirty={dirty} disabled={readOnly} />}
+          {!collectiveId && <BuildingAssociationPanel object={object} form={form} baseline={baseForm}
+            enabled={!readOnly} serverMatches={associationMatches} onLinked={key => setAssociationMatches(previous => previous.filter(match => match.selection_key !== key))} onRemoveSelection={key => {
+              setAssociationMatches(previous => previous.filter(match => match.selection_key !== key));
+              if (key.startsWith("bag:")) toggleCandidate(key.slice(4));
+              else {
+                const point = form.building_selection_points.find(item => key === `selection:${object.id}:${item.id}`);
+                if (point) toggleBuildingPoint(point);
+              }
+            }} />}
           {workspace === "buildings" ? <>
             {!viewOnly && <section className="space-y-2 rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <div><p className="text-sm font-semibold">Bepaling van gebouwen</p><p className="mt-1 text-xs text-muted-foreground">Handmatig voorkomt verkeerde markeringen bij gedeelde adressen.</p></div>
@@ -906,17 +969,17 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
                   const key = `bag:${id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || (feature ? candidateLabel(feature) : `BAG-pand ${id.slice(0, 12)}`)}
                     caption={conflictCount ? `Gekoppeld aan ${conflictCount} ander object` : form.building_selection_mode === "automatic" ? "Automatisch voorgesteld · PDOK BAG" : "PDOK BAG"}
-                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
+                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
                 })}
                 {form.building_selection_mode === "manual" && form.building_selection_points.map((point, index) => {
                   const key = `point:${point.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Gebouw ${index + 1} · Zonder BAG-koppeling`}
-                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
+                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
                 })}
                 {form.building_selection_mode === "manual" && form.manual_building_geojson.features.map((feature, index) => {
                   const key = `manual:${feature.properties?.local_id || feature.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Eerder ingetekend gebouw ${index + 1}`}
-                    caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={setHighlightedBuildingKey} onRename={renameBuilding}
+                    caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding}
                     onRemove={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} />;
                 })}
               </div>
@@ -935,7 +998,14 @@ export default function ObjectMapTab({ object, onRegisterNavigationGuard }) {
             <section className="rounded-xl border border-border/70 bg-card/45 p-4 backdrop-blur-xl">
               <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold">Terreinbegrenzing</p><p className="mt-1 text-xs text-muted-foreground">Deze grens staat los van de gebouwselectie en wordt voorbereid voor toekomstige locatieondersteuning.</p></div><Badge variant="secondary">{form.object_area_geojson.features.length} vlak{form.object_area_geojson.features.length === 1 ? "" : "ken"}</Badge></div>
               <div className="mt-4 rounded-lg border border-border/60 bg-background/35 p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Totale oppervlakte</p><p className="mt-1 text-lg font-semibold">{formatArea(terrainArea)}</p></div>
-              <div className="mt-3 space-y-2">{form.object_area_geojson.features.map((_, index) => <div key={`terrain-${index}`} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/35 px-3 py-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /><span className="flex-1 text-xs font-medium">Terreindeel {index + 1}</span>{!viewOnly && <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: removeFeature(current.object_area_geojson, index) }))} aria-label={`Terreindeel ${index + 1} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button>}</div>)}</div>
+              <div className="mt-3 space-y-2">{form.object_area_geojson.features.map((feature, index) => {
+                const key = terrainFeatureKey(feature);
+                return <TerrainSelectionRow key={key} selectionKey={key} label={`Terreindeel ${index + 1}`}
+                  highlighted={highlightedTerrainKey === key} disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightTerrain}
+                  onRemove={() => updateWithHistory(current => ({ ...current, object_area_geojson: {
+                    ...current.object_area_geojson, features: current.object_area_geojson.features.filter(item => terrainFeatureKey(item) !== key),
+                  } }))} />;
+              })}</div>
               {!viewOnly && form.object_area_geojson.features.length > 0 && <Button type="button" variant="outline" size="sm" className="mt-3 w-full text-destructive hover:text-destructive" disabled={readOnly} onClick={() => updateWithHistory(current => ({ ...current, object_area_geojson: emptyFeatureCollection() }))}><Eraser className="h-4 w-4" /> Hele terreinbegrenzing wissen</Button>}
             </section>
           </>}

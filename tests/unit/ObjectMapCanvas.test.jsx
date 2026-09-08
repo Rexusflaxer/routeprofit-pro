@@ -635,7 +635,7 @@ describe("ObjectMapCanvas", () => {
     act(() => map.emit("style.load"));
     expect(map.layers.get("loq-object-map-parcels-fill").paint["fill-opacity"]).toBe(0);
     expect(map.layers.get("loq-object-map-parcels-line").paint["line-color"]).toBe("#64748b");
-    expect(map.layers.get("loq-object-map-terrain-fill").paint["fill-color"]).toBe("#10b981");
+    expect(map.layers.get("loq-object-map-terrain-fill").paint["fill-color"]).toEqual(["case", ["==", ["get", "loq_list_highlight"], true], "#f59e0b", "#10b981"]);
     expect(map.layers.get("loq-object-map-terrain-line").paint["line-dasharray"]).toBeUndefined();
   });
 
@@ -1116,6 +1116,23 @@ describe("ObjectMapCanvas", () => {
     act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4808, lat: 51.9202 } }));
     expect(onToggleBuildingPoint).not.toHaveBeenCalled();
     expect(onBuildingMatchUnavailable).toHaveBeenCalledWith("Deze opgeslagen selectie ligt onder meerdere gebouwen. Verwijder haar uit de lijst en kies het gebouw opnieuw van bovenaf.");
+  });
+
+  it.each([false, true])("accentueert uitsluitend het aangewezen terreindeel onder de gebouwen zonder geometrie te wijzigen (kaartviewer: %s)", async viewOnly => {
+    const terrain = { type: "FeatureCollection", features: [{ ...candidate, id: "terrain-a" }, { ...candidate, id: "terrain-b" }] };
+    const rendered = renderCanvas({ viewOnly, terrain });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedTerrainKey="terrain-b" />);
+    const data = map.getSource("loq-object-map-terrain").setData.mock.calls.at(-1)[0];
+    expect(data.features.map(item => item.properties.loq_list_highlight)).toEqual([false, true]);
+    expect(data.features.map(item => item.geometry)).toEqual(terrain.features.map(item => item.geometry));
+    expect(terrain.features.every(item => item.properties.loq_list_highlight === undefined)).toBe(true);
+    expect(map.getSlot("loq-object-map-terrain-fill")).toBe("middle");
+    expect(map.getSlot("loq-object-map-terrain-line")).toBe("middle");
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} highlightedTerrainKey={null} />);
+    expect(map.getSource("loq-object-map-terrain").setData.mock.calls.at(-1)[0].features.map(item => item.properties.loq_list_highlight)).toEqual([false, false]);
   });
 
   it.each([false, true])("plaatst terrein in beide 3D-werkruimten onder de gebouwen (kaartviewer: %s)", async viewOnly => {

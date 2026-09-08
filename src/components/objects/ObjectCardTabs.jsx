@@ -30,6 +30,7 @@ import ObjectModulesTab from "./ObjectModulesTab";
 import ObjectHandbookTab from "./ObjectHandbookTab";
 import ObjectFloorPlanPlaceholderTab from "./ObjectFloorPlanPlaceholderTab";
 import ObjectMapTab from "./ObjectMapTab";
+import ObjectParticipationTab from "./ObjectParticipationTab";
 import ObjectTasksTab from "./ObjectTasksTab";
 import {
   OBJECT_CARD_TABS,
@@ -421,6 +422,8 @@ export default function ObjectCardTabs({
             <ObjectFloorPlanPlaceholderTab />
           ) : activeTab === "map-area" ? (
             <ObjectMapTab key={object.id} object={object} onRegisterNavigationGuard={onRegisterModuleNavigationGuard} />
+          ) : activeTab === "participation" ? (
+            <ObjectParticipationTab key={object.id} object={object} />
           ) : activeTab === "tasks" ? (
             <ObjectTasksTab
               object={object}

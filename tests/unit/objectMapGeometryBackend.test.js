@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { inlineBackendImports } from "../helpers/inlineBackendImports";
 import path from "node:path";
 import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -13,13 +14,13 @@ const mobileSource = fs.readFileSync(mobileApiPath, "utf8");
 let customerBackend;
 let mobileBackend;
 
-async function compiledBackend(source, appendedExports) {
+async function compiledBackend(source, entryPath, appendedExports) {
   const withoutSdk = source.replace(
     /^import \{ createClientFromRequest(?: as ([A-Za-z0-9_]+))? \} from ["']npm:@base44\/sdk@[^"']+["'];$/gm,
     (_match, alias) => `const ${alias || "createClientFromRequest"} = () => ({});`,
   );
   const { transform } = await import("esbuild");
-  const compiled = await transform(`${withoutSdk}\nexport { ${appendedExports.join(", ")} };`, {
+  const compiled = await transform(await inlineBackendImports(`${withoutSdk}\nexport { ${appendedExports.join(", ")} };`, entryPath), {
     format: "esm",
     loader: "ts",
     target: "es2022",
@@ -35,7 +36,7 @@ beforeAll(async () => {
     env: { get: () => undefined },
     serve: () => undefined,
   };
-  customerBackend = await compiledBackend(customerSource, [
+  customerBackend = await compiledBackend(customerSource, customerApiPath, [
     "CUSTOMER_OBJECT_CAS_MUTATION_ACTIONS",
     "MUTATION_ACTIONS",
     "READ_ACTIONS",
@@ -67,7 +68,7 @@ beforeAll(async () => {
     "safeObjectMapCoordinate",
     "safeStoredMapGeometry",
   ]);
-  mobileBackend = await compiledBackend(mobileSource, [
+  mobileBackend = await compiledBackend(mobileSource, mobileApiPath, [
     "buildPackage",
     "executeMobileRouteAction",
     "mobileBuildingSelectionMode",
@@ -179,8 +180,11 @@ function mockCustomerPlatform(objectOverrides = {}, otherObjects = [], options =
     }),
   };
   const customerEntity = {
-    get: vi.fn(async id => id === customer.id ? { ...customer } : null),
-    list: vi.fn(async () => [{ ...customer }]),
+    get: vi.fn(async id => {
+      const row = id === customer.id ? customer : options.entityRows?.Customer?.find(candidate => candidate.id === id);
+      return row ? { ...row } : null;
+    }),
+    list: vi.fn(async (_sort, limit = 1_000, skip = 0) => [{ ...customer }, ...(options.entityRows?.Customer || [])].slice(skip, skip + limit)),
     updateMany: vi.fn(async (query, update) => {
       if (query.id !== customer.id || query.version !== customer.version) return { success: true, updated: 0 };
       customer = {
@@ -194,6 +198,21 @@ function mockCustomerPlatform(objectOverrides = {}, otherObjects = [], options =
   const base44 = {
     asServiceRole: {
       entities: {
+        ...Object.fromEntries(["Collectief", "CollectiveMembership", "BuildingDossierLink", "PhysicalBuilding"].map(name => {
+          const rows = options.entityRows?.[name] || [];
+          return [name, {
+            list: vi.fn(async (_sort, limit = 5000, skip = 0) => rows.slice(skip, skip + limit)),
+            filter: vi.fn(async query => rows.filter(row => Object.entries(query).every(([key, value]) => row[key] === value))),
+            get: vi.fn(async id => rows.find(row => row.id === id) || null),
+            create: vi.fn(async value => { const row = { id: `${name}-${rows.length + 1}`, ...value }; rows.push(row); return row; }),
+            updateMany: vi.fn(async (query, update) => {
+              const index = rows.findIndex(row => row.id === query.id && row.version === query.version);
+              if (index < 0) return { success: true, updated: 0 };
+              rows[index] = { ...rows[index], ...update.$set, version: rows[index].version + Number(update.$inc?.version || 0) };
+              return { success: true, updated: 1 };
+            }),
+          }];
+        })),
         Customer: customerEntity,
         SurveillanceObject: surveillanceEntity,
         ObjectMapGeometryRevision: {
@@ -1264,7 +1283,22 @@ describe("Kaart en terrein backendcontract", () => {
     )).toThrow("Controleer en bevestig eerst opnieuw");
   });
 
-  it("eist een expliciete reden voor een nieuw gedeeld BAG-pand", async () => {
+  it("weigert een nieuw gedeeld BAG-pand zonder bedrijfsverzamelgebouw ook als overlap wordt bevestigd", async () => {
+    const { base44, surveillanceEntity } = mockCustomerPlatform({ building_polygon_geojson: null, building_selection_mode: "automatic", map_geometry_status: "unconfigured" }, [surveillanceObject({ id: "object-2", customer_id: "customer-2" })], {
+      entityRows: { Customer: [{ id: "customer-2", name: "Andere huurder", status: "active", version: 1 }] },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(squareFeature()), { status: 200 })));
+    const error = await rejectedError(customerBackend.handleUpdateObjectMapConfiguration(base44, { id: "admin-1" }, {
+      customer_id: "customer-1", object_id: "object-1", data: {
+        building_selection_mode: "manual", selected_bag_feature_ids: ["bag-building-1"],
+        overlap_confirmation: { confirmed: true, reason: "We delen het pand", conflict_fingerprint: "a".repeat(64) },
+      },
+    }, 3, "map-no-group", "fingerprint-no-group", "update_object_map_configuration|customer_id:customer-1|object_id:object-1"));
+    expect(error).toMatchObject({ status: 409, details: { code: "SHARED_BUILDING_REQUIRED" } });
+    expect(surveillanceEntity.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("eist ook binnen een bevestigd bedrijfsverzamelgebouw een actuele expliciete reden voor een nieuw gedeeld BAG-pand", async () => {
     const other = surveillanceObject({
       id: "object-2",
       customer_id: "customer-2",
@@ -1273,11 +1307,16 @@ describe("Kaart en terrein backendcontract", () => {
       version: 1,
     });
     const otherObjects = [other];
+    const memberships = ["object-1", "object-2"].map(object_id => ({ id: `membership-${object_id}`, collective_id: "shared-building", object_id, status: "active", version: 1 }));
     const { base44 } = mockCustomerPlatform({
       building_polygon_geojson: null,
       building_selection_mode: "automatic",
       map_geometry_status: "unconfigured",
-    }, otherObjects);
+    }, otherObjects, { entityRows: {
+      Customer: ["customer-2", "customer-3"].map(id => ({ id, status: "active", version: 1 })),
+      Collectief: [{ id: "shared-building", name: "Bedrijfsverzamelgebouw", collectief_type: "bedrijfsverzamelgebouw", status: "active", building_polygon_geojson: surveillanceObject().building_polygon_geojson }],
+      CollectiveMembership: memberships,
+    } });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(squareFeature()), { status: 200 })));
 
     const conflictError = await rejectedError(customerBackend.handleUpdateObjectMapConfiguration(
@@ -1314,6 +1353,7 @@ describe("Kaart en terrein backendcontract", () => {
       name: "Derde huurder",
       version: 1,
     }));
+    memberships.push({ id: "membership-object-3", collective_id: "shared-building", object_id: "object-3", status: "active", version: 1 });
     const staleConfirmation = await rejectedError(customerBackend.handleUpdateObjectMapConfiguration(
       base44,
       { id: "admin-1" },

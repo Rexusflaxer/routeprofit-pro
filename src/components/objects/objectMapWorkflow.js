@@ -16,6 +16,14 @@ function required(value, label) {
   return normalized;
 }
 
+export function mapDossierScope({ customerId, objectId, collectiveId }) {
+  if (collectiveId) {
+    if (objectId || customerId) throw new Error("Kies één kaartdossier: object of collectief.");
+    return { collective_id: required(collectiveId, "Collectief-ID") };
+  }
+  return { customer_id: required(customerId, "Klant-ID"), object_id: required(objectId, "Object-ID") };
+}
+
 function overlapReason(value) {
   const reason = required(value, "Reden voor gedeeld gebouw");
   if (reason.length < 3) throw new Error("De reden voor een gedeeld gebouw moet minimaal 3 tekens bevatten.");
@@ -121,6 +129,7 @@ export function normalizeObjectMapConfiguration(value) {
     || selectedFeatureIds(selectedBuildings.features.filter(feature => (feature.properties?.source || "pdok_bag") === "pdok_bag"));
   const showOnMobileMap = configuration.show_on_mobile_map ?? configuration.object?.show_on_mobile_map;
   return {
+    collective_id: configuration.collective_id || root.collective_id || null,
     object_id: configuration.object_id || root.object_id || null,
     customer_id: configuration.customer_id || root.customer_id || null,
     object: configuration.object && typeof configuration.object === "object" ? configuration.object : null,
@@ -152,20 +161,18 @@ export function createObjectMapMutationKey() {
   return createCustomerMutationKey("update_object_map_configuration");
 }
 
-export async function getObjectMapConfiguration({ customerId, objectId, invoke = invokeCustomerPlatformRead }) {
+export async function getObjectMapConfiguration({ customerId, objectId, collectiveId, invoke = invokeCustomerPlatformRead }) {
   const result = await invoke({
     action: "get_object_map_configuration",
-    customer_id: required(customerId, "Klant-ID"),
-    object_id: required(objectId, "Object-ID"),
+    ...mapDossierScope({ customerId, objectId, collectiveId }),
   });
   return normalizeObjectMapConfiguration(result);
 }
 
-export async function listObjectBuildingCandidates({ customerId, objectId, radiusMeters = 250, limit = 100, cursor = null, invoke = invokeCustomerPlatformRead }) {
+export async function listObjectBuildingCandidates({ customerId, objectId, collectiveId, radiusMeters = 250, limit = 100, cursor = null, invoke = invokeCustomerPlatformRead }) {
   const result = await invoke({
     action: "list_object_building_candidates",
-    customer_id: required(customerId, "Klant-ID"),
-    object_id: required(objectId, "Object-ID"),
+    ...mapDossierScope({ customerId, objectId, collectiveId }),
     radius_meters: Math.min(500, Math.max(25, Math.round(Number(radiusMeters) || 250))),
     limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
     ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
@@ -194,11 +201,10 @@ function requireUnchangedParcelCenter(expected, actual) {
   }
 }
 
-export async function listObjectParcelCandidates({ customerId, objectId, radiusMeters = 1_000, limit = 100, cursor = null, transport = "server", expectedCenter = null, invoke = invokeCustomerPlatformRead, fetchDirect = fetchObjectParcelCandidatesDirect }) {
+export async function listObjectParcelCandidates({ customerId, objectId, collectiveId, radiusMeters = 1_000, limit = 100, cursor = null, transport = "server", expectedCenter = null, invoke = invokeCustomerPlatformRead, fetchDirect = fetchObjectParcelCandidatesDirect }) {
   const payload = {
     action: "list_object_parcel_candidates",
-    customer_id: required(customerId, "Klant-ID"),
-    object_id: required(objectId, "Object-ID"),
+    ...mapDossierScope({ customerId, objectId, collectiveId }),
     radius_meters: Math.min(1_000, Math.max(25, Math.round(Number(radiusMeters) || 1_000))),
     limit: Math.min(100, Math.max(1, Math.round(Number(limit) || 100))),
     ...(String(cursor || "").trim() ? { cursor: String(cursor).trim() } : {}),
@@ -207,9 +213,10 @@ export async function listObjectParcelCandidates({ customerId, objectId, radiusM
   // scope and the saved address on every browser page; never use draft/prop
   // coordinates or send platform credentials to PDOK.
   const readDirect = async originalError => {
-    const configuration = await getObjectMapConfiguration({ customerId: payload.customer_id, objectId: payload.object_id, invoke });
+    const configuration = await getObjectMapConfiguration({ customerId: payload.customer_id, objectId: payload.object_id, collectiveId, invoke });
     const object = configuration.object;
-    if (configuration.customer_id !== payload.customer_id || configuration.object_id !== payload.object_id
+    if (collectiveId ? configuration.collective_id !== collectiveId || object?.id !== collectiveId
+      : configuration.customer_id !== payload.customer_id || configuration.object_id !== payload.object_id
       || object?.id !== payload.object_id || object?.customer_id !== payload.customer_id) {
       throw Object.assign(new Error("De actuele objectlocatie kon niet veilig worden gecontroleerd. Vernieuw de kaart."), { status: 409, details: { code: "object_map_scope_changed", retryable: false } });
     }
@@ -248,15 +255,14 @@ export function shouldRetryObjectParcelCandidates(failureCount, error) {
   return status === 0 || status === 408 || status === 429 || status >= 500;
 }
 
-export async function updateObjectMapConfiguration({ customerId, objectId, expectedVersion, data, idempotencyKey, invoke = invokeCustomerPlatformMutation }) {
+export async function updateObjectMapConfiguration({ customerId, objectId, collectiveId, expectedVersion, data, idempotencyKey, invoke = invokeCustomerPlatformMutation }) {
   const version = Number(expectedVersion);
   if (!Number.isInteger(version) || version < 0) throw new Error("De actuele objectversie ontbreekt. Vernieuw de kaart en probeer opnieuw.");
   const mode = data?.building_selection_mode === "manual" ? "manual" : "automatic";
   const confirmation = overlapConfirmation(data?.overlap_confirmation);
   const result = await invoke({
     action: "update_object_map_configuration",
-    customer_id: required(customerId, "Klant-ID"),
-    object_id: required(objectId, "Object-ID"),
+    ...mapDossierScope({ customerId, objectId, collectiveId }),
     expected_version: version,
     idempotency_key: required(idempotencyKey, "Mutatiesleutel"),
     data: {
