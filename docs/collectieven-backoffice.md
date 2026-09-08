@@ -66,3 +66,23 @@ Controleer na publicatie in een testdossier:
 9. Bestaande objectplanning, contractactivatie en prijsberekening blijven ongewijzigd; collectieftaken verschijnen niet in de operationele planning.
 
 Een GitHub-push is geen bewijs van Base44-publicatie. Voer na synchronisatie **Publish** uit en controleer de bovenstaande routes met een ingelogde beheerder. Zonder die probe blijft de livewerking ongeverifieerd.
+
+## Correctie: overzicht en verouderde previewbackend
+
+De melding **Onbekende actie** bij het openen van Collectieven betekent dat de aangesproken `customerPlatformApi` de nieuwe actie niet herkent. De huidige broncode registreert de collectiefacties al. Een oude, vastgezette previewversie kan echter nog zonder deze acties draaien; ook een nog niet gesynchroniseerde of gepubliceerde actuele backend kan de melding geven. De foutreferentie alleen maakt dit onderscheid niet.
+
+De overzichtsroute `/Collectief` toont altijd de tabelkoppen, zoek-/typefilter en **Collectief toevoegen**. Alleen `/Collectief?id=…` opent een dossier. Laden, een echte lege lijst en een laadfout hebben afzonderlijke tabelmeldingen; een mislukte aanvraag wordt nooit voorgesteld als een lege database. Na een fout kan de gebruiker opnieuw laden. Dat de toevoegknop zichtbaar blijft, betekent niet dat een ongepubliceerde backend al kan opslaan.
+
+### Gerichte Base44-uitvoerprompt
+
+Neem de correctie in `src/pages/Collectief.jsx` en `src/components/customers/customerDossierUtils.js` over, inclusief de regressietests `CollectiveDossier.test.jsx` en `CustomerPlatformRuntime.test.js`. Zorg dat de reeds toegevoegde collectiefentiteiten en de handler in `customerPlatformApi/collectiveDossier.ts` met de registratie in `entry.ts` daadwerkelijk zijn gesynchroniseerd en gepubliceerd.
+
+De runtimeherstelroute moet alle vijf collectiefreads en zes collectiefmutaties uit de serverregistratie ondersteunen. Alleen wanneer een vastgezette previewbackend exact HTTP 400 **Onbekende actie** teruggeeft, mag hetzelfde verzoek eenmaal naar de actuele functions-client. Behoud de volledige payload, `expected_version` en dezelfde `idempotency_key`. Herhaal geen validatiefout, bevoegdheidsfout, versieconflict, timeout of serverstoring op een andere backend. Gebruik geen directe entiteit-CRUD als alternatief. Als de actuele backend de actie ook niet kent, toon synchronisatie-/publicatie-instructies en behoud status en foutreferentie. Deze correctie verandert geen entiteiten, rechten, backendcontracten of iOS-code.
+
+Acceptatie na publicatie:
+
+1. Open Collectieven vanuit het menu: tabel en toevoegknop zijn zichtbaar, ook tijdens laden. Een fout toont **De collectieven konden niet worden geladen**, geen dossiermelding en geen fictieve lege lijst.
+2. Controleer een lege installatie, zoeken/filteren, opnieuw laden na een fout en het openen/sluiten van een bestaand dossier.
+3. Test de oude previewversie: de collectievenlijst werkt via de actuele backend zodra die de acties bevat. Een mutatie wordt uitsluitend na expliciete afwijzing wegens onbekende actie herhaald, met dezelfde idempotencysleutel.
+4. Controleer dat 403/409-fouten en onzekere netwerkfouten geen alternatieve aanvraag veroorzaken. Bij een nog verouderde actuele backend blijft de publicatiemelding met de actuele foutreferentie zichtbaar.
+5. Voer met een ingelogde beheerder een echte lijstaanvraag uit. Controleer aanmaken alleen in een expliciet daarvoor bestemd testdossier; wijzig geen bestaande klantdossiers om publicatie te testen.

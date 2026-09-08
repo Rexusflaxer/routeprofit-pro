@@ -19,9 +19,10 @@ import {
 } from "@/components/collectief/collectiveDossierWorkflow";
 import { formatDateTime, getCustomerName } from "@/components/customers/customerDossierUtils";
 
-function RequestState({ loading, error, onRetry }) {
-  return <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-xl border border-border p-6 text-center" role={error ? "alert" : "status"}>
-    {loading ? <><Loader2 className="h-5 w-5 animate-spin text-primary" /><p className="text-sm text-muted-foreground">Collectiefdossier laden…</p></> : <><AlertCircle className="h-5 w-5 text-destructive" /><p className="text-sm font-medium">Het collectiefdossier kon niet worden geladen.</p><p className="max-w-lg text-xs text-muted-foreground">{error?.message || "Probeer het opnieuw."}</p>{error?.requestId && <p className="text-xs text-muted-foreground">Referentie {error.requestId}</p>}<Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="h-4 w-4" />Opnieuw laden</Button></>}
+function RequestState({ loading, error, onRetry, overview = false }) {
+  const details = [error?.status && `Status ${error.status}`, error?.requestId && `Referentie ${error.requestId}`].filter(Boolean).join(" · ");
+  return <div className={`flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center ${overview ? "" : "rounded-xl border border-border"}`} role={loading ? "status" : "alert"}>
+    {loading ? <><Loader2 className="h-5 w-5 animate-spin text-primary" /><p className="text-sm text-muted-foreground">{overview ? "Collectieven laden…" : "Collectiefdossier laden…"}</p></> : <><AlertCircle className="h-5 w-5 text-destructive" /><p className="text-sm font-medium">{overview ? "De collectieven konden niet worden geladen." : "Het collectiefdossier kon niet worden geladen."}</p><p className="max-w-lg text-xs text-muted-foreground">{error?.message || "Probeer het opnieuw."}</p>{details && <p className="text-xs text-muted-foreground">{details}</p>}<Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="h-4 w-4" />Opnieuw laden</Button></>}
   </div>;
 }
 
@@ -112,8 +113,29 @@ export default function CollectiefPage() {
   const customerById = new Map((list.customers || []).map(customer => [customer.id, customer]));
   const visible = items.filter(item => (!type || item.collectief_type === type) && `${item.name} ${item.address || ""} ${getCustomerName(customerById.get(collectiveManagerId(item)))}`.toLowerCase().includes(search.toLowerCase()));
   return <PageTransition><PageHeader title="Collectieven" subtitle="Gezamenlijke gebieden en gebouwen, met hun eigen dossier en deelnemende klantobjecten." actions={<Button onClick={() => openForm({})}><Plus className="h-4 w-4" />Collectief toevoegen</Button>} />
-    {listQuery.isLoading || listQuery.isError ? <RequestState loading={listQuery.isLoading} error={listQuery.error} onRetry={() => listQuery.refetch()} /> : <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/35"><div className="flex flex-wrap gap-3 border-b border-border/70 p-4"><div className="relative min-w-0 flex-1 sm:max-w-md"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input aria-label="Zoek collectief" placeholder="Zoek op naam, beheerder of adres…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div><select aria-label="Filter type collectief" className={`${collectiveSelectClass} sm:w-64`} value={type} onChange={event => setType(event.target.value)}><option value="">Alle typen</option>{Object.entries(COLLECTIVE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-      {visible.length ? <Table aria-label="Collectieven"><TableHeader><TableRow><TableHead>Collectief</TableHead><TableHead>Type</TableHead><TableHead>Beheerder</TableHead><TableHead>Onderdeel van</TableHead><TableHead><span className="sr-only">Openen</span></TableHead></TableRow></TableHeader><TableBody>{visible.map(item => <TableRow key={item.id} className="cursor-pointer" onClick={() => openCollective(item.id)}><TableCell><button type="button" className="font-medium text-foreground hover:text-primary" onClick={event => { event.stopPropagation(); openCollective(item.id); }}>{item.name}</button>{item.address && <p className="mt-1 text-xs text-muted-foreground">{item.address}</p>}</TableCell><TableCell><Badge variant="outline">{COLLECTIVE_TYPES[item.collectief_type] || item.collectief_type}</Badge></TableCell><TableCell className="text-sm text-muted-foreground">{collectiveManagerId(item) ? getCustomerName(customerById.get(collectiveManagerId(item))) : "Geen beheerder"}</TableCell><TableCell className="text-sm text-muted-foreground">{items.find(parent => parent.id === item.parent_collectief_id)?.name || "Zelfstandig"}</TableCell><TableCell><ArrowUpRight className="ml-auto h-4 w-4 text-muted-foreground" /></TableCell></TableRow>)}</TableBody></Table> : <div className="flex min-h-72 flex-col items-center justify-center gap-2 p-6 text-center"><Layers className="h-8 w-8 text-muted-foreground/60" /><p className="text-sm font-medium">{search || type ? "Geen collectieven gevonden" : "Nog geen collectieven"}</p><p className="max-w-lg text-xs text-muted-foreground">Maak een bedrijventerrein, woonwijk of bedrijfsverzamelgebouw aan. De klantobjecten blijven zelfstandig en kunnen daarna worden gekoppeld.</p></div>}
-    </section>}
+    <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/35">
+      <div className="flex flex-wrap gap-3 border-b border-border/70 p-4">
+        <div className="relative min-w-0 flex-1 sm:max-w-md"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input aria-label="Zoek collectief" placeholder="Zoek op naam, beheerder of adres…" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
+        <select aria-label="Filter type collectief" className={`${collectiveSelectClass} sm:w-64`} value={type} onChange={event => setType(event.target.value)}><option value="">Alle typen</option>{Object.entries(COLLECTIVE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      </div>
+      <Table aria-label="Collectieven" aria-busy={listQuery.isLoading}>
+        <TableHeader><TableRow><TableHead>Collectief</TableHead><TableHead>Type</TableHead><TableHead>Beheerder</TableHead><TableHead>Onderdeel van</TableHead><TableHead><span className="sr-only">Openen</span></TableHead></TableRow></TableHeader>
+        <TableBody>
+          {listQuery.isLoading || listQuery.isError ? (
+            <TableRow><TableCell colSpan={5} className="p-0"><RequestState overview loading={listQuery.isLoading} error={listQuery.error} onRetry={() => listQuery.refetch()} /></TableCell></TableRow>
+          ) : visible.length ? visible.map(item => (
+            <TableRow key={item.id} className="cursor-pointer" onClick={() => openCollective(item.id)}>
+              <TableCell><button type="button" className="font-medium text-foreground hover:text-primary" onClick={event => { event.stopPropagation(); openCollective(item.id); }}>{item.name}</button>{item.address && <p className="mt-1 text-xs text-muted-foreground">{item.address}</p>}</TableCell>
+              <TableCell><Badge variant="outline">{COLLECTIVE_TYPES[item.collectief_type] || item.collectief_type}</Badge></TableCell>
+              <TableCell className="text-sm text-muted-foreground">{collectiveManagerId(item) ? getCustomerName(customerById.get(collectiveManagerId(item))) : "Geen beheerder"}</TableCell>
+              <TableCell className="text-sm text-muted-foreground">{items.find(parent => parent.id === item.parent_collectief_id)?.name || "Zelfstandig"}</TableCell>
+              <TableCell><ArrowUpRight className="ml-auto h-4 w-4 text-muted-foreground" /></TableCell>
+            </TableRow>
+          )) : (
+            <TableRow><TableCell colSpan={5} className="p-0"><div className="flex min-h-72 flex-col items-center justify-center gap-2 p-6 text-center"><Layers className="h-8 w-8 text-muted-foreground/60" /><p className="text-sm font-medium">{search || type ? "Geen collectieven gevonden" : "Nog geen collectieven"}</p><p className="max-w-lg text-xs text-muted-foreground">Maak een bedrijventerrein, woonwijk of bedrijfsverzamelgebouw aan. De klantobjecten blijven zelfstandig en kunnen daarna worden gekoppeld.</p></div></TableCell></TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </section>
   </PageTransition>;
 }

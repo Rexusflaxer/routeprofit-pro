@@ -108,10 +108,74 @@ describe("collectief bewerken", () => {
 describe("collectiefkaart", () => {
   it("opent met een doorzoekbare tabel in plaats van oude kaarten", async () => {
     mount(<CollectiefPage />);
-    expect(await screen.findByRole("table", { name: "Collectieven" })).toBeInTheDocument();
-    expect(screen.getByText("Geen beheerder")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Collectieven" })).toBeInTheDocument();
+    expect(await screen.findByText("Geen beheerder")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Zoek collectief" }), { target: { value: "nietgevonden" } });
     expect(screen.getByText("Geen collectieven gevonden")).toBeInTheDocument();
+  });
+  it("behoudt de tabel en toevoegknop terwijl de collectieven laden", () => {
+    mocks.read.mockImplementation(() => new Promise(() => {}));
+    mount(<CollectiefPage />);
+    const table = screen.getByRole("table", { name: "Collectieven" });
+    expect(table).toHaveAttribute("aria-busy", "true");
+    expect(within(table).getByRole("columnheader", { name: "Collectief" })).toBeInTheDocument();
+    expect(within(table).getByRole("status")).toHaveTextContent("Collectieven laden…");
+    expect(screen.getByRole("button", { name: "Collectief toevoegen" })).toBeEnabled();
+    expect(screen.queryByText("Nog geen collectieven")).not.toBeInTheDocument();
+    expect(mocks.read).not.toHaveBeenCalledWith(expect.objectContaining({ action: "get_collective_dossier" }));
+  });
+  it("behoudt een lege overzichtstabel en kan daar een collectief toevoegen", async () => {
+    mocks.read.mockResolvedValue({ items: [], customers, objects });
+    mount(<CollectiefPage />);
+    expect(await screen.findByText("Nog geen collectieven")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Collectieven" })).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("button", { name: "Collectief toevoegen" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collectief toevoegen" }));
+    expect(screen.getByLabelText("Naam *")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Collectief aanmaken" })).toBeInTheDocument();
+    expect(mocks.read).not.toHaveBeenCalledWith(expect.objectContaining({ action: "get_collective_dossier" }));
+  });
+  it("toont een herkenbare overzichtsfout in de tabel zonder een lege lijst voor te wenden", async () => {
+    mocks.read.mockRejectedValueOnce(Object.assign(new Error("De dienst is tijdelijk niet bereikbaar."), { status: 503, requestId: "collective-list-reference" }));
+    mount(<CollectiefPage />);
+    const alert = await screen.findByRole("alert");
+    expect(within(screen.getByRole("table", { name: "Collectieven" })).getByRole("alert")).toBe(alert);
+    expect(alert).toHaveTextContent("De collectieven konden niet worden geladen.");
+    expect(alert).toHaveTextContent("De dienst is tijdelijk niet bereikbaar.");
+    expect(alert).toHaveTextContent("Status 503 · Referentie collective-list-reference");
+    expect(screen.getByRole("button", { name: "Collectief toevoegen" })).toBeEnabled();
+    expect(screen.queryByText("Nog geen collectieven")).not.toBeInTheDocument();
+    expect(screen.queryByText("Het collectiefdossier kon niet worden geladen.")).not.toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "Opnieuw laden" }));
+    expect(await screen.findByRole("button", { name: "Van der Zeelaan" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("opent pas na een rijselectie het dossier en keert terug naar de collectievenlijst", async () => {
+    mount(<CollectiefPage />);
+    const collectiveButton = await screen.findByRole("button", { name: "Van der Zeelaan" });
+    expect(mocks.read).not.toHaveBeenCalledWith(expect.objectContaining({ action: "get_collective_dossier" }));
+    fireEvent.click(collectiveButton.closest("tr"));
+    expect(await screen.findByRole("tab", { name: "Objecten & deelnemers" })).toBeInTheDocument();
+    expect(mocks.read).toHaveBeenCalledWith({ action: "get_collective_dossier", collective_id: "estate" });
+    fireEvent.click(screen.getByRole("button", { name: "Collectieven" }));
+    expect(screen.getByRole("table", { name: "Collectieven" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collectief toevoegen" })).toBeEnabled();
+    expect(screen.queryByRole("tab", { name: "Objecten & deelnemers" })).not.toBeInTheDocument();
+  });
+  it("onderscheidt een dossierfout en biedt een terugweg naar de overzichtstabel", async () => {
+    mocks.read.mockImplementation(async ({ action }) => {
+      if (action === "get_collective_dossier") throw Object.assign(new Error("Dit collectief bestaat niet."), { status: 404, requestId: "collective-detail-reference" });
+      return { items: [collective], customers, objects };
+    });
+    mount(<CollectiefPage />, "/Collectief?id=missing");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Het collectiefdossier kon niet worden geladen.");
+    expect(alert).toHaveTextContent("Status 404 · Referentie collective-detail-reference");
+    expect(screen.queryByRole("table", { name: "Collectieven" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collectieven" }));
+    expect(screen.getByRole("table", { name: "Collectieven" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Van der Zeelaan" })).toBeInTheDocument();
   });
   it("toont alle dossieronderdelen en geeft uitsluitend een collectiefcontext aan de kaart", async () => {
     mount(<CollectiefPage />, "/Collectief?id=estate");

@@ -40,6 +40,22 @@ const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "update_object_map_configuration",
 ]);
 
+// These actions were introduced after the existing object-module preview
+// snapshots. Keep their reads AND guarded writes in the same recovery path.
+const COLLECTIVE_PLATFORM_ACTIONS = new Set([
+  "list_collective_dossiers",
+  "get_collective_dossier",
+  "get_object_collective_context",
+  "list_building_associations",
+  "list_customer_shared_objects",
+  "create_collective_dossier",
+  "update_collective_dossier",
+  "upsert_collective_membership",
+  "upsert_object_customer_responsibility",
+  "upsert_collective_dossier_record",
+  "confirm_building_association",
+]);
+
 export const CUSTOMER_TABS = [
   { key: "overview", label: "Overzicht", icon: LayoutDashboard },
   { key: "contacts", label: "Contacten", icon: ContactRound },
@@ -208,7 +224,7 @@ async function invokeCustomerPlatformWithClient(client, payload) {
   const response = await client.functions.invoke("customerPlatformApi", payload);
   const result = response?.data?.data || response?.data || {};
   if (result?.error) {
-    throw customerPlatformError({ response: { data: result } }, payload?.action);
+    throw customerPlatformError({ response: { status: response?.status, data: result } }, payload?.action);
   }
   if (result?.ok === false) throw new Error(result.message || "De klantplatformactie is mislukt.");
   return result;
@@ -220,12 +236,27 @@ function normalizedCustomerPlatformError(error, action) {
     : customerPlatformError(error, action);
 }
 
+function isUnsupportedPlatformAction(error, payload) {
+  return (OBJECT_MODULE_PLATFORM_ACTIONS.has(payload?.action) || COLLECTIVE_PLATFORM_ACTIONS.has(payload?.action))
+    && error?.status === 400
+    && /^Onbekende actie\.?$/i.test(String(error?.message || "").trim());
+}
+
 function shouldRetryLatestFunctions(error, payload) {
   return hasPinnedFunctionsVersion === true
     && base44LatestFunctions?.functions?.invoke
-    && OBJECT_MODULE_PLATFORM_ACTIONS.has(payload?.action)
-    && error?.status === 400
-    && /^Onbekende actie\.?$/i.test(String(error?.message || "").trim());
+    && base44LatestFunctions !== base44
+    && isUnsupportedPlatformAction(error, payload);
+}
+
+function unsupportedPlatformActionError(error, payload) {
+  if (!isUnsupportedPlatformAction(error, payload)) return error;
+  const collective = COLLECTIVE_PLATFORM_ACTIONS.has(payload.action) || Boolean(payload.collective_id);
+  error.message = collective
+    ? "De collectieven-backend ondersteunt deze actie nog niet. Synchroniseer en publiceer de nieuwste Base44-versie en laad opnieuw."
+    : "De objectkaart-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
+  error.details = { ...(error.details || {}), code: collective ? "collective_platform_backend_outdated" : "object_platform_backend_outdated" };
+  return error;
 }
 
 async function invokeCustomerPlatformRequest(payload) {
@@ -233,18 +264,13 @@ async function invokeCustomerPlatformRequest(payload) {
     return await invokeCustomerPlatformWithClient(base44, payload);
   } catch (error) {
     const normalized = normalizedCustomerPlatformError(error, payload?.action);
-    if (!shouldRetryLatestFunctions(normalized, payload)) throw normalized;
+    if (!shouldRetryLatestFunctions(normalized, payload)) throw unsupportedPlatformActionError(normalized, payload);
     try {
       // Mutaties reuse the exact same idempotency key. The pinned request was
       // rejected before dispatch, so retrying the latest snapshot is safe.
       return await invokeCustomerPlatformWithClient(base44LatestFunctions, payload);
     } catch (latestError) {
-      const latest = normalizedCustomerPlatformError(latestError, payload?.action);
-      if (latest.status === 400 && /^Onbekende actie\.?$/i.test(String(latest.message || "").trim())) {
-        latest.message = "De objectkaart-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
-        latest.details = { ...(latest.details || {}), code: "object_platform_backend_outdated" };
-      }
-      throw latest;
+      throw unsupportedPlatformActionError(normalizedCustomerPlatformError(latestError, payload?.action), payload);
     }
   }
 }
