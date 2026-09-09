@@ -149,6 +149,23 @@ describe("collective map dossier integration", () => {
     expectNoOperationalWrites(mock);
   });
 
+  it.each([
+    { manager_customer_id: "customer-1", customer_id: null },
+    { manager_customer_id: null, customer_id: "customer-1" },
+    { manager_customer_id: "customer-1", customer_id: "customer-1" },
+  ])("behoudt de gekoppelde klant bij collectiefkaart lezen en opslaan (%j)", async customerLink => {
+    const mock = fixture(); mockPdok();
+    Object.assign(mock.rows.Collectief[0], customerLink);
+    const read = await request(mock, { action: "get_object_map_configuration", collective_id: "estate-1" });
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ configuration: { collective_id: "estate-1", object_id: null, customer_id: null } });
+    const mutation = await request(mock, saveBody());
+    expect(mutation.status).toBe(200);
+    expect(await mutation.json()).toMatchObject({ ok: true, configuration: { collective_id: "estate-1", version: 4 } });
+    expect(mock.rows.Collectief[0]).toMatchObject(customerLink);
+    expectNoOperationalWrites(mock);
+  });
+
   it.each([{ customer_id: "customer-1" }, { object_id: "object-1" }, { customer_id: "customer-1", object_id: "object-1" }])("weigert gemengde object-/collectiefscope %j", async extra => {
     const mock = fixture();
     const body = { collective_id: "estate-1", ...extra };

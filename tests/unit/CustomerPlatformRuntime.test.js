@@ -135,7 +135,7 @@ describe("customerPlatformApi runtimecontract", () => {
   });
 
   // Read the server action registry so a newly introduced collective action
-  // cannot accidentally be omitted from preview recovery again.
+  // cannot accidentally be omitted from current-contract routing again.
   const backend = fs.readFileSync(`${process.cwd()}/base44/functions/customerPlatformApi/collectiveDossier.ts`, "utf8");
   const collectiveActions = [...backend.matchAll(/export const COLLECTIVE_(READ|MUTATION)_ACTIONS = new Set\(\[([\s\S]*?)\]\)/g)]
     .flatMap(([, kind, actions]) => [...actions.matchAll(/'([^']+)'/g)].map(([, action]) => ({ kind, action })));
@@ -148,18 +148,18 @@ describe("customerPlatformApi runtimecontract", () => {
     expect(collectiveActions).toContainEqual({ kind: "READ", action: "list_collective_dossiers" });
   });
 
-  it.each(collectiveActions)("herstelt $action vanuit een oude preview zonder de payload te veranderen", async ({ kind, action }) => {
+  it.each(collectiveActions)("stuurt $action direct naar het actuele collectiefcontract zonder de payload te veranderen", async ({ kind, action }) => {
     const payload = Object.freeze({ action, collective_id: "collective-1", ...(kind === "MUTATION" ? { expected_version: 3, idempotency_key: `${action}:same-key` } : {}) });
     invoke.mockRejectedValue(unknownAction());
     invokeLatest.mockResolvedValue({ data: { data: { ok: true, items: [{ id: "collective-1", name: "Bedrijventerrein" }] } } });
     const call = kind === "READ" ? invokeCustomerPlatformRead : invokeCustomerPlatformMutation;
     await expect(call(payload)).resolves.toMatchObject({ items: [{ id: "collective-1" }] });
-    expect(invoke).toHaveBeenCalledExactlyOnceWith("customerPlatformApi", payload);
+    expect(invoke).not.toHaveBeenCalled();
     expect(invokeLatest).toHaveBeenCalledExactlyOnceWith("customerPlatformApi", payload);
     expect(invokeLatest.mock.calls[0][1]).toBe(payload);
   });
 
-  it("behoudt de nieuwe referentie als ook de nieuwste collectiefbackend de actie niet kent", async () => {
+  it("behoudt de referentie als de nieuwste collectiefbackend de actie niet kent, zonder oudere retry", async () => {
     invoke.mockRejectedValue(unknownAction());
     invokeLatest.mockRejectedValue(unknownAction("latest-request"));
     await expect(invokeCustomerPlatformRead({ action: "list_collective_dossiers" })).rejects.toMatchObject({
@@ -167,7 +167,7 @@ describe("customerPlatformApi runtimecontract", () => {
       status: 400, action: "list_collective_dossiers", requestId: "latest-request",
       details: { code: "collective_platform_backend_outdated" },
     });
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalled();
     expect(invokeLatest).toHaveBeenCalledTimes(1);
   });
 
@@ -190,22 +190,65 @@ describe("customerPlatformApi runtimecontract", () => {
   });
 
   it.each([400, 401, 403, 409, 429, 503])("probeert een echte fout %i niet op een andere backend opnieuw", async status => {
-    invoke.mockRejectedValue({ response: { status, data: { error: status === 400 ? "Naam is verplicht" : "Onbekende actie", request_id: "real-error" } } });
+    invokeLatest.mockRejectedValue({ response: { status, data: { error: status === 400 ? "Naam is verplicht" : "Onbekende actie", request_id: "real-error" } } });
     await expect(invokeCustomerPlatformMutation({ action: "create_collective_dossier", idempotency_key: "keep-key", expected_version: 0 })).rejects.toMatchObject({ status, requestId: "real-error", details: null });
-    expect(invokeLatest).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(invokeLatest).toHaveBeenCalledTimes(1);
   });
 
   it("herhaalt geen onzekere timeout of niet-geregistreerde commerciële mutatie", async () => {
-    invoke.mockRejectedValue(new Error("Network timeout"));
+    invokeLatest.mockRejectedValue(new Error("Network timeout"));
     await expect(invokeCustomerPlatformMutation({ action: "confirm_building_association" })).rejects.toThrow("Network timeout");
+    expect(invoke).not.toHaveBeenCalled();
     invoke.mockRejectedValue(unknownAction());
     await expect(invokeCustomerPlatformMutation({ action: "create_customer_contact" })).rejects.toMatchObject({ message: "Onbekende actie", details: null });
-    expect(invokeLatest).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invokeLatest).toHaveBeenCalledTimes(1);
   });
 
   it("behoudt status en referentie van een geretourneerde fout zonder 2xx blind te herhalen", async () => {
-    invoke.mockResolvedValue({ status: 200, data: { error: "Onbekende actie", request_id: "resolved-error" } });
+    invokeLatest.mockResolvedValue({ status: 200, data: { error: "Onbekende actie", request_id: "resolved-error" } });
     await expect(invokeCustomerPlatformRead({ action: "list_collective_dossiers" })).rejects.toMatchObject({ status: 200, requestId: "resolved-error", message: "Onbekende actie" });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(invokeLatest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["get_object_map_configuration", "list_object_building_candidates", "list_object_parcel_candidates", "update_object_map_configuration"])("houdt de bestaande klantobjectroute voor %s intact", async action => {
+    const payload = { action, customer_id: "customer-1", object_id: "object-1", expected_version: 2, idempotency_key: "object-key" };
+    invoke.mockResolvedValue({ data: { ok: true } });
+    await expect(invokeCustomerPlatformRequestForAction(payload)).resolves.toEqual({ ok: true });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("customerPlatformApi", payload);
     expect(invokeLatest).not.toHaveBeenCalled();
+  });
+
+  function invokeCustomerPlatformRequestForAction(payload) {
+    return payload.action === "update_object_map_configuration" ? invokeCustomerPlatformMutation(payload) : invokeCustomerPlatformRead(payload);
+  }
+
+  it.each([null, "", "   ", 42])("schakelt niet naar latest voor een ongeldige collectiefscope (%j)", async collectiveId => {
+    invoke.mockRejectedValue({ response: { status: 400, data: { error: "customer_id is verplicht", request_id: "invalid-scope" } } });
+    await expect(invokeCustomerPlatformRead({ action: "get_object_map_configuration", collective_id: collectiveId })).rejects.toMatchObject({ message: "customer_id is verplicht", details: null, requestId: "invalid-scope" });
+    expect(invokeLatest).not.toHaveBeenCalled();
+  });
+
+  it("routeert onbekende of commerciële acties niet op basis van alleen collective_id", async () => {
+    const payload = { action: "create_customer_contact", collective_id: "collective-1" };
+    invoke.mockRejectedValue(unknownAction());
+    await expect(invokeCustomerPlatformMutation(payload)).rejects.toMatchObject({ message: "Onbekende actie", details: null });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("customerPlatformApi", payload);
+    expect(invokeLatest).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("legt een oude object-only kaartbackend uit zonder klantdata toe te voegen (pinned=%s)", async pinned => {
+    runtime.pinned = pinned;
+    const payload = Object.freeze({ action: "get_object_map_configuration", collective_id: "collective-1" });
+    const client = pinned ? invokeLatest : invoke;
+    client.mockRejectedValue({ response: { status: 400, data: { error: "customer_id is verplicht", request_id: "be5acd2c-5c7f-441c-b739-8ccce0a9bf32" } } });
+    await expect(invokeCustomerPlatformRead(payload)).rejects.toMatchObject({
+      status: 400, requestId: "be5acd2c-5c7f-441c-b739-8ccce0a9bf32", details: { code: "collective_platform_backend_outdated" },
+      message: "De collectieven-backend ondersteunt deze actie nog niet. Synchroniseer en publiceer de nieuwste Base44-versie en laad opnieuw.",
+    });
+    expect(client).toHaveBeenCalledExactlyOnceWith("customerPlatformApi", payload);
+    expect(pinned ? invoke : invokeLatest).not.toHaveBeenCalled();
   });
 });

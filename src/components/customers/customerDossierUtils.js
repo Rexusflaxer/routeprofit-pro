@@ -19,6 +19,13 @@ import {
   hasPinnedFunctionsVersion,
 } from "@/api/base44Client";
 
+const OBJECT_MAP_PLATFORM_ACTIONS = new Set([
+  "get_object_map_configuration",
+  "list_object_building_candidates",
+  "list_object_parcel_candidates",
+  "update_object_map_configuration",
+]);
+
 const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "list_object_modules",
   "get_object_module",
@@ -34,14 +41,11 @@ const OBJECT_MODULE_PLATFORM_ACTIONS = new Set([
   "update_object_handbook_article",
   "archive_object_handbook_article",
   "sync_object_installation_handbooks",
-  "get_object_map_configuration",
-  "list_object_building_candidates",
-  "list_object_parcel_candidates",
-  "update_object_map_configuration",
+  ...OBJECT_MAP_PLATFORM_ACTIONS,
 ]);
 
-// These actions were introduced after the existing object-module preview
-// snapshots. Keep their reads AND guarded writes in the same recovery path.
+// These actions and collective-scoped map requests need the same current
+// contract. Older previews know the map action names but only accept objects.
 const COLLECTIVE_PLATFORM_ACTIONS = new Set([
   "list_collective_dossiers",
   "get_collective_dossier",
@@ -236,22 +240,36 @@ function normalizedCustomerPlatformError(error, action) {
     : customerPlatformError(error, action);
 }
 
-function isUnsupportedPlatformAction(error, payload) {
+function isCollectiveMapRequest(payload) {
+  return OBJECT_MAP_PLATFORM_ACTIONS.has(payload?.action)
+    && typeof payload?.collective_id === "string"
+    && payload.collective_id.trim().length > 0
+    && !payload.customer_id && !payload.object_id;
+}
+
+function usesCollectivePlatformContract(payload) {
+  return COLLECTIVE_PLATFORM_ACTIONS.has(payload?.action) || isCollectiveMapRequest(payload);
+}
+
+function hasIndependentLatestFunctions() {
+  return hasPinnedFunctionsVersion === true
+    && typeof base44LatestFunctions?.functions?.invoke === "function"
+    && base44LatestFunctions !== base44;
+}
+
+function isUnknownPlatformAction(error, payload) {
   return (OBJECT_MODULE_PLATFORM_ACTIONS.has(payload?.action) || COLLECTIVE_PLATFORM_ACTIONS.has(payload?.action))
     && error?.status === 400
     && /^Onbekende actie\.?$/i.test(String(error?.message || "").trim());
 }
 
-function shouldRetryLatestFunctions(error, payload) {
-  return hasPinnedFunctionsVersion === true
-    && base44LatestFunctions?.functions?.invoke
-    && base44LatestFunctions !== base44
-    && isUnsupportedPlatformAction(error, payload);
-}
-
 function unsupportedPlatformActionError(error, payload) {
-  if (!isUnsupportedPlatformAction(error, payload)) return error;
-  const collective = COLLECTIVE_PLATFORM_ACTIONS.has(payload.action) || Boolean(payload.collective_id);
+  // This legacy object-only validation cannot apply to a valid collective map
+  // scope. Explain an outdated deployment, but never retry a validation error.
+  const legacyMapContract = isCollectiveMapRequest(payload) && error?.status === 400
+    && /^customer_id is verplicht\.?$/i.test(String(error?.message || "").trim());
+  if (!isUnknownPlatformAction(error, payload) && !legacyMapContract) return error;
+  const collective = usesCollectivePlatformContract(payload);
   error.message = collective
     ? "De collectieven-backend ondersteunt deze actie nog niet. Synchroniseer en publiceer de nieuwste Base44-versie en laad opnieuw."
     : "De objectkaart-backend is nog niet gepubliceerd. Publiceer de nieuwste Base44-versie en probeer opnieuw.";
@@ -260,11 +278,17 @@ function unsupportedPlatformActionError(error, payload) {
 }
 
 async function invokeCustomerPlatformRequest(payload) {
+  // Select the contract before dispatch, including guarded writes. Do not send
+  // a collective map request to an old object-only snapshot first, or replay a
+  // failed write on another backend. Auth, scope, version and key stay intact.
+  const useLatest = hasIndependentLatestFunctions() && usesCollectivePlatformContract(payload);
   try {
-    return await invokeCustomerPlatformWithClient(base44, payload);
+    return await invokeCustomerPlatformWithClient(useLatest ? base44LatestFunctions : base44, payload);
   } catch (error) {
     const normalized = normalizedCustomerPlatformError(error, payload?.action);
-    if (!shouldRetryLatestFunctions(normalized, payload)) throw unsupportedPlatformActionError(normalized, payload);
+    if (useLatest || !hasIndependentLatestFunctions() || !isUnknownPlatformAction(normalized, payload)) {
+      throw unsupportedPlatformActionError(normalized, payload);
+    }
     try {
       // Mutaties reuse the exact same idempotency key. The pinned request was
       // rejected before dispatch, so retrying the latest snapshot is safe.
