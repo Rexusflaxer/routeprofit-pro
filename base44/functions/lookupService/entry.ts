@@ -107,6 +107,36 @@ async function handleLookupLicensePlate(req) {
 
 // base44/functions/_shared/lookup/searchAddress.ts
 import { createClientFromRequest as createClientFromRequest3 } from "npm:@base44/sdk@0.8.6";
+const ADDRESS_SEARCH_PAGE_SIZE = 20;
+const ADDRESS_SEARCH_MAX_PAGE_SIZE = 50;
+const ADDRESS_SEARCH_MAX_OFFSET = 10000;
+const ADDRESS_SEARCH_FIELDS = "id,type,weergavenaam,straatnaam,huisnummer,huisletter,huisnummertoevoeging,postcode,woonplaatsnaam,centroide_ll,nummeraanduiding_id,adresseerbaarobject_id";
+
+function addressSearchUrl(query, limit, offset) {
+  const url = new URL("https://api.pdok.nl/bzk/locatieserver/search/v3_1/suggest");
+  url.search = new URLSearchParams({
+    q: query,
+    fq: "type:adres",
+    rows: String(limit),
+    start: String(offset),
+    fl: ADDRESS_SEARCH_FIELDS,
+    // Keep partial-address matching, but rank an exact address ahead of the
+    // many suffixes of the same house number. Do this before pagination.
+    qf: "exacte_match^20 suggest^0.5 huisnummer^0.5 huisletter^0.5 huisnummertoevoeging^0.5",
+    sort: "score desc,sortering asc,weergavenaam asc,id asc",
+  }).toString();
+  return url;
+}
+
+function addressSearchCoordinates(point) {
+  const match = typeof point === "string" && point.match(/^POINT\s*\(\s*([-+\d.eE]+)\s+([-+\d.eE]+)\s*\)$/i);
+  const longitude = match ? Number(match[1]) : NaN;
+  const latitude = match ? Number(match[2]) : NaN;
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || Math.abs(longitude) > 180 || Math.abs(latitude) > 90
+    || (longitude === 0 && latitude === 0)) return { latitude: null, longitude: null };
+  return { latitude, longitude };
+}
+
 async function handleSearchAddress(req) {
   try {
     const base44 = createClientFromRequest3(req);
@@ -114,16 +144,31 @@ async function handleSearchAddress(req) {
     if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const { query } = await req.json();
-    if (!query || query.length < 3) {
-      return Response.json({ suggestions: [] });
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body.query !== "string" || body.query.length > 300) {
+      return Response.json({ error: "Gebruik een adreszoekopdracht van maximaal 300 tekens." }, { status: 400 });
     }
-    const url = `https://api.pdok.nl/bzk/locatieserver/search/v3_1/free?q=${encodeURIComponent(query)}&rows=5`;
-    const response = await fetch(url);
+    const query = body.query.trim();
+    const requestedLimit = body.limit ?? ADDRESS_SEARCH_PAGE_SIZE;
+    const offset = body.offset ?? 0;
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || !Number.isInteger(offset) || offset < 0 || offset > ADDRESS_SEARCH_MAX_OFFSET) {
+      return Response.json({ error: "Ongeldige adrespaginering." }, { status: 400 });
+    }
+    const limit = Math.min(ADDRESS_SEARCH_MAX_PAGE_SIZE, requestedLimit);
+    if (query.length < 3) {
+      return Response.json({ suggestions: [], total: 0, has_more: false, next_offset: null });
+    }
+    const response = await fetch(addressSearchUrl(query, limit, offset), { signal: AbortSignal.timeout(8000), headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("PDOK address search unavailable");
     const data = await response.json();
-    const suggestions = (data.response?.docs || []).filter((doc) => doc.huisnummer || doc.type === "adres").map((doc) => {
-      const coords = doc.centroide_ll ? doc.centroide_ll.replace("POINT(", "").replace(")", "").split(" ") : null;
+    const docs = data.response?.docs;
+    const total = data.response?.numFound;
+    if (!Array.isArray(docs) || !Number.isInteger(total) || total < 0 || docs.length > limit) {
+      throw new Error("PDOK returned invalid address results");
+    }
+    const suggestions = docs.filter((doc) => doc?.type === "adres" && doc.weergavenaam).map((doc) => {
       return {
+        id: doc.id || doc.nummeraanduiding_id || null,
         address: doc.weergavenaam || doc.straatnaam,
         street_name: doc.straatnaam || null,
         house_number: doc.huisnummer ? String(doc.huisnummer) : null,
@@ -132,13 +177,16 @@ async function handleSearchAddress(req) {
         city: doc.woonplaatsnaam || null,
         country: "Nederland",
         bag_address_id: doc.nummeraanduiding_id || doc.adresseerbaarobject_id || null,
-        latitude: coords ? parseFloat(coords[1]) : null,
-        longitude: coords ? parseFloat(coords[0]) : null
+        ...addressSearchCoordinates(doc.centroide_ll),
       };
     });
-    return Response.json({ suggestions });
-  } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    // Offset counts raw provider records, even if a malformed record was
+    // filtered out, so loading more cannot repeat a page indefinitely.
+    const nextOffset = offset + docs.length;
+    const hasMore = docs.length > 0 && nextOffset < total && nextOffset <= ADDRESS_SEARCH_MAX_OFFSET;
+    return Response.json({ suggestions, total, has_more: hasMore, next_offset: hasMore ? nextOffset : null });
+  } catch {
+    return Response.json({ error: "Adressen konden niet worden geladen. Probeer het opnieuw of verfijn je zoekopdracht." }, { status: 503 });
   }
 }
 
