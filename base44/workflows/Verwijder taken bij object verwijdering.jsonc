@@ -1,0 +1,37 @@
+{
+  "name": "Verwijder taken bij object verwijdering",
+  "description": "",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "entity",
+      "events": [
+        "delete"
+      ],
+      "entity_name": "SurveillanceObject"
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "verwijder_taken_bij_object_verwijdering",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_function": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "onObjectDeleted",
+            "args": {}
+          },
+          "then": "end"
+        }
+      }
+    ]
+  },
+  "x-base44-migrated-from-automation": {
+    "legacy_payload_function": "onObjectDeleted"
+  }
+}
