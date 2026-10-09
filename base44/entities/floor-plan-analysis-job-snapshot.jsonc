@@ -1,0 +1,12 @@
+{
+  "name": "FloorPlanAnalysisJobSnapshot",
+  "type": "object",
+  "properties": {
+    "job_id": {"type": "string"},
+    "version": {"type": "integer", "minimum": 1},
+    "payload": {"type": "object", "additionalProperties": true, "description": "Onveranderlijke servergeschreven snapshot; alleen de service-index activeert deze versie."},
+    "retain_until": {"type": "string", "format": "date-time"}
+  },
+  "required": ["job_id", "version", "payload", "retain_until"],
+  "rls": {"create": false, "read": false, "update": false, "delete": false}
+}

@@ -1,0 +1,14 @@
+{
+  "name": "FloorPlanAnalysisService",
+  "type": "object",
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "enabled": {"type": "boolean", "default": false},
+    "max_workers": {"type": "integer", "minimum": 1, "maximum": 16, "default": 1},
+    "jobs": {"type": "object", "additionalProperties": true, "description": "Gezaghebbende snapshotverwijzingen; uitsluitend muteren met versie-CAS."},
+    "receipts": {"type": "object", "additionalProperties": true, "description": "Begrensde idempotencyhashes en fingerprints; geen bronafbeeldingen of geheimen."},
+    "workers": {"type": "object", "additionalProperties": true, "description": "Geautoriseerde worker-ID, model-ID en laatste heartbeat; nooit het workergeheim."}
+  },
+  "required": ["version", "enabled", "max_workers", "jobs", "receipts", "workers"],
+  "rls": {"create": false, "read": false, "update": false, "delete": false}
+}
