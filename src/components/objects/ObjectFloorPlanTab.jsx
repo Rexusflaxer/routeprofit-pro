@@ -43,6 +43,7 @@ const SOURCE_LABELS = {
 const FLOORPLAN_FIELDS = [
   "id",
   "object_id",
+  "building_selection_key",
   "status",
   "revision",
   "is_current",
@@ -144,7 +145,7 @@ export default function ObjectFloorPlanTab({ objectId }) {
   });
 
   const sortedPlans = useMemo(
-    () => [...plans].sort((left, right) => Number(right.revision || 0) - Number(left.revision || 0)),
+    () => plans.filter(plan => !plan.building_selection_key).sort((left, right) => Number(right.revision || 0) - Number(left.revision || 0)),
     [plans],
   );
   const current = sortedPlans.find((plan) => plan.is_current && plan.status === "published") || null;

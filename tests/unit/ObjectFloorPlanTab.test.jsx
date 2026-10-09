@@ -29,6 +29,18 @@ describe("ObjectFloorPlanTab", () => {
     filter.mockReset();
   });
 
+  it("laat gebouwplattegronden de bestaande objectplattegrond niet vervangen", async () => {
+    filter.mockResolvedValue([
+      { id: "building-plan", object_id: "object-1", building_selection_key: "bag:building-1", revision: 99, status: "published", is_current: true, title: "Alleen voor gebouw" },
+      { id: "object-plan", object_id: "object-1", revision: 2, status: "published", is_current: true, title: "Bestaande objectplattegrond" },
+    ]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><ObjectFloorPlanTab objectId="object-1" /></QueryClientProvider>);
+    expect(await screen.findByRole("heading", { name: "Bestaande objectplattegrond" })).toBeInTheDocument();
+    expect(screen.queryByText("Alleen voor gebouw")).not.toBeInTheDocument();
+    expect(filter.mock.calls[0][4]).toContain("building_selection_key");
+  });
+
   it("toont revisies en opent een ManagedFile-ID zonder de opgeslagen URL rechtstreeks te gebruiken", async () => {
     filter.mockResolvedValueOnce([
       {

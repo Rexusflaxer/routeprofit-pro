@@ -93,7 +93,7 @@ function buildingRows(configuration) {
     if (id) seenManualIds.add(id);
     manualIndex += 1;
     const key = `manual:${id || `legacy-${manualIndex}`}`;
-    rows.push({ key, name: nameFor(key, `Eerder ingetekend gebouw ${manualIndex}`),
+    rows.push({ key, name: nameFor(key, `Eerder ingetekend gebouw ${manualIndex}`), hasStableId: Boolean(id),
       source: "Eigen contour · zonder BAG", identification: "Geen BAG-identificatie", area: knownArea(feature) });
   });
   return rows;
@@ -112,7 +112,7 @@ export function objectMapInventoryRows(configuration = {}, workspace = "building
   });
 }
 
-export default function ObjectMapOverview({ configuration, workspace = "buildings" }) {
+export default function ObjectMapOverview({ configuration, workspace = "buildings", onOpenBuildingFloorPlan, floorPlanBuildingKeys }) {
   const terrain = workspace === "terrain";
   const automatic = !terrain && configuration?.building_selection_mode === "automatic";
   const rows = objectMapInventoryRows(configuration, workspace);
@@ -129,7 +129,12 @@ export default function ObjectMapOverview({ configuration, workspace = "building
           <TableHead className="px-6">Naam</TableHead><TableHead>Bron</TableHead><TableHead>Identificatie</TableHead><TableHead className="px-6 text-right">Oppervlakte</TableHead>
         </TableRow></TableHeader>
         <TableBody>{rows.map(row => <TableRow key={row.key}>
-          <TableCell className="max-w-xs px-6 py-4 font-medium"><span className="break-words">{row.name}</span></TableCell>
+          <TableCell className="max-w-xs px-6 py-4 font-medium">{!terrain && !automatic && row.hasStableId !== false && onOpenBuildingFloorPlan
+            && (!floorPlanBuildingKeys || floorPlanBuildingKeys.has(row.key))
+            ? <button type="button" onClick={() => onOpenBuildingFloorPlan(row.key, row.name)}
+              aria-label={`Plattegrond van ${row.name} bekijken`}
+              className="break-words rounded-sm text-left text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{row.name}</button>
+            : <span className="break-words">{row.name}</span>}</TableCell>
           <TableCell className="text-muted-foreground">{row.source}</TableCell>
           <TableCell className="max-w-xs break-words text-muted-foreground">{row.identification}</TableCell>
           <TableCell className="whitespace-nowrap px-6 text-right tabular-nums">{areaLabel(row.area)}</TableCell>

@@ -1,0 +1,61 @@
+/* Import uses the same LOQ surfaces, spacing and focus treatment as the editor. */
+.loq-import-overlay { position:fixed; inset:0; z-index:1000; background:hsl(var(--background)/.35); backdrop-filter:blur(8px); }
+.loq-import-dialog { position:fixed; z-index:1001; top:50%; left:50%; transform:translate(-50%,-50%); background:hsl(var(--card)); color:hsl(var(--foreground)); border:1px solid hsl(var(--border)); border-radius:12px; box-shadow:0 24px 80px #00000030; width:min(1400px,calc(100vw - 40px)); height:min(950px,calc(100vh - 40px)); display:flex; flex-direction:column; overflow:hidden; font-family:inherit; font-size:13px; line-height:1.5; }
+.loq-import-dialog * { box-sizing:border-box; }
+.loq-import-dialog header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:16px 20px; border-bottom:1px solid hsl(var(--border)); flex-shrink:0; }
+.loq-import-eyebrow { display:block; font-size:11px; font-weight:600; color:hsl(var(--muted-foreground)); margin-bottom:4px; }
+.loq-import-dialog h2 { margin:0; font-size:15px; font-weight:600; line-height:20px; }
+.loq-import-dialog p { font-size:12px; line-height:18px; color:hsl(var(--muted-foreground)); margin:5px 0; }
+.loq-import-body { display:flex; flex:1; min-height:0; }
+.loq-import-body aside { width:276px; flex-shrink:0; background:hsl(var(--card)); border-right:1px solid hsl(var(--border)); padding:16px; overflow:auto; display:flex; flex-direction:column; gap:12px; scrollbar-width:thin; }
+.loq-import-body main { min-width:0; flex:1; background:hsl(var(--background)); display:flex; flex-direction:column; overflow:hidden; }
+.loq-import-dialog button { display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:6px 12px; min-height:32px; background:hsl(var(--card)); color:hsl(var(--foreground)); border:1px solid hsl(var(--input)/.8); border-radius:8px; font-size:12px; line-height:18px; font-weight:500; cursor:pointer; font-family:inherit; transition:background .15s,color .15s; box-shadow:0 1px 2px #00000006; }
+.loq-import-dialog button>svg { flex-shrink:0; }
+.loq-import-dialog button:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.loq-import-dialog button:disabled { opacity:.5; cursor:not-allowed; }
+.loq-import-dialog :is(button,input,select,[tabindex]):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
+.loq-import-dialog button.loq-import-primary { background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); border-color:hsl(var(--primary)); box-shadow:0 6px 18px hsl(var(--primary)/.22); }
+.loq-import-dialog button.loq-import-primary:hover { background:hsl(var(--primary)/.9); }
+.loq-import-dialog button[aria-pressed=true]:not(.loq-import-primary) { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); border-color:hsl(var(--primary)/.4); }
+.loq-import-dialog button.loq-import-close { width:32px; height:32px; padding:0; background:transparent; border:0; box-shadow:none; color:hsl(var(--muted-foreground)); flex-shrink:0; }
+.loq-import-dialog button.loq-import-close:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.loq-import-dialog small { font-size:11px; color:hsl(var(--muted-foreground)); line-height:17px; display:block; }
+.loq-import-card { display:flex; flex-direction:column; gap:8px; padding:12px; background:hsl(var(--card)); border:1px solid hsl(var(--border)); border-radius:10px; }
+.loq-import-card strong { font-size:12px; font-weight:600; display:flex; gap:6px; align-items:center; overflow-wrap:anywhere; }
+.loq-import-card label { display:flex; flex-direction:column; gap:5px; font-size:12px; color:hsl(var(--foreground)); }
+.loq-import-card input,.loq-import-card select { border:1px solid hsl(var(--input)/.8); padding:7px 9px; min-height:36px; border-radius:8px; font-family:inherit; font-size:13px; min-width:0; width:100%; background:hsl(var(--card)); color:hsl(var(--foreground)); box-shadow:0 1px 2px #00000005; }
+.loq-import-card input[type=checkbox] { width:15px; height:15px; min-height:15px; align-self:flex-start; accent-color:hsl(var(--primary)); box-shadow:none; }
+.loq-import-card label:has(input[type=checkbox]) { flex-direction:row; align-items:center; gap:8px; }
+.loq-import-button-grid,.loq-import-coordinates { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.loq-import-button-grid button { padding:6px; font-size:12px; min-height:36px; }
+.loq-import-canvas { flex:1; min-height:0; overflow:auto; padding:20px; display:flex; align-items:flex-start; justify-content:center; }
+.loq-import-canvas svg { display:block; width:100%; max-height:100%; height:auto; background:white; box-shadow:0 2px 12px #00000012; flex:none; color-scheme:light; }
+.loq-import-empty { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; padding:28px; color:hsl(var(--muted-foreground)); }
+.loq-import-empty>svg { color:hsl(var(--primary)); padding:10px; width:56px; height:56px; border-radius:12px; background:hsl(var(--accent)); margin-bottom:12px; }
+.loq-import-empty h3 { color:hsl(var(--foreground)); font-size:15px; font-weight:600; line-height:20px; margin:0 0 4px; }
+.loq-import-empty p { max-width:340px; }
+.loq-import-message { padding:10px 16px; background:hsl(var(--card)); border-top:1px solid hsl(var(--border)); flex-shrink:0; }
+.loq-import-message span { display:flex; align-items:center; gap:8px; font-size:12px; }
+.loq-import-message p { margin:2px 0; }
+.loq-import-dialog .loq-import-error { color:#b91c1c; font-weight:500; }
+.dark .loq-import-dialog .loq-import-error { color:#fca5a5; }
+.loq-import-dialog .loq-import-success { color:#15803d; display:flex; align-items:center; gap:5px; }
+.dark .loq-import-dialog .loq-import-success { color:#86efac; }
+.loq-import-dialog footer { padding:12px 20px; border-top:1px solid hsl(var(--border)); display:flex; align-items:center; justify-content:space-between; gap:16px; flex-shrink:0; background:hsl(var(--card)); }
+.loq-import-dialog footer span { font-size:12px; color:hsl(var(--muted-foreground)); }
+.loq-import-dialog footer button { flex-shrink:0; }
+.loq-import-spin { animation:loq-import-spin 1.2s linear infinite; }
+@keyframes loq-import-spin { to { transform:rotate(360deg); } }
+@media(max-width:1100px) {
+  .loq-import-body aside { width:258px; padding:12px; }
+  .loq-import-canvas { padding:14px; }
+}
+@media(max-height:800px) {
+  .loq-import-dialog { height:calc(100vh - 24px); }
+  .loq-import-dialog header { padding:12px 16px; }
+  .loq-import-dialog footer { padding:10px 16px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .loq-import-dialog button { transition:none; }
+  .loq-import-spin { animation:none; }
+}

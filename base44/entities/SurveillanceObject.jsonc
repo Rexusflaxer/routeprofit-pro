@@ -688,21 +688,58 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "source": { "type": "string", "enum": ["user_selected"] },
-          "provider": { "type": "string", "enum": ["mapbox"] },
-          "bag_status": { "type": "string", "enum": ["unlinked"] },
-          "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
-          "latitude": { "type": "number", "minimum": -90, "maximum": 90 }
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "user_selected"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mapbox"
+            ]
+          },
+          "bag_status": {
+            "type": "string",
+            "enum": [
+              "unlinked"
+            ]
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          }
         },
-        "required": ["id", "source", "provider", "bag_status", "longitude", "latitude"]
+        "required": [
+          "id",
+          "source",
+          "provider",
+          "bag_status",
+          "longitude",
+          "latitude"
+        ]
       }
     },
     "building_labels": {
       "type": "object",
       "maxProperties": 100,
       "default": {},
-      "additionalProperties": { "type": "string", "maxLength": 100 },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 100
+      },
       "description": "Gebruikersnamen voor geselecteerde gebouwen, gekoppeld via bag:<PDOK-id>, point:<lokaal aanklikpunt-id> of manual:<local_id>. Alleen opslaan via de kaartconfiguratie; geen namen in logboek of recoverypayloads."
     },
     "object_area_geojson": {
@@ -790,6 +827,20 @@
     "version": {
       "type": "number",
       "default": 1
+    },
+    "floor_plan_workspace_index": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Uitsluitend servergestuurde autoritatieve gebouwplattegrondverwijzingen; atomisch met floor_plan_workspace_index_version. Bevat geen tekeninhoud."
+    },
+    "floor_plan_workspace_index_version": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "CAS-generatie voor gebouwplattegronden. Wijzigt de object-/kaartversie niet."
     }
   },
   "required": [

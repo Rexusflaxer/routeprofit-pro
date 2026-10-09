@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { createCollectiveDossierHandlers } from './collectiveDossier.ts';
+import { createBuildingFloorPlanHandlers, validateDesktopDocument } from './buildingFloorPlans.ts';
 
 type LooseRecord = Record<string, any>;
 
@@ -30,6 +31,18 @@ const collectiveDossierHandlers = createCollectiveDossierHandlers({
       await releaseGlobalObjectCodeMutation(base44, reservation, 'collectiefinrichting');
     }
   },
+});
+
+const buildingFloorPlanHandlers = createBuildingFloorPlanHandlers({
+  entity: getEntity, ApiError, requireRecord, selectionKeys: objectBuildingFloorPlanSelectionKeys,
+  versionOf, sha256, nowIso,
+  requireScope: (base44: LooseRecord, body: LooseRecord, mutable: boolean) => mutable
+    ? requireCustomerObjectForMutation(base44, body) : requireCustomerObjectScope(base44, body),
+  audit: (base44: LooseRecord, user: LooseRecord, body: LooseRecord, result: LooseRecord, fingerprint: string) =>
+    recordMutationResult(base44, user, body.action, body.idempotency_key, {
+      ...result, category: 'operations', summary: 'Gebouwplattegrond bijgewerkt',
+      audit_result: result,
+    }, body, fingerprint, `${body.object_id}:${body.building_selection_key}`),
 });
 
 const QUOTE_TRANSITIONS: Record<string, string[]> = {
@@ -97,10 +110,12 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 };
 
 const READ_ACTIONS = new Set([
+  ...buildingFloorPlanHandlers.readActions,
   ...collectiveDossierHandlers.readActions,
   'get_customer_overview',
   'search_customer_objects',
   'get_object_map_configuration',
+  'get_object_building_floor_plan',
   'list_object_building_candidates',
   'list_object_parcel_candidates',
   'list_object_warning_addresses',
@@ -125,6 +140,7 @@ const HANDBOOK_ENTITY_MUTATION_ACTIONS = new Set([
 ]);
 
 const MUTATION_ACTIONS = new Set([
+  ...buildingFloorPlanHandlers.mutationActions,
   ...collectiveDossierHandlers.mutationActions,
   'create_customer',
   'update_customer',
@@ -4250,6 +4266,21 @@ function objectBuildingLabelKeys(geometry: unknown, points: LooseRecord[] = []) 
   return new Set([...counts].filter(([, count]) => count === 1).map(([key]) => key));
 }
 
+function objectBuildingFloorPlanSelectionKeys(object: LooseRecord) {
+  // Automatic or legacy contours are context until a manual selection is saved.
+  // The public geometry normalizer may synthesize IDs; those are not plan keys.
+  if (object.__dossier_kind === 'collective' || object.building_selection_mode !== 'manual') return [] as string[];
+  const buildings = safeStoredBuildingCollection(object);
+  const points = safeStoredBuildingSelectionPoints(object);
+  if (buildings.invalid || points.invalid ||
+    geoJsonFeatures(buildings.value).length + points.value.length > OBJECT_MAP_MAX_BUILDING_FEATURES) return [] as string[];
+  const storedKeys = objectBuildingLabelKeys(object.building_polygon_geojson,
+    Array.isArray(object.building_selection_points) ? object.building_selection_points : []);
+  return [...objectBuildingLabelKeys(buildings.value, points.value)]
+    .filter(key => storedKeys.has(key))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function normalizedBuildingLabels(value: unknown, geometry: unknown, points: LooseRecord[] = [], strict = false) {
   if (value === undefined) return {};
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
@@ -4495,6 +4526,9 @@ function safeObjectMapConfiguration(object: LooseRecord) {
     building_polygon_geojson: safeGeometry.building_polygon_geojson,
     building_selection_points: safeGeometry.building_selection_points,
     building_labels: normalizedBuildingLabels(object.building_labels, safeGeometry.building_polygon_geojson, safeGeometry.building_selection_points),
+    ...(object.__dossier_kind === 'collective' ? {} : {
+      building_floor_plan_selection_keys: objectBuildingFloorPlanSelectionKeys(object),
+    }),
     manual_building_geojson: safeExistingManualBuildingCollection(object, safeGeometry.building_polygon_geojson),
     object_area_geojson: safeGeometry.object_area_geojson,
     building_summary: buildingSelectionSummary(safeGeometry.building_polygon_geojson, safeGeometry.building_selection_points),
@@ -4993,6 +5027,32 @@ async function handleGetObjectMapConfiguration(base44: LooseRecord, body: LooseR
     conflicts: publicBuildingAssignmentConflicts(
       object.__dossier_kind === 'collective' ? [] : await buildingAssignmentConflicts(base44, object, configuration.building_polygon_geojson, null, configuration.building_selection_points),
     ),
+  };
+}
+
+async function handleGetObjectBuildingFloorPlan(base44: LooseRecord, body: LooseRecord) {
+  if (body.collective_id) throw new ApiError(400, 'Gebouwplattegronden horen bij een objectdossier');
+  const { customer, object } = await requireCustomerObjectScope(base44, body);
+  const selectionKey = requireString(body, 'building_selection_key');
+  if (!objectBuildingFloorPlanSelectionKeys(object).includes(selectionKey)) {
+    throw new ApiError(409, 'Dit gebouw is niet meer uniek geselecteerd in het opgeslagen objectdossier', {
+      code: 'building_selection_unavailable',
+    });
+  }
+  // Immutable desktop publications are activated by the atomic object pointer.
+  const floorplan = await buildingFloorPlanHandlers.resolveCurrent(base44, object, selectionKey);
+  return {
+    customer_id: customer.id,
+    object_id: object.id,
+    building_selection_key: selectionKey,
+    floor_plan: floorplan ? {
+      ...safeSecurityPlanFloorplan(floorplan),
+      ...(floorplan.desktop_document ? { desktop_document: validateDesktopDocument(floorplan.desktop_document, ApiError), pdf_file_id: asString(floorplan.pdf_file_id) || null } : {}),
+      object_id: object.id,
+      building_selection_key: selectionKey,
+      source: asString(floorplan.source) || null,
+      published_at: floorplan.published_at || null,
+    } : null,
   };
 }
 
@@ -16324,7 +16384,8 @@ async function securityPlanReferenceData(base44: LooseRecord, customerId: string
     getEntity(base44, 'ObjectInstallation').filter({ customer_id: customerId, object_id: objectId }, '+name', 1000),
     getEntity(base44, 'ObjectOperationalModule').filter({ customer_id: customerId, object_id: objectId }, '+display_name', 100),
   ]);
-  return { sections, floorplans, installations, modules };
+  const object = await requireRecord(base44, 'SurveillanceObject', objectId, 'Object');
+  return { sections, floorplans: buildingFloorPlanHandlers.committedFloorPlans(object, floorplans), installations, modules };
 }
 
 function resolvedSecurityPlanModuleAssignments(revision: LooseRecord, modules: LooseRecord[]) {
@@ -18354,21 +18415,24 @@ async function executeMutation(
 
 export async function handleCustomerPlatformRequest(req: Request) {
   const requestId = req.headers.get('x-request-id') || crypto.randomUUID();
+  let action = '';
   if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
   try {
     const base44 = createClientFromRequest(req) as LooseRecord;
     const user = await base44.auth.me().catch(() => null);
     requireAdmin(user);
     const body = await req.json().catch(() => ({})) as LooseRecord;
-    const action = asString(body.action);
+    action = asString(body.action);
     if (!action) throw new ApiError(400, 'action is verplicht');
 
     if (READ_ACTIONS.has(action)) {
+      if (buildingFloorPlanHandlers.readActions.has(action)) return json(await buildingFloorPlanHandlers.read(base44, user, body));
       if (action === 'list_building_associations') return json(await handleBuildingAssociationSuggestions(base44, body));
       if (collectiveDossierHandlers.readActions.has(action)) return json(await collectiveDossierHandlers.read(base44, user, action, body));
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
       if (action === 'search_customer_objects') return json(await handleSearchCustomerObjects(base44, body));
       if (action === 'get_object_map_configuration') return json(await handleGetObjectMapConfiguration(base44, body));
+      if (action === 'get_object_building_floor_plan') return json(await handleGetObjectBuildingFloorPlan(base44, body));
       if (action === 'list_object_building_candidates') return json(await handleListObjectBuildingCandidates(base44, body));
       if (action === 'list_object_parcel_candidates') return json(await handleListObjectParcelCandidates(base44, body));
       if (action === 'list_object_warning_addresses') return json(await handleListObjectWarningAddresses(base44, body));
@@ -18398,6 +18462,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
       }
     }
 
+    if (buildingFloorPlanHandlers.mutationActions.has(action)) return json({ ok: true, ...(await buildingFloorPlanHandlers.mutate(base44, user, body)) });
     if (!MUTATION_ACTIONS.has(action)) throw new ApiError(400, 'Onbekende actie');
     const { idempotencyKey, expectedVersion } = requireMutationEnvelope(body);
     const requestFingerprint = await mutationRequestFingerprint(action, body);
@@ -18517,7 +18582,11 @@ export async function handleCustomerPlatformRequest(req: Request) {
     return json({ ok: true, ...result, replayed: Boolean(result.replayed) }, action.startsWith('create_') ? 201 : 200);
   } catch (error) {
     const status = Number((error as LooseRecord)?.status || 500);
-    console.error('[customerPlatformApi]', requestId, error);
+    if (buildingFloorPlanHandlers.readActions.has(action) || buildingFloorPlanHandlers.mutationActions.has(action)) {
+      console.error('[customerPlatformApi]', requestId, { action, status, code: (error as LooseRecord)?.details?.code || 'floor_plan_request_failed' });
+    } else {
+      console.error('[customerPlatformApi]', requestId, error);
+    }
     return json({
       error: publicCustomerPlatformErrorMessage(error, status),
       details: (error as LooseRecord)?.details || null,

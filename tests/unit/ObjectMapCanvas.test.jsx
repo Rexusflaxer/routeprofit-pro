@@ -159,6 +159,127 @@ describe("ObjectMapCanvas", () => {
     labelHookState.resolveBuildingRoofAnchor = null;
   });
 
+  it("opent de plattegrond van een geselecteerd BAG-gebouw in de viewer zonder de kaartselectie te muteren", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const { props } = renderCanvas({ viewOnly: true, onOpenBuildingFloorPlan });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    const originalEvent = {};
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, originalEvent });
+      // A single physical click can also reach the GeoJSON hit-test layer.
+      map.emitLayer("click", "loq-object-map-candidates-fill", { features: [candidate], originalEvent });
+    });
+    expect(onOpenBuildingFloorPlan).toHaveBeenCalledExactlyOnceWith("bag:bag-1");
+    expect(props.onToggleCandidate).not.toHaveBeenCalled();
+  });
+
+  it("opent een opgeslagen gebouwpunt vanuit de terreinviewer en negeert niet-geselecteerde gebouwen", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const point = { id: "office", longitude: 4.4807, latitude: 51.9202 };
+    const rendered = renderCanvas({ viewOnly: true, workspace: "terrain", candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty,
+      buildingSelectionPoints: [point], onOpenBuildingFloorPlan });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding }));
+    expect(onOpenBuildingFloorPlan).toHaveBeenCalledExactlyOnceWith("point:office");
+    onOpenBuildingFloorPlan.mockClear();
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} buildingSelectionPoints={[]} />);
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding });
+      map.emitLayer("click", "loq-object-map-candidates-fill", { features: [candidate] });
+      map.emitLayer("click", "loq-object-map-terrain-fill", { features: [candidate] });
+    });
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+  });
+
+  it("kiest geen plattegrond als een native gebouw meerdere opgeslagen selecties bevat", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    renderCanvas({ viewOnly: true, candidates: [], selectedBagFeatureIds: [], selectedBuildings: empty,
+      buildingSelectionPoints: [{ id: "office", longitude: 4.4807, latitude: 51.9202 }, { id: "storage", longitude: 4.4808, latitude: 51.9201 }],
+      onOpenBuildingFloorPlan });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    act(() => map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding }));
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+  });
+
+  it("opent bij een ambigue native klik ook geen BAG-fallback als slechts één selectie op de serverwhitelist staat", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    renderCanvas({ viewOnly: true, buildingSelectionPoints: [{ id: "office", longitude: 4.4807, latitude: 51.9202 }],
+      onOpenBuildingFloorPlan, floorPlanBuildingKeys: new Set(["bag:bag-1"]) });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    const originalEvent = {};
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, originalEvent });
+      map.emitLayer("click", "loq-object-map-candidates-fill", { features: [candidate], originalEvent });
+      map.emitInteraction("loq-object-map-standard-building-mouseenter", { feature: standardBuilding });
+    });
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+    expect(map.getCanvas().style.cursor).not.toBe("pointer");
+  });
+
+  it("geeft alleen servergoedgekeurde native en eigen gebouwselecties een actie of aanwijzer", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const manual = { ...candidate, id: undefined, properties: { source: "manual", local_id: "manual:1" } };
+    const rendered = renderCanvas({ viewOnly: true, selectedBuildings: { type: "FeatureCollection", features: [candidate, manual] },
+      onOpenBuildingFloorPlan, floorPlanBuildingKeys: new Set() });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    map.renderedFeatures = [standardBuilding];
+    act(() => map.emit("style.load"));
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding });
+      map.emitInteraction("loq-object-map-standard-building-mouseenter", { feature: standardBuilding });
+      map.emitLayer("click", "loq-object-map-selected-fill", { features: [manual] });
+      map.emitLayer("mousemove", "loq-object-map-selected-fill", { features: [manual] });
+    });
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+    expect(map.getCanvas().style.cursor).not.toBe("pointer");
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} floorPlanBuildingKeys={new Set(["bag:bag-1"])} />);
+    act(() => {
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding });
+      map.emitInteraction("loq-object-map-standard-building-mouseenter", { feature: standardBuilding });
+    });
+    expect(onOpenBuildingFloorPlan).toHaveBeenCalledExactlyOnceWith("bag:bag-1");
+    expect(map.getCanvas().style.cursor).toBe("pointer");
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} floorPlanBuildingKeys={new Set()} />);
+    expect(map.getCanvas().style.cursor).not.toBe("pointer");
+  });
+
+  it("opent alleen een opgeslagen eigen contour en behoudt in de editor het selecteren van gebouwen", async () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const manual = { ...candidate, id: "workshop", properties: { source: "manual", local_id: "workshop" } };
+    const rendered = renderCanvas({ viewOnly: true, selectedBagFeatureIds: [], selectedBuildings: { type: "FeatureCollection", features: [manual] },
+      manualBuildings: { type: "FeatureCollection", features: [manual] }, onOpenBuildingFloorPlan });
+    await waitFor(() => expect(mapboxState.instances).toHaveLength(1));
+    const map = mapboxState.instances[0];
+    act(() => map.emit("style.load"));
+    act(() => map.emitLayer("click", "loq-object-map-selected-fill", { features: [manual] }));
+    expect(onOpenBuildingFloorPlan).toHaveBeenCalledExactlyOnceWith("manual:workshop");
+    onOpenBuildingFloorPlan.mockClear();
+    act(() => map.emitLayer("click", "loq-object-map-selected-fill", { features: [{ ...manual, id: "other", properties: { source: "manual", local_id: "other" } }] }));
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+
+    rendered.rerender(<ObjectMapCanvas {...rendered.props} viewOnly={false} />);
+    map.renderedFeatures = [standardBuilding];
+    act(() => {
+      map.emitLayer("click", "loq-object-map-selected-fill", { features: [manual] });
+      map.emitInteraction("loq-object-map-standard-building-click", { feature: standardBuilding, lngLat: { lng: 4.4807, lat: 51.9202 } });
+    });
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+    expect(rendered.props.onToggleCandidate).toHaveBeenCalledExactlyOnceWith("bag-1");
+  });
+
   it.each(["buildings", "terrain"])("toont in alleen-lezen %s alle opgeslagen lagen en namen, met camerabediening maar zonder mutaties", async workspace => {
     const callbacks = Object.fromEntries([
       "onToggleCandidate", "onToggleBuildingPoint", "onToggleParcel", "onRemoveTerrainFeature",

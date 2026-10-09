@@ -31,3 +31,6 @@ playwright-report
 
 .env
 base44/.app.jsonc
+desktop/dist/
+desktop/release/
+desktop/qa-output/

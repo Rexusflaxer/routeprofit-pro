@@ -15,6 +15,10 @@ const polygon = {
 };
 
 describe("objectkaart API-workflow", () => {
+  it("bewaart uitsluitend de serverlijst met toegestane plattegrondkeys en maakt geen eigen fallback", () => {
+    expect(normalizeObjectMapConfiguration({ configuration: { building_floor_plan_selection_keys: ["bag:b", "point:p", 42] } }).building_floor_plan_selection_keys).toEqual(["bag:b", "point:p"]);
+    expect(normalizeObjectMapConfiguration({ configuration: { building_selection_mode: "manual", selected_bag_feature_ids: ["b"] } }).building_floor_plan_selection_keys).toEqual([]);
+  });
   it("geeft gebouwnamen mee en behoudt ze bij herladen zonder oude callers te overschrijven", async () => {
     const labels = { "bag:bag-1": "Receptie", "point:point-1": "Magazijn" };
     const invoke = vi.fn(async payload => ({ configuration: { version: 8, ...payload.data } }));

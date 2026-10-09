@@ -33,6 +33,8 @@ import { invokeCustomerPlatformRead } from "@/components/customers/customerDossi
 import { trustedObjectCoordinatePair } from "@/lib/coordinates";
 import ObjectMapCanvas from "./ObjectMapCanvas";
 import ObjectMapOverview from "./ObjectMapOverview";
+import ObjectBuildingFloorPlanDialog from "./ObjectBuildingFloorPlanDialog";
+import { storedBuildingFloorPlanKeys } from "./objectBuildingFloorPlanWorkflow";
 import BuildingAssociationPanel from "./BuildingAssociationPanel";
 import CollectiveBuildingLinks from "@/components/collectief/CollectiveBuildingLinks";
 import TerrainSelectionRow from "./TerrainSelectionRow";
@@ -149,12 +151,14 @@ function keepSelectedBuildingLabels(form) {
   return Object.fromEntries(Object.entries(form.building_labels || {}).filter(([key]) => keys.has(key)));
 }
 
-function BuildingSelectionRow({ selectionKey, label, caption, colorClass, disabled, viewOnly, onHighlight, onRename, onRemove, removeLabel }) {
+function BuildingSelectionRow({ selectionKey, label, caption, colorClass, disabled, viewOnly, onHighlight, onRename, onRemove, removeLabel, onOpenBuildingFloorPlan }) {
   return <div role="listitem" tabIndex={0} aria-label={label} className="flex items-center gap-2 p-3 outline-none transition hover:bg-primary/10 focus-within:bg-primary/10"
     onMouseEnter={() => onHighlight(selectionKey)} onMouseLeave={() => onHighlight(null)}
     onFocus={() => onHighlight(selectionKey)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) onHighlight(null); }}>
     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${colorClass}`} />
-    <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium" title={label}>{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{caption}</p></div>
+    <div className="min-w-0 flex-1">{onOpenBuildingFloorPlan
+      ? <button type="button" className="w-full truncate text-left text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={label} aria-label={`Plattegrond van ${label} bekijken`} onClick={() => onOpenBuildingFloorPlan(selectionKey, label)}>{label}</button>
+      : <p className="truncate text-xs font-medium" title={label}>{label}</p>}<p className="mt-0.5 text-[11px] text-muted-foreground">{caption}</p></div>
     {!viewOnly && <><Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={() => onRename(selectionKey, label)} aria-label={`${label} naam wijzigen`}><Pencil className="h-3.5 w-3.5" /></Button>
     <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled} onClick={onRemove} aria-label={removeLabel || `${label} verwijderen`}><Trash2 className="h-3.5 w-3.5" /></Button></>}
   </div>;
@@ -241,6 +245,7 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
   const [form, setForm] = useState(null);
   const [baseForm, setBaseForm] = useState(null);
   const [appliedConfiguration, setAppliedConfiguration] = useState(null);
+  const [floorPlanBuilding, setFloorPlanBuilding] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
   const [editingTarget, setEditingTarget] = useState(null);
@@ -285,6 +290,17 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
   const archived = mapObject?.status === "archived";
   const canEdit = !archived && verified;
   const viewOnly = screen === "view";
+  const floorPlanKeys = useMemo(() => storedBuildingFloorPlanKeys(appliedConfiguration), [appliedConfiguration]);
+  const openBuildingFloorPlan = useCallback((key, label) => {
+    if (collectiveId || screen === "edit" || !floorPlanKeys.has(key)) return;
+    setFloorPlanBuilding({ key, label: label || appliedConfiguration?.building_labels?.[key] || "Gebouw" });
+  }, [appliedConfiguration, collectiveId, floorPlanKeys, screen]);
+  useEffect(() => {
+    setFloorPlanBuilding(null);
+  }, [object.id, collectiveId]);
+  useEffect(() => {
+    if (floorPlanBuilding && !floorPlanKeys.has(floorPlanBuilding.key)) setFloorPlanBuilding(null);
+  }, [floorPlanBuilding, floorPlanKeys]);
   const readOnly = screen !== "edit" || !canEdit || saving;
   const mobileEligible = !collectiveId && mapObject?.status === "active" && mapObject?.is_active_customer_object !== false;
   const usesBuildingCandidates = screen === "edit"
@@ -848,7 +864,7 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
       </div>
 
       {screen === "overview" ? <>
-        <ObjectMapOverview configuration={appliedConfiguration} workspace={workspace} />
+        <ObjectMapOverview configuration={appliedConfiguration} workspace={workspace} floorPlanBuildingKeys={floorPlanKeys} onOpenBuildingFloorPlan={collectiveId ? undefined : openBuildingFloorPlan} />
         <div className="mt-auto border-t border-border/70 px-4 py-3 text-xs text-muted-foreground">Revisie {appliedConfiguration.map_geometry_revision || 0} · Laatst gewijzigd: {formatDateTime(appliedConfiguration.map_geometry_updated_at)}</div>
       </> : <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_350px]">
         <div className="space-y-3">
@@ -883,6 +899,8 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
           {usesBuildingCandidates && candidatesQuery.isRefetchError && candidatesQuery.data && !candidatesQuery.isFetchNextPageError && workspace === "buildings" && <ErrorPanel title="De geladen BAG-gebouwen blijven zichtbaar, maar vernieuwen is mislukt." error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
           <ObjectMapCanvas
             viewOnly={viewOnly}
+            floorPlanBuildingKeys={floorPlanKeys}
+            onOpenBuildingFloorPlan={viewOnly && !collectiveId && floorPlanKeys.size > 0 ? openBuildingFloorPlan : undefined}
             object={mapObject}
             workspace={workspace}
             mapView={mapView}
@@ -969,18 +987,18 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
                   const key = `bag:${id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || (feature ? candidateLabel(feature) : `BAG-pand ${id.slice(0, 12)}`)}
                     caption={conflictCount ? `Gekoppeld aan ${conflictCount} ander object` : form.building_selection_mode === "automatic" ? "Automatisch voorgesteld · PDOK BAG" : "PDOK BAG"}
-                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} />;
+                    colorClass={conflictCount ? "bg-amber-500" : "bg-blue-500"} disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleCandidate(id)} onOpenBuildingFloorPlan={viewOnly && !collectiveId && floorPlanKeys.has(key) ? openBuildingFloorPlan : undefined} />;
                 })}
                 {form.building_selection_mode === "manual" && form.building_selection_points.map((point, index) => {
                   const key = `point:${point.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Gebouw ${index + 1} · Zonder BAG-koppeling`}
-                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} />;
+                    caption="Eigen kaartselectie · geen bevestigde BAG-koppeling" colorClass="bg-blue-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding} onRemove={() => toggleBuildingPoint(point)} removeLabel={`Gebouw zonder BAG-koppeling ${index + 1} verwijderen`} onOpenBuildingFloorPlan={viewOnly && !collectiveId && floorPlanKeys.has(key) ? openBuildingFloorPlan : undefined} />;
                 })}
                 {form.building_selection_mode === "manual" && form.manual_building_geojson.features.map((feature, index) => {
                   const key = `manual:${feature.properties?.local_id || feature.id}`;
                   return <BuildingSelectionRow key={key} selectionKey={key} label={form.building_labels?.[key] || `Eerder ingetekend gebouw ${index + 1}`}
                     caption="Bestaande contour behouden" colorClass="bg-violet-500" disabled={readOnly} viewOnly={viewOnly} onHighlight={highlightBuilding} onRename={renameBuilding}
-                    onRemove={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} />;
+                    onRemove={() => updateWithHistory(current => ({ ...current, manual_building_geojson: removeFeature(current.manual_building_geojson, index) }))} onOpenBuildingFloorPlan={viewOnly && !collectiveId && floorPlanKeys.has(key) ? openBuildingFloorPlan : undefined} />;
                 })}
               </div>
               {form.building_selection_mode === "manual" && form.building_selection_points.length > 0 && <p className="border-t border-border/70 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">Zonder BAG-koppeling bewaren we jouw gekozen plek. Controleer gedeeld gebruik zelf: verschillende selecties in hetzelfde gebouw zijn niet altijd automatisch als overlap herkenbaar.</p>}
@@ -1017,6 +1035,7 @@ export default function ObjectMapTab({ object: customerObject, collective, onReg
         </aside>
       </div>}
 
+      <ObjectBuildingFloorPlanDialog customerId={object.customer_id} objectId={object.id} building={floorPlanBuilding} onClose={() => setFloorPlanBuilding(null)} />
       <Dialog open={Boolean(renamingBuilding)} onOpenChange={open => { if (!open) setRenamingBuilding(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Gebouwnaam wijzigen</DialogTitle><DialogDescription>Geef dit gebouw een herkenbare naam, bijvoorbeeld Receptie of Magazijn. De naam wordt samen met de kaart opgeslagen.</DialogDescription></DialogHeader>

@@ -14,6 +14,7 @@ export default function NavigationTracker() {
     useEffect(() => {
         // Extract page name from pathname
         const pathname = location.pathname;
+        if (pathname.toLowerCase() === '/desktopsignin') return;
         let pageName;
 
         if (pathname === '/' || pathname === '') {

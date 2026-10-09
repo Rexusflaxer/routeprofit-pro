@@ -146,6 +146,8 @@ export function normalizeObjectMapConfiguration(value) {
     selected_bag_feature_ids: [...new Set((Array.isArray(selectedIds) ? selectedIds : []).map(String).filter(Boolean))].sort(),
     building_selection_points: Array.isArray(configuration.building_selection_points) ? configuration.building_selection_points : [],
     building_labels: configuration.building_labels && typeof configuration.building_labels === "object" && !Array.isArray(configuration.building_labels) ? configuration.building_labels : {},
+    building_floor_plan_selection_keys: Array.isArray(configuration.building_floor_plan_selection_keys)
+      ? configuration.building_floor_plan_selection_keys.filter(key => typeof key === "string") : [],
     building_polygon_geojson: selectedBuildings,
     manual_building_geojson: manualBuildings,
     object_area_geojson: normalizeFeatureCollection(configuration.object_area_geojson),

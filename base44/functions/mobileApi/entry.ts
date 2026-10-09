@@ -924,6 +924,9 @@ async function uploadBase64Asset(base44, asset, context) {
     throw error;
   }
 }
+function mobileLegacyObjectFloorPlan(record) {
+  return record?.building_selection_key === undefined || record?.building_selection_key === null || record?.building_selection_key === "";
+}
 async function handleMobileObjectFloorPlan(req) {
   try {
     const base44 = createClientFromRequest3(req);
@@ -932,9 +935,12 @@ async function handleMobileObjectFloorPlan(req) {
     const body = await req.json();
     const { action, object_id } = body;
     if (!object_id) return Response.json({ error: "object_id is verplicht" }, { status: 400 });
+    if (body.building_selection_key != null || body.upload?.building_selection_key != null) {
+      return Response.json({ error: "Gebouwplattegronden worden via de LOQ desktop app beheerd." }, { status: 400 });
+    }
     if (action === "get") {
       const records = await base44.asServiceRole.entities.ObjectFloorPlan.filter({ object_id, is_current: true });
-      const current = records.find((r) => r.is_current && r.status === "published") || null;
+      const current = records.find((r) => mobileLegacyObjectFloorPlan(r) && r.is_current && r.status === "published") || null;
       return Response.json({ floor_plan: current });
     }
     if (action === "publish") {
@@ -943,7 +949,8 @@ async function handleMobileObjectFloorPlan(req) {
         base44.asServiceRole.entities.ObjectFloorPlan.filter({ object_id }),
         base44.asServiceRole.entities.SurveillanceObject.get(object_id).catch(() => null)
       ]);
-      const maxRevision = existing.reduce((max, r) => Math.max(max, r.revision || 0), 0);
+      const legacyRecords = existing.filter(mobileLegacyObjectFloorPlan);
+      const maxRevision = legacyRecords.reduce((max, r) => Math.max(max, r.revision || 0), 0);
       const newRevision = maxRevision + 1;
       const assetContext = {
         object,
@@ -958,12 +965,13 @@ async function handleMobileObjectFloorPlan(req) {
         uploadBase64Asset(base44, upload.preview_2d_asset, { ...assetContext, label: "RoomPlan 2D preview", category: "object_floorplan_preview_2d", sourceField: "preview_2d_file_url" }),
         uploadBase64Asset(base44, upload.metadata_asset, { ...assetContext, label: "RoomPlan metadata", category: "object_floorplan_metadata", sourceField: "metadata.metadata_url" })
       ]);
-      const currentRecords = existing.filter((r) => r.is_current);
+      const currentRecords = legacyRecords.filter((r) => r.is_current);
       await Promise.all(currentRecords.map(
         (r) => base44.asServiceRole.entities.ObjectFloorPlan.update(r.id, { is_current: false })
       ));
       const newRecord = await base44.asServiceRole.entities.ObjectFloorPlan.create({
         object_id,
+        building_selection_key: null,
         status: "published",
         revision: newRevision,
         is_current: true,
@@ -1340,7 +1348,7 @@ async function handleMobileObjectsMap(req) {
       authorizedRoute ? base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: authorizedRoute.id }) : Promise.resolve([]),
       base44.asServiceRole.entities.ObjectFloorPlan.filter({ is_current: true, status: "published" })
     ]);
-    const floorPlanByObjectId = new Map(floorPlans.map((fp) => [String(fp.object_id), fp]));
+    const floorPlanByObjectId = new Map(floorPlans.filter(mobileLegacyObjectFloorPlan).map((fp) => [String(fp.object_id), fp]));
     return Response.json({
       objects: objects.map((object) => {
         const coordinates = mobileMapCoordinatePair(object.latitude, object.longitude);
@@ -1568,7 +1576,7 @@ async function buildPackage(base44, routeExecution) {
   ]);
   const sortedTasks = taskExecutions.sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
   const objectById = new Map(objects.map((object) => [String(object.id), object]));
-  const floorPlanByObjectId = new Map(floorPlans.map((fp) => [String(fp.object_id), fp]));
+  const floorPlanByObjectId = new Map(floorPlans.filter(mobileLegacyObjectFloorPlan).map((fp) => [String(fp.object_id), fp]));
   const vehicle = vehicles.find((v) => String(v.id) === String(routeExecution.vehicle_id)) || null;
   const employee = personnel.find((p) => String(p.id) === String(routeExecution.employee_id)) || null;
   const relevantObjectIds = new Set(sortedTasks.map((task) => String(task.object_id)));
