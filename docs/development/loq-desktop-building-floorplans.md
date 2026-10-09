@@ -1,6 +1,14 @@
 # Overdracht: LOQ desktop app en plattegronden per gebouw
 
-Dit bestand bewaart de oorspronkelijke gebouwgerichte voorbereiding én de desktopimplementatie van 9 oktober 2026. De huidige implementatiestatus hieronder gaat vóór de historische ontwerptekst verderop. Bestaande lokale wijzigingen zijn behouden; er is niets gecommit of gepusht. De actuele workspace-instructies blijven van toepassing.
+Dit bestand bewaart de oorspronkelijke gebouwgerichte voorbereiding én de desktopimplementatie van 9 oktober 2026. De huidige implementatiestatus hieronder gaat vóór de historische ontwerptekst verderop. Bestaande lokale wijzigingen zijn behouden. De actuele publicatiestatus staat direct hieronder; eerdere implementatiestatus beschrijft de oorspronkelijke lokale oplevering.
+
+## Publicatiestatus — 9 oktober 2026, na expliciete toestemming
+
+De complete voorbereide desktopkoppeling is gericht naar `origin/main` gepusht: commit `c0a12c1dd4ad16fe2e84b80ed8ff88566dbcaf1a` (`feat: add LOQ Desktop authentication and building floor plans`). Alle 392 gerichte tests slagen opnieuw. De onafhankelijke scopecontrole heeft geen ongerelateerde functionele wijzigingen gevonden. De oude lokale `pnpm-lock.yaml` en `pnpm-workspace.yaml` zijn niet meegenomen; gegenereerde QA-uitvoer, installatiebestanden en licentiebundels evenmin.
+
+**Nog niet als live opgelost melden.** De laatst gecontroleerde publieke bundle (`index-CRzHthV9.js`) bevat `/DesktopSignIn` en `desktopAuth` nog niet. GitHub heeft geen geconfigureerde Actions-runs/statuschecks voor deze commit. De Base44-bevestiging voor de ontwikkelaarsaanmelding is aan de gebruiker gevraagd en staat nog open; er zijn in deze publicatiestap nog geen Base44-deploys uitgevoerd of secrets gewijzigd. Een eenmalige aanmeldcode staat niet in dit document.
+
+Vervolg na aanmelding: controleer de GitHub-synchronisatie van frontend, vier schemawijzigingen en drie functies; controleer uitsluitend de namen van benodigde serversecrets; publiceer via de bestaande Base44-Publish-flow. Controleer de nieuwe live aanmeldpagina, beveiligde callback en gebouwacties. Gebruik de actuele gedetailleerde [Base44-opdracht](../base44/object-building-floorplans-update.md), niet de historische viewer-only instructie daarin. De toestemming om dit gericht naar GitHub/Base44 te publiceren is al gegeven; vraag die niet opnieuw.
 
 ## Desktopimplementatie — 9 oktober 2026
 
