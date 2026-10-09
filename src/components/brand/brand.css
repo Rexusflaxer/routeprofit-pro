@@ -1,0 +1,5 @@
+.loq-brand{display:inline-block;position:relative;aspect-ratio:769 / 287;flex-shrink:0;vertical-align:middle}
+.loq-brand img{display:block;width:100%;height:100%;object-fit:contain}
+.loq-brand .loq-brand-on-dark{display:none}
+.dark .loq-brand--auto .loq-brand-on-light,.loq-brand--dark .loq-brand-on-light{display:none}
+.dark .loq-brand--auto .loq-brand-on-dark,.loq-brand--dark .loq-brand-on-dark{display:block}

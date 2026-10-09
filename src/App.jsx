@@ -22,6 +22,7 @@ import CustomerDetail from './pages/CustomerDetail';
 import CustomerPortal from './pages/CustomerPortal';
 import Commercial from './pages/Commercial';
 import Billing from './pages/Billing';
+import DesktopSignIn from './pages/DesktopSignIn';
 // CAOBeheer removed from customer app — owner-only via Codex/Cloudflare governance
 
 const { Pages, Layout, mainPage } = pagesConfig;
@@ -58,6 +59,7 @@ const AuthenticatedApp = () => {
   // Render the main app
   return (
     <Routes>
+      <Route path="/DesktopSignIn" element={<DesktopSignIn />} />
       <Route path="/" element={
         <LayoutWrapper currentPageName={mainPageKey}>
           <MainPage />

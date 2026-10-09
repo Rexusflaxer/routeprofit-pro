@@ -441,6 +441,8 @@ export default function ObjectMapCanvas({
   onToggleBuildingPoint,
   nearbyBuildingSelections = [],
   onBuildingAssociations,
+  onOpenBuildingFloorPlan,
+  floorPlanBuildingKeys,
   workspace = "buildings",
   mapView = "map",
   parcelCandidates = [],
@@ -617,6 +619,8 @@ export default function ObjectMapCanvas({
     onToggleBuildingPoint,
     nearbyBuildingSelections,
     onBuildingAssociations,
+    onOpenBuildingFloorPlan,
+    floorPlanBuildingKeys,
     workspace,
     mapView,
     parcelsVisible,
@@ -774,6 +778,23 @@ export default function ObjectMapCanvas({
         });
         return { bagFeatureIds, selectionPoints };
       };
+      const selectedManualKey = feature => {
+        if (!["manual", "user_drawn"].includes(feature?.properties?.source)) return null;
+        const id = feature.properties.local_id || feature.id;
+        return id ? `manual:${id}` : null;
+      };
+      const openBuildingFloorPlan = (interaction, keys, event) => {
+        if (!interaction.viewOnly || !interaction.onOpenBuildingFloorPlan || interaction.drawingTarget
+          || interaction.editingTarget || dragRef.current || featureEventHandled(event, handledEventsRef.current)) return false;
+        const uniqueKeys = [...new Set(keys.filter(Boolean))];
+        // More than one saved selection on a native roof/contour is ambiguous.
+        // The named list provides the explicit choice in that case.
+        if (uniqueKeys.length !== 1) return false;
+        if (interaction.floorPlanBuildingKeys && !interaction.floorPlanBuildingKeys.has(uniqueKeys[0])) return false;
+        markFeatureEventHandled(event, handledEventsRef.current);
+        interaction.onOpenBuildingFloorPlan(uniqueKeys[0]);
+        return true;
+      };
       const clearStandardBuildingHover = () => {
         hoveredStandardBuildingsRef.current.forEach(feature => applyStandardBuildingState(feature, { highlight: false }));
         hoveredStandardBuildingsRef.current.clear();
@@ -868,6 +889,17 @@ export default function ObjectMapCanvas({
           target: STANDARD_BUILDINGS_TARGET,
           handler: event => {
             const interaction = interactionsRef.current;
+            if (interaction.viewOnly) {
+              if (!interaction.onOpenBuildingFloorPlan || !event.feature) return false;
+              const record = standardBuildingStatesRef.current.get(mapboxBuildingFeatureKey(event.feature));
+              if (!record?.selected || record.bagFeatureIds.length + record.selectionPointIds.length !== 1) return false;
+              const selectionKey = record.bagFeatureIds.length ? `bag:${record.bagFeatureIds[0]}` : `point:${record.selectionPointIds[0]}`;
+              if (interaction.floorPlanBuildingKeys && !interaction.floorPlanBuildingKeys.has(selectionKey)) return false;
+              hoveredStandardBuildingsRef.current.set(mapboxBuildingFeatureKey(event.feature), event.feature);
+              applyStandardBuildingState(event.feature, { highlight: true });
+              map.getCanvas().style.cursor = "pointer";
+              return true;
+            }
             if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
             const key = mapboxBuildingFeatureKey(event.feature);
             hoveredStandardBuildingsRef.current.set(key, event.feature);
@@ -894,19 +926,30 @@ export default function ObjectMapCanvas({
           target: STANDARD_BUILDINGS_TARGET,
           handler: event => {
             const interaction = interactionsRef.current;
-            if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget || !event.feature) return false;
+            if (!event.feature || (!interaction.viewOnly && (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget))) return false;
+            if (interaction.viewOnly && (!interaction.onOpenBuildingFloorPlan || featureEventHandled(event, handledEventsRef.current))) return false;
             const clickCoordinate = event.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null;
             let groups;
             let pointAssociations;
             try {
               ({ groups, pointAssociations } = queryStandardBuildingGroups(map, interaction.buildingSelectionPoints, [event.feature]));
             } catch {
+              if (interaction.viewOnly) return false;
               interaction.onBuildingMatchUnavailable?.("De kaart wordt nog geladen. Probeer het gebouw over een moment opnieuw te selecteren.");
               return true;
             }
             const group = groups.find(item => item.identities.has(mapboxBuildingFeatureKey(event.feature)));
             if (!group) return true;
             const selectedEntries = selectedGroupEntries(group, interaction, pointAssociations);
+            if (interaction.viewOnly) {
+              const manualKeys = clickCoordinate ? (dataRef.current?.selected.features || [])
+                .filter(feature => featureStrictlyContainsCoordinate(feature, clickCoordinate)).map(selectedManualKey).filter(Boolean) : [];
+              return openBuildingFloorPlan(interaction, [
+                ...manualKeys,
+                ...selectedEntries.bagFeatureIds.map(id => `bag:${id}`),
+                ...selectedEntries.selectionPoints.map(point => `point:${point.id}`),
+              ], event);
+            }
             const existingPoints = (interaction.buildingSelectionPoints || []).filter(point => groupContainsCoordinate(group, [point.longitude, point.latitude])
               || selectedEntries.selectionPoints.some(item => item.id === point.id));
             if (existingPoints.length + selectedEntries.bagFeatureIds.length > 1) {
@@ -1016,6 +1059,13 @@ export default function ObjectMapCanvas({
 
       const toggleFeature = event => {
         const interaction = interactionsRef.current;
+        if (interaction.viewOnly) {
+          if (standardBuildingInteractionsInstalled) return;
+          const keys = (event.features || []).filter(feature => interaction.selectedBagFeatureIds.has(featureSourceId(feature)))
+            .map(feature => `bag:${featureSourceId(feature)}`);
+          openBuildingFloorPlan(interaction, keys, event);
+          return;
+        }
         if (standardBuildingInteractionsInstalled) return;
         if (featureEventHandled(event, handledEventsRef.current)) return;
         if (interaction.workspace !== "buildings" || interaction.disabled || interaction.drawingTarget || interaction.editingTarget) return;
@@ -1031,6 +1081,21 @@ export default function ObjectMapCanvas({
       });
       map.on("mouseleave", LAYER.candidatesFill, () => {
         if (!standardBuildingInteractionsInstalled && !dragRef.current) map.getCanvas().style.cursor = "";
+      });
+
+      map.on("click", LAYER.selectedFill, event => {
+        const interaction = interactionsRef.current;
+        const savedKeys = new Set((dataRef.current?.selected.features || []).map(selectedManualKey).filter(Boolean));
+        const keys = (event.features || []).map(selectedManualKey).filter(key => savedKeys.has(key));
+        openBuildingFloorPlan(interaction, keys, event);
+      });
+      map.on("mousemove", LAYER.selectedFill, event => {
+        if (!interactionsRef.current.viewOnly || !interactionsRef.current.onOpenBuildingFloorPlan) return;
+        const keys = [...new Set((event.features || []).map(selectedManualKey).filter(Boolean))];
+        if (keys.length === 1 && (!interactionsRef.current.floorPlanBuildingKeys || interactionsRef.current.floorPlanBuildingKeys.has(keys[0]))) map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", LAYER.selectedFill, () => {
+        if (!dragRef.current) map.getCanvas().style.cursor = "";
       });
 
       map.on("click", LAYER.parcelsFill, event => {
@@ -1229,7 +1294,7 @@ export default function ObjectMapCanvas({
   useEffect(() => {
     if (workspace === "buildings" && !interactionDisabled && !drawingTarget && !editingTarget) return;
     clearStandardBuildingHoverRef.current?.();
-  }, [interactionDisabled, drawingTarget, editingTarget, workspace]);
+  }, [interactionDisabled, drawingTarget, editingTarget, floorPlanBuildingKeys, workspace]);
 
   return (
     <div className="relative h-[540px] min-h-[420px] overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-inner lg:h-[680px]">

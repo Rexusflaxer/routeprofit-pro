@@ -6,6 +6,13 @@
       "type": "string",
       "description": "ID van het gekoppelde object"
     },
+    "building_selection_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Exacte sleutel van een opgeslagen gebouwselectie binnen object_id: bag:<source_feature_id>, manual:<local_id> of point:<id>. Null of afwezig is een bestaand objectbreed iOS-plan; een gebouwplan gebruikt nooit die fallback."
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -19,13 +26,13 @@
     },
     "revision": {
       "type": "number",
-      "description": "Revisienummer",
+      "description": "Revisienummer binnen object_id en building_selection_key; objectbrede plannen hebben een eigen reeks",
       "default": 1
     },
     "is_current": {
       "type": "boolean",
       "default": false,
-      "description": "Is dit de actieve versie?"
+      "description": "Is dit de actieve versie binnen object_id en building_selection_key? Per gebouw mag hoogstens één gepubliceerde versie actief zijn."
     },
     "title": {
       "type": [
@@ -38,7 +45,7 @@
         "string",
         "null"
       ],
-      "description": "Bron, bijv. ios_roomplan"
+      "description": "Bron, bijv. ios_roomplan of loq_desktop"
     },
     "captured_by": {
       "type": [
@@ -172,6 +179,28 @@
         "null"
       ],
       "additionalProperties": true
+    },
+    "desktop_document": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Onveranderlijke, volledig gevalideerde LOQ Desktop documentrevisie met meerdere verdiepingen. Alleen de objectindex bepaalt actuele publicatie; is_current blijft false voor dit nieuwe protocol."
+    },
+    "pdf_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gevalideerde private ManagedFile-verwijzing van de afdruk."
+    },
+    "desktop_operation_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Technische idempotencyhash voor herstel van een staged desktoppublicatie; bevat geen inhoud of labels."
     }
   },
   "required": [
@@ -181,25 +210,13 @@
     "is_current"
   ],
   "rls": {
-    "create": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
+    "create": false,
     "read": {
       "user_condition": {
         "role": "admin"
       }
     },
-    "update": {
-      "user_condition": {
-        "role": "admin"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "role": "admin"
-      }
-    }
+    "update": false,
+    "delete": false
   }
 }

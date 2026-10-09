@@ -21,6 +21,7 @@ import {
 
 const OBJECT_MAP_PLATFORM_ACTIONS = new Set([
   "get_object_map_configuration",
+  "get_object_building_floor_plan",
   "list_object_building_candidates",
   "list_object_parcel_candidates",
   "update_object_map_configuration",
