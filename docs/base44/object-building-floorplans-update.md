@@ -2,6 +2,8 @@
 
 ## Actuele opdracht — 9 oktober 2026
 
+**Uitgevoerd:** de drie functies, vier schemawijzigingen en webfrontend zijn op 9 oktober gepubliceerd. De live accountoverdracht slaagt, inclusief afwijzen van onjuiste proofs, dubbele gelijktijdige uitwisseling en hergebruik. De actuele bewijslast en resterende gebruikersproeven staan in [de desktopoverdracht](../development/loq-desktop-building-floorplans.md#publicatiestatus--9-oktober-2026-na-expliciete-toestemming). Onderstaande opdracht blijft beschikbaar voor gerichte herpublicatie.
+
 Herstel de ontbrekende live `/DesktopSignIn`-pagina door de volledige voorbereide desktopkoppeling uit deze GitHub-versie naar de bestaande LOQ-app (`698e307ed3aa4cab3729bbf1`) te synchroniseren en publiceren. De functionele implementatie en contracten staan in [de actuele desktopoverdracht](../development/loq-desktop-building-floorplans.md). De historische voorbereidingsopdracht verderop is geen beperking van deze actuele release.
 
 Neem samen mee:
@@ -13,7 +15,7 @@ Neem samen mee:
 
 Controleer uitsluitend aanwezigheid van de benodigde serversecret, zonder waarden te tonen. Aanmelding gebruikt `LOQ_DESKTOP_AUTH_KEY_B64` of domeingescheiden de bestaande `MANAGED_FILE_MASTER_KEY_B64`; private bestanden vereisen de bestaande ManagedFile-master. Geen bestaande encryptiesleutel roteren.
 
-Deze bestaande app is met GitHub gesynchroniseerd: publiceer na de gerichte push naar `main` via de Base44-Publish-flow. Controleer eerst dat de nieuwe pagina, drie functies en vier schemawijzigingen daadwerkelijk zijn gesynchroniseerd. Voer geen brede CLI-deploy of `entities push` vanuit een onvolledige map uit; dat kan andere serverresources vervangen of verwijderen. Als een named-function-deploy nodig blijkt, publiceer uitsluitend `desktopAuth`, `customerPlatformApi` en `mobileApi`, zonder `--force`.
+Deze bestaande app heeft een GitHub-koppeling, maar bij deze release bleek de gerichte push naar `main` nog niet in de sandbox te staan. Controleer daarom steeds de daadwerkelijke bron én runtime-registratie. Een sandboxbestand of checkpoint alleen bewijst niet dat een entity actief is. Publiceer de frontend pas met de juiste productieconfiguratie. Voer geen brede CLI-deploy of `entities push` vanuit een onvolledige map uit; dat kan andere serverresources vervangen of verwijderen. Als gerichte functiepublicatie nodig blijkt, publiceer uitsluitend `desktopAuth`, `customerPlatformApi` en `mobileApi`, zonder `--force`. Als volledige registry-sync nodig is, lees direct ervoor de volledige live registry, behoud alle overige schema's exact, pas uitsluitend de vier bedoelde schema's toe en verifieer direct erna dat niets is verwijderd of onbedoeld gewijzigd.
 
 Acceptatie: de live `/DesktopSignIn` toont de LOQ-aanmeldpagina, een ongeldige/verlopen poging geeft een herstelmelding, een geldige admin-aanmelding keert veilig terug naar de geïnstalleerde app, objecten/gebouwen openen en een concept kan online worden opgeslagen/heropend. Controleer de volledige gepubliceerde gebouwtekening, private bestandsrechten en compatibiliteit van de bestaande iOS-objectplannen. Een geslaagde frontendbuild of GitHub-push is geen bewijs dat deze live acceptatie al is voltooid.
 
