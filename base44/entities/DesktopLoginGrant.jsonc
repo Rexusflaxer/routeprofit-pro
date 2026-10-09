@@ -2,88 +2,6 @@
   "name": "DesktopLoginGrant",
   "type": "object",
   "properties": {
-<<<<<<< HEAD
-    "app_id": {
-      "type": "string"
-    },
-    "user_id": {
-      "type": "string"
-    },
-    "code_hash": {
-      "type": "string"
-    },
-    "state_hash": {
-      "type": "string"
-    },
-    "challenge": {
-      "type": "string"
-    },
-    "ciphertext": {
-      "type": "string"
-    },
-    "iv": {
-      "type": "string"
-    },
-    "expires_at": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "consumed_at": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "format": "date-time"
-    },
-    "status": {
-      "type": "string",
-      "enum": [
-        "pending",
-        "consumed"
-      ],
-      "default": "pending"
-    },
-    "version": {
-      "type": "number",
-      "default": 1
-    }
-  },
-  "required": [
-    "app_id",
-    "user_id",
-    "code_hash",
-    "state_hash",
-    "challenge",
-    "ciphertext",
-    "iv",
-    "expires_at",
-    "status",
-    "version"
-  ],
-  "rls": {
-    "create": {
-      "user_condition": {
-        "id": "__desktop_service_only__"
-      }
-    },
-    "read": {
-      "user_condition": {
-        "id": "__desktop_service_only__"
-      }
-    },
-    "update": {
-      "user_condition": {
-        "id": "__desktop_service_only__"
-      }
-    },
-    "delete": {
-      "user_condition": {
-        "id": "__desktop_service_only__"
-      }
-    }
-  }
-}
-=======
     "app_id": {"type": "string"},
     "user_id": {"type": "string"},
     "code_hash": {"type": "string"},
@@ -104,4 +22,3 @@
     "delete": {"user_condition": {"id": "__desktop_service_only__"}}
   }
 }
->>>>>>> origin/main
