@@ -1,0 +1,48 @@
+appId: nl.loq.desktop
+productName: LOQ Desktop
+copyright: Copyright LOQ
+directories:
+  output: desktop/release
+files:
+  - desktop/main.mjs
+  - desktop/preload.cjs
+  - desktop/security.mjs
+  - desktop/dist/**/*
+  - package.json
+  - '!node_modules/**/*'
+extraResources:
+  - from: desktop/licenses
+    to: licenses
+extraMetadata:
+  main: desktop/main.mjs
+  version: 0.1.1
+asar: true
+npmRebuild: false
+protocols:
+  - name: LOQ Desktop aanmelden
+    schemes:
+      - loq-desktop
+mac:
+  icon: desktop/assets/loq-desktop.icns
+  category: public.app-category.productivity
+  minimumSystemVersion: '13.0'
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: desktop/entitlements.mac.plist
+  entitlementsInherit: desktop/entitlements.mac.plist
+  notarize: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+dmg:
+  title: LOQ Desktop
+  contents:
+    - x: 130
+      y: 180
+    - x: 410
+      y: 180
+      type: link
+      path: /Applications
+artifactName: 'LOQ-Desktop-${version}-${arch}.${ext}'

@@ -1,6 +1,6 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import ObjectMapOverview, { objectMapInventoryRows } from "@/components/objects/ObjectMapOverview";
 
 const collection = features => ({ type: "FeatureCollection", features });
@@ -15,6 +15,45 @@ const configuration = overrides => ({ building_selection_mode: "manual", selecte
   object_area_geojson: collection([]), ...overrides });
 
 describe("ObjectMapOverview", () => {
+  it("opent plattegronden via bereikbare gebouwknoppen met de opgeslagen BAG-, punt- en contouridentiteit", () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    render(<ObjectMapOverview configuration={configuration({ selected_bag_feature_ids: ["bag-1"], building_polygon_geojson: collection([bag]),
+      manual_building_geojson: collection([manual]), building_selection_points: [{ id: "point-1", latitude: 52, longitude: 5 }],
+      building_labels: { "bag:bag-1": "Receptie", "point:point-1": "Opslag", "manual:own-1": "Werkplaats" },
+    })} onOpenBuildingFloorPlan={onOpenBuildingFloorPlan} />);
+    ["Receptie", "Opslag", "Werkplaats"].forEach(name => {
+      const button = screen.getByRole("button", { name: `Plattegrond van ${name} bekijken` });
+      expect(button).toHaveAttribute("type", "button");
+      fireEvent.click(button);
+    });
+    expect(onOpenBuildingFloorPlan.mock.calls).toEqual([["bag:bag-1", "Receptie"], ["point:point-1", "Opslag"], ["manual:own-1", "Werkplaats"]]);
+  });
+
+  it("opent geen plattegrond voor terrein, historische automatische contouren of contouren zonder stabiele identiteit", () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const { id: _id, ...withoutId } = manual;
+    const old = { ...withoutId, properties: {} };
+    const rendered = render(<ObjectMapOverview configuration={configuration({ manual_building_geojson: collection([old]) })} onOpenBuildingFloorPlan={onOpenBuildingFloorPlan} />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    rendered.rerender(<ObjectMapOverview configuration={configuration({ building_selection_mode: "automatic", building_polygon_geojson: collection([bag]) })} onOpenBuildingFloorPlan={onOpenBuildingFloorPlan} />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    rendered.rerender(<ObjectMapOverview configuration={configuration({ object_area_geojson: collection([manual]) })} workspace="terrain" onOpenBuildingFloorPlan={onOpenBuildingFloorPlan} />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onOpenBuildingFloorPlan).not.toHaveBeenCalled();
+  });
+
+  it("gebruikt de serverwhitelist zodat gesaneerde legacy-ID's geen gebouwplattegrondactie krijgen", () => {
+    const onOpenBuildingFloorPlan = vi.fn();
+    const normalizedLegacy = { ...manual, id: undefined, properties: { source: "manual", local_id: "manual:1" } };
+    render(<ObjectMapOverview configuration={configuration({ selected_bag_feature_ids: ["bag-1"], building_polygon_geojson: collection([bag]),
+      manual_building_geojson: collection([normalizedLegacy]), building_labels: { "bag:bag-1": "Receptie", "manual:manual:1": "Oude contour" },
+    })} onOpenBuildingFloorPlan={onOpenBuildingFloorPlan} floorPlanBuildingKeys={new Set(["bag:bag-1"])} />);
+    expect(screen.getByText("Oude contour")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plattegrond van Oude contour bekijken" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Plattegrond van Receptie bekijken" }));
+    expect(onOpenBuildingFloorPlan).toHaveBeenCalledExactlyOnceWith("bag:bag-1", "Receptie");
+  });
+
   it("toont opgeslagen BAG-gebouwen in de standaard inventaristabel zonder eigen acties of kaart", () => {
     render(<ObjectMapOverview configuration={configuration({ selected_bag_feature_ids: ["bag-1"], building_polygon_geojson: collection([bag]), building_labels: { "bag:bag-1": "Receptie" } })} workspace="buildings" />);
     const table = screen.getByRole("table", { name: "Opgeslagen gebouwen" });

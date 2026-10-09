@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getConfiguration, listCandidates, listParcels, updateConfiguration, guardState, navigationRequest, canvasProps } = vi.hoisted(() => ({
+const { getConfiguration, listCandidates, listParcels, updateConfiguration, guardState, navigationRequest, canvasProps, floorPlanRead } = vi.hoisted(() => ({
   getConfiguration: vi.fn(),
   listCandidates: vi.fn(),
   listParcels: vi.fn(),
@@ -12,6 +12,7 @@ const { getConfiguration, listCandidates, listParcels, updateConfiguration, guar
   guardState: vi.fn(),
   navigationRequest: vi.fn(),
   canvasProps: vi.fn(),
+  floorPlanRead: vi.fn(),
 }));
 
 // All service calls below are explicitly mocked. Do not initialize the real
@@ -19,7 +20,21 @@ const { getConfiguration, listCandidates, listParcels, updateConfiguration, guar
 vi.mock("@/components/customers/customerDossierUtils", () => ({
   createCustomerMutationKey: () => "unused-ui-test-key",
   invokeCustomerPlatformMutation: () => { throw new Error("Unexpected platform mutation in UI test"); },
-  invokeCustomerPlatformRead: () => { throw new Error("Unexpected platform read in UI test"); },
+  invokeCustomerPlatformRead: payload => {
+    if (payload.action === "get_object_building_floor_plan") return floorPlanRead(payload);
+    throw new Error("Unexpected platform read in UI test");
+  },
+}));
+
+vi.mock("@/lib/managedFiles", () => ({
+  prepareManagedFilePreview: () => { throw new Error("Unexpected file request in map integration test"); },
+  revokeManagedFilePreview: vi.fn(),
+}));
+
+vi.mock("@/api/base44Client", () => ({
+  base44: { entities: {}, functions: { invoke: () => { throw new Error("Unexpected unmocked SDK request in map UI test"); } } },
+  base44LatestFunctions: null,
+  hasPinnedFunctionsVersion: false,
 }));
 
 vi.mock("@/components/objects/objectMapWorkflow", async importOriginal => ({
@@ -67,6 +82,7 @@ vi.mock("@/components/objects/ObjectMapCanvas", () => ({
     <button type="button" disabled={props.disabled || !props.parcelSelectionEnabled} onClick={() => props.onToggleParcel(props.parcelCandidates.at(-1)?.id)}>Laatste perceel op kaart selecteren</button>
     <button type="button" disabled={props.disabled || props.editingTarget} onClick={() => props.onRemoveTerrainFeature(0)}>Eerste terreindeel op kaart verwijderen</button>
     <button type="button">Passend tonen</button>
+    {props.onOpenBuildingFloorPlan && <button type="button" onClick={() => props.onOpenBuildingFloorPlan("bag:bag-1")}>Geselecteerd gebouw openen</button>}
     <output aria-label="Geselecteerde kaartpanden">{(props.selectedBagFeatureIds || []).join(",")}</output>
     <output aria-label="Kaartstatus">{JSON.stringify({ view: props.mapView, workspace: props.workspace, viewOnly: props.viewOnly, disabled: props.disabled, editingTarget: props.editingTarget, parcelSelectionEnabled: props.parcelSelectionEnabled, highlightedBuildingKey: props.highlightedBuildingKey, points: props.buildingSelectionPoints, buildings: props.selectedBuildings, labels: props.buildingLabels, terrain: props.terrain, parcels: props.parcelCandidates.map(feature => feature.id) })}</output>
   </div>;
@@ -141,6 +157,36 @@ describe("ObjectMapTab", () => {
     listCandidates.mockResolvedValue({ items: [candidate], total: 1, source: "PDOK BAG", source_retrieved_at: "2026-09-06T09:00:00Z" });
     listParcels.mockResolvedValue({ items: [{ ...candidate, id: "parcel-1", properties: { source: "pdok_brk", source_feature_id: "parcel-1", label: "ROTTERDAM A 12" } }], source: "PDOK Kadastrale kaart" });
     updateConfiguration.mockResolvedValue({ ...configuration, expected_version: 5, building_selection_mode: "manual", selected_bag_feature_ids: ["bag-1"], map_geometry_status: "configured", map_geometry_revision: 1 });
+    floorPlanRead.mockImplementation(async payload => ({ customer_id: payload.customer_id, object_id: payload.object_id, building_selection_key: payload.building_selection_key, floor_plan: null }));
+  });
+
+  it("opent een opgeslagen gebouw vanuit overzicht, viewerlijst en kaart met exact dezelfde key", async () => {
+    getConfiguration.mockResolvedValue({ ...configuration, building_selection_mode: "manual", building_floor_plan_selection_keys: ["bag:bag-1"], selected_bag_feature_ids: ["bag-1"], building_labels: { "bag:bag-1": "Receptie" }, building_polygon_geojson: { type: "FeatureCollection", features: [candidate] } });
+    renderOverview();
+    fireEvent.click(await screen.findByRole("button", { name: "Plattegrond van Receptie bekijken" }));
+    expect(await screen.findByText("Voeg een plattegrond toe via de LOQ desktop app.")).toBeInTheDocument();
+    expect(floorPlanRead).toHaveBeenLastCalledWith({ action: "get_object_building_floor_plan", customer_id: "customer-1", object_id: "object-1", building_selection_key: "bag:bag-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Weergeven op kaart" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Plattegrond van Receptie bekijken" }));
+    expect(await screen.findByRole("dialog", { name: "Receptie" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Geselecteerd gebouw openen" }));
+    expect(await screen.findByRole("dialog", { name: "Receptie" })).toBeInTheDocument();
+    expect(floorPlanRead).toHaveBeenCalledTimes(3);
+    expect(updateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("biedt geen gebouwplattegrond aan voor een automatisch voorgesteld of onopgeslagen gebouw", async () => {
+    renderOverview();
+    expect(await screen.findByRole("button", { name: "Weergeven op kaart" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Plattegrond van/ })).not.toBeInTheDocument();
+    await openEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Exact vastleggen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Gebouw zonder BAG selecteren" }));
+    await waitFor(() => expect(mapState().points).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: /Plattegrond van|Geselecteerd gebouw openen/ })).not.toBeInTheDocument();
+    expect(floorPlanRead).not.toHaveBeenCalled();
   });
 
   it.each(["view", "edit"])("koppelt terreinhover en toetsenbordfocus aan de stabiele id in %s zonder het dossier te wijzigen", async mode => {

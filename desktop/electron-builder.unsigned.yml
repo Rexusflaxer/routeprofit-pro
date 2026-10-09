@@ -1,0 +1,8 @@
+extends: desktop/electron-builder.yml
+artifactName: 'LOQ-Desktop-${version}-${arch}-UNSIGNED-development.${ext}'
+mac:
+  identity: null
+  notarize: false
+  extendInfo:
+    CFBundleDisplayName: LOQ Desktop (ontwikkeling)
+    NSHumanReadableCopyright: LOQ — Development build. Not Developer ID signed or notarized.
