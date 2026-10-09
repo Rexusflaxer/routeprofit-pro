@@ -103,6 +103,27 @@ export function desktopLegacyFloor(document: any) {
 export function createBuildingFloorPlanHandlers(deps: RecordValue) {
   const { entity, ApiError, requireScope, selectionKeys, versionOf, sha256, nowIso, requireRecord, audit } = deps;
   const fail = (status: number, message: string, code: string, extra: RecordValue = {}) => { throw new ApiError(status, message, { code, ...extra }); };
+  const assetStep = async <T>(code: string, status: number, run: () => Promise<T>): Promise<T> => {
+    try { return await run(); }
+    catch (error) {
+      // Preserve our existing integrity/configuration errors, never provider text.
+      if (error instanceof ApiError) throw error;
+      return fail(status, 'Het beveiligde plattegrondbestand kon niet worden geopend', code);
+    }
+  };
+  const fetchFailureReason = (error: unknown) => {
+    // Inspect bounded transport diagnostics only to select a fixed public enum.
+    // Neither these messages nor URLs/headers are returned or logged.
+    const item = error && typeof error === 'object' ? error as RecordValue : {};
+    const cause = item.cause && typeof item.cause === 'object' ? item.cause : {};
+    const names = [item.name, cause.name].filter(value => typeof value === 'string').map(value => value.slice(0, 100));
+    const text = [item.message, cause.message, item.code, cause.code].filter(value => typeof value === 'string').map(value => value.slice(0, 2048)).join(' ').toLowerCase();
+    if (names.includes('TimeoutError') || /\b(?:timeout|timed out|etimedout|und_err_connect_timeout)\b/.test(text)) return 'timeout';
+    if (/redirect/.test(text)) return /unsupported|not supported|not implemented|won.t be implemented|invalid redirect (?:mode|value)/.test(text) ? 'redirect_unsupported' : 'redirect';
+    if (/\b(?:certificate|cert_|x509|tls|ssl|unknown issuer)\b|cert_has_expired|unable_to_verify_leaf_signature/.test(text)) return 'tls';
+    if (/\b(?:dns|getaddrinfo|enotfound|eai_again)\b|name resolution|failed to lookup address|nodename nor servname/.test(text)) return 'dns';
+    return 'unknown';
+  };
   const integer = (value: any, name: string) => { if (!Number.isSafeInteger(value) || value < 0) fail(400, `${name} is verplicht en moet een positief geheel getal of nul zijn`, 'invalid_floor_plan_request'); return value; };
   const dict = (value: any) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const indexOf = (object: any) => dict(object.floor_plan_workspace_index);
@@ -184,7 +205,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     if (body.action === 'read_object_building_floor_plan_asset') {
       const file = await assetScope(base44, state, body.file_id, ['background', 'preview', 'pdf', 'logo']);
       const content = await decryptAsset(base44, file);
-      await entity(base44, 'ManagedFileAccessLog').create({ managed_file_id: file.id, action: 'download', actor_user_id: user.id, owner_type: 'object', owner_id: state.object.id, source_entity: WORKSPACE, source_entity_id: file.source_entity_id, success: true, created_at: nowIso(), metadata: { building_key_hash: state.keyHash } });
+      await assetStep('floor_plan_asset_audit_failed', 503, () => entity(base44, 'ManagedFileAccessLog').create({ managed_file_id: file.id, action: 'download', actor_user_id: user.id, owner_type: 'object', owner_id: state.object.id, source_entity: WORKSPACE, source_entity_id: file.source_entity_id, success: true, created_at: nowIso(), metadata: { building_key_hash: state.keyHash } }));
       return { file_id: file.id, filename: file.download_filename, mime_type: file.mime_type, content_base64: content };
     }
     return projection(base44, state, readEntry(state.object, state.keyHash));
@@ -326,29 +347,39 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     return fail(409, 'Bestand is beveiligd opgeslagen; probeer met dezelfde opslagsleutel opnieuw', 'floor_plan_busy', { retryable: true });
   };
   const decryptAsset = async (base44: any, file: any) => {
-    const signed = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: file.file_uri, expires_in: 60 });
+    const signed = await assetStep<any>('floor_plan_asset_signing_failed', 502, () => base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: file.file_uri, expires_in: 60 }));
     if (!signed?.signed_url || !String(signed.signed_url).startsWith('https://')) return fail(502, 'Het bestand is niet beschikbaar', 'floor_plan_asset_unavailable');
-    const response = await fetch(signed.signed_url, { redirect: 'error' });
+    let response: Response;
+    // The hosted runtime supports manual/follow. Manual preserves the no-redirect
+    // rule: every 3xx response is rejected by the existing response.ok check.
+    try { response = await fetch(signed.signed_url, { redirect: 'manual' }); }
+    catch (error) { return fail(502, 'Het beveiligde plattegrondbestand kon niet worden opgehaald', 'floor_plan_asset_fetch_failed', {reason: fetchFailureReason(error)}); }
     if (!response.ok || Number(response.headers.get('content-length')) > MAX_ASSET_BYTES + 16) return fail(502, 'Het bestand is niet beschikbaar', 'floor_plan_asset_unavailable');
     if (!response.body) return fail(502, 'Het bestand is leeg', 'floor_plan_asset_unavailable');
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      total += chunk.value.byteLength;
-      if (total > MAX_ASSET_BYTES + 16) { await reader.cancel(); return fail(409, 'Het bestand is te groot', 'floor_plan_asset_integrity'); }
-      chunks.push(chunk.value);
-    }
-    const encrypted = new Uint8Array(total);
-    let position = 0;
-    for (const chunk of chunks) { encrypted.set(chunk, position); position += chunk.byteLength; }
-    if (encrypted.length > MAX_ASSET_BYTES + 16 || to64(await crypto.subtle.digest('SHA-256', encrypted)) !== file.ciphertext_sha256) return fail(409, 'Bestandscontrole mislukt', 'floor_plan_asset_integrity');
-    const rawKey = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: from64(file.key_wrap_iv) }, await master(['decrypt']), from64(file.encrypted_data_key));
-    const key = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
-    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: from64(file.encryption_iv) }, key, encrypted);
-    if (to64(await crypto.subtle.digest('SHA-256', plaintext)) !== file.plaintext_sha256) return fail(409, 'Bestandscontrole mislukt', 'floor_plan_asset_integrity');
+    const encrypted = await assetStep('floor_plan_asset_stream_failed', 502, async () => {
+      const reader = response.body!.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        total += chunk.value.byteLength;
+        if (total > MAX_ASSET_BYTES + 16) { await reader.cancel(); return fail(409, 'Het bestand is te groot', 'floor_plan_asset_integrity'); }
+        chunks.push(chunk.value);
+      }
+      const bytes = new Uint8Array(total);
+      let position = 0;
+      for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
+      return bytes;
+    });
+    const cipherHash = await assetStep('floor_plan_asset_cipher_hash_failed', 503, () => crypto.subtle.digest('SHA-256', encrypted));
+    if (encrypted.length > MAX_ASSET_BYTES + 16 || to64(cipherHash) !== file.ciphertext_sha256) return fail(409, 'Bestandscontrole mislukt', 'floor_plan_asset_integrity');
+    const masterKey = await assetStep('floor_plan_asset_master_key_failed', 503, () => master(['decrypt']));
+    const rawKey = await assetStep('floor_plan_asset_key_unwrap_failed', 503, () => crypto.subtle.decrypt({ name: 'AES-GCM', iv: from64(file.key_wrap_iv) }, masterKey, from64(file.encrypted_data_key)));
+    const key = await assetStep('floor_plan_asset_key_import_failed', 503, () => crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']));
+    const plaintext = await assetStep('floor_plan_asset_decryption_failed', 409, () => crypto.subtle.decrypt({ name: 'AES-GCM', iv: from64(file.encryption_iv) }, key, encrypted));
+    const plaintextHash = await assetStep('floor_plan_asset_plaintext_hash_failed', 503, () => crypto.subtle.digest('SHA-256', plaintext));
+    if (to64(plaintextHash) !== file.plaintext_sha256) return fail(409, 'Bestandscontrole mislukt', 'floor_plan_asset_integrity');
     return to64(plaintext);
   };
   const committedFloorPlans = (object: any, records: any[]) => {
