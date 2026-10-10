@@ -1,3 +1,4 @@
+import {ROOM_SCAN_DESKTOP_ACTIONS,roomScanForRequest} from '../../shared/floorPlans/buildingRoomScanRuntime.ts';
 import { ACTIONS as BUILDING_COLLABORATION_ACTIONS } from '../../shared/floorPlans/buildingCollaboration.mjs';
 import { createBase44BuildingCollaboration } from '../../shared/floorPlans/buildingCollaborationBase44.mjs';
 const buildingCollaborationActions = new Set(Object.values(BUILDING_COLLABORATION_ACTIONS));
@@ -17899,6 +17900,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
     const body = await req.json().catch(() => ({})) as LooseRecord;
     action = asString(body.action);
     if (!action) throw new ApiError(400, 'action is verplicht');
+    if (ROOM_SCAN_DESKTOP_ACTIONS.has(action)) return json({ok:true,...(await roomScanForRequest(base44).handle(action,user,body))});
     if (buildingCollaborationActions.has(action)) {
       const collaboration = createBase44BuildingCollaboration({base44, entity: getEntity, floorPlans: buildingFloorPlanHandlers, validateDesktopDocument, ApiError, sha256,
         audit: async (event: LooseRecord) => recordMutationResult(base44, user, event.action, event.operation_id, {resource_type: 'ObjectBuildingFloorPlanWorkspace', resource_id: event.workspace_id, workspace_version: event.version, category: 'operations', summary: 'Gezamenlijke gebouwtekening bijgewerkt'}, {customer_id: body.customer_id, object_id: body.object_id, building_selection_key: body.building_selection_key}, await sha256(`${event.action}:${event.operation_id}:${event.version}`), `${body.object_id}:${body.building_selection_key}`),
@@ -18066,7 +18068,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
     return json({ ok: true, ...result, replayed: Boolean(result.replayed) }, action.startsWith('create_') ? 201 : 200);
   } catch (error) {
     const status = Number((error as LooseRecord)?.status || 500);
-    if (buildingCollaborationActions.has(action) || ANALYSIS_ACTIONS.has(action) || buildingFloorPlanHandlers.readActions.has(action) || buildingFloorPlanHandlers.mutationActions.has(action) || buildingReferenceHandlers.readActions.has(action) || buildingReferenceHandlers.mutationActions.has(action)) {
+    if (ROOM_SCAN_DESKTOP_ACTIONS.has(action) || buildingCollaborationActions.has(action) || ANALYSIS_ACTIONS.has(action) || buildingFloorPlanHandlers.readActions.has(action) || buildingFloorPlanHandlers.mutationActions.has(action) || buildingReferenceHandlers.readActions.has(action) || buildingReferenceHandlers.mutationActions.has(action)) {
       console.error('[customerPlatformApi]', requestId, { action, status, code: (error as LooseRecord)?.details?.code || 'floor_plan_request_failed' });
     } else {
       console.error('[customerPlatformApi]', requestId, error);

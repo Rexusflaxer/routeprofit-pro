@@ -1,0 +1,47 @@
+{
+  "name": "ObjectBuildingRoomScanArchive",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "building_selection_key": {
+      "type": "string"
+    },
+    "workspace_id": {
+      "type": "string"
+    },
+    "capture_session_id": {
+      "type": "string"
+    },
+    "digest": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "customer_id",
+    "object_id",
+    "building_selection_key",
+    "workspace_id",
+    "capture_session_id",
+    "digest",
+    "created_at",
+    "manifest"
+  ],
+  "rls": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  }
+}

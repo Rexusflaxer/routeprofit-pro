@@ -1,3 +1,4 @@
+import {ROOM_SCAN_MOBILE_ACTIONS,handleMobileRoomScan} from '../../shared/floorPlans/buildingRoomScanRuntime.ts';
 // base44/functions/_shared/mobile/createMobileRouteExecution.ts
 import { createClientFromRequest } from "npm:@base44/sdk@0.8.25";
 function nowIso() {
@@ -1764,6 +1765,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.clone().json().catch(() => ({}));
     const action = String(body?.action || "");
+    if (ROOM_SCAN_MOBILE_ACTIONS.has(action)) return handleMobileRoomScan(req, body, createClientFromRequest);
     const handler = HANDLERS[action];
     if (!handler) {
       return json({

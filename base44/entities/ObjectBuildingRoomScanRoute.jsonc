@@ -1,0 +1,57 @@
+{
+  "name": "ObjectBuildingRoomScanRoute",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "building_selection_key": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "lookup_key": {
+      "type": "string"
+    },
+    "capture_session_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "floor_id": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": "string"
+    },
+    "map_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "kind",
+    "user_id",
+    "customer_id",
+    "object_id",
+    "building_selection_key",
+    "document_id",
+    "floor_id",
+    "map_version",
+    "expires_at"
+  ],
+  "rls": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  }
+}
