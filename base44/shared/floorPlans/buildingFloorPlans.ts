@@ -171,7 +171,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
   };
   const projection = async (base44: any, state: any, entry: any) => ({
     customer_id: state.customer.id, object_id: state.object.id, building_selection_key: state.key, configuration_version: versionOf(state.object),
-    capabilities: { building_references: true, document_versions: [1, 2] },
+    capabilities: { building_references: true, document_versions: [1, 2], collaboration_protocol: 1 },
     workspace: entry?.snapshot_id ? { id: entry.id, version: entry.version, document: await snapshot(base44, state.object, state.key, entry), current_published_floor_plan_id: entry.current_published_floor_plan_id || null, published_revision: entry.published_revision || 0, updated_at: entry.updated_at } : null,
   });
   const keyFor = async (user: any, body: any) => {
@@ -250,6 +250,9 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
       await emitAudit(base44, user, body, prior.entry || entry, operation, hash);
       return { ...(await projection(base44, state, prior.entry || entry)), ...(prior.file_id ? { file_id: prior.file_id, mime_type: prior.mime_type } : {}), replayed: true };
     }
+    // Committed legacy receipts above remain replayable. New whole-document
+    // writes can no longer bypass the authoritative collaboration protocol.
+    if (body.action !== 'upload_object_building_floor_plan_asset') fail(409, 'Werk LOQ Desktop bij om samen aan deze tekening te werken.', 'floor_plan_client_update_required');
     state = await scope(base44, body, true);
     entry = readEntry(state.object, state.keyHash);
     if (body.action === 'upload_object_building_floor_plan_asset') return uploadAsset(base44, user, body, state, operation, hash);
@@ -455,6 +458,6 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     if (files[0].metadata?.request_fingerprint !== requestFingerprint) fail(409, 'Deze importsleutel is eerder met andere inhoud gebruikt', 'floor_plan_idempotency_conflict');
     return assetScope(base44, state, files[0].id, [`reference_${suffix}`]);
   };
-  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset, storeReferenceAsset, findReferenceAsset } };
+  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset, storeReferenceAsset, findReferenceAsset, validateReferences, desktopLegacyFloor } };
 
 }
