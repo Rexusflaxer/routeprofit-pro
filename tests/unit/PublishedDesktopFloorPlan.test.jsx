@@ -22,6 +22,15 @@ const pdf = (url = 'blob:private-pdf', filename = 'Kantoor-ontruiming.pdf') => (
 beforeEach(() => {prepare.mockReset();revoke.mockReset();});
 
 describe('published desktop drawing and PDF', () => {
+  it('opens a v2 source-linked document and shows attribution for the selected floor', () => {
+    const value=plan(),doc=value.desktop_document;doc.schemaVersion=2;
+    doc.geoReference={crs:'EPSG:28992',origin:{x:201000,y:494000},rotation:0,verticalDatum:'NAP',axis:'x-east-y-north'};
+    doc.buildingReferences=[{id:'ref-1',manifestFileId:'manifest-1',manifestSha256:'a'.repeat(64),floorId:doc.floors[0].id,wallIds:['wall-ground'],usedParts:['footprint'],interpretation:'closed_building',measurementStatus:'unchecked',attributions:['BGT · CC0 1.0']}];
+    render(<PublishedDesktopFloorPlan plan={value}/>);
+    expect(screen.getByText('Receptie')).toBeInTheDocument();expect(screen.getByText('Bronnen: BGT · CC0 1.0')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox',{name:'Verdieping'}),{target:{value:doc.floors[1].id}});
+    expect(screen.queryByText('Bronnen: BGT · CC0 1.0')).not.toBeInTheDocument();expect(screen.getByText('Vergaderruimte')).toBeInTheDocument();
+  });
   it('shows the complete selected floor and distinguishes installation from evacuation symbols', () => {
     const value = plan(); render(<PublishedDesktopFloorPlan plan={value}/>);
     expect(screen.getByRole('img',{name:'Plattegrond Begane grond'})).toBeInTheDocument();

@@ -32,11 +32,12 @@ export function validateDesktopDocument(input: any, ApiError: any) {
   let serialized: string;
   try { serialized = JSON.stringify(input); } catch { return fail(); }
   if (!serialized || new TextEncoder().encode(serialized).length > MAX_DOCUMENT_BYTES) fail('Het tekenbestand is te groot (maximaal 4 MiB)');
-  object(input, ['schemaVersion', 'id', 'title', 'unit', 'floors']);
-  if (input.schemaVersion !== 1 || input.unit !== 'm') fail('Deze tekenbestandversie of maateenheid wordt niet ondersteund');
+  const version2 = input?.schemaVersion === 2;
+  object(input, ['schemaVersion', 'id', 'title', 'unit', 'floors', ...(version2 ? ['geoReference', 'buildingReferences'] : [])]);
+  if (![1, 2].includes(input.schemaVersion) || input.unit !== 'm') fail('Deze tekenbestandversie of maateenheid wordt niet ondersteund');
   const documentId = id(input.id);
-  return {
-    schemaVersion: 1, id: documentId, title: text(input.title), unit: 'm',
+  const document: RecordValue = {
+    schemaVersion: input.schemaVersion, id: documentId, title: text(input.title), unit: 'm',
     floors: array(input.floors, 30, 1).map((floor: any) => {
       object(floor, ['id', 'name', 'elevation', 'walls', 'rooms', 'openings', 'symbols', 'routes', 'background', 'print']);
       const floorId = id(floor.id);
@@ -86,6 +87,26 @@ export function validateDesktopDocument(input: any, ApiError: any) {
       } };
     }),
   };
+  if (version2 && input.geoReference !== undefined) {
+    const geo = object(input.geoReference, ['crs', 'origin', 'rotation', 'verticalDatum', 'axis']);
+    object(geo.origin, ['x', 'y']);
+    document.geoReference = { crs: choice(geo.crs, ['EPSG:28992']), origin: { x: number(geo.origin.x, -50000, 400000), y: number(geo.origin.y, 250000, 700000) }, rotation: number(geo.rotation, -3600, 3600), verticalDatum: choice(geo.verticalDatum, ['NAP']), axis: choice(geo.axis, ['x-east-y-north']) };
+  }
+  if (version2 && input.buildingReferences !== undefined) {
+    document.buildingReferences = array(input.buildingReferences, 60).map((item: any) => {
+      object(item, ['id', 'manifestFileId', 'manifestSha256', 'usedParts', 'floorId', 'wallIds', 'interpretation', 'measurementStatus', 'attributions', 'modelFileId']);
+      if (typeof item.manifestSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.manifestSha256)) fail('Ongeldige broncontrole');
+      const usedParts = array(item.usedParts, 3, 1).map((part: any) => choice(part, ['footprint', 'aerial', 'roof']));
+      if (new Set(usedParts).size !== usedParts.length || usedParts.includes('roof') !== Boolean(item.modelFileId)) fail();
+      // These IDs describe the original imported parts, including parts the
+      // user subsequently removed. They never authorize access to other data.
+      const wallIds = array(item.wallIds, 5000).map(reference);
+      if (new Set(wallIds).size !== wallIds.length) fail();
+      return { id: id(item.id), manifestFileId: reference(item.manifestFileId), manifestSha256: item.manifestSha256, usedParts, ...(item.modelFileId ? { modelFileId: reference(item.modelFileId) } : {}), floorId: reference(item.floorId), wallIds, interpretation: choice(item.interpretation, ['closed_building', 'open_structure']), measurementStatus: choice(item.measurementStatus, ['unchecked', 'user_checked']), attributions: array(item.attributions, 8).map((value: any) => text(value, 400, false)) };
+    });
+    if (document.buildingReferences.length && !document.geoReference) fail('De geografische bronkoppeling ontbreekt');
+  }
+  return document;
 }
 
 export function desktopLegacyFloor(document: any) {
@@ -150,6 +171,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
   };
   const projection = async (base44: any, state: any, entry: any) => ({
     customer_id: state.customer.id, object_id: state.object.id, building_selection_key: state.key, configuration_version: versionOf(state.object),
+    capabilities: { building_references: true, document_versions: [1, 2] },
     workspace: entry?.snapshot_id ? { id: entry.id, version: entry.version, document: await snapshot(base44, state.object, state.key, entry), current_published_floor_plan_id: entry.current_published_floor_plan_id || null, published_revision: entry.published_revision || 0, updated_at: entry.updated_at } : null,
   });
   const keyFor = async (user: any, body: any) => {
@@ -185,8 +207,16 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     return file;
   };
   const validateReferences = async (base44: any, state: any, document: any) => {
+    for (const reference of document.buildingReferences || []) {
+      const file = await assetScope(base44, state, reference.manifestFileId, ['reference_manifest']);
+      if (file.metadata?.manifest_sha256 !== reference.manifestSha256 || file.metadata?.reference_interpretation !== reference.interpretation || reference.usedParts.some((part: string) => !file.metadata?.reference_parts?.includes(part)) || JSON.stringify(reference.attributions) !== JSON.stringify(file.metadata?.reference_attributions)) fail(409, 'De bronkoppeling past niet bij het opgeslagen importpakket', 'building_reference_manifest_mismatch');
+      if (JSON.stringify(canonical(file.metadata?.reference_georeference)) !== JSON.stringify(canonical(document.geoReference))) fail(409, 'De geografische bronkoppeling is gewijzigd', 'building_reference_georeference_mismatch');
+      if (reference.modelFileId && file.metadata?.reference_model_file_id !== reference.modelFileId) fail(409, 'Het buitenmodel hoort bij een ander importpakket', 'building_reference_model_mismatch');
+      if (reference.modelFileId) await assetScope(base44, state, reference.modelFileId, ['reference_model']);
+      for (const assetId of file.metadata?.reference_asset_ids || []) await assetScope(base44, state, assetId, ['reference_aerial', 'reference_model']);
+    }
     for (const id of new Set<string>(document.floors.map((f: any) => f.print.logoFileId).filter(Boolean))) await assetScope(base44, state, id, ['logo']);
-    for (const id of new Set<string>(document.floors.filter((f: any) => f.background).map((f: any) => f.background.fileId))) await assetScope(base44, state, id, ['background']);
+    for (const id of new Set<string>(document.floors.filter((f: any) => f.background).map((f: any) => f.background.fileId))) await assetScope(base44, state, id, ['background', 'reference_aerial']);
     for (const id of new Set<string>(document.floors.flatMap((f: any) => f.symbols.map((s: any) => s.installationId).filter(Boolean)))) {
       const installation = await requireRecord(base44, 'ObjectInstallation', id, 'Installatie');
       if (installation.object_id !== state.object.id || installation.customer_id !== state.customer.id || installation.status === 'archived') fail(409, 'Een symbool verwijst naar een niet beschikbare objectinstallatie', 'floor_plan_installation_unavailable');
@@ -203,7 +233,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
   const read = async (base44: any, user: any, body: any) => {
     const state = await scope(base44, body);
     if (body.action === 'read_object_building_floor_plan_asset') {
-      const file = await assetScope(base44, state, body.file_id, ['background', 'preview', 'pdf', 'logo']);
+      const file = await assetScope(base44, state, body.file_id, ['background', 'preview', 'pdf', 'logo', 'reference_manifest', 'reference_aerial', 'reference_model']);
       const content = await decryptAsset(base44, file);
       await assetStep('floor_plan_asset_audit_failed', 503, () => entity(base44, 'ManagedFileAccessLog').create({ managed_file_id: file.id, action: 'download', actor_user_id: user.id, owner_type: 'object', owner_id: state.object.id, source_entity: WORKSPACE, source_entity_id: file.source_entity_id, success: true, created_at: nowIso(), metadata: { building_key_hash: state.keyHash } }));
       return { file_id: file.id, filename: file.download_filename, mime_type: file.mime_type, content_base64: content };
@@ -228,6 +258,13 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     entry ||= { id: crypto.randomUUID(), version: 0, snapshot_id: null, current_published_floor_plan_id: oldPublished?.id || null, published_revision: oldPublished?.revision || 0 };
     const document = body.action === 'save_object_building_floor_plan_draft' ? validateDesktopDocument(body.data?.document, ApiError) : await snapshot(base44, state.object, state.key, entry);
     if (!document) fail(409, 'Sla de tekening op voordat je publiceert', 'floor_plan_draft_required');
+    if (body.action === 'save_object_building_floor_plan_draft' && document.schemaVersion === 1 && entry.snapshot_id) {
+      const previous = await snapshot(base44, state.object, state.key, entry);
+      const supportsV2 = Array.isArray(body.supported_document_versions) && body.supported_document_versions.length === 2 && body.supported_document_versions.includes(1) && body.supported_document_versions.includes(2);
+      // A current client can intentionally undo the complete import. An older
+      // client must not accidentally erase metadata it cannot understand.
+      if (previous?.schemaVersion === 2 && !supportsV2) fail(409, 'Werk LOQ Desktop bij voordat je deze tekening wijzigt.', 'floor_plan_client_update_required');
+    }
     await validateReferences(base44, state, document);
     const next = { ...entry, version: entry.version + 1, updated_at: nowIso() };
     if (body.action === 'save_object_building_floor_plan_draft') {
@@ -283,10 +320,24 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     if (!bytes || bytes.length !== 32) return fail(503, 'Beveiligde bestandsopslag is nog niet geconfigureerd', 'managed_file_crypto_unavailable');
     return crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, usage);
   };
-  const assetData = (data: any) => {
+  const assetData = (data: any, serverMetadata?: RecordValue) => {
+    if (serverMetadata && ['reference_manifest', 'reference_aerial', 'reference_model'].includes(data?.kind)) {
+      let bytes: ReturnType<typeof from64>; try { bytes = from64(data.content_base64); } catch { return fail(400, 'Ongeldig bronbestand', 'invalid_floor_plan_asset'); }
+      if (!bytes.length || bytes.length > MAX_ASSET_BYTES) return fail(400, 'Het bronbestand is te groot', 'invalid_floor_plan_asset');
+      if (['reference_manifest', 'reference_model'].includes(data.kind)) {
+        if (data.mime_type !== 'application/json') return fail(400, 'Ongeldig bronmanifest', 'invalid_floor_plan_asset');
+        try { JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail(400, 'Ongeldig bronmanifest', 'invalid_floor_plan_asset'); }
+        return { bytes, extension: 'json' };
+      }
+      const png = data.mime_type === 'image/png' && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
+      const jpeg = data.mime_type === 'image/jpeg' && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+      if (!png && !jpeg) return fail(400, 'Ongeldige luchtfoto', 'invalid_floor_plan_asset');
+      return { bytes, extension: jpeg ? 'jpg' : 'png' };
+    }
+
     const types: RecordValue = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'application/pdf': 'pdf', 'image/heic': 'heic', 'image/heif': 'heif' };
     if (!data || !['background', 'preview', 'pdf', 'logo'].includes(data.kind) || !types[data.mime_type] || (data.kind === 'pdf' && data.mime_type !== 'application/pdf') || (['preview', 'logo'].includes(data.kind) && !['image/png', 'image/jpeg', 'image/webp'].includes(data.mime_type)) || typeof data.content_base64 !== 'string' || data.content_base64.length > Math.ceil(MAX_ASSET_BYTES / 3) * 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data.content_base64)) return fail(400, 'Ongeldig plattegrondbestand (maximaal 12 MiB)', 'invalid_floor_plan_asset');
-    let bytes;
+    let bytes: ReturnType<typeof from64>;
     try { bytes = from64(data.content_base64); } catch { return fail(400, 'Ongeldig bestand', 'invalid_floor_plan_asset'); }
     if (!bytes.length || bytes.length > MAX_ASSET_BYTES) return fail(400, 'Ongeldige bestandsgrootte', 'invalid_floor_plan_asset');
     const header = Array.from(bytes.slice(0, 12)).map(byte => String.fromCharCode(byte)).join('');
@@ -294,8 +345,8 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     if (!isImage) return fail(400, 'De inhoud past niet bij het gekozen bestandstype', 'invalid_floor_plan_asset');
     return { bytes, extension: types[data.mime_type] };
   };
-  const uploadAsset = async (base44: any, user: any, body: any, state: any, operation: string, hash: string) => {
-    const { bytes, extension } = assetData(body.data);
+  const uploadAsset = async (base44: any, user: any, body: any, state: any, operation: string, hash: string, serverMetadata?: RecordValue) => {
+    const { bytes, extension } = assetData(body.data, serverMetadata);
     const initialEntry = readEntry(state.object, state.keyHash);
     const publicationAsset = ['preview', 'pdf'].includes(body.data.kind);
     if (publicationAsset && (!initialEntry?.snapshot_id || initialEntry.version !== body.expected_version)) fail(409, 'Sla eerst de actuele tekenversie op voordat je de afdruk uploadt', 'floor_plan_asset_revision_conflict');
@@ -329,7 +380,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
       const uploaded = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: new File([ciphertext], `${filename}.enc`, { type: 'application/octet-stream' }) });
       if (!uploaded?.file_uri) return fail(502, 'Privéopslag bevestigde het bestand niet; probeer met dezelfde opslagsleutel opnieuw', 'floor_plan_upload_incomplete');
       const folder = `objects/${state.object.id}/floorplans/building-${state.keyHash}/${publicationAsset ? `revision-${publicationRevision}/` : ''}assets`;
-      file = await entity(base44, 'ManagedFile').create({ owner_type: 'object', owner_id: state.object.id, object_id: state.object.id, customer_id: state.customer.id, company_id: null, tenant_container_key: `object:${state.object.id}`, owner_container_key: `object:${state.object.id}`, access_scope: 'company', domain: 'operations', category: 'building_floor_plan', source_entity: WORKSPACE, source_entity_id: operation, source_field: body.data.kind, file_url: `private://${uploaded.file_uri}`, file_uri: uploaded.file_uri, storage_filename: `${filename}.enc`, display_filename: filename, download_filename: filename, logical_path: `${folder}/${filename}`, folder_path: folder, extension, mime_type: body.data.mime_type, stored_mime_type: 'application/octet-stream', size_bytes: bytes.length, ciphertext_size_bytes: ciphertext.byteLength, encrypted: true, encryption_algorithm: 'AES-256-GCM', encryption_key_id: Deno.env.get('MANAGED_FILE_MASTER_KEY_ID') || 'managed-file-master-v1', encryption_iv: to64(iv), encrypted_data_key: to64(wrapped), key_wrap_algorithm: 'AES-256-GCM', key_wrap_iv: to64(wrapIv), plaintext_sha256: to64(await crypto.subtle.digest('SHA-256', bytes)), ciphertext_sha256: to64(await crypto.subtle.digest('SHA-256', ciphertext)), storage_visibility: 'private', status: 'active', is_sensitive: true, security_classification: 'strictly_confidential', uploaded_at: nowIso(), uploaded_by: user.id, metadata: { building_key_hash: state.keyHash, asset_kind: body.data.kind, request_fingerprint: hash, ...(publicationAsset ? { draft_version: draftVersion, publication_revision: publicationRevision } : {}) } });
+      file = await entity(base44, 'ManagedFile').create({ owner_type: 'object', owner_id: state.object.id, object_id: state.object.id, customer_id: state.customer.id, company_id: null, tenant_container_key: `object:${state.object.id}`, owner_container_key: `object:${state.object.id}`, access_scope: 'company', domain: 'operations', category: 'building_floor_plan', source_entity: WORKSPACE, source_entity_id: operation, source_field: body.data.kind, file_url: `private://${uploaded.file_uri}`, file_uri: uploaded.file_uri, storage_filename: `${filename}.enc`, display_filename: filename, download_filename: filename, logical_path: `${folder}/${filename}`, folder_path: folder, extension, mime_type: body.data.mime_type, stored_mime_type: 'application/octet-stream', size_bytes: bytes.length, ciphertext_size_bytes: ciphertext.byteLength, encrypted: true, encryption_algorithm: 'AES-256-GCM', encryption_key_id: Deno.env.get('MANAGED_FILE_MASTER_KEY_ID') || 'managed-file-master-v1', encryption_iv: to64(iv), encrypted_data_key: to64(wrapped), key_wrap_algorithm: 'AES-256-GCM', key_wrap_iv: to64(wrapIv), plaintext_sha256: to64(await crypto.subtle.digest('SHA-256', bytes)), ciphertext_sha256: to64(await crypto.subtle.digest('SHA-256', ciphertext)), storage_visibility: 'private', status: 'active', is_sensitive: true, security_classification: 'strictly_confidential', uploaded_at: nowIso(), uploaded_by: user.id, metadata: { ...serverMetadata, building_key_hash: state.keyHash, asset_kind: body.data.kind, request_fingerprint: hash, ...(publicationAsset ? { draft_version: draftVersion, publication_revision: publicationRevision } : {}) } });
     }
     await assetScope(base44, state, file.id, [body.data.kind]);
     state = await scope(base44, body, true);
@@ -388,5 +439,22 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     const current = new Set(entries.map(entry => entry.current_published_floor_plan_id).filter(Boolean));
     return records.filter(record => !record.metadata?.immutable_desktop_revision || committed.has(record.id)).map(record => record.metadata?.immutable_desktop_revision || committed.has(record.id) ? { ...record, is_current: current.has(record.id) } : record);
   };
-  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset } };
+  const storeReferenceAsset = async (base44: any, user: any, body: any, suffix: string, data: any, metadata: RecordValue, requestFingerprint: string) => {
+    if (!['manifest', 'aerial', 'model'].includes(suffix) || data?.kind !== `reference_${suffix}`) fail(400, 'Ongeldig bronbestand', 'invalid_floor_plan_asset');
+    const operation = await sha256(`${user.id}:building-reference:${body.idempotency_key}:${suffix}`);
+    const state = await scope(base44, body, true);
+    return uploadAsset(base44, user, { ...body, expected_version: 0, data }, state, operation, requestFingerprint, metadata);
+  };
+  const findReferenceAsset = async (base44: any, user: any, body: any, suffix: string, requestFingerprint: string) => {
+    if (!['manifest', 'aerial', 'model'].includes(suffix)) fail(400, 'Ongeldig bronbestand', 'invalid_floor_plan_asset');
+    const state = await scope(base44, body, true);
+    const operation = await sha256(`${user.id}:building-reference:${body.idempotency_key}:${suffix}`);
+    const files = await entity(base44, 'ManagedFile').filter({ object_id: state.object.id, source_entity: WORKSPACE, source_entity_id: operation }, '-created_date', 2);
+    if (files.length > 1) fail(409, 'Het importpakket is niet uniek beschikbaar', 'building_reference_ambiguous');
+    if (!files[0]) return null;
+    if (files[0].metadata?.request_fingerprint !== requestFingerprint) fail(409, 'Deze importsleutel is eerder met andere inhoud gebruikt', 'floor_plan_idempotency_conflict');
+    return assetScope(base44, state, files[0].id, [`reference_${suffix}`]);
+  };
+  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset, storeReferenceAsset, findReferenceAsset } };
+
 }

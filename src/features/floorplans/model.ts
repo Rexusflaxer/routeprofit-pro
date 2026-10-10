@@ -7,7 +7,9 @@ export type PlanSymbol = { id: string; kind: string; position: Point; rotation: 
 export type Route = { id: string; points: Point[]; label: string };
 export type PrintSettings = { paper: 'A4' | 'A3'; orientation: 'portrait' | 'landscape'; scale: number; profile: 'evacuation' | 'installation'; title: string; address: string; drawingNumber: string; instructions: string; secondaryInstructions: string; language2: string; cropCenter?: Point; logoFileId?:string; viewpoints: { id: string; label: string; position: Point; rotation: number }[] };
 export type Floor = { id: string; name: string; elevation: number; walls: Wall[]; rooms: Room[]; openings: Opening[]; symbols: PlanSymbol[]; routes: Route[]; background?: { fileId: string; width: number; height: number; origin: Point; metresPerPixel: number; opacity: number; calibrated: boolean }; print: PrintSettings };
-export type FloorPlanDocument = { schemaVersion: 1; id: string; title: string; unit: 'm'; floors: Floor[] };
+export type BuildingGeoReference = { crs: 'EPSG:28992'; origin: Point; rotation: 0; verticalDatum: 'NAP'; axis: 'x-east-y-north' };
+export type BuildingReference = { id: string; manifestFileId: string; manifestSha256: string; usedParts: ('footprint' | 'aerial' | 'roof')[]; floorId: string; wallIds: string[]; interpretation: 'closed_building' | 'open_structure'; measurementStatus: 'unchecked' | 'user_checked'; attributions: string[]; modelFileId?:string };
+export type FloorPlanDocument = { schemaVersion: 1 | 2; id: string; title: string; unit: 'm'; floors: Floor[]; geoReference?: BuildingGeoReference; buildingReferences?: BuildingReference[] };
 export type Issue = { severity: 'error' | 'warning'; floorId: string; elementId?: string; message: string };
 export const uid = () => globalThis.crypto?.randomUUID?.() || `fp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 export function createFloor(name = 'Begane grond'): Floor {
@@ -28,6 +30,7 @@ export function validateDocument(document: FloorPlanDocument): Issue[] {
     const add = (severity: Issue['severity'], message: string, elementId?: string) => issues.push({ severity, message, floorId: floor.id, elementId });
     if (!floor.walls.length) add('error', `${floor.name}: teken of bevestig eerst muren.`);
     if (floor.background && !floor.background.calibrated) add('error', `${floor.name}: bevestig de schaal van de onderlegger.`);
+    if (document.buildingReferences?.some(reference => reference.floorId === floor.id && reference.measurementStatus === 'unchecked')) add('warning', `${floor.name}: de openbare buitenvorm bevat nog geen nagemeten maten.`);
     if (!Number.isFinite(floor.print.scale) || floor.print.scale <= 0) add('error', `${floor.name}: kies een geldige afdrukschaal.`);
     floor.walls.forEach(wall => { if (distance(wall.start, wall.end) < .1 || ![wall.start.x, wall.start.y, wall.end.x, wall.end.y, wall.thickness].every(Number.isFinite) || wall.thickness <= 0) add('error', 'Een muur heeft ongeldige afmetingen.', wall.id); });
     floor.openings.forEach(opening => { const wall = floor.walls.find(w => w.id === opening.wallId); if (!wall || opening.width <= 0 || opening.offset < 0 || opening.offset + opening.width > distance(wall.start, wall.end) + .001) add('error', 'Een deur of raam valt buiten de bijbehorende muur.', opening.id); });

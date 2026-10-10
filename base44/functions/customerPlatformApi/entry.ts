@@ -5,6 +5,9 @@ import type { LooseRecord } from '../../shared/floorPlans/buildingFloorPlanScope
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { createCollectiveDossierHandlers } from './collectiveDossier.ts';
 import { createBuildingFloorPlanHandlers, validateDesktopDocument } from './buildingFloorPlans.ts';
+import { createBuildingReferenceHandlers } from '../../shared/floorPlans/buildingReferences.ts';
+import { preparePublicBuildingModel } from '../../shared/floorPlans/publicBuildingModel.ts';
+import { inflateSync } from 'npm:fflate@0.8.2';
 
 const collectiveDossierHandlers = createCollectiveDossierHandlers({
   entity: getEntity,
@@ -33,6 +36,10 @@ const buildingFloorPlanHandlers = createBuildingFloorPlanHandlers({
       ...result, category: 'operations', summary: 'Gebouwplattegrond bijgewerkt',
       audit_result: result,
     }, body, fingerprint, `${body.object_id}:${body.building_selection_key}`),
+});
+
+const buildingReferenceHandlers = createBuildingReferenceHandlers({ ApiError, sha256, nowIso, versionOf, floorPlans: buildingFloorPlanHandlers,
+  prepareModel: (request: any) => preparePublicBuildingModel(request, { inflateRaw: (compressed, expectedBytes) => inflateSync(compressed, { out: new Uint8Array(expectedBytes) }) }),
 });
 
 const QUOTE_TRANSITIONS: Record<string, string[]> = {
@@ -101,6 +108,7 @@ const INDEX_TRANSITIONS: Record<string, string[]> = {
 
 const READ_ACTIONS = new Set([
   ...buildingFloorPlanHandlers.readActions,
+  ...buildingReferenceHandlers.readActions,
   ...collectiveDossierHandlers.readActions,
   'get_customer_overview',
   'search_customer_objects',
@@ -131,6 +139,7 @@ const HANDBOOK_ENTITY_MUTATION_ACTIONS = new Set([
 
 const MUTATION_ACTIONS = new Set([
   ...buildingFloorPlanHandlers.mutationActions,
+  ...buildingReferenceHandlers.mutationActions,
   ...collectiveDossierHandlers.mutationActions,
   'create_customer',
   'update_customer',
@@ -17891,6 +17900,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
 
     if (READ_ACTIONS.has(action)) {
       if (buildingFloorPlanHandlers.readActions.has(action)) return json(await buildingFloorPlanHandlers.read(base44, user, body));
+      if (buildingReferenceHandlers.readActions.has(action)) return json(await buildingReferenceHandlers.read(base44, user, body));
       if (action === 'list_building_associations') return json(await handleBuildingAssociationSuggestions(base44, body));
       if (collectiveDossierHandlers.readActions.has(action)) return json(await collectiveDossierHandlers.read(base44, user, action, body));
       if (action === 'get_customer_overview') return json(await handleGetCustomerOverview(base44, body));
@@ -17926,6 +17936,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
       }
     }
 
+    if (buildingReferenceHandlers.mutationActions.has(action)) return json({ ok: true, ...(await buildingReferenceHandlers.mutate(base44, user, body)) });
     if (buildingFloorPlanHandlers.mutationActions.has(action)) return json({ ok: true, ...(await buildingFloorPlanHandlers.mutate(base44, user, body)) });
     if (!MUTATION_ACTIONS.has(action)) throw new ApiError(400, 'Onbekende actie');
     const { idempotencyKey, expectedVersion } = requireMutationEnvelope(body);
@@ -18046,7 +18057,7 @@ export async function handleCustomerPlatformRequest(req: Request) {
     return json({ ok: true, ...result, replayed: Boolean(result.replayed) }, action.startsWith('create_') ? 201 : 200);
   } catch (error) {
     const status = Number((error as LooseRecord)?.status || 500);
-    if (ANALYSIS_ACTIONS.has(action) || buildingFloorPlanHandlers.readActions.has(action) || buildingFloorPlanHandlers.mutationActions.has(action)) {
+    if (ANALYSIS_ACTIONS.has(action) || buildingFloorPlanHandlers.readActions.has(action) || buildingFloorPlanHandlers.mutationActions.has(action) || buildingReferenceHandlers.readActions.has(action) || buildingReferenceHandlers.mutationActions.has(action)) {
       console.error('[customerPlatformApi]', requestId, { action, status, code: (error as LooseRecord)?.details?.code || 'floor_plan_request_failed' });
     } else {
       console.error('[customerPlatformApi]', requestId, error);

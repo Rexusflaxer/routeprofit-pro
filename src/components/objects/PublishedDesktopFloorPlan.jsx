@@ -17,6 +17,7 @@ export default function PublishedDesktopFloorPlan({ plan }) {
   const [preview, setPreview] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const [pdf, setPdf] = useState(null), [pdfError, setPdfError] = useState(''), [pdfLoading, setPdfLoading] = useState(false), [attempt, setAttempt] = useState(0);
   const floor = document?.floors.find(item => item.id === floorId) || document?.floors[0];
+  const attributions = [...new Set((document?.buildingReferences || []).filter(reference => reference.floorId === floor?.id).flatMap(reference => reference.attributions))];
   useEffect(() => {
     let active = true, owned = null;
     setPreview(null); setError(''); setLoading(false);
@@ -64,6 +65,7 @@ export default function PublishedDesktopFloorPlan({ plan }) {
           : <div role="alert" className="space-y-3 p-6 text-center"><AlertCircle className="mx-auto h-6 w-6 text-destructive" /><p className="text-sm">{pdfError || 'Er is geen afdrukvoorbeeld beschikbaar.'}</p><button type="button" className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs" onClick={() => setAttempt(value => value + 1)}><RefreshCw className="h-4 w-4" />Opnieuw laden</button></div>}
     </div> : <>
       <div className="h-[60vh] min-h-72 overflow-hidden rounded-xl border bg-white p-6"><FloorPlanRenderer floor={floor} profile={profile} dimensions={profile === 'installation'} layers={{ background: profile === 'installation' }} backgroundUrls={preview && floor.background ? { [floor.background.fileId]: preview.url } : {}} /></div>
+      {attributions.length > 0 && <p className="text-xs text-muted-foreground">Bronnen: {attributions.join(' · ')}</p>}
       {loading && <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />Onderlegger openen…</p>}
       {error && <p role="alert" className="flex items-center gap-2 text-xs text-destructive"><AlertCircle className="h-3 w-3" />{error}</p>}
     </>}

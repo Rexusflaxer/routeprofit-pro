@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, webcrypto } from 'node:crypto';
 import { File as NodeFile, Blob as NodeBlob } from 'node:buffer';
 import { TextEncoder } from 'node:util';
+import { createBuildingReferenceHandlers } from '../../base44/shared/floorPlans/buildingReferences';
 import { createBuildingFloorPlanHandlers, validateDesktopDocument, desktopLegacyFloor } from '../../base44/functions/customerPlatformApi/buildingFloorPlans';
 
 class ApiError extends Error {
@@ -235,5 +236,197 @@ describe('private managed drawing assets', () => {
     await expect(s.run(save('cross-building', 0, { building_selection_key: 'bag:two', data: { document: d } }))).rejects.toMatchObject({ status: 403 });
     await s.run(save('draft-background', 0, { data: { document: d } }));
     await expect(s.run(publish('pub-background'))).rejects.toMatchObject({ status: 409, details: { code: 'floor_plan_scale_unconfirmed' } });
+  });
+});
+
+const referenceGeo = { crs: 'EPSG:28992', origin: { x: 201234.5, y: 495123.6 }, rotation: 0, verticalDatum: 'NAP', axis: 'x-east-y-north' };
+function referenceSetup() {
+  const s = setup();
+  Object.assign(s.object, { latitude: 52.44, longitude: 6.07, building_selection_mode: 'manual', building_selection_points: [{ id: 'selected-one', latitude: 52.44, longitude: 6.07 }, { id: 'selected-two', latitude: 52.441, longitude: 6.071 }], keys: ['point:selected-one', 'point:selected-two'] });
+  let now = '2026-10-10T12:00:00.000Z';
+  const candidate: any = { id: 'bgt:source-one', source: 'bgt', sourceId: 'source-one', bagId: '0246100000012576', label: 'Buitencontour', structureType: 'building', matching: 'contains_point', geometry: { type: 'Polygon', coordinates: [[[6.07,52.44],[6.0701,52.44],[6.0701,52.4401],[6.07,52.44]]] }, polygons: [[[{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:0}]]], geoReference: referenceGeo, provenance: { retrievedAt: now, license: 'CC0-1.0', attribution: 'BGT via PDOK', version: '2026', registeredAt: '2026-01-01' }, requiresConfirmation: true };
+  const discover = vi.fn(async () => ({ candidates: [structuredClone(candidate)], aerial: { year: 2026, geoReference: referenceGeo }, warnings: [], status: 'ready' }));
+  const prepareAerial = vi.fn(async () => ({ bytes: new Uint8Array(Buffer.from(png, 'base64')), mimeType: 'image/png', width: 100, height: 100, origin: { x:-5,y:-5 }, metresPerPixel: 0.1, geoReference: referenceGeo, attribution: 'Luchtfoto 2026 / PDOK', year: 2026 }));
+  const publicModel = {schemaVersion:1,bagId:candidate.bagId,geoReference:referenceGeo,vertices:[{x:0,y:0,z:3.1},{x:10,y:0,z:3.1},{x:10,y:10,z:3.1}],surfaces:[{rings:[[0,1,2]],type:'roof'}],groundNAP:5,sourceYear:2025,quality:{rmseMetres:0.5},provenance:{source:'kadaster_3d',sourceId:'NL.IMBAG.Pand.0246100000012576',url:'https://3d.kadaster.nl/example.zip',retrievedAt:now,license:'CC-BY-4.0',attribution:'Kadaster / CC BY 4.0',lod:'2.2'},attributions:['Kadaster / CC BY 4.0']};
+  const prepareModel = vi.fn(async () => ({model:structuredClone(publicModel),warnings:[]}));
+  const handler = createBuildingReferenceHandlers({ApiError, sha256, nowIso: () => now, versionOf: (o: any) => o.version, floorPlans: s.api, discover, prepareAerial, prepareModel});
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(s.uploads[Number(/file-(\d+)/.exec(url)![1])-1])));
+  const body = {customer_id:'customer-1',object_id:'object-1',building_selection_key:'point:selected-one',expected_map_version:4};
+  const list = (extra: any = {}) => handler.read(s.base44, admin, {...body,action:'get_object_building_reference_candidates',...extra});
+  const prepare = (candidate_id: string, extra: any = {}) => handler.mutate(s.base44, admin, {...body,action:'prepare_object_building_reference_import',candidate_id,idempotency_key:'reference-import-one',interpretation:'closed_building',include_aerial:true,...extra});
+  return {...s,body,candidate,discover,prepareAerial,prepareModel,publicModel,handler,list,prepare,setNow:(value: string) => {now=value;}};
+}
+
+describe('public building source packages', () => {
+  it('uses only saved scope/selection and returns a brokered photo without writing business data', async () => {
+    const s=referenceSetup(); const result=await s.list({bag_id:'forged',selectedPoint:[5,51],geometry:{bad:true}});
+    expect(s.discover).toHaveBeenCalledWith({selectionKey:'point:selected-one',selectedPoint:[6.07,52.44]});
+    expect(result.candidates[0].candidate_id).toMatch(/^v1\.\d{10}\.[a-f0-9]{64}$/);
+    expect(result.aerial.content_base64).toBe(png); expect(s.uploads).toHaveLength(0);
+    expect((await s.read({building_selection_key:'point:selected-one'})).capabilities.document_versions).toEqual([1,2]);
+  });
+  it('scopes candidates to exact selection and rejects stale map versions', async () => {
+    const s=referenceSetup(); const result=await s.list();
+    await expect(s.prepare(result.candidates[0].candidate_id,{building_selection_key:'point:selected-two'})).rejects.toMatchObject({details:{code:'building_reference_candidate_changed'}});
+    await expect(s.list({expected_map_version:3})).rejects.toMatchObject({details:{code:'building_configuration_conflict'}});
+    expect(s.uploads).toHaveLength(0);
+  });
+  it('rejects changed and expired proposals without changing a drawing', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    s.candidate.polygons[0][0][1].x=11;
+    await expect(s.prepare(token)).rejects.toMatchObject({details:{code:'building_reference_candidate_changed'}});
+    s.setNow('2026-10-10T12:16:00.000Z');
+    await expect(s.prepare(token)).rejects.toMatchObject({details:{code:'building_reference_candidate_expired'}});
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(0);
+  });
+  it('encrypts immutable manifest/photo; a replay after expiry performs no fresh source calls or upload', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    const first=await s.prepare(token); expect(first.reference.attributions).toEqual(['BGT via PDOK','Luchtfoto 2026 / PDOK']);
+    expect(s.uploads).toHaveLength(2); expect(s.rows.ManagedFile.every(f=>f.encrypted && f.storage_visibility==='private')).toBe(true);
+    const manifestFile=s.rows.ManagedFile.find(f=>f.metadata.asset_kind==='reference_manifest');
+    const manifest=JSON.parse(Buffer.from(await s.api.serverOnly.decryptAsset(s.base44,manifestFile),'base64').toString());
+    expect(manifest.aerialSource.sha256).toBe(createHash('sha256').update(Buffer.from(png,'base64')).digest('hex'));
+    expect(manifest.aerialSource.year).toBe(2026);
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(0);
+    s.discover.mockClear(); s.setNow('2026-10-10T14:00:00.000Z');
+    const replay=await s.prepare(token); expect(replay).toEqual({...first,replayed:true});
+    expect(s.discover).not.toHaveBeenCalled(); expect(s.uploads).toHaveLength(2);
+  });
+  it('conflicts when the same import key changes content', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id; await s.prepare(token);
+    await expect(s.prepare(token,{include_aerial:false})).rejects.toMatchObject({details:{code:'floor_plan_idempotency_conflict'}});
+    expect(s.uploads).toHaveLength(2);
+  });
+  it('preparing an open shed requires open-structure interpretation', async () => {
+    const s=referenceSetup(); s.candidate.structureType='open_shed'; const token=(await s.list()).candidates[0].candidate_id;
+    await expect(s.prepare(token)).rejects.toMatchObject({details:{code:'building_reference_structure_confirmation'}});
+    const imported=await s.prepare(token,{interpretation:'open_structure',include_aerial:false});
+    expect(imported.reference.usedParts).toEqual(['footprint']); expect(s.uploads).toHaveLength(1);
+  });
+  it('keeps a valid contour available when photo preview is unavailable', async () => {
+    const s=referenceSetup(); s.prepareAerial.mockRejectedValue(new Error('upstream unavailable'));
+    const result=await s.list(); expect(result.status).toBe('partial'); expect(result.candidates).toHaveLength(1); expect(result.aerial).toBeNull();
+    await expect(s.prepare(result.candidates[0].candidate_id)).rejects.toMatchObject({details:{code:'building_reference_aerial_unavailable'}});
+    expect((await s.prepare(result.candidates[0].candidate_id,{include_aerial:false})).reference.usedParts).toEqual(['footprint']);
+  });
+  it('reserves concurrent duplicate imports before upload', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    const results=await Promise.allSettled([s.prepare(token),s.prepare(token)]);
+    expect(results.some(r=>r.status==='fulfilled')).toBe(true); expect(s.uploads).toHaveLength(2);
+    await s.prepare(token); expect(s.uploads).toHaveLength(2);
+  });
+  it('recovers registration interrupted before the manifest receipt', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    s.hooks.afterCreate=(name:string,row:any)=>{if(name==='ManagedFile'&&row.metadata.asset_kind==='reference_manifest'){s.hooks.afterCreate=null;throw Error('interrupted after manifest');}};
+    await expect(s.prepare(token)).rejects.toThrow('interrupted after manifest');
+    expect((await s.prepare(token)).replayed).toBe(true); expect(s.uploads).toHaveLength(2);
+  });
+  it('saves v2 provenance, keeps v1 strict, and rejects forged hashes and missing rights', async () => {
+    const s=referenceSetup(); const imported=await s.prepare((await s.list()).candidates[0].candidate_id);
+    const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:imported.geoReference,buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:['wall-1']}]});
+    const request=save('save-reference',0,{...s.body,data:{document:data}});
+    expect((await s.run(request)).workspace.document.buildingReferences).toEqual(data.buildingReferences);
+    const legacy={...data,schemaVersion:1}; expect(()=>validateDesktopDocument(legacy,ApiError)).toThrow();
+    data.buildingReferences[0].manifestSha256='0'.repeat(64);
+    await expect(s.run(save('forged-reference',1,{...s.body,data:{document:data}}))).rejects.toMatchObject({details:{code:'building_reference_manifest_mismatch'}});
+    data.buildingReferences[0].manifestSha256=imported.manifest_sha256;
+    await expect(s.run(save('cross-selection-reference',0,{...s.body,building_selection_key:'point:selected-two',data:{document:data}}))).rejects.toMatchObject({status:403});
+  });
+  it('does not allow public upload to forge trusted reference metadata', async () => {
+    const s=referenceSetup(); const request:any=upload('forge-manifest'); Object.assign(request,s.body); request.data={kind:'reference_manifest',mime_type:'application/json',content_base64:Buffer.from('{}').toString('base64')};
+    await expect(s.run(request)).rejects.toMatchObject({details:{code:'invalid_floor_plan_asset'}}); expect(s.uploads).toHaveLength(0);
+  });
+  it('rejects manifest attribution/coordinate tampering and removed selection on replay', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id; const imported=await s.prepare(token);
+    const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:{...imported.geoReference,origin:{x:200000,y:495000}},buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:[]}]});
+    await expect(s.run(save('alter-georeference',0,{...s.body,data:{document:data}}))).rejects.toMatchObject({details:{code:'building_reference_georeference_mismatch'}});
+    data.geoReference=imported.geoReference; data.buildingReferences[0].attributions=[];
+    await expect(s.run(save('erase-attribution',0,{...s.body,data:{document:data}}))).rejects.toMatchObject({details:{code:'building_reference_manifest_mismatch'}});
+    s.object.keys=[];
+    await expect(s.prepare(token)).rejects.toMatchObject({details:{code:'building_selection_unavailable'}});
+  });
+});
+
+describe('public building reference publication compatibility', () => {
+  it('accepts an explicit correction from unknown source classification to closed building', async () => {
+    const s=referenceSetup(); s.candidate.structureType='unknown'; const token=(await s.list()).candidates[0].candidate_id;
+    const result=await s.prepare(token,{confirmed_closed_structure:true,include_aerial:false});
+    expect(result.reference.interpretation).toBe('closed_building');
+  });
+  it('publishes v2 source references immutably while the legacy 2D geometry remains unchanged', async () => {
+    const s=referenceSetup(); const imported=await s.prepare((await s.list()).candidates[0].candidate_id);
+    const data:any=doc(); const before=desktopLegacyFloor(data);
+    Object.assign(data,{schemaVersion:2,geoReference:imported.geoReference,buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:['wall-1']}]});
+    data.floors[0].background={...imported.aerial,calibrated:true};
+    await s.run(save('save-v2-publication',0,{...s.body,data:{document:data}}));
+    await s.run(publish('publish-v2-reference',1,null,s.body));
+    expect(s.rows.ObjectFloorPlan[0].floorplan_2d_json).toEqual(before);
+    expect(s.rows.ObjectFloorPlan[0].desktop_document.buildingReferences[0]).toEqual(data.buildingReferences[0]);
+    s.rows.ManagedFile.find(f=>f.metadata.asset_kind==='reference_aerial').status='archived';
+    await expect(s.run(publish('republish-missing-source',2,s.rows.ObjectFloorPlan[0].id,s.body))).rejects.toMatchObject({details:{code:'floor_plan_asset_unavailable'}});
+    expect(s.rows.ObjectFloorPlan).toHaveLength(1);
+  });
+});
+
+it('requires v2 client capability for intentionally undoing an imported document back to v1', async () => {
+  const s=referenceSetup(); const imported=await s.prepare((await s.list()).candidates[0].candidate_id,{include_aerial:false});
+  const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:imported.geoReference,buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:['wall-1']}]});
+  await s.run(save('save-v2-for-undo',0,{...s.body,data:{document:data}}));
+  await expect(s.run(save('old-client-downgrade',1,s.body))).rejects.toMatchObject({details:{code:'floor_plan_client_update_required'}});
+  expect((await s.run(save('new-client-undo',1,{...s.body,supported_document_versions:[1,2]}))).workspace.document.schemaVersion).toBe(1);
+  expect(s.rows.ManagedFile).toHaveLength(1);
+});
+
+describe('optional immutable public exterior model', () => {
+  it('stores the metric source model separately and scopes it through the immutable manifest', async () => {
+    const s=referenceSetup(); const discovery=await s.list(); expect(discovery.candidates[0].hasModelPotential).toBe(true);
+    const imported=await s.prepare(discovery.candidates[0].candidate_id,{include_model:true});
+    expect(imported.reference.usedParts).toEqual(['footprint','aerial','roof']); expect(s.uploads).toHaveLength(3);
+    const asset=s.rows.ManagedFile.find(f=>f.metadata.asset_kind==='reference_model');
+    expect(imported.reference.modelFileId).toBe(asset.id); expect(imported.model.sourceYear).toBe(2025);
+    const raw=JSON.parse(Buffer.from(await s.api.serverOnly.decryptAsset(s.base44,asset),'base64').toString());
+    expect(raw.vertices[0].z).toBe(3.1); expect(raw.groundNAP).toBe(5);
+    expect(s.prepareModel).toHaveBeenCalledWith({bagId:s.candidate.bagId,geoReference:referenceGeo,sourceBounds:[201234.5,495123.6,201244.5,495133.6]});
+    const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:imported.geoReference,buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:['wall-1']}]});
+    await s.run(save('save-source-model',0,{...s.body,data:{document:data}}));
+    await s.run(publish('publish-source-model',1,null,s.body));
+    asset.status='archived';
+    await expect(s.run(publish('missing-source-model',2,s.rows.ObjectFloorPlan[0].id,s.body))).rejects.toMatchObject({details:{code:'floor_plan_asset_unavailable'}});
+  });
+  it('keeps the outside contour when the optional model source is unavailable', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id; s.prepareModel.mockRejectedValue(new Error('upstream unavailable'));
+    const result=await s.prepare(token,{include_aerial:false,include_model:true});
+    expect(result.reference.usedParts).toEqual(['footprint']); expect(result.reference.modelFileId).toBeUndefined(); expect(result.warnings).toHaveLength(1); expect(s.uploads).toHaveLength(1);
+    s.prepareModel.mockClear(); const replay=await s.prepare(token,{include_aerial:false,include_model:true});
+    expect(replay.warnings).toEqual(result.warnings); expect(s.prepareModel).not.toHaveBeenCalled();
+  });
+  it('rejects a model from another BAG building before storing it', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id; s.publicModel.bagId='0246100000013704';
+    await expect(s.prepare(token,{include_aerial:false,include_model:true})).rejects.toMatchObject({details:{code:'building_reference_model_mismatch'}}); expect(s.uploads).toHaveLength(0);
+  });
+  it('recovers a model registered before interruption without fetching newer source data', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    s.hooks.afterCreate=(name:string,row:any)=>{if(name==='ManagedFile'&&row.metadata.asset_kind==='reference_model'){s.hooks.afterCreate=null;throw Error('interrupted after model');}};
+    await expect(s.prepare(token,{include_aerial:false,include_model:true})).rejects.toThrow('interrupted after model');
+    s.prepareModel.mockClear(); s.prepareModel.mockRejectedValue(new Error('source changed'));
+    const result=await s.prepare(token,{include_aerial:false,include_model:true});
+    expect(result.model.sourceYear).toBe(2025); expect(s.prepareModel).not.toHaveBeenCalled(); expect(s.uploads).toHaveLength(2);
+  });
+  it('recovers a registered photo with its original checksum and geometry', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id;
+    s.hooks.afterCreate=(name:string,row:any)=>{if(name==='ManagedFile'&&row.metadata.asset_kind==='reference_aerial'){s.hooks.afterCreate=null;throw Error('interrupted after photo');}};
+    await expect(s.prepare(token)).rejects.toThrow('interrupted after photo'); s.prepareAerial.mockClear(); s.prepareAerial.mockRejectedValue(new Error('photo changed'));
+    const result=await s.prepare(token); expect(s.prepareAerial).not.toHaveBeenCalled(); expect(result.aerial.origin).toEqual({x:-5,y:-5});
+    const manifestFile=s.rows.ManagedFile.find(f=>f.metadata.asset_kind==='reference_manifest');
+    const manifest=JSON.parse(Buffer.from(await s.api.serverOnly.decryptAsset(s.base44,manifestFile),'base64').toString());
+    expect(manifest.aerialSource.sha256).toBe(createHash('sha256').update(Buffer.from(png,'base64')).digest('hex')); expect(s.uploads).toHaveLength(2);
+  });
+  it('binds model choice to the request key and rejects forged model references', async () => {
+    const s=referenceSetup(); const token=(await s.list()).candidates[0].candidate_id; const result=await s.prepare(token,{include_model:true});
+    await expect(s.prepare(token,{include_model:false})).rejects.toMatchObject({details:{code:'floor_plan_idempotency_conflict'}});
+    const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:result.geoReference,buildingReferences:[{...result.reference,modelFileId:result.aerial.fileId,floorId:'floor-1',wallIds:[]}]});
+    await expect(s.run(save('forged-source-model',0,{...s.body,data:{document:data}}))).rejects.toMatchObject({details:{code:'building_reference_model_mismatch'}});
+    delete data.buildingReferences[0].modelFileId;
+    expect(()=>validateDesktopDocument(data,ApiError)).toThrow();
   });
 });
