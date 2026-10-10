@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, webcrypto } from 'node:crypto';
+import { createBase44BuildingCollaboration } from '../../base44/shared/floorPlans/buildingCollaborationBase44.mjs';
+import { ACTIONS } from '../../base44/shared/floorPlans/buildingCollaboration.mjs';
+import { diffDocuments, canonical } from '../../base44/shared/floorPlans/collabDocument.mjs';
 import { File as NodeFile, Blob as NodeBlob } from 'node:buffer';
 import { TextEncoder } from 'node:util';
 import { createBuildingReferenceHandlers } from '../../base44/shared/floorPlans/buildingReferences';
@@ -12,15 +15,17 @@ const admin = { id: 'admin-one', role: 'admin' };
 const sha256 = async (text: string) => createHash('sha256').update(text).digest('hex');
 const doc = (title = 'Object') => ({ schemaVersion: 1, id: 'doc-1', title, unit: 'm', floors: [{ id: 'floor-1', name: 'Begane grond', elevation: 0, walls: [{ id: 'wall-1', start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, thickness: 0.2 }], rooms: [], openings: [{ id: 'door-1', wallId: 'wall-1', type: 'door', offset: 2, width: 1, hinge: 'left', swing: 'in' }], symbols: [], routes: [], print: { paper: 'A4', orientation: 'landscape', scale: 100, profile: 'installation', title: '', address: '', drawingNumber: '', instructions: '', secondaryInstructions: '', language2: '', viewpoints: [] } }] });
 const scope = { customer_id: 'customer-1', object_id: 'object-1', building_selection_key: 'bag:one' };
-const save = (key: string, version = 0, overrides: any = {}) => ({ ...scope, action: 'save_object_building_floor_plan_draft', expected_map_version: 4, expected_version: version, idempotency_key: key, data: { document: doc() }, ...overrides });
-const publish = (key: string, version = 1, current: string | null = null, overrides: any = {}) => ({ ...scope, action: 'publish_object_building_floor_plan', expected_map_version: 4, expected_version: version, expected_current_floor_plan_id: current, idempotency_key: key, ...overrides });
+const save = (key: string, version = 0, overrides: any = {}) => ({ ...scope, action: 'test:save_collaboratively', expected_map_version: 4, expected_version: version, idempotency_key: key, data: { document: doc() }, ...overrides });
+const publish = (key: string, version = 1, current: string | null = null, overrides: any = {}) => ({ ...scope, action: 'test:publish_collaboratively', expected_map_version: 4, expected_version: version, expected_current_floor_plan_id: current, idempotency_key: key, ...overrides });
 
 function matches(record: any, query: any): boolean {
   return Object.entries(query).every(([key, value]: any) => {
     if (key === '$or') return value.some((branch: any) => matches(record, branch));
     if (key === '$and') return value.every((branch: any) => matches(record, branch));
-    if (value && typeof value === 'object' && '$exists' in value) return (record[key] !== undefined) === value.$exists;
-    return record[key] === value;
+    const found = key.split('.').reduce((item: any, part: string) => item?.[part], record);
+    if (value && typeof value === 'object' && '$exists' in value) return (found !== undefined) === value.$exists;
+    if (value && typeof value === 'object' && '$gt' in value) return found > value.$gt;
+    return value === null ? found == null : found === value;
   });
 }
 function setup() {
@@ -51,7 +56,37 @@ function setup() {
     if (object.customer_id !== customer.id || mutable && customer.status === 'archived') throw new ApiError(409, 'Verkeerde scope');
     return { object, customer };
   } });
-  return { object, rows, api, base44, hooks, audit, uploads, run: (body: any) => api.mutate(base44, admin, body), read: (body: any = {}) => api.read(base44, admin, { ...scope, action: 'get_object_building_floor_plan_workspace', ...body }) };
+  // Scenario helpers use actual session/claim/apply/publication actions. The
+  // test:* intents are never sent to an API; legacyRun separately verifies the
+  // old write routes are closed and their already-committed receipts replay.
+  const collaborative = createBase44BuildingCollaboration({base44, entity:(_base:any,name:string)=>entities[name],floorPlans:api,validateDesktopDocument,ApiError,sha256,audit});
+  const operations = new Map<string, any>();
+  const run = async (body:any) => {
+    if (!body.action.startsWith('test:')) return api.mutate(base44,admin,body);
+    const fields = {customer_id:body.customer_id,object_id:body.object_id,building_selection_key:body.building_selection_key,expected_map_version:body.expected_map_version};
+    const key = `${body.action}:${body.building_selection_key}:${body.idempotency_key}`;
+    const prior = operations.get(key);
+    if (prior?.kind === 'initial') return collaborative.handle(ACTIONS.open,admin,{...fields,client_id:prior.clientId,initial_document:body.data.document});
+    let operation = prior;
+    if (!operation) {
+      const state = await api.read(base44,admin,{...fields,action:'get_object_building_floor_plan_workspace'});
+      if (!state.workspace?.document && body.expected_version !== 0) throw new ApiError(409,'De tekenversie is gewijzigd',{code:'floor_plan_resource_conflict'});
+      const clientId = `fixture-${await sha256(body.building_selection_key)}`;
+      const opened = await collaborative.handle(ACTIONS.open,admin,{...fields,client_id:clientId,...(body.action==='test:save_collaboratively'?{initial_document:body.data.document}:{})});
+      if (!state.workspace?.document) { operations.set(key,{kind:'initial',clientId}); return opened; }
+      const before = state.workspace.version === body.expected_version ? opened.workspace.document : rows.ObjectBuildingFloorPlanWorkspace.find(row=>row.workspace_id===state.workspace.id && row.version===body.expected_version)?.document;
+      if (!before) throw new ApiError(409,'De tekenversie is gewijzigd',{code:'floor_plan_resource_conflict'});
+      const changes = body.action==='test:save_collaboratively' ? diffDocuments(before,body.data.document) : [];
+      if (body.action==='test:save_collaboratively' && !changes.length) return opened;
+      const claimed = await collaborative.handle(ACTIONS.claim,admin,{...fields,session_id:opened.session.session_id,request_id:body.idempotency_key,...(changes.length?{changes}:{resource_ids:['document']})});
+      operation={before,sessionId:opened.session.session_id,lease:claimed.lease};operations.set(key,operation);
+    }
+    const payload={...fields,session_id:operation.sessionId,operation_id:body.idempotency_key,lease_id:operation.lease.lease_id,fence:operation.lease.fence,base_version:body.expected_version};
+    return body.action==='test:save_collaboratively'
+      ? collaborative.handle(ACTIONS.apply,admin,{...payload,changes:diffDocuments(operation.before,body.data.document)})
+      : collaborative.handle(ACTIONS.publish,admin,{...payload,expected_current_floor_plan_id:body.expected_current_floor_plan_id,data:body.data||{}});
+  };
+  return { object, rows, api, base44, hooks, audit, uploads, run, collaborative, legacyRun: (body:any)=>api.mutate(base44,admin,body), read: (body: any = {}) => api.read(base44, admin, { ...scope, action: 'get_object_building_floor_plan_workspace', ...body }) };
 }
 
 beforeEach(() => {
@@ -64,6 +99,39 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
+describe('legacy writer migration boundary', () => {
+  it.each(['save_object_building_floor_plan_draft','publish_object_building_floor_plan'])('rejects a new %s request without changing any document or publication', async action => {
+    const s=setup();const body={...(action.startsWith('save')?save('legacy-new-save'):publish('legacy-new-publication',0)),action};
+    await expect(s.legacyRun(body)).rejects.toMatchObject({status:409,details:{code:'floor_plan_client_update_required'}});
+    expect((await s.read()).workspace).toBeNull();
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(0);expect(s.rows.ObjectFloorPlan).toHaveLength(0);
+    expect(s.audit).not.toHaveBeenCalled();
+  });
+  it.each(['save_object_building_floor_plan_draft','publish_object_building_floor_plan'])('replays a previously committed %s receipt without activating its historical snapshot', async action => {
+    const s=setup();const body={...(action.startsWith('save')?save('legacy-committed-save'):publish('legacy-committed-publication',0)),action};
+    const keyHash=await sha256('bag:one'),operation=await sha256(`${admin.id}:${body.idempotency_key}`),fingerprint=await sha256(JSON.stringify(canonical(body)));
+    const old={id:'legacy-workspace',version:1,snapshot_id:'legacy-old',published_revision:action.startsWith('publish')?1:0,current_published_floor_plan_id:action.startsWith('publish')?'publication-old':null};
+    const current={...old,version:2,snapshot_id:'legacy-current',receipts:{[operation]:{fingerprint,entry:old}}};
+    s.rows.ObjectBuildingFloorPlanWorkspace.push(...[['legacy-old',1,doc('Old acknowledged')],['legacy-current',2,doc('Latest drawing')]].map(([id,version,document])=>({id,version,document,workspace_id:old.id,customer_id:scope.customer_id,object_id:scope.object_id,building_selection_key:scope.building_selection_key})));
+    if(action.startsWith('publish'))s.rows.ObjectFloorPlan.push({id:'publication-old',object_id:scope.object_id,building_selection_key:scope.building_selection_key,status:'published',revision:1});
+    s.object.floor_plan_workspace_index={[keyHash]:current};s.object.floor_plan_workspace_index_version=7;
+    const records=structuredClone(s.rows);s.audit.mockRejectedValueOnce(new Error('audit unavailable'));
+    await expect(s.legacyRun(body)).rejects.toThrow('audit unavailable');
+    const replay=await s.legacyRun(body);expect(replay.replayed).toBe(true);expect(replay.workspace.version).toBe(1);
+    expect(replay.workspace.document.title).toBe('Old acknowledged');
+    expect((await s.read()).workspace.document.title).toBe('Latest drawing');
+    expect(s.rows).toEqual(records);expect(s.object.floor_plan_workspace_index_version).toBe(7);
+    await expect(s.legacyRun({...body,expected_version:99})).rejects.toMatchObject({status:409,details:{code:'floor_plan_idempotency_conflict'}});
+  });
+  it('does not turn an uncommitted historical reservation into a new legacy save', async () => {
+    const s=setup(),body={...save('legacy-incomplete'),action:'save_object_building_floor_plan_draft'};
+    const keyHash=await sha256('bag:one'),operation=await sha256(`${admin.id}:${body.idempotency_key}`),fingerprint=await sha256(JSON.stringify(canonical(body)));
+    s.object.floor_plan_workspace_index={[keyHash]:{id:'legacy-pending',version:0,snapshot_id:null,published_revision:0,receipts:{[operation]:{fingerprint,pending:true,expires_at:'2000-01-01T00:00:00.000Z'}}}};
+    await expect(s.legacyRun(body)).rejects.toMatchObject({status:409,details:{code:'floor_plan_client_update_required'}});
+    expect((await s.read()).workspace).toBeNull();expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(0);
+  });
+});
+
 describe('authoritative cloud workspace', () => {
   it('returns no workspace before first save; persists complete multi-floor document and keeps map version unchanged', async () => {
     const s = setup(); expect((await s.read()).workspace).toBeNull();
@@ -73,30 +141,36 @@ describe('authoritative cloud workspace', () => {
     expect(s.object.version).toBe(4); expect((await s.read()).workspace.document).toEqual(data);
     expect(JSON.stringify(s.audit.mock.calls)).not.toContain('Begane grond');
   });
-  it('replays the exact saved snapshot after audit/HTTP failure, even when a later save exists', async () => {
-    const s = setup(); s.audit.mockRejectedValueOnce(new Error('audit temporarily unavailable'));
-    await expect(s.run(save('save-unknown'))).rejects.toThrow('audit temporarily unavailable');
-    await s.run(save('save-second', 1, { data: { document: doc('Changed') } }));
-    const recovered = await s.run(save('save-unknown'));
-    expect(recovered.replayed).toBe(true); expect(recovered.workspace.version).toBe(1); expect(recovered.workspace.document.title).toBe('Object');
-    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(2);
-    expect((await s.read()).workspace.version).toBe(2);
+  it('replays a committed operation after audit/HTTP failure without replacing a newer canonical document', async () => {
+    const s = setup(); await s.run(save('initial'));
+    s.audit.mockRejectedValueOnce(new Error('audit temporarily unavailable'));
+    const request=save('save-unknown',1,{data:{document:doc('First change')}});
+    await expect(s.run(request)).rejects.toThrow('audit temporarily unavailable');
+    await s.run(save('save-second',2,{data:{document:doc('Changed')}}));
+    const recovered=await s.run(request);
+    expect(recovered.replayed).toBe(true);expect(recovered.committed_version).toBe(2);
+    expect(recovered.workspace.version).toBe(3);expect(recovered.workspace.document.title).toBe('Changed');
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(3);
   });
-  it('recovers a staged draft after interruption before activation without creating another snapshot', async () => {
+  it('retries initialization after interruption while leaving the abandoned snapshot non-authoritative', async () => {
     const s = setup(); s.hooks.afterCreate = (name: string) => { if (name === 'ObjectBuildingFloorPlanWorkspace') { s.hooks.afterCreate = null; throw new Error('process stopped'); } };
     await expect(s.run(save('save-interrupted'))).rejects.toThrow('process stopped');
     expect((await s.read()).workspace).toBeNull();
     const result = await s.run(save('save-interrupted'));
-    expect(result.workspace.version).toBe(1); expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(1);
+    expect(result.workspace.version).toBe(1); expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(2);
+    expect(s.object.floor_plan_workspace_index[await sha256('bag:one')].snapshot_id).toBe(s.rows.ObjectBuildingFloorPlanWorkspace[1].id);
   });
-  it('rejects the same idempotency key with changed content', async () => {
-    const s = setup(); await s.run(save('save-bound-key'));
-    await expect(s.run(save('save-bound-key', 0, { data: { document: doc('Other') } }))).rejects.toMatchObject({ status: 409, details: { code: 'floor_plan_idempotency_conflict' } });
+  it('rejects the same operation key with changed content', async () => {
+    const s=setup();await s.run(save('initial'));
+    await s.run(save('save-bound-key',1,{data:{document:doc('First')}}));
+    await expect(s.run(save('save-bound-key',1,{data:{document:doc('Other')}}))).rejects.toMatchObject({status:409,details:{code:'floor_plan_operation_reused'}});
   });
-  it('racing first saves choose one authoritative document and retain the losing draft snapshot', async () => {
-    const s = setup(); const results = await Promise.allSettled([s.run(save('racing-save-a', 0, { data: { document: doc('A') } })), s.run(save('racing-save-b', 0, { data: { document: doc('B') } }))]);
-    expect(results.filter(item => item.status === 'fulfilled')).toHaveLength(1);
-    expect((await s.read()).workspace.version).toBe(1); expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(2);
+  it('racing first opens return the same authoritative initial document', async () => {
+    const s=setup();const results=await Promise.all([s.run(save('racing-save-a',0,{data:{document:doc('A')}})),s.run(save('racing-save-b',0,{data:{document:doc('B')}}))]);
+    expect(results[0].workspace.document).toEqual(results[1].workspace.document);
+    expect((await s.read()).workspace.version).toBe(1);
+    const current=s.object.floor_plan_workspace_index[await sha256('bag:one')];
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace.filter(row=>row.id===current.snapshot_id)).toHaveLength(1);
   });
   it('concurrent saves for two buildings both survive independent index rebasing', async () => {
     const s = setup(); await Promise.all([s.run(save('building-one')), s.run(save('building-two', 0, { building_selection_key: 'bag:two' }))]);
@@ -105,15 +179,34 @@ describe('authoritative cloud workspace', () => {
   });
   it('map change between staging and activation blocks commit and retains the old current', async () => {
     const s = setup(); await s.run(save('save-before-map'));
-    s.hooks.beforeCas = () => { s.object.version = 5; s.hooks.beforeCas = null; };
-    await expect(s.run(save('save-map-race', 1))).rejects.toMatchObject({ status: 409, details: { code: 'building_configuration_conflict' } });
-    expect((await s.read()).workspace.version).toBe(1);
+    // Delay the map change until after the operation's immutable snapshot is
+    // staged; changing it during session opening would not exercise activation.
+    s.hooks.afterCreate = (name: string) => {
+      if (name !== 'ObjectBuildingFloorPlanWorkspace') return;
+      s.hooks.afterCreate = null;
+      s.hooks.beforeCas = () => { s.object.version = 5; s.hooks.beforeCas = null; };
+    };
+    await expect(s.run(save('save-map-race', 1, {data:{document:doc('Changed')}}))).rejects.toMatchObject({ status: 409, details: { code: 'building_configuration_conflict' } });
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(2);
+    expect((await s.read()).workspace).toMatchObject({ version: 1, document: { title: 'Object' } });
   });
-  it('deselection, archived objects, wrong customer and unexpected version are rejected', async () => {
+  it('deselection, archived objects and wrong customer are rejected', async () => {
     const s = setup(); await expect(s.run(save('invalid-key', 0, { building_selection_key: 'manual:other' }))).rejects.toMatchObject({ status: 409 });
     s.rows.Customer.push({ id: 'customer-2' }); await expect(s.run(save('invalid-scope', 0, { customer_id: 'customer-2' }))).rejects.toMatchObject({ status: 409 });
-    await expect(s.run(save('invalid-version', 5))).rejects.toMatchObject({ status: 409 });
     s.object.status = 'archived'; await expect(s.run(save('invalid-archived'))).rejects.toMatchObject({ status: 409 });
+  });
+  it('rejects a future base version at the server without staging or activating a change', async () => {
+    const s = setup();
+    const fields = { ...scope, expected_map_version: 4 };
+    const opened = await s.collaborative.handle(ACTIONS.open, admin, { ...fields, client_id: 'future-version-client', initial_document: doc() });
+    const changes = diffDocuments(opened.workspace.document, doc('Must not be saved'));
+    const claimed = await s.collaborative.handle(ACTIONS.claim, admin, { ...fields, session_id: opened.session.session_id, request_id: 'future-version-claim', changes });
+    await expect(s.collaborative.handle(ACTIONS.apply, admin, {
+      ...fields, session_id: opened.session.session_id, operation_id: 'future-version-operation',
+      lease_id: claimed.lease.lease_id, fence: claimed.lease.fence, base_version: 99, changes,
+    })).rejects.toMatchObject({ status: 400, details: { code: 'invalid_floor_plan_operation' } });
+    expect(s.rows.ObjectBuildingFloorPlanWorkspace).toHaveLength(1);
+    expect((await s.read()).workspace).toMatchObject({ version: 1, document: { title: 'Object' } });
   });
 });
 
@@ -142,7 +235,7 @@ describe('immutable publication pointer', () => {
   it('recovers publication interrupted after record creation; old pointer stays readable throughout', async () => {
     const s = setup(); await s.run(save('draft-before-pub'));
     const initial = await s.run(publish('publish-initial'));
-    await s.run(save('draft-revision-two', 2));
+    await s.run(save('draft-revision-two', 2, {data:{document:doc('Revision two')}}));
     s.hooks.afterCreate = (name: string) => { if (name === 'ObjectFloorPlan') { s.hooks.afterCreate = null; throw new Error('interrupted publication'); } };
     const request = publish('publish-interrupted', 3, initial.workspace.current_published_floor_plan_id);
     await expect(s.run(request)).rejects.toThrow('interrupted publication');
@@ -368,11 +461,11 @@ describe('public building reference publication compatibility', () => {
   });
 });
 
-it('requires v2 client capability for intentionally undoing an imported document back to v1', async () => {
+it('allows intentional v2-to-v1 undo through collaboration while rejecting legacy writes', async () => {
   const s=referenceSetup(); const imported=await s.prepare((await s.list()).candidates[0].candidate_id,{include_aerial:false});
   const data:any=doc(); Object.assign(data,{schemaVersion:2,geoReference:imported.geoReference,buildingReferences:[{...imported.reference,floorId:'floor-1',wallIds:['wall-1']}]});
   await s.run(save('save-v2-for-undo',0,{...s.body,data:{document:data}}));
-  await expect(s.run(save('old-client-downgrade',1,s.body))).rejects.toMatchObject({details:{code:'floor_plan_client_update_required'}});
+  await expect(s.legacyRun({...save('old-client-downgrade',1,s.body),action:'save_object_building_floor_plan_draft'})).rejects.toMatchObject({details:{code:'floor_plan_client_update_required'}});
   expect((await s.run(save('new-client-undo',1,{...s.body,supported_document_versions:[1,2]}))).workspace.document.schemaVersion).toBe(1);
   expect(s.rows.ManagedFile).toHaveLength(1);
 });

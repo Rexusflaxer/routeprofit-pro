@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder, TextEncoder } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { inlineBackendImports } from "../helpers/inlineBackendImports";
 
@@ -11,7 +12,7 @@ let mobile;
 
 async function loadBackend(relativePath, exports) {
   const entryPath = path.join(root, relativePath);
-  const source = fs.readFileSync(entryPath, "utf8").replace(
+  const source = fs.readFileSync(entryPath, "utf8").replace(/from ["']npm:fflate@[^"']+["']/g, `from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("fflate")).href)}`).replace(
     /^import \{ createClientFromRequest(?: as ([A-Za-z0-9_]+))? \} from ["']npm:@base44\/sdk@[^"']+["'];$/gm,
     (_match, alias) => `const ${alias || "createClientFromRequest"} = () => globalThis.__buildingFloorPlanBase44;`,
   );
