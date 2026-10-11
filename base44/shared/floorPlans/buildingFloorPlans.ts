@@ -32,20 +32,21 @@ export function validateDesktopDocument(input: any, ApiError: any) {
   let serialized: string;
   try { serialized = JSON.stringify(input); } catch { return fail(); }
   if (!serialized || new TextEncoder().encode(serialized).length > MAX_DOCUMENT_BYTES) fail('Het tekenbestand is te groot (maximaal 4 MiB)');
-  const version2 = input?.schemaVersion === 2;
+  const version2 = input?.schemaVersion === 2 || input?.schemaVersion === 3;
+  const version3 = input?.schemaVersion === 3;
   object(input, ['schemaVersion', 'id', 'title', 'unit', 'floors', ...(version2 ? ['geoReference', 'buildingReferences'] : [])]);
-  if (![1, 2].includes(input.schemaVersion) || input.unit !== 'm') fail('Deze tekenbestandversie of maateenheid wordt niet ondersteund');
+  if (![1, 2, 3].includes(input.schemaVersion) || input.unit !== 'm') fail('Deze tekenbestandversie of maateenheid wordt niet ondersteund');
   const documentId = id(input.id);
   const document: RecordValue = {
     schemaVersion: input.schemaVersion, id: documentId, title: text(input.title), unit: 'm',
     floors: array(input.floors, 30, 1).map((floor: any) => {
-      object(floor, ['id', 'name', 'elevation', 'walls', 'rooms', 'openings', 'symbols', 'routes', 'background', 'print']);
+      object(floor, ['id', 'name', 'elevation', 'walls', 'rooms', 'openings', 'symbols', 'routes', 'background', 'print', ...(version3 ? ['furnishings'] : [])]);
       const floorId = id(floor.id);
       const walls = array(floor.walls, 5000).map((wall: any) => {
-        object(wall, ['id', 'start', 'end', 'thickness']);
+        object(wall, ['id', 'start', 'end', 'thickness', ...(version3 ? ['height'] : [])]);
         const start = point(wall.start), end = point(wall.end);
         if (Math.hypot(start.x - end.x, start.y - end.y) < 0.01) fail('Een muur moet minstens een centimeter lang zijn');
-        return { id: id(wall.id), start, end, thickness: number(wall.thickness, 0.01, 5) };
+        return { id: id(wall.id), start, end, thickness: number(wall.thickness, 0.01, 5), ...(wall.height !== undefined ? { height: number(wall.height, 0.01, 50) } : {}) };
       });
       const wallMap = new Map(walls.map((wall: any) => [wall.id, wall]));
       const rooms = array(floor.rooms, 2000).map((room: any) => {
@@ -56,12 +57,12 @@ export function validateDesktopDocument(input: any, ApiError: any) {
         return { id: id(room.id), label: text(room.label), polygon };
       });
       const openings = array(floor.openings, 4000).map((opening: any) => {
-        object(opening, ['id', 'wallId', 'type', 'offset', 'width', 'hinge', 'swing']);
+        object(opening, ['id', 'wallId', 'type', 'offset', 'width', 'hinge', 'swing', ...(version3 ? ['height', 'bottomElevation'] : [])]);
         const wall: any = wallMap.get(reference(opening.wallId));
         if (!wall) fail('Een deur of raam moet aan een bestaande muur zijn gekoppeld');
         const offset = number(opening.offset, 0), width = number(opening.width, 0.05, 50);
         if (offset + width > Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y) + 0.001) fail('Een deur of raam valt buiten de muur');
-        return { id: id(opening.id), wallId: opening.wallId, type: choice(opening.type, ['door', 'window', 'opening']), offset, width, hinge: choice(opening.hinge, ['left', 'right']), swing: choice(opening.swing, ['in', 'out']) };
+        return { id: id(opening.id), wallId: opening.wallId, type: choice(opening.type, ['door', 'window', 'opening']), offset, width, hinge: choice(opening.hinge, ['left', 'right']), swing: choice(opening.swing, ['in', 'out']), ...(opening.height !== undefined ? { height: number(opening.height, 0.01, 50) } : {}), ...(opening.bottomElevation !== undefined ? { bottomElevation: number(opening.bottomElevation, 0, 1000) } : {}) };
       });
       const symbols = array(floor.symbols, 5000).map((symbol: any) => {
         object(symbol, ['id', 'kind', 'position', 'rotation', 'label', 'installationId']);
@@ -72,6 +73,10 @@ export function validateDesktopDocument(input: any, ApiError: any) {
         object(route, ['id', 'points', 'label']);
         return { id: id(route.id), points: array(route.points, 500, 2).map(point), label: text(route.label) };
       });
+      const furnishings = floor.furnishings === undefined ? undefined : array(floor.furnishings, 2500).map((item: any) => {
+        object(item, ['id', 'category', 'position', 'rotation', 'width', 'depth', 'height', 'bottomElevation', 'confidence']);
+        return { id: id(item.id), category: text(item.category, 128), position: point(item.position), rotation: number(item.rotation, -3600, 3600), width: number(item.width, 0.01, 1000), depth: number(item.depth, 0.01, 1000), height: number(item.height, 0.01, 1000), bottomElevation: number(item.bottomElevation, 0, 1000), confidence: choice(item.confidence, ['low', 'medium', 'high', 'unknown']) };
+      });
       let background;
       if (floor.background != null) {
         const bg = object(floor.background, ['fileId', 'width', 'height', 'origin', 'metresPerPixel', 'opacity', 'calibrated']);
@@ -79,7 +84,7 @@ export function validateDesktopDocument(input: any, ApiError: any) {
         background = { fileId: reference(bg.fileId), width: number(bg.width, 1, 20000), height: number(bg.height, 1, 20000), origin: point(bg.origin), metresPerPixel: number(bg.metresPerPixel, 0.000001, 100), opacity: number(bg.opacity, 0, 1), calibrated: bg.calibrated };
       }
       const print = object(floor.print, ['paper', 'orientation', 'scale', 'profile', 'title', 'address', 'drawingNumber', 'instructions', 'secondaryInstructions', 'language2', 'viewpoints', 'cropCenter', 'logoFileId']);
-      return { id: floorId, name: text(floor.name, 120, false), elevation: number(floor.elevation, -1000, 10000), walls, rooms, openings, symbols, routes, ...(background ? { background } : {}), print: {
+      return { id: floorId, name: text(floor.name, 120, false), elevation: number(floor.elevation, -1000, 10000), walls, rooms, openings, symbols, routes, ...(furnishings !== undefined ? { furnishings } : {}), ...(background ? { background } : {}), print: {
         paper: choice(print.paper, ['A4', 'A3']), orientation: choice(print.orientation, ['portrait', 'landscape']), scale: number(print.scale, 1, 10000), profile: choice(print.profile, ['evacuation', 'installation']), title: text(print.title), address: text(print.address, 500), drawingNumber: text(print.drawingNumber, 120), instructions: text(print.instructions, 4000), secondaryInstructions: text(print.secondaryInstructions, 4000), language2: text(print.language2, 40),
         viewpoints: array(print.viewpoints, 100).map((view: any) => { object(view, ['id', 'label', 'position', 'rotation']); return { id: id(view.id), label: text(view.label), position: point(view.position), rotation: number(view.rotation, -3600, 3600) }; }),
         ...(print.cropCenter ? { cropCenter: point(print.cropCenter) } : {}),
@@ -113,7 +118,7 @@ export function desktopLegacyFloor(document: any) {
   const floor = document.floors[0];
   const endpoints = [...floor.walls.flatMap((wall: any) => [wall.start, wall.end]), ...floor.rooms.flatMap((room: any) => room.polygon), ...floor.symbols.map((symbol: any) => symbol.position)];
   const xs = endpoints.map((point: any) => point.x), ys = endpoints.map((point: any) => point.y);
-  return { id: floor.id, title: floor.name, unit: 'm', bounds: { minX: Math.min(0, ...xs), minY: Math.min(0, ...ys), maxX: Math.max(1, ...xs), maxY: Math.max(1, ...ys) }, rooms: floor.rooms, walls: floor.walls.map((wall: any) => ({ ...wall, height: 2.8 })), openings: floor.openings.map((opening: any) => {
+  return { id: floor.id, title: floor.name, unit: 'm', bounds: { minX: Math.min(0, ...xs), minY: Math.min(0, ...ys), maxX: Math.max(1, ...xs), maxY: Math.max(1, ...ys) }, rooms: floor.rooms, walls: floor.walls.map((wall: any) => ({ ...wall, height: wall.height ?? 2.8 })), openings: floor.openings.map((opening: any) => {
     const wall = floor.walls.find((candidate: any) => candidate.id === opening.wallId);
     const length = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
     const p = (distance: number) => ({ x: wall.start.x + (wall.end.x - wall.start.x) * distance / length, y: wall.start.y + (wall.end.y - wall.start.y) * distance / length });
@@ -171,7 +176,7 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
   };
   const projection = async (base44: any, state: any, entry: any) => ({
     customer_id: state.customer.id, object_id: state.object.id, building_selection_key: state.key, configuration_version: versionOf(state.object),
-    capabilities: { building_references: true, document_versions: [1, 2], collaboration_protocol: 1 },
+    capabilities: { building_references: true, document_versions: [1, 2, 3], collaboration_protocol: 1 },
     workspace: entry?.snapshot_id ? { id: entry.id, version: entry.version, document: await snapshot(base44, state.object, state.key, entry), current_published_floor_plan_id: entry.current_published_floor_plan_id || null, published_revision: entry.published_revision || 0, updated_at: entry.updated_at } : null,
   });
   const keyFor = async (user: any, body: any) => {

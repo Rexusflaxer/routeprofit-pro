@@ -74,7 +74,7 @@ export function createBuildingCollaboration({load, commit, validateDocument, sta
     const time = now();
     const active = sanitizeState(state, time);
     const entry = loaded.entry;
-    return {capabilities: {collaboration_protocol: 1, document_versions: [1, 2]}, configuration_version: loaded.mapVersion,
+    return {capabilities: {collaboration_protocol: 1, document_versions: [1, 2, 3]}, configuration_version: loaded.mapVersion,
       server_time: iso(time), generation: active.generation,
       session: session ? {session_id: session.session_id, client_id: session.client_id, expires_at: iso(session.expires_at_ms)} : null,
       workspace: entry?.snapshot_id ? {id: entry.id, version: entry.version, document: clone(loaded.document), current_published_floor_plan_id: entry.current_published_floor_plan_id || null, published_revision: entry.published_revision || 0, updated_at: entry.updated_at} : null,

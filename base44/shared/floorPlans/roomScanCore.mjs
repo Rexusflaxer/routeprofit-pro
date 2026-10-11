@@ -2,7 +2,10 @@
  * Adapter contract is documented in SERVER-INTEGRATION.md. */
 export const PROTOCOL = 'building-room-scan-v1';
 export const WALL_MERGE = 'room-scan-wall-merge-v1';
-export const CAPABILITIES = Object.freeze({wall_merge:WALL_MERGE});
+export const ROOM_DETAILS = 'room-scan-details-v1';
+export const ROOM_ORIENTATION = 'room-scan-orientation-v1';
+export const CAPABILITIES = Object.freeze({wall_merge:WALL_MERGE,room_details:ROOM_DETAILS,room_orientation:ROOM_ORIENTATION});
+const captureCapabilities=rich=>rich?CAPABILITIES:{wall_merge:WALL_MERGE,room_orientation:ROOM_ORIENTATION};
 export const ACTIONS = Object.freeze({targets:'get_building_room_scan_targets',begin:'begin_building_room_scan',submit:'submit_building_room_scan_event',end:'end_building_room_scan',get:'get_object_building_room_scans',place:'place_object_building_room_scan'});
 export class RoomScanError extends Error { constructor(status,code,message,details={}) { super(message);this.status=status;this.details={code,...details}; } }
 const fail=(status,code,message,details)=>{throw new RoomScanError(status,code,message,details);};
@@ -17,23 +20,39 @@ const categories=new Set(['storage','refrigerator','stove','bed','sink','washerD
 export const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
 const same=(a,b)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
 const byteLength=v=>new TextEncoder().encode(JSON.stringify(v)).length;
-export function validateEvent(event,context) {
+const smallText=(v,max)=>typeof v==='string'&&v.length>0&&new TextEncoder().encode(v).length<=max&&!/[<>\u0000-\u001f]/.test(v);
+const wrapDegrees=v=>(v%360+360)%360;
+const angleDifference=(a,b)=>Math.abs(((a-b+540)%360)-180);
+export function validateOrientation(value,event,context){
+ const allowed=['schemaVersion','method','reference','headingOrientation','localYAxisBearingDegrees','headingAccuracyDegrees','spreadDegrees','sampleCount','sampleWindowSeconds','sampledAt','magneticHeadingDegrees','trueHeadingDegrees','cameraFrameTimestampSeconds','pairingDeltaMilliseconds','deviceTopLocal','cameraForwardLocal','tracking'];
+ const angle=v=>number(v,0,360)&&v<360;
+ const vector=v=>keys(v,['x','y','z'])&&[v.x,v.y,v.z].every(n=>number(n,-1,1))&&Math.abs(Math.hypot(v.x,v.y,v.z)-1)<=.02;
+ if(!keys(value,allowed)||value.schemaVersion!==1||value.method!=='corelocation-arkit-device-top-v1'||!['true','magnetic'].includes(value.reference)||value.headingOrientation!=='portrait'||!angle(value.localYAxisBearingDegrees)||!number(value.headingAccuracyDegrees,0,20)||!number(value.spreadDegrees,0,8)||!Number.isInteger(value.sampleCount)||!number(value.sampleCount,3,32)||!number(value.sampleWindowSeconds,.4,10)||typeof value.sampledAt!=='string'||!Number.isFinite(Date.parse(value.sampledAt))||!angle(value.magneticHeadingDegrees)||(value.trueHeadingDegrees!==undefined&&!angle(value.trueHeadingDegrees))||(value.reference==='true'&&value.trueHeadingDegrees===undefined)||!number(value.cameraFrameTimestampSeconds,0,Number.MAX_SAFE_INTEGER)||!number(value.pairingDeltaMilliseconds,0,150)||!vector(value.deviceTopLocal)||!vector(value.cameraForwardLocal)||value.tracking!=='normal')fail(400,'invalid_room_scan_orientation','Ongeldige meetrichting.');
+ const a=value.deviceTopLocal,b=value.cameraForwardLocal;
+ const derived=wrapDegrees((value.reference==='true'?value.trueHeadingDegrees:value.magneticHeadingDegrees)-Math.atan2(a.x,-a.z)*180/Math.PI);
+ if(Math.hypot(a.x,a.z)<.45||Math.abs(a.x*b.x+a.y*b.y+a.z*b.z)>.03||angleDifference(derived,value.localYAxisBearingDegrees)>value.spreadDegrees+2||Date.parse(value.sampledAt)>Date.parse(event.capturedAt)+1500||Date.parse(value.sampledAt)<Date.parse(context.expiresAt)-1205000)fail(400,'invalid_room_scan_orientation','De richting hoort niet bij deze scanmeting.');
+ return value;
+}
+export function validateEvent(event,context,{richDetails=false}={}) {
   if(byteLength(event)>1048576)fail(413,'room_scan_too_large','Deze scanmeting is te groot.');
-  if(!keys(event,['schemaVersion','context','coordinateFrameId','coordinateSystem','alignment','sequence','capturedAt','isFinal','snapshot'])||event.schemaVersion!==1||!uuid(event.coordinateFrameId)||event.coordinateSystem!=='arkit-x-negative-z-metres'||event.alignment!=='unregistered'||!Number.isSafeInteger(event.sequence)||event.sequence<1||event.sequence>100000||typeof event.isFinal!=='boolean'||typeof event.capturedAt!=='string'||!Number.isFinite(Date.parse(event.capturedAt)))fail(400,'invalid_room_scan_event','Ongeldige scanmeting.');
+  if(!keys(event,['schemaVersion','context','coordinateFrameId','coordinateSystem','alignment','sequence','capturedAt','isFinal','snapshot','orientation'])||event.schemaVersion!==1||!uuid(event.coordinateFrameId)||event.coordinateSystem!=='arkit-x-negative-z-metres'||event.alignment!=='unregistered'||!Number.isSafeInteger(event.sequence)||event.sequence<1||event.sequence>100000||typeof event.isFinal!=='boolean'||typeof event.capturedAt!=='string'||!Number.isFinite(Date.parse(event.capturedAt)))fail(400,'invalid_room_scan_event','Ongeldige scanmeting.');
   const actual=event.context;
   if(!keys(actual,['captureSessionId','customerId','objectId','buildingSelectionKey','documentId','floorId','mapVersion','expiresAt','targetRoomId','targetRoomLabel']))fail(400,'invalid_room_scan_scope','Ongeldige scankoppeling.');
   for(const key of ['captureSessionId','customerId','objectId','buildingSelectionKey','documentId','floorId','mapVersion','targetRoomId','targetRoomLabel'])if(actual[key]!==context[key])fail(409,'room_scan_scope_changed','De scan hoort niet bij deze ruimte of tekening.');
   if(Date.parse(actual.expiresAt)!==Date.parse(context.expiresAt))fail(409,'room_scan_scope_changed','De scansessie heeft een andere geldigheid.');
+  if(event.orientation!==undefined)validateOrientation(event.orientation,event,context);
   const snapshot=event.snapshot;
   if(!keys(snapshot,['roomId','surfaces','objects'])||!identifier(snapshot.roomId)||!Array.isArray(snapshot.surfaces)||snapshot.surfaces.length>2500||!Array.isArray(snapshot.objects??[])||(snapshot.objects??[]).length>500)fail(400,'invalid_room_scan_geometry','Ongeldige ruimtegegevens.');
   const ids=new Set();
   for(const s of snapshot.surfaces){
-    if(!keys(s,['id','kind','start','end','height','bottomElevation','confidence','parentWallId','isCurved'])||!identifier(s.id)||ids.has(s.id)||!['wall','door','window','opening'].includes(s.kind)||!point(s.start)||!point(s.end)||!number(Math.hypot(s.end.x-s.start.x,s.end.y-s.start.y),.001,1000)||!number(s.height,.000001,50)||!number(s.bottomElevation,-1000,1000)||!confidence(s.confidence)||(s.parentWallId!==undefined&&!identifier(s.parentWallId))||(s.isCurved!==undefined&&typeof s.isCurved!=='boolean'))fail(400,'invalid_room_scan_geometry','Ongeldig scanvlak.');
+    if(!keys(s,['id','kind','start','end','height','bottomElevation','confidence','parentWallId','isCurved','details'])||!identifier(s.id)||ids.has(s.id)||!['wall','door','window','opening'].includes(s.kind)||!point(s.start)||!point(s.end)||!number(Math.hypot(s.end.x-s.start.x,s.end.y-s.start.y),.001,1000)||!number(s.height,.000001,50)||!number(s.bottomElevation,-1000,1000)||!confidence(s.confidence)||(s.parentWallId!==undefined&&!identifier(s.parentWallId))||(s.isCurved!==undefined&&typeof s.isCurved!=='boolean'))fail(400,'invalid_room_scan_geometry','Ongeldig scanvlak.');
+    if(s.details!==undefined&&(!richDetails||s.kind!=='door'||!keys(s.details,['isOpen'])||typeof s.details.isOpen!=='boolean'))fail(400,'invalid_room_scan_geometry','Ongeldige deurgegevens.');
     ids.add(s.id);
   }
   ids.clear();
   for(const o of snapshot.objects??[]){
-    if(!keys(o,['id','category','center','width','depth','height','bottomElevation','rotationRadians','confidence'])||!identifier(o.id)||ids.has(o.id)||!categories.has(o.category)||!point(o.center)||![o.width,o.depth,o.height].every(v=>number(v,.000001,100))||!number(o.bottomElevation,-1000,1000)||!number(o.rotationRadians,-Math.PI*2,Math.PI*2)||!confidence(o.confidence))fail(400,'invalid_room_scan_geometry','Ongeldig gescand object.');
+    if(!keys(o,['id','category','center','width','depth','height','bottomElevation','rotationRadians','confidence','details'])||!identifier(o.id)||ids.has(o.id)||!categories.has(o.category)||!point(o.center)||![o.width,o.depth,o.height].every(v=>number(v,.000001,100))||!number(o.bottomElevation,-1000,1000)||!number(o.rotationRadians,-Math.PI*2,Math.PI*2)||!confidence(o.confidence))fail(400,'invalid_room_scan_geometry','Ongeldig gescand object.');
+    if(o.details!==undefined){const d=o.details;if(!richDetails||!keys(d,['parentObjectId','attributes'])||(d.parentObjectId!==undefined&&!smallText(d.parentObjectId,128))||!Array.isArray(d.attributes)||d.attributes.length>16||d.attributes.some(a=>!keys(a,['type','value'])||!smallText(a.type,80)||!smallText(a.value,80))||new Set(d.attributes.map(a=>JSON.stringify([a.type,a.value]))).size!==d.attributes.length)fail(400,'invalid_room_scan_geometry','Ongeldige objectdetails.');}
     ids.add(o.id);
   }
   return clone(event);
@@ -99,9 +118,10 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
    if(!actions.has(action))fail(400,'invalid_room_scan_action','Onbekende scanactie.');
    if(!user?.id||user.role!=='admin')fail(403,'room_scan_forbidden','Alleen bevoegde LOQ-beheerders kunnen gebouwen scannen.');
    if(!body||byteLength(body)>1100000)fail(413,'room_scan_too_large','Dit scanverzoek is te groot.');
-   if(action===ACTIONS.targets){if(!identifier(body.object_id))fail(400,'invalid_room_scan_scope','Kies een geldig object.');return {protocol:PROTOCOL,targets:await listTargets(user,body.object_id)};}
+   if(action===ACTIONS.targets){if(!identifier(body.object_id))fail(400,'invalid_room_scan_scope','Kies een geldig object.');return {protocol:PROTOCOL,capabilities:CAPABILITIES,targets:await listTargets(user,body.object_id)};}
    if(action===ACTIONS.begin&&!identifier(body.target_id))fail(400,'invalid_room_scan_scope','Kies een geldig scandoel.');
    if([ACTIONS.submit,ACTIONS.end,ACTIONS.place].includes(action)&&!uuid(body.capture_session_id))fail(400,'invalid_room_scan_scope','Kies een geldige scansessie.');
+   if([ACTIONS.begin,ACTIONS.place].includes(action)&&body.required_room_details!==undefined&&body.required_room_details!==ROOM_DETAILS)fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor deze scangegevens.',{capabilities:CAPABILITIES});
    if(action===ACTIONS.place){
      if(body.required_wall_merge!==undefined&&body.required_wall_merge!==WALL_MERGE)fail(409,'room_scan_capability_mismatch','Werk LOQ bij om deze scan veilig samen te voegen.',{capabilities:CAPABILITIES});
      // Order is not a semantic difference, so an identical retry may reorder
@@ -123,14 +143,14 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        for(const [s,isArchived] of [...Object.values(state.sessions).map(s=>[s,false]),...archived.sessions.map(s=>[s,true])]){
          if(s.context.documentId!==document.id||s.context.mapVersion!==loaded.mapVersion||!document.floors.some(f=>f.id===s.context.floorId)||s.status==='cancelled'&&!s.placement?.appliedSequence)continue;
          const event=s.latest?await getEvent(loaded,s.latest):null;
-         sessions.push({capture_session_id:s.context.captureSessionId,status:s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time?'expired':s.status,context:s.context,sequence:s.sequence,event,placement:s.placement||null,placement_revision:s.placementRevision||0,archived:isArchived});
+         sessions.push({capture_session_id:s.context.captureSessionId,status:s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time?'expired':s.status,context:s.context,sequence:s.sequence,event,placement:s.placement||null,placement_revision:s.placementRevision||0,rich_details:s.richDetails===true,archived:isArchived});
        }
        return {protocol:PROTOCOL,capabilities:CAPABILITIES,server_time:iso(time),cursor:state.generation,workspace_version:entry.version,sessions,archive_offset:offset,next_archive_offset:archived.nextOffset,archive_count:state.archiveCount};
      }
      if(action===ACTIONS.begin){
        if(!uuid(body.request_id))fail(400,'invalid_room_scan_request','Een scansleutel is verplicht.');
        const beginKey=await hash(`${user.id}:${body.request_id}`),prior=state.begins[beginKey];
-       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,context};}
+       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,capabilities:captureCapabilities(prior.richDetails===true),context};}
        const floor=document.floors.find(f=>f.id===loaded.floorId);
        if(!floor)fail(409,'room_scan_scope_changed','Deze verdieping bestaat niet meer.');
        const existing=typeof body.room_id==='string',creating=typeof body.new_room_label==='string';
@@ -141,8 +161,9 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        if(Object.values(state.sessions).some(s=>s.userId===user.id&&s.status==='capturing'&&Date.parse(s.context.expiresAt)>time))fail(409,'room_scan_already_active','Rond de huidige ruimtescan eerst af.');
        if(Object.values(state.sessions).filter(s=>s.status==='capturing'&&Date.parse(s.context.expiresAt)>time).length>=32)fail(429,'room_scan_session_limit','Er zijn te veel gelijktijdige scans in dit gebouw.');
        const id=randomId(),context={captureSessionId:id,...scopeOf(loaded),expiresAt:iso(Math.floor((time+1200000)/1000)*1000),...(room?{targetRoomId:room.id}:{}),targetRoomLabel:label};
-       state.sessions[id]={context,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
-       state.begins[beginKey]={fingerprint,sessionId:id,context,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,context};
+       const richDetails=body.required_room_details===ROOM_DETAILS;
+       state.sessions[id]={context,richDetails,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
+       state.begins[beginKey]={fingerprint,sessionId:id,context,richDetails,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,capabilities:captureCapabilities(richDetails),context};
      }else{
        if(action===ACTIONS.end&&!state.sessions[body.capture_session_id]){
          const receipt=state.closedReceipts[body.capture_session_id];
@@ -162,7 +183,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        const session=currentSession(loaded,state,body.capture_session_id);
        if(action===ACTIONS.submit){
          assertOwner(session,user);
-         const event=validateEvent(body.event,session.context);
+         const event=validateEvent(body.event,session.context,{richDetails:session.richDetails===true});
          if(body.event_id!==`${body.capture_session_id}:${event.coordinateFrameId}:${event.sequence}`)fail(400,'invalid_room_scan_event_id','Ongeldige scanmetingssleutel.');
          const digest=await hash(JSON.stringify(canonical(event))),prior=session.receipts[String(event.sequence)];
          if(prior){if(prior.digest!==digest||prior.eventId!==body.event_id)fail(409,'room_scan_event_reused','Deze scanmeting is met andere inhoud herhaald.');return {eventId:body.event_id,sequence:event.sequence,accepted:true,replayed:true};}
@@ -184,6 +205,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
          if(body.status==='completed'){assertActive(session,time);if(!session.finalSequence||session.latest?.sequence!==session.finalSequence)fail(409,'room_scan_final_required','Wacht tot de laatste meting is opgeslagen.');}
          session.status=body.status;response={status:session.status};
        }else if(action===ACTIONS.place){
+         if(session.richDetails===true&&body.required_room_details!==ROOM_DETAILS)fail(409,'room_scan_client_update_required','Werk LOQ Desktop bij voor deze uitgebreide ruimtescan.',{capabilities:CAPABILITIES});
          if(!uuid(body.operation_id))fail(400,'invalid_room_scan_request','Een plaatsingssleutel is verplicht.');
          if(body.document_id!==document.id||body.map_version!==loaded.mapVersion||body.coordinate_frame_id!==session.coordinateFrameId)fail(409,'room_scan_scope_changed','De tekening, kaart of scanrichting is veranderd.');
          const operationKey=await hash(`${user.id}:${body.operation_id}`),prior=state.operations[operationKey];

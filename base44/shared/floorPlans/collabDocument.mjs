@@ -1,6 +1,6 @@
 // Shared client/server protocol. Collections are ID-addressed; display order is
 // intentionally not a write dependency for unrelated element additions.
-export const COLLECTIONS = Object.freeze(['walls', 'openings', 'rooms', 'symbols', 'routes']);
+export const COLLECTIONS = Object.freeze(['walls', 'openings', 'rooms', 'symbols', 'routes', 'furnishings']);
 const clone = value => structuredClone(value);
 const EPS = .001;
 export function canonical(value) {
@@ -91,6 +91,7 @@ export function applyChanges(document, changes) {
     for (const collection of COLLECTIONS) {
       const elements = Object.keys(resources).filter(key => { const parsed = parseResourceId(key); return parsed.kind === 'element' && parsed.floorId === id && parsed.collection === collection; }).map(key => resources[key]);
       const order = new Map((previous?.[collection] || []).map((element, index) => [element.id, index]));
+      if (collection === 'furnishings' && !elements.length && metadata.schemaVersion < 3) continue;
       result[collection] = elements.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) || a.id.localeCompare(b.id));
     }
     return result;
@@ -146,7 +147,7 @@ export function dependencyResources(document, {resourceIds = [], changes = []} =
     if (!floor || !element) continue;
     const change = changes.find(item => item.resource_id === key);
     const labelOnly = parsed.collection === 'rooms' && change && equalValue(change.before?.polygon, change.after?.polygon);
-    if (labelOnly || ['symbols', 'routes'].includes(parsed.collection)) continue;
+    if (labelOnly || ['symbols', 'routes', 'furnishings'].includes(parsed.collection)) continue;
     const affectedWalls = new Set();
     if (parsed.collection === 'walls') {
       // Includes new crossings in the after-document, not merely old joints.

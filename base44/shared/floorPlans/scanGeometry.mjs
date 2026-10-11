@@ -1,8 +1,3676 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// routeprofit-pro/node_modules/splaytree/dist/splay.js
+var require_splay = __commonJS({
+  "routeprofit-pro/node_modules/splaytree/dist/splay.js"(exports, module) {
+    (function(global, factory) {
+      typeof exports === "object" && typeof module !== "undefined" ? module.exports = factory() : typeof define === "function" && define.amd ? define(factory) : global.SplayTree = factory();
+    })(exports, (function() {
+      "use strict";
+      function DEFAULT_COMPARE(a, b2) {
+        return a > b2 ? 1 : a < b2 ? -1 : 0;
+      }
+      var SplayTree = function SplayTree2(compare, noDuplicates) {
+        if (compare === void 0) compare = DEFAULT_COMPARE;
+        if (noDuplicates === void 0) noDuplicates = false;
+        this._compare = compare;
+        this._root = null;
+        this._size = 0;
+        this._noDuplicates = !!noDuplicates;
+      };
+      var prototypeAccessors = { size: {} };
+      SplayTree.prototype.rotateLeft = function rotateLeft(x2) {
+        var y2 = x2.right;
+        if (y2) {
+          x2.right = y2.left;
+          if (y2.left) {
+            y2.left.parent = x2;
+          }
+          y2.parent = x2.parent;
+        }
+        if (!x2.parent) {
+          this._root = y2;
+        } else if (x2 === x2.parent.left) {
+          x2.parent.left = y2;
+        } else {
+          x2.parent.right = y2;
+        }
+        if (y2) {
+          y2.left = x2;
+        }
+        x2.parent = y2;
+      };
+      SplayTree.prototype.rotateRight = function rotateRight(x2) {
+        var y2 = x2.left;
+        if (y2) {
+          x2.left = y2.right;
+          if (y2.right) {
+            y2.right.parent = x2;
+          }
+          y2.parent = x2.parent;
+        }
+        if (!x2.parent) {
+          this._root = y2;
+        } else if (x2 === x2.parent.left) {
+          x2.parent.left = y2;
+        } else {
+          x2.parent.right = y2;
+        }
+        if (y2) {
+          y2.right = x2;
+        }
+        x2.parent = y2;
+      };
+      SplayTree.prototype._splay = function _splay(x2) {
+        var this$1 = this;
+        while (x2.parent) {
+          var p = x2.parent;
+          if (!p.parent) {
+            if (p.left === x2) {
+              this$1.rotateRight(p);
+            } else {
+              this$1.rotateLeft(p);
+            }
+          } else if (p.left === x2 && p.parent.left === p) {
+            this$1.rotateRight(p.parent);
+            this$1.rotateRight(p);
+          } else if (p.right === x2 && p.parent.right === p) {
+            this$1.rotateLeft(p.parent);
+            this$1.rotateLeft(p);
+          } else if (p.left === x2 && p.parent.right === p) {
+            this$1.rotateRight(p);
+            this$1.rotateLeft(p);
+          } else {
+            this$1.rotateLeft(p);
+            this$1.rotateRight(p);
+          }
+        }
+      };
+      SplayTree.prototype.splay = function splay(x2) {
+        var this$1 = this;
+        var p, gp, ggp, l, r;
+        while (x2.parent) {
+          p = x2.parent;
+          gp = p.parent;
+          if (gp && gp.parent) {
+            ggp = gp.parent;
+            if (ggp.left === gp) {
+              ggp.left = x2;
+            } else {
+              ggp.right = x2;
+            }
+            x2.parent = ggp;
+          } else {
+            x2.parent = null;
+            this$1._root = x2;
+          }
+          l = x2.left;
+          r = x2.right;
+          if (x2 === p.left) {
+            if (gp) {
+              if (gp.left === p) {
+                if (p.right) {
+                  gp.left = p.right;
+                  gp.left.parent = gp;
+                } else {
+                  gp.left = null;
+                }
+                p.right = gp;
+                gp.parent = p;
+              } else {
+                if (l) {
+                  gp.right = l;
+                  l.parent = gp;
+                } else {
+                  gp.right = null;
+                }
+                x2.left = gp;
+                gp.parent = x2;
+              }
+            }
+            if (r) {
+              p.left = r;
+              r.parent = p;
+            } else {
+              p.left = null;
+            }
+            x2.right = p;
+            p.parent = x2;
+          } else {
+            if (gp) {
+              if (gp.right === p) {
+                if (p.left) {
+                  gp.right = p.left;
+                  gp.right.parent = gp;
+                } else {
+                  gp.right = null;
+                }
+                p.left = gp;
+                gp.parent = p;
+              } else {
+                if (r) {
+                  gp.left = r;
+                  r.parent = gp;
+                } else {
+                  gp.left = null;
+                }
+                x2.right = gp;
+                gp.parent = x2;
+              }
+            }
+            if (l) {
+              p.right = l;
+              l.parent = p;
+            } else {
+              p.right = null;
+            }
+            x2.left = p;
+            p.parent = x2;
+          }
+        }
+      };
+      SplayTree.prototype.replace = function replace(u, v2) {
+        if (!u.parent) {
+          this._root = v2;
+        } else if (u === u.parent.left) {
+          u.parent.left = v2;
+        } else {
+          u.parent.right = v2;
+        }
+        if (v2) {
+          v2.parent = u.parent;
+        }
+      };
+      SplayTree.prototype.minNode = function minNode(u) {
+        if (u === void 0) u = this._root;
+        if (u) {
+          while (u.left) {
+            u = u.left;
+          }
+        }
+        return u;
+      };
+      SplayTree.prototype.maxNode = function maxNode(u) {
+        if (u === void 0) u = this._root;
+        if (u) {
+          while (u.right) {
+            u = u.right;
+          }
+        }
+        return u;
+      };
+      SplayTree.prototype.insert = function insert(key, data) {
+        var z2 = this._root;
+        var p = null;
+        var comp = this._compare;
+        var cmp;
+        if (this._noDuplicates) {
+          while (z2) {
+            p = z2;
+            cmp = comp(z2.key, key);
+            if (cmp === 0) {
+              return;
+            } else if (comp(z2.key, key) < 0) {
+              z2 = z2.right;
+            } else {
+              z2 = z2.left;
+            }
+          }
+        } else {
+          while (z2) {
+            p = z2;
+            if (comp(z2.key, key) < 0) {
+              z2 = z2.right;
+            } else {
+              z2 = z2.left;
+            }
+          }
+        }
+        z2 = { key, data, left: null, right: null, parent: p };
+        if (!p) {
+          this._root = z2;
+        } else if (comp(p.key, z2.key) < 0) {
+          p.right = z2;
+        } else {
+          p.left = z2;
+        }
+        this.splay(z2);
+        this._size++;
+        return z2;
+      };
+      SplayTree.prototype.find = function find(key) {
+        var z2 = this._root;
+        var comp = this._compare;
+        while (z2) {
+          var cmp = comp(z2.key, key);
+          if (cmp < 0) {
+            z2 = z2.right;
+          } else if (cmp > 0) {
+            z2 = z2.left;
+          } else {
+            return z2;
+          }
+        }
+        return null;
+      };
+      SplayTree.prototype.contains = function contains(key) {
+        var node = this._root;
+        var comparator = this._compare;
+        while (node) {
+          var cmp = comparator(key, node.key);
+          if (cmp === 0) {
+            return true;
+          } else if (cmp < 0) {
+            node = node.left;
+          } else {
+            node = node.right;
+          }
+        }
+        return false;
+      };
+      SplayTree.prototype.remove = function remove(key) {
+        var z2 = this.find(key);
+        if (!z2) {
+          return false;
+        }
+        this.splay(z2);
+        if (!z2.left) {
+          this.replace(z2, z2.right);
+        } else if (!z2.right) {
+          this.replace(z2, z2.left);
+        } else {
+          var y2 = this.minNode(z2.right);
+          if (y2.parent !== z2) {
+            this.replace(y2, y2.right);
+            y2.right = z2.right;
+            y2.right.parent = y2;
+          }
+          this.replace(z2, y2);
+          y2.left = z2.left;
+          y2.left.parent = y2;
+        }
+        this._size--;
+        return true;
+      };
+      SplayTree.prototype.removeNode = function removeNode(z2) {
+        if (!z2) {
+          return false;
+        }
+        this.splay(z2);
+        if (!z2.left) {
+          this.replace(z2, z2.right);
+        } else if (!z2.right) {
+          this.replace(z2, z2.left);
+        } else {
+          var y2 = this.minNode(z2.right);
+          if (y2.parent !== z2) {
+            this.replace(y2, y2.right);
+            y2.right = z2.right;
+            y2.right.parent = y2;
+          }
+          this.replace(z2, y2);
+          y2.left = z2.left;
+          y2.left.parent = y2;
+        }
+        this._size--;
+        return true;
+      };
+      SplayTree.prototype.erase = function erase(key) {
+        var z2 = this.find(key);
+        if (!z2) {
+          return;
+        }
+        this.splay(z2);
+        var s = z2.left;
+        var t = z2.right;
+        var sMax = null;
+        if (s) {
+          s.parent = null;
+          sMax = this.maxNode(s);
+          this.splay(sMax);
+          this._root = sMax;
+        }
+        if (t) {
+          if (s) {
+            sMax.right = t;
+          } else {
+            this._root = t;
+          }
+          t.parent = sMax;
+        }
+        this._size--;
+      };
+      SplayTree.prototype.pop = function pop() {
+        var node = this._root, returnValue = null;
+        if (node) {
+          while (node.left) {
+            node = node.left;
+          }
+          returnValue = { key: node.key, data: node.data };
+          this.remove(node.key);
+        }
+        return returnValue;
+      };
+      SplayTree.prototype.next = function next(node) {
+        var successor = node;
+        if (successor) {
+          if (successor.right) {
+            successor = successor.right;
+            while (successor && successor.left) {
+              successor = successor.left;
+            }
+          } else {
+            successor = node.parent;
+            while (successor && successor.right === node) {
+              node = successor;
+              successor = successor.parent;
+            }
+          }
+        }
+        return successor;
+      };
+      SplayTree.prototype.prev = function prev(node) {
+        var predecessor = node;
+        if (predecessor) {
+          if (predecessor.left) {
+            predecessor = predecessor.left;
+            while (predecessor && predecessor.right) {
+              predecessor = predecessor.right;
+            }
+          } else {
+            predecessor = node.parent;
+            while (predecessor && predecessor.left === node) {
+              node = predecessor;
+              predecessor = predecessor.parent;
+            }
+          }
+        }
+        return predecessor;
+      };
+      SplayTree.prototype.forEach = function forEach(callback) {
+        var current = this._root;
+        var s = [], done = false, i = 0;
+        while (!done) {
+          if (current) {
+            s.push(current);
+            current = current.left;
+          } else {
+            if (s.length > 0) {
+              current = s.pop();
+              callback(current, i++);
+              current = current.right;
+            } else {
+              done = true;
+            }
+          }
+        }
+        return this;
+      };
+      SplayTree.prototype.range = function range(low, high, fn, ctx) {
+        var this$1 = this;
+        var Q2 = [];
+        var compare = this._compare;
+        var node = this._root, cmp;
+        while (Q2.length !== 0 || node) {
+          if (node) {
+            Q2.push(node);
+            node = node.left;
+          } else {
+            node = Q2.pop();
+            cmp = compare(node.key, high);
+            if (cmp > 0) {
+              break;
+            } else if (compare(node.key, low) >= 0) {
+              if (fn.call(ctx, node)) {
+                return this$1;
+              }
+            }
+            node = node.right;
+          }
+        }
+        return this;
+      };
+      SplayTree.prototype.keys = function keys() {
+        var current = this._root;
+        var s = [], r = [], done = false;
+        while (!done) {
+          if (current) {
+            s.push(current);
+            current = current.left;
+          } else {
+            if (s.length > 0) {
+              current = s.pop();
+              r.push(current.key);
+              current = current.right;
+            } else {
+              done = true;
+            }
+          }
+        }
+        return r;
+      };
+      SplayTree.prototype.values = function values() {
+        var current = this._root;
+        var s = [], r = [], done = false;
+        while (!done) {
+          if (current) {
+            s.push(current);
+            current = current.left;
+          } else {
+            if (s.length > 0) {
+              current = s.pop();
+              r.push(current.data);
+              current = current.right;
+            } else {
+              done = true;
+            }
+          }
+        }
+        return r;
+      };
+      SplayTree.prototype.at = function at2(index) {
+        var current = this._root;
+        var s = [], done = false, i = 0;
+        while (!done) {
+          if (current) {
+            s.push(current);
+            current = current.left;
+          } else {
+            if (s.length > 0) {
+              current = s.pop();
+              if (i === index) {
+                return current;
+              }
+              i++;
+              current = current.right;
+            } else {
+              done = true;
+            }
+          }
+        }
+        return null;
+      };
+      SplayTree.prototype.load = function load(keys, values, presort) {
+        if (keys === void 0) keys = [];
+        if (values === void 0) values = [];
+        if (presort === void 0) presort = false;
+        if (this._size !== 0) {
+          throw new Error("bulk-load: tree is not empty");
+        }
+        var size = keys.length;
+        if (presort) {
+          sort(keys, values, 0, size - 1, this._compare);
+        }
+        this._root = loadRecursive(null, keys, values, 0, size);
+        this._size = size;
+        return this;
+      };
+      SplayTree.prototype.min = function min() {
+        var node = this.minNode(this._root);
+        if (node) {
+          return node.key;
+        } else {
+          return null;
+        }
+      };
+      SplayTree.prototype.max = function max() {
+        var node = this.maxNode(this._root);
+        if (node) {
+          return node.key;
+        } else {
+          return null;
+        }
+      };
+      SplayTree.prototype.isEmpty = function isEmpty() {
+        return this._root === null;
+      };
+      prototypeAccessors.size.get = function() {
+        return this._size;
+      };
+      SplayTree.createTree = function createTree(keys, values, comparator, presort, noDuplicates) {
+        return new SplayTree(comparator, noDuplicates).load(keys, values, presort);
+      };
+      Object.defineProperties(SplayTree.prototype, prototypeAccessors);
+      function loadRecursive(parent, keys, values, start, end) {
+        var size = end - start;
+        if (size > 0) {
+          var middle = start + Math.floor(size / 2);
+          var key = keys[middle];
+          var data = values[middle];
+          var node = { key, data, parent };
+          node.left = loadRecursive(node, keys, values, start, middle);
+          node.right = loadRecursive(node, keys, values, middle + 1, end);
+          return node;
+        }
+        return null;
+      }
+      function sort(keys, values, left, right, compare) {
+        if (left >= right) {
+          return;
+        }
+        var pivot = keys[left + right >> 1];
+        var i = left - 1;
+        var j2 = right + 1;
+        while (true) {
+          do {
+            i++;
+          } while (compare(keys[i], pivot) < 0);
+          do {
+            j2--;
+          } while (compare(keys[j2], pivot) > 0);
+          if (i >= j2) {
+            break;
+          }
+          var tmp = keys[i];
+          keys[i] = keys[j2];
+          keys[j2] = tmp;
+          tmp = values[i];
+          values[i] = values[j2];
+          values[j2] = tmp;
+        }
+        sort(keys, values, left, j2, compare);
+        sort(keys, values, j2 + 1, right, compare);
+      }
+      return SplayTree;
+    }));
+  }
+});
+
+// routeprofit-pro/node_modules/robust-predicates/umd/predicates.js
+var require_predicates = __commonJS({
+  "routeprofit-pro/node_modules/robust-predicates/umd/predicates.js"(exports, module) {
+    (function(global, factory) {
+      typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.predicates = {}));
+    })(exports, function(exports2) {
+      "use strict";
+      const epsilon = 11102230246251565e-32;
+      const splitter = 134217729;
+      const resulterrbound = (3 + 8 * epsilon) * epsilon;
+      function sum(elen, e, flen, f, h) {
+        let Q2, Qnew, hh, bvirt;
+        let enow = e[0];
+        let fnow = f[0];
+        let eindex = 0;
+        let findex = 0;
+        if (fnow > enow === fnow > -enow) {
+          Q2 = enow;
+          enow = e[++eindex];
+        } else {
+          Q2 = fnow;
+          fnow = f[++findex];
+        }
+        let hindex = 0;
+        if (eindex < elen && findex < flen) {
+          if (fnow > enow === fnow > -enow) {
+            Qnew = enow + Q2;
+            hh = Q2 - (Qnew - enow);
+            enow = e[++eindex];
+          } else {
+            Qnew = fnow + Q2;
+            hh = Q2 - (Qnew - fnow);
+            fnow = f[++findex];
+          }
+          Q2 = Qnew;
+          if (hh !== 0) {
+            h[hindex++] = hh;
+          }
+          while (eindex < elen && findex < flen) {
+            if (fnow > enow === fnow > -enow) {
+              Qnew = Q2 + enow;
+              bvirt = Qnew - Q2;
+              hh = Q2 - (Qnew - bvirt) + (enow - bvirt);
+              enow = e[++eindex];
+            } else {
+              Qnew = Q2 + fnow;
+              bvirt = Qnew - Q2;
+              hh = Q2 - (Qnew - bvirt) + (fnow - bvirt);
+              fnow = f[++findex];
+            }
+            Q2 = Qnew;
+            if (hh !== 0) {
+              h[hindex++] = hh;
+            }
+          }
+        }
+        while (eindex < elen) {
+          Qnew = Q2 + enow;
+          bvirt = Qnew - Q2;
+          hh = Q2 - (Qnew - bvirt) + (enow - bvirt);
+          enow = e[++eindex];
+          Q2 = Qnew;
+          if (hh !== 0) {
+            h[hindex++] = hh;
+          }
+        }
+        while (findex < flen) {
+          Qnew = Q2 + fnow;
+          bvirt = Qnew - Q2;
+          hh = Q2 - (Qnew - bvirt) + (fnow - bvirt);
+          fnow = f[++findex];
+          Q2 = Qnew;
+          if (hh !== 0) {
+            h[hindex++] = hh;
+          }
+        }
+        if (Q2 !== 0 || hindex === 0) {
+          h[hindex++] = Q2;
+        }
+        return hindex;
+      }
+      function sum_three(alen, a, blen, b2, clen, c, tmp, out) {
+        return sum(sum(alen, a, blen, b2, tmp), tmp, clen, c, out);
+      }
+      function scale(elen, e, b2, h) {
+        let Q2, sum2, hh, product1, product0;
+        let bvirt, c, ahi, alo, bhi, blo;
+        c = splitter * b2;
+        bhi = c - (c - b2);
+        blo = b2 - bhi;
+        let enow = e[0];
+        Q2 = enow * b2;
+        c = splitter * enow;
+        ahi = c - (c - enow);
+        alo = enow - ahi;
+        hh = alo * blo - (Q2 - ahi * bhi - alo * bhi - ahi * blo);
+        let hindex = 0;
+        if (hh !== 0) {
+          h[hindex++] = hh;
+        }
+        for (let i = 1; i < elen; i++) {
+          enow = e[i];
+          product1 = enow * b2;
+          c = splitter * enow;
+          ahi = c - (c - enow);
+          alo = enow - ahi;
+          product0 = alo * blo - (product1 - ahi * bhi - alo * bhi - ahi * blo);
+          sum2 = Q2 + product0;
+          bvirt = sum2 - Q2;
+          hh = Q2 - (sum2 - bvirt) + (product0 - bvirt);
+          if (hh !== 0) {
+            h[hindex++] = hh;
+          }
+          Q2 = product1 + sum2;
+          hh = sum2 - (Q2 - product1);
+          if (hh !== 0) {
+            h[hindex++] = hh;
+          }
+        }
+        if (Q2 !== 0 || hindex === 0) {
+          h[hindex++] = Q2;
+        }
+        return hindex;
+      }
+      function negate(elen, e) {
+        for (let i = 0; i < elen; i++) e[i] = -e[i];
+        return elen;
+      }
+      function estimate(elen, e) {
+        let Q2 = e[0];
+        for (let i = 1; i < elen; i++) Q2 += e[i];
+        return Q2;
+      }
+      function vec(n) {
+        return new Float64Array(n);
+      }
+      const ccwerrboundA = (3 + 16 * epsilon) * epsilon;
+      const ccwerrboundB = (2 + 12 * epsilon) * epsilon;
+      const ccwerrboundC = (9 + 64 * epsilon) * epsilon * epsilon;
+      const B = vec(4);
+      const C1 = vec(8);
+      const C2 = vec(12);
+      const D2 = vec(16);
+      const u = vec(4);
+      function orient2dadapt(ax, ay, bx, by, cx, cy, detsum) {
+        let acxtail, acytail, bcxtail, bcytail;
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0, u3;
+        const acx = ax - cx;
+        const bcx = bx - cx;
+        const acy = ay - cy;
+        const bcy = by - cy;
+        s1 = acx * bcy;
+        c = splitter * acx;
+        ahi = c - (c - acx);
+        alo = acx - ahi;
+        c = splitter * bcy;
+        bhi = c - (c - bcy);
+        blo = bcy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = acy * bcx;
+        c = splitter * acy;
+        ahi = c - (c - acy);
+        alo = acy - ahi;
+        c = splitter * bcx;
+        bhi = c - (c - bcx);
+        blo = bcx - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        B[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        B[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        B[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        B[3] = u3;
+        let det = estimate(4, B);
+        let errbound = ccwerrboundB * detsum;
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        bvirt = ax - acx;
+        acxtail = ax - (acx + bvirt) + (bvirt - cx);
+        bvirt = bx - bcx;
+        bcxtail = bx - (bcx + bvirt) + (bvirt - cx);
+        bvirt = ay - acy;
+        acytail = ay - (acy + bvirt) + (bvirt - cy);
+        bvirt = by - bcy;
+        bcytail = by - (bcy + bvirt) + (bvirt - cy);
+        if (acxtail === 0 && acytail === 0 && bcxtail === 0 && bcytail === 0) {
+          return det;
+        }
+        errbound = ccwerrboundC * detsum + resulterrbound * Math.abs(det);
+        det += acx * bcytail + bcy * acxtail - (acy * bcxtail + bcx * acytail);
+        if (det >= errbound || -det >= errbound) return det;
+        s1 = acxtail * bcy;
+        c = splitter * acxtail;
+        ahi = c - (c - acxtail);
+        alo = acxtail - ahi;
+        c = splitter * bcy;
+        bhi = c - (c - bcy);
+        blo = bcy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = acytail * bcx;
+        c = splitter * acytail;
+        ahi = c - (c - acytail);
+        alo = acytail - ahi;
+        c = splitter * bcx;
+        bhi = c - (c - bcx);
+        blo = bcx - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        u[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        u[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        u[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        u[3] = u3;
+        const C1len = sum(4, B, 4, u, C1);
+        s1 = acx * bcytail;
+        c = splitter * acx;
+        ahi = c - (c - acx);
+        alo = acx - ahi;
+        c = splitter * bcytail;
+        bhi = c - (c - bcytail);
+        blo = bcytail - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = acy * bcxtail;
+        c = splitter * acy;
+        ahi = c - (c - acy);
+        alo = acy - ahi;
+        c = splitter * bcxtail;
+        bhi = c - (c - bcxtail);
+        blo = bcxtail - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        u[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        u[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        u[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        u[3] = u3;
+        const C2len = sum(C1len, C1, 4, u, C2);
+        s1 = acxtail * bcytail;
+        c = splitter * acxtail;
+        ahi = c - (c - acxtail);
+        alo = acxtail - ahi;
+        c = splitter * bcytail;
+        bhi = c - (c - bcytail);
+        blo = bcytail - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = acytail * bcxtail;
+        c = splitter * acytail;
+        ahi = c - (c - acytail);
+        alo = acytail - ahi;
+        c = splitter * bcxtail;
+        bhi = c - (c - bcxtail);
+        blo = bcxtail - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        u[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        u[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        u[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        u[3] = u3;
+        const Dlen = sum(C2len, C2, 4, u, D2);
+        return D2[Dlen - 1];
+      }
+      function orient2d(ax, ay, bx, by, cx, cy) {
+        const detleft = (ay - cy) * (bx - cx);
+        const detright = (ax - cx) * (by - cy);
+        const det = detleft - detright;
+        if (detleft === 0 || detright === 0 || detleft > 0 !== detright > 0) return det;
+        const detsum = Math.abs(detleft + detright);
+        if (Math.abs(det) >= ccwerrboundA * detsum) return det;
+        return -orient2dadapt(ax, ay, bx, by, cx, cy, detsum);
+      }
+      function orient2dfast(ax, ay, bx, by, cx, cy) {
+        return (ay - cy) * (bx - cx) - (ax - cx) * (by - cy);
+      }
+      const o3derrboundA = (7 + 56 * epsilon) * epsilon;
+      const o3derrboundB = (3 + 28 * epsilon) * epsilon;
+      const o3derrboundC = (26 + 288 * epsilon) * epsilon * epsilon;
+      const bc = vec(4);
+      const ca = vec(4);
+      const ab = vec(4);
+      const at_b = vec(4);
+      const at_c = vec(4);
+      const bt_c = vec(4);
+      const bt_a = vec(4);
+      const ct_a = vec(4);
+      const ct_b = vec(4);
+      const bct = vec(8);
+      const cat = vec(8);
+      const abt = vec(8);
+      const u$1 = vec(4);
+      const _8 = vec(8);
+      const _8b = vec(8);
+      const _16 = vec(8);
+      const _12 = vec(12);
+      let fin = vec(192);
+      let fin2 = vec(192);
+      function finadd(finlen, alen, a) {
+        finlen = sum(finlen, fin, alen, a, fin2);
+        const tmp = fin;
+        fin = fin2;
+        fin2 = tmp;
+        return finlen;
+      }
+      function tailinit(xtail, ytail, ax, ay, bx, by, a, b2) {
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0, u3, negate2;
+        if (xtail === 0) {
+          if (ytail === 0) {
+            a[0] = 0;
+            b2[0] = 0;
+            return 1;
+          } else {
+            negate2 = -ytail;
+            s1 = negate2 * ax;
+            c = splitter * negate2;
+            ahi = c - (c - negate2);
+            alo = negate2 - ahi;
+            c = splitter * ax;
+            bhi = c - (c - ax);
+            blo = ax - bhi;
+            a[0] = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            a[1] = s1;
+            s1 = ytail * bx;
+            c = splitter * ytail;
+            ahi = c - (c - ytail);
+            alo = ytail - ahi;
+            c = splitter * bx;
+            bhi = c - (c - bx);
+            blo = bx - bhi;
+            b2[0] = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            b2[1] = s1;
+            return 2;
+          }
+        } else {
+          if (ytail === 0) {
+            s1 = xtail * ay;
+            c = splitter * xtail;
+            ahi = c - (c - xtail);
+            alo = xtail - ahi;
+            c = splitter * ay;
+            bhi = c - (c - ay);
+            blo = ay - bhi;
+            a[0] = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            a[1] = s1;
+            negate2 = -xtail;
+            s1 = negate2 * by;
+            c = splitter * negate2;
+            ahi = c - (c - negate2);
+            alo = negate2 - ahi;
+            c = splitter * by;
+            bhi = c - (c - by);
+            blo = by - bhi;
+            b2[0] = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            b2[1] = s1;
+            return 2;
+          } else {
+            s1 = xtail * ay;
+            c = splitter * xtail;
+            ahi = c - (c - xtail);
+            alo = xtail - ahi;
+            c = splitter * ay;
+            bhi = c - (c - ay);
+            blo = ay - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = ytail * ax;
+            c = splitter * ytail;
+            ahi = c - (c - ytail);
+            alo = ytail - ahi;
+            c = splitter * ax;
+            bhi = c - (c - ax);
+            blo = ax - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 - t0;
+            bvirt = s0 - _i;
+            a[0] = s0 - (_i + bvirt) + (bvirt - t0);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 - t1;
+            bvirt = _0 - _i;
+            a[1] = _0 - (_i + bvirt) + (bvirt - t1);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            a[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            a[3] = u3;
+            s1 = ytail * bx;
+            c = splitter * ytail;
+            ahi = c - (c - ytail);
+            alo = ytail - ahi;
+            c = splitter * bx;
+            bhi = c - (c - bx);
+            blo = bx - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = xtail * by;
+            c = splitter * xtail;
+            ahi = c - (c - xtail);
+            alo = xtail - ahi;
+            c = splitter * by;
+            bhi = c - (c - by);
+            blo = by - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 - t0;
+            bvirt = s0 - _i;
+            b2[0] = s0 - (_i + bvirt) + (bvirt - t0);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 - t1;
+            bvirt = _0 - _i;
+            b2[1] = _0 - (_i + bvirt) + (bvirt - t1);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            b2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            b2[3] = u3;
+            return 4;
+          }
+        }
+      }
+      function tailadd(finlen, a, b2, k2, z2) {
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _k, _0, s1, s0, u3;
+        s1 = a * b2;
+        c = splitter * a;
+        ahi = c - (c - a);
+        alo = a - ahi;
+        c = splitter * b2;
+        bhi = c - (c - b2);
+        blo = b2 - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        c = splitter * k2;
+        bhi = c - (c - k2);
+        blo = k2 - bhi;
+        _i = s0 * k2;
+        c = splitter * s0;
+        ahi = c - (c - s0);
+        alo = s0 - ahi;
+        u$1[0] = alo * blo - (_i - ahi * bhi - alo * bhi - ahi * blo);
+        _j = s1 * k2;
+        c = splitter * s1;
+        ahi = c - (c - s1);
+        alo = s1 - ahi;
+        _0 = alo * blo - (_j - ahi * bhi - alo * bhi - ahi * blo);
+        _k = _i + _0;
+        bvirt = _k - _i;
+        u$1[1] = _i - (_k - bvirt) + (_0 - bvirt);
+        u3 = _j + _k;
+        u$1[2] = _k - (u3 - _j);
+        u$1[3] = u3;
+        finlen = finadd(finlen, 4, u$1);
+        if (z2 !== 0) {
+          c = splitter * z2;
+          bhi = c - (c - z2);
+          blo = z2 - bhi;
+          _i = s0 * z2;
+          c = splitter * s0;
+          ahi = c - (c - s0);
+          alo = s0 - ahi;
+          u$1[0] = alo * blo - (_i - ahi * bhi - alo * bhi - ahi * blo);
+          _j = s1 * z2;
+          c = splitter * s1;
+          ahi = c - (c - s1);
+          alo = s1 - ahi;
+          _0 = alo * blo - (_j - ahi * bhi - alo * bhi - ahi * blo);
+          _k = _i + _0;
+          bvirt = _k - _i;
+          u$1[1] = _i - (_k - bvirt) + (_0 - bvirt);
+          u3 = _j + _k;
+          u$1[2] = _k - (u3 - _j);
+          u$1[3] = u3;
+          finlen = finadd(finlen, 4, u$1);
+        }
+        return finlen;
+      }
+      function orient3dadapt(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, permanent) {
+        let finlen;
+        let adxtail, bdxtail, cdxtail;
+        let adytail, bdytail, cdytail;
+        let adztail, bdztail, cdztail;
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0, u3;
+        const adx = ax - dx;
+        const bdx = bx - dx;
+        const cdx = cx - dx;
+        const ady = ay - dy;
+        const bdy = by - dy;
+        const cdy = cy - dy;
+        const adz = az - dz;
+        const bdz = bz - dz;
+        const cdz = cz - dz;
+        s1 = bdx * cdy;
+        c = splitter * bdx;
+        ahi = c - (c - bdx);
+        alo = bdx - ahi;
+        c = splitter * cdy;
+        bhi = c - (c - cdy);
+        blo = cdy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cdx * bdy;
+        c = splitter * cdx;
+        ahi = c - (c - cdx);
+        alo = cdx - ahi;
+        c = splitter * bdy;
+        bhi = c - (c - bdy);
+        blo = bdy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bc[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bc[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        bc[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        bc[3] = u3;
+        s1 = cdx * ady;
+        c = splitter * cdx;
+        ahi = c - (c - cdx);
+        alo = cdx - ahi;
+        c = splitter * ady;
+        bhi = c - (c - ady);
+        blo = ady - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = adx * cdy;
+        c = splitter * adx;
+        ahi = c - (c - adx);
+        alo = adx - ahi;
+        c = splitter * cdy;
+        bhi = c - (c - cdy);
+        blo = cdy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ca[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ca[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ca[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ca[3] = u3;
+        s1 = adx * bdy;
+        c = splitter * adx;
+        ahi = c - (c - adx);
+        alo = adx - ahi;
+        c = splitter * bdy;
+        bhi = c - (c - bdy);
+        blo = bdy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = bdx * ady;
+        c = splitter * bdx;
+        ahi = c - (c - bdx);
+        alo = bdx - ahi;
+        c = splitter * ady;
+        bhi = c - (c - ady);
+        blo = ady - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ab[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ab[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ab[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ab[3] = u3;
+        finlen = sum(
+          sum(
+            scale(4, bc, adz, _8),
+            _8,
+            scale(4, ca, bdz, _8b),
+            _8b,
+            _16
+          ),
+          _16,
+          scale(4, ab, cdz, _8),
+          _8,
+          fin
+        );
+        let det = estimate(finlen, fin);
+        let errbound = o3derrboundB * permanent;
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        bvirt = ax - adx;
+        adxtail = ax - (adx + bvirt) + (bvirt - dx);
+        bvirt = bx - bdx;
+        bdxtail = bx - (bdx + bvirt) + (bvirt - dx);
+        bvirt = cx - cdx;
+        cdxtail = cx - (cdx + bvirt) + (bvirt - dx);
+        bvirt = ay - ady;
+        adytail = ay - (ady + bvirt) + (bvirt - dy);
+        bvirt = by - bdy;
+        bdytail = by - (bdy + bvirt) + (bvirt - dy);
+        bvirt = cy - cdy;
+        cdytail = cy - (cdy + bvirt) + (bvirt - dy);
+        bvirt = az - adz;
+        adztail = az - (adz + bvirt) + (bvirt - dz);
+        bvirt = bz - bdz;
+        bdztail = bz - (bdz + bvirt) + (bvirt - dz);
+        bvirt = cz - cdz;
+        cdztail = cz - (cdz + bvirt) + (bvirt - dz);
+        if (adxtail === 0 && bdxtail === 0 && cdxtail === 0 && adytail === 0 && bdytail === 0 && cdytail === 0 && adztail === 0 && bdztail === 0 && cdztail === 0) {
+          return det;
+        }
+        errbound = o3derrboundC * permanent + resulterrbound * Math.abs(det);
+        det += adz * (bdx * cdytail + cdy * bdxtail - (bdy * cdxtail + cdx * bdytail)) + adztail * (bdx * cdy - bdy * cdx) + bdz * (cdx * adytail + ady * cdxtail - (cdy * adxtail + adx * cdytail)) + bdztail * (cdx * ady - cdy * adx) + cdz * (adx * bdytail + bdy * adxtail - (ady * bdxtail + bdx * adytail)) + cdztail * (adx * bdy - ady * bdx);
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        const at_len = tailinit(adxtail, adytail, bdx, bdy, cdx, cdy, at_b, at_c);
+        const bt_len = tailinit(bdxtail, bdytail, cdx, cdy, adx, ady, bt_c, bt_a);
+        const ct_len = tailinit(cdxtail, cdytail, adx, ady, bdx, bdy, ct_a, ct_b);
+        const bctlen = sum(bt_len, bt_c, ct_len, ct_b, bct);
+        finlen = finadd(finlen, scale(bctlen, bct, adz, _16), _16);
+        const catlen = sum(ct_len, ct_a, at_len, at_c, cat);
+        finlen = finadd(finlen, scale(catlen, cat, bdz, _16), _16);
+        const abtlen = sum(at_len, at_b, bt_len, bt_a, abt);
+        finlen = finadd(finlen, scale(abtlen, abt, cdz, _16), _16);
+        if (adztail !== 0) {
+          finlen = finadd(finlen, scale(4, bc, adztail, _12), _12);
+          finlen = finadd(finlen, scale(bctlen, bct, adztail, _16), _16);
+        }
+        if (bdztail !== 0) {
+          finlen = finadd(finlen, scale(4, ca, bdztail, _12), _12);
+          finlen = finadd(finlen, scale(catlen, cat, bdztail, _16), _16);
+        }
+        if (cdztail !== 0) {
+          finlen = finadd(finlen, scale(4, ab, cdztail, _12), _12);
+          finlen = finadd(finlen, scale(abtlen, abt, cdztail, _16), _16);
+        }
+        if (adxtail !== 0) {
+          if (bdytail !== 0) {
+            finlen = tailadd(finlen, adxtail, bdytail, cdz, cdztail);
+          }
+          if (cdytail !== 0) {
+            finlen = tailadd(finlen, -adxtail, cdytail, bdz, bdztail);
+          }
+        }
+        if (bdxtail !== 0) {
+          if (cdytail !== 0) {
+            finlen = tailadd(finlen, bdxtail, cdytail, adz, adztail);
+          }
+          if (adytail !== 0) {
+            finlen = tailadd(finlen, -bdxtail, adytail, cdz, cdztail);
+          }
+        }
+        if (cdxtail !== 0) {
+          if (adytail !== 0) {
+            finlen = tailadd(finlen, cdxtail, adytail, bdz, bdztail);
+          }
+          if (bdytail !== 0) {
+            finlen = tailadd(finlen, -cdxtail, bdytail, adz, adztail);
+          }
+        }
+        return fin[finlen - 1];
+      }
+      function orient3d(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) {
+        const adx = ax - dx;
+        const bdx = bx - dx;
+        const cdx = cx - dx;
+        const ady = ay - dy;
+        const bdy = by - dy;
+        const cdy = cy - dy;
+        const adz = az - dz;
+        const bdz = bz - dz;
+        const cdz = cz - dz;
+        const bdxcdy = bdx * cdy;
+        const cdxbdy = cdx * bdy;
+        const cdxady = cdx * ady;
+        const adxcdy = adx * cdy;
+        const adxbdy = adx * bdy;
+        const bdxady = bdx * ady;
+        const det = adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady);
+        const permanent = (Math.abs(bdxcdy) + Math.abs(cdxbdy)) * Math.abs(adz) + (Math.abs(cdxady) + Math.abs(adxcdy)) * Math.abs(bdz) + (Math.abs(adxbdy) + Math.abs(bdxady)) * Math.abs(cdz);
+        const errbound = o3derrboundA * permanent;
+        if (det > errbound || -det > errbound) {
+          return det;
+        }
+        return orient3dadapt(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, permanent);
+      }
+      function orient3dfast(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) {
+        const adx = ax - dx;
+        const bdx = bx - dx;
+        const cdx = cx - dx;
+        const ady = ay - dy;
+        const bdy = by - dy;
+        const cdy = cy - dy;
+        const adz = az - dz;
+        const bdz = bz - dz;
+        const cdz = cz - dz;
+        return adx * (bdy * cdz - bdz * cdy) + bdx * (cdy * adz - cdz * ady) + cdx * (ady * bdz - adz * bdy);
+      }
+      const iccerrboundA = (10 + 96 * epsilon) * epsilon;
+      const iccerrboundB = (4 + 48 * epsilon) * epsilon;
+      const iccerrboundC = (44 + 576 * epsilon) * epsilon * epsilon;
+      const bc$1 = vec(4);
+      const ca$1 = vec(4);
+      const ab$1 = vec(4);
+      const aa = vec(4);
+      const bb = vec(4);
+      const cc = vec(4);
+      const u$2 = vec(4);
+      const v2 = vec(4);
+      const axtbc = vec(8);
+      const aytbc = vec(8);
+      const bxtca = vec(8);
+      const bytca = vec(8);
+      const cxtab = vec(8);
+      const cytab = vec(8);
+      const abt$1 = vec(8);
+      const bct$1 = vec(8);
+      const cat$1 = vec(8);
+      const abtt = vec(4);
+      const bctt = vec(4);
+      const catt = vec(4);
+      const _8$1 = vec(8);
+      const _16$1 = vec(16);
+      const _16b = vec(16);
+      const _16c = vec(16);
+      const _32 = vec(32);
+      const _32b = vec(32);
+      const _48 = vec(48);
+      const _64 = vec(64);
+      let fin$1 = vec(1152);
+      let fin2$1 = vec(1152);
+      function finadd$1(finlen, a, alen) {
+        finlen = sum(finlen, fin$1, a, alen, fin2$1);
+        const tmp = fin$1;
+        fin$1 = fin2$1;
+        fin2$1 = tmp;
+        return finlen;
+      }
+      function incircleadapt(ax, ay, bx, by, cx, cy, dx, dy, permanent) {
+        let finlen;
+        let adxtail, bdxtail, cdxtail, adytail, bdytail, cdytail;
+        let axtbclen, aytbclen, bxtcalen, bytcalen, cxtablen, cytablen;
+        let abtlen, bctlen, catlen;
+        let abttlen, bcttlen, cattlen;
+        let n1, n0;
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0, u3;
+        const adx = ax - dx;
+        const bdx = bx - dx;
+        const cdx = cx - dx;
+        const ady = ay - dy;
+        const bdy = by - dy;
+        const cdy = cy - dy;
+        s1 = bdx * cdy;
+        c = splitter * bdx;
+        ahi = c - (c - bdx);
+        alo = bdx - ahi;
+        c = splitter * cdy;
+        bhi = c - (c - cdy);
+        blo = cdy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cdx * bdy;
+        c = splitter * cdx;
+        ahi = c - (c - cdx);
+        alo = cdx - ahi;
+        c = splitter * bdy;
+        bhi = c - (c - bdy);
+        blo = bdy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bc$1[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bc$1[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        bc$1[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        bc$1[3] = u3;
+        s1 = cdx * ady;
+        c = splitter * cdx;
+        ahi = c - (c - cdx);
+        alo = cdx - ahi;
+        c = splitter * ady;
+        bhi = c - (c - ady);
+        blo = ady - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = adx * cdy;
+        c = splitter * adx;
+        ahi = c - (c - adx);
+        alo = adx - ahi;
+        c = splitter * cdy;
+        bhi = c - (c - cdy);
+        blo = cdy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ca$1[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ca$1[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ca$1[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ca$1[3] = u3;
+        s1 = adx * bdy;
+        c = splitter * adx;
+        ahi = c - (c - adx);
+        alo = adx - ahi;
+        c = splitter * bdy;
+        bhi = c - (c - bdy);
+        blo = bdy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = bdx * ady;
+        c = splitter * bdx;
+        ahi = c - (c - bdx);
+        alo = bdx - ahi;
+        c = splitter * ady;
+        bhi = c - (c - ady);
+        blo = ady - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ab$1[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ab$1[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ab$1[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ab$1[3] = u3;
+        finlen = sum(
+          sum(
+            sum(
+              scale(scale(4, bc$1, adx, _8$1), _8$1, adx, _16$1),
+              _16$1,
+              scale(scale(4, bc$1, ady, _8$1), _8$1, ady, _16b),
+              _16b,
+              _32
+            ),
+            _32,
+            sum(
+              scale(scale(4, ca$1, bdx, _8$1), _8$1, bdx, _16$1),
+              _16$1,
+              scale(scale(4, ca$1, bdy, _8$1), _8$1, bdy, _16b),
+              _16b,
+              _32b
+            ),
+            _32b,
+            _64
+          ),
+          _64,
+          sum(
+            scale(scale(4, ab$1, cdx, _8$1), _8$1, cdx, _16$1),
+            _16$1,
+            scale(scale(4, ab$1, cdy, _8$1), _8$1, cdy, _16b),
+            _16b,
+            _32
+          ),
+          _32,
+          fin$1
+        );
+        let det = estimate(finlen, fin$1);
+        let errbound = iccerrboundB * permanent;
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        bvirt = ax - adx;
+        adxtail = ax - (adx + bvirt) + (bvirt - dx);
+        bvirt = ay - ady;
+        adytail = ay - (ady + bvirt) + (bvirt - dy);
+        bvirt = bx - bdx;
+        bdxtail = bx - (bdx + bvirt) + (bvirt - dx);
+        bvirt = by - bdy;
+        bdytail = by - (bdy + bvirt) + (bvirt - dy);
+        bvirt = cx - cdx;
+        cdxtail = cx - (cdx + bvirt) + (bvirt - dx);
+        bvirt = cy - cdy;
+        cdytail = cy - (cdy + bvirt) + (bvirt - dy);
+        if (adxtail === 0 && bdxtail === 0 && cdxtail === 0 && adytail === 0 && bdytail === 0 && cdytail === 0) {
+          return det;
+        }
+        errbound = iccerrboundC * permanent + resulterrbound * Math.abs(det);
+        det += (adx * adx + ady * ady) * (bdx * cdytail + cdy * bdxtail - (bdy * cdxtail + cdx * bdytail)) + 2 * (adx * adxtail + ady * adytail) * (bdx * cdy - bdy * cdx) + ((bdx * bdx + bdy * bdy) * (cdx * adytail + ady * cdxtail - (cdy * adxtail + adx * cdytail)) + 2 * (bdx * bdxtail + bdy * bdytail) * (cdx * ady - cdy * adx)) + ((cdx * cdx + cdy * cdy) * (adx * bdytail + bdy * adxtail - (ady * bdxtail + bdx * adytail)) + 2 * (cdx * cdxtail + cdy * cdytail) * (adx * bdy - ady * bdx));
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        if (bdxtail !== 0 || bdytail !== 0 || cdxtail !== 0 || cdytail !== 0) {
+          s1 = adx * adx;
+          c = splitter * adx;
+          ahi = c - (c - adx);
+          alo = adx - ahi;
+          s0 = alo * alo - (s1 - ahi * ahi - (ahi + ahi) * alo);
+          t1 = ady * ady;
+          c = splitter * ady;
+          ahi = c - (c - ady);
+          alo = ady - ahi;
+          t0 = alo * alo - (t1 - ahi * ahi - (ahi + ahi) * alo);
+          _i = s0 + t0;
+          bvirt = _i - s0;
+          aa[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+          _j = s1 + _i;
+          bvirt = _j - s1;
+          _0 = s1 - (_j - bvirt) + (_i - bvirt);
+          _i = _0 + t1;
+          bvirt = _i - _0;
+          aa[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+          u3 = _j + _i;
+          bvirt = u3 - _j;
+          aa[2] = _j - (u3 - bvirt) + (_i - bvirt);
+          aa[3] = u3;
+        }
+        if (cdxtail !== 0 || cdytail !== 0 || adxtail !== 0 || adytail !== 0) {
+          s1 = bdx * bdx;
+          c = splitter * bdx;
+          ahi = c - (c - bdx);
+          alo = bdx - ahi;
+          s0 = alo * alo - (s1 - ahi * ahi - (ahi + ahi) * alo);
+          t1 = bdy * bdy;
+          c = splitter * bdy;
+          ahi = c - (c - bdy);
+          alo = bdy - ahi;
+          t0 = alo * alo - (t1 - ahi * ahi - (ahi + ahi) * alo);
+          _i = s0 + t0;
+          bvirt = _i - s0;
+          bb[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+          _j = s1 + _i;
+          bvirt = _j - s1;
+          _0 = s1 - (_j - bvirt) + (_i - bvirt);
+          _i = _0 + t1;
+          bvirt = _i - _0;
+          bb[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+          u3 = _j + _i;
+          bvirt = u3 - _j;
+          bb[2] = _j - (u3 - bvirt) + (_i - bvirt);
+          bb[3] = u3;
+        }
+        if (adxtail !== 0 || adytail !== 0 || bdxtail !== 0 || bdytail !== 0) {
+          s1 = cdx * cdx;
+          c = splitter * cdx;
+          ahi = c - (c - cdx);
+          alo = cdx - ahi;
+          s0 = alo * alo - (s1 - ahi * ahi - (ahi + ahi) * alo);
+          t1 = cdy * cdy;
+          c = splitter * cdy;
+          ahi = c - (c - cdy);
+          alo = cdy - ahi;
+          t0 = alo * alo - (t1 - ahi * ahi - (ahi + ahi) * alo);
+          _i = s0 + t0;
+          bvirt = _i - s0;
+          cc[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+          _j = s1 + _i;
+          bvirt = _j - s1;
+          _0 = s1 - (_j - bvirt) + (_i - bvirt);
+          _i = _0 + t1;
+          bvirt = _i - _0;
+          cc[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+          u3 = _j + _i;
+          bvirt = u3 - _j;
+          cc[2] = _j - (u3 - bvirt) + (_i - bvirt);
+          cc[3] = u3;
+        }
+        if (adxtail !== 0) {
+          axtbclen = scale(4, bc$1, adxtail, axtbc);
+          finlen = finadd$1(finlen, sum_three(
+            scale(axtbclen, axtbc, 2 * adx, _16$1),
+            _16$1,
+            scale(scale(4, cc, adxtail, _8$1), _8$1, bdy, _16b),
+            _16b,
+            scale(scale(4, bb, adxtail, _8$1), _8$1, -cdy, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (adytail !== 0) {
+          aytbclen = scale(4, bc$1, adytail, aytbc);
+          finlen = finadd$1(finlen, sum_three(
+            scale(aytbclen, aytbc, 2 * ady, _16$1),
+            _16$1,
+            scale(scale(4, bb, adytail, _8$1), _8$1, cdx, _16b),
+            _16b,
+            scale(scale(4, cc, adytail, _8$1), _8$1, -bdx, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (bdxtail !== 0) {
+          bxtcalen = scale(4, ca$1, bdxtail, bxtca);
+          finlen = finadd$1(finlen, sum_three(
+            scale(bxtcalen, bxtca, 2 * bdx, _16$1),
+            _16$1,
+            scale(scale(4, aa, bdxtail, _8$1), _8$1, cdy, _16b),
+            _16b,
+            scale(scale(4, cc, bdxtail, _8$1), _8$1, -ady, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (bdytail !== 0) {
+          bytcalen = scale(4, ca$1, bdytail, bytca);
+          finlen = finadd$1(finlen, sum_three(
+            scale(bytcalen, bytca, 2 * bdy, _16$1),
+            _16$1,
+            scale(scale(4, cc, bdytail, _8$1), _8$1, adx, _16b),
+            _16b,
+            scale(scale(4, aa, bdytail, _8$1), _8$1, -cdx, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (cdxtail !== 0) {
+          cxtablen = scale(4, ab$1, cdxtail, cxtab);
+          finlen = finadd$1(finlen, sum_three(
+            scale(cxtablen, cxtab, 2 * cdx, _16$1),
+            _16$1,
+            scale(scale(4, bb, cdxtail, _8$1), _8$1, ady, _16b),
+            _16b,
+            scale(scale(4, aa, cdxtail, _8$1), _8$1, -bdy, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (cdytail !== 0) {
+          cytablen = scale(4, ab$1, cdytail, cytab);
+          finlen = finadd$1(finlen, sum_three(
+            scale(cytablen, cytab, 2 * cdy, _16$1),
+            _16$1,
+            scale(scale(4, aa, cdytail, _8$1), _8$1, bdx, _16b),
+            _16b,
+            scale(scale(4, bb, cdytail, _8$1), _8$1, -adx, _16c),
+            _16c,
+            _32,
+            _48
+          ), _48);
+        }
+        if (adxtail !== 0 || adytail !== 0) {
+          if (bdxtail !== 0 || bdytail !== 0 || cdxtail !== 0 || cdytail !== 0) {
+            s1 = bdxtail * cdy;
+            c = splitter * bdxtail;
+            ahi = c - (c - bdxtail);
+            alo = bdxtail - ahi;
+            c = splitter * cdy;
+            bhi = c - (c - cdy);
+            blo = cdy - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = bdx * cdytail;
+            c = splitter * bdx;
+            ahi = c - (c - bdx);
+            alo = bdx - ahi;
+            c = splitter * cdytail;
+            bhi = c - (c - cdytail);
+            blo = cdytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            u$2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            u$2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            u$2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            u$2[3] = u3;
+            s1 = cdxtail * -bdy;
+            c = splitter * cdxtail;
+            ahi = c - (c - cdxtail);
+            alo = cdxtail - ahi;
+            c = splitter * -bdy;
+            bhi = c - (c - -bdy);
+            blo = -bdy - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = cdx * -bdytail;
+            c = splitter * cdx;
+            ahi = c - (c - cdx);
+            alo = cdx - ahi;
+            c = splitter * -bdytail;
+            bhi = c - (c - -bdytail);
+            blo = -bdytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            v2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            v2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            v2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            v2[3] = u3;
+            bctlen = sum(4, u$2, 4, v2, bct$1);
+            s1 = bdxtail * cdytail;
+            c = splitter * bdxtail;
+            ahi = c - (c - bdxtail);
+            alo = bdxtail - ahi;
+            c = splitter * cdytail;
+            bhi = c - (c - cdytail);
+            blo = cdytail - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = cdxtail * bdytail;
+            c = splitter * cdxtail;
+            ahi = c - (c - cdxtail);
+            alo = cdxtail - ahi;
+            c = splitter * bdytail;
+            bhi = c - (c - bdytail);
+            blo = bdytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 - t0;
+            bvirt = s0 - _i;
+            bctt[0] = s0 - (_i + bvirt) + (bvirt - t0);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 - t1;
+            bvirt = _0 - _i;
+            bctt[1] = _0 - (_i + bvirt) + (bvirt - t1);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            bctt[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            bctt[3] = u3;
+            bcttlen = 4;
+          } else {
+            bct$1[0] = 0;
+            bctlen = 1;
+            bctt[0] = 0;
+            bcttlen = 1;
+          }
+          if (adxtail !== 0) {
+            const len = scale(bctlen, bct$1, adxtail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(axtbclen, axtbc, adxtail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * adx, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(bcttlen, bctt, adxtail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * adx, _16$1),
+              _16$1,
+              scale(len2, _8$1, adxtail, _16b),
+              _16b,
+              scale(len, _16c, adxtail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+            if (bdytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, cc, adxtail, _8$1), _8$1, bdytail, _16$1), _16$1);
+            }
+            if (cdytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, bb, -adxtail, _8$1), _8$1, cdytail, _16$1), _16$1);
+            }
+          }
+          if (adytail !== 0) {
+            const len = scale(bctlen, bct$1, adytail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(aytbclen, aytbc, adytail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * ady, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(bcttlen, bctt, adytail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * ady, _16$1),
+              _16$1,
+              scale(len2, _8$1, adytail, _16b),
+              _16b,
+              scale(len, _16c, adytail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+          }
+        }
+        if (bdxtail !== 0 || bdytail !== 0) {
+          if (cdxtail !== 0 || cdytail !== 0 || adxtail !== 0 || adytail !== 0) {
+            s1 = cdxtail * ady;
+            c = splitter * cdxtail;
+            ahi = c - (c - cdxtail);
+            alo = cdxtail - ahi;
+            c = splitter * ady;
+            bhi = c - (c - ady);
+            blo = ady - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = cdx * adytail;
+            c = splitter * cdx;
+            ahi = c - (c - cdx);
+            alo = cdx - ahi;
+            c = splitter * adytail;
+            bhi = c - (c - adytail);
+            blo = adytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            u$2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            u$2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            u$2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            u$2[3] = u3;
+            n1 = -cdy;
+            n0 = -cdytail;
+            s1 = adxtail * n1;
+            c = splitter * adxtail;
+            ahi = c - (c - adxtail);
+            alo = adxtail - ahi;
+            c = splitter * n1;
+            bhi = c - (c - n1);
+            blo = n1 - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = adx * n0;
+            c = splitter * adx;
+            ahi = c - (c - adx);
+            alo = adx - ahi;
+            c = splitter * n0;
+            bhi = c - (c - n0);
+            blo = n0 - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            v2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            v2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            v2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            v2[3] = u3;
+            catlen = sum(4, u$2, 4, v2, cat$1);
+            s1 = cdxtail * adytail;
+            c = splitter * cdxtail;
+            ahi = c - (c - cdxtail);
+            alo = cdxtail - ahi;
+            c = splitter * adytail;
+            bhi = c - (c - adytail);
+            blo = adytail - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = adxtail * cdytail;
+            c = splitter * adxtail;
+            ahi = c - (c - adxtail);
+            alo = adxtail - ahi;
+            c = splitter * cdytail;
+            bhi = c - (c - cdytail);
+            blo = cdytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 - t0;
+            bvirt = s0 - _i;
+            catt[0] = s0 - (_i + bvirt) + (bvirt - t0);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 - t1;
+            bvirt = _0 - _i;
+            catt[1] = _0 - (_i + bvirt) + (bvirt - t1);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            catt[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            catt[3] = u3;
+            cattlen = 4;
+          } else {
+            cat$1[0] = 0;
+            catlen = 1;
+            catt[0] = 0;
+            cattlen = 1;
+          }
+          if (bdxtail !== 0) {
+            const len = scale(catlen, cat$1, bdxtail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(bxtcalen, bxtca, bdxtail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * bdx, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(cattlen, catt, bdxtail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * bdx, _16$1),
+              _16$1,
+              scale(len2, _8$1, bdxtail, _16b),
+              _16b,
+              scale(len, _16c, bdxtail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+            if (cdytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, aa, bdxtail, _8$1), _8$1, cdytail, _16$1), _16$1);
+            }
+            if (adytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, cc, -bdxtail, _8$1), _8$1, adytail, _16$1), _16$1);
+            }
+          }
+          if (bdytail !== 0) {
+            const len = scale(catlen, cat$1, bdytail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(bytcalen, bytca, bdytail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * bdy, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(cattlen, catt, bdytail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * bdy, _16$1),
+              _16$1,
+              scale(len2, _8$1, bdytail, _16b),
+              _16b,
+              scale(len, _16c, bdytail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+          }
+        }
+        if (cdxtail !== 0 || cdytail !== 0) {
+          if (adxtail !== 0 || adytail !== 0 || bdxtail !== 0 || bdytail !== 0) {
+            s1 = adxtail * bdy;
+            c = splitter * adxtail;
+            ahi = c - (c - adxtail);
+            alo = adxtail - ahi;
+            c = splitter * bdy;
+            bhi = c - (c - bdy);
+            blo = bdy - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = adx * bdytail;
+            c = splitter * adx;
+            ahi = c - (c - adx);
+            alo = adx - ahi;
+            c = splitter * bdytail;
+            bhi = c - (c - bdytail);
+            blo = bdytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            u$2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            u$2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            u$2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            u$2[3] = u3;
+            n1 = -ady;
+            n0 = -adytail;
+            s1 = bdxtail * n1;
+            c = splitter * bdxtail;
+            ahi = c - (c - bdxtail);
+            alo = bdxtail - ahi;
+            c = splitter * n1;
+            bhi = c - (c - n1);
+            blo = n1 - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = bdx * n0;
+            c = splitter * bdx;
+            ahi = c - (c - bdx);
+            alo = bdx - ahi;
+            c = splitter * n0;
+            bhi = c - (c - n0);
+            blo = n0 - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 + t0;
+            bvirt = _i - s0;
+            v2[0] = s0 - (_i - bvirt) + (t0 - bvirt);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 + t1;
+            bvirt = _i - _0;
+            v2[1] = _0 - (_i - bvirt) + (t1 - bvirt);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            v2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            v2[3] = u3;
+            abtlen = sum(4, u$2, 4, v2, abt$1);
+            s1 = adxtail * bdytail;
+            c = splitter * adxtail;
+            ahi = c - (c - adxtail);
+            alo = adxtail - ahi;
+            c = splitter * bdytail;
+            bhi = c - (c - bdytail);
+            blo = bdytail - bhi;
+            s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+            t1 = bdxtail * adytail;
+            c = splitter * bdxtail;
+            ahi = c - (c - bdxtail);
+            alo = bdxtail - ahi;
+            c = splitter * adytail;
+            bhi = c - (c - adytail);
+            blo = adytail - bhi;
+            t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+            _i = s0 - t0;
+            bvirt = s0 - _i;
+            abtt[0] = s0 - (_i + bvirt) + (bvirt - t0);
+            _j = s1 + _i;
+            bvirt = _j - s1;
+            _0 = s1 - (_j - bvirt) + (_i - bvirt);
+            _i = _0 - t1;
+            bvirt = _0 - _i;
+            abtt[1] = _0 - (_i + bvirt) + (bvirt - t1);
+            u3 = _j + _i;
+            bvirt = u3 - _j;
+            abtt[2] = _j - (u3 - bvirt) + (_i - bvirt);
+            abtt[3] = u3;
+            abttlen = 4;
+          } else {
+            abt$1[0] = 0;
+            abtlen = 1;
+            abtt[0] = 0;
+            abttlen = 1;
+          }
+          if (cdxtail !== 0) {
+            const len = scale(abtlen, abt$1, cdxtail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(cxtablen, cxtab, cdxtail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * cdx, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(abttlen, abtt, cdxtail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * cdx, _16$1),
+              _16$1,
+              scale(len2, _8$1, cdxtail, _16b),
+              _16b,
+              scale(len, _16c, cdxtail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+            if (adytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, bb, cdxtail, _8$1), _8$1, adytail, _16$1), _16$1);
+            }
+            if (bdytail !== 0) {
+              finlen = finadd$1(finlen, scale(scale(4, aa, -cdxtail, _8$1), _8$1, bdytail, _16$1), _16$1);
+            }
+          }
+          if (cdytail !== 0) {
+            const len = scale(abtlen, abt$1, cdytail, _16c);
+            finlen = finadd$1(finlen, sum(
+              scale(cytablen, cytab, cdytail, _16$1),
+              _16$1,
+              scale(len, _16c, 2 * cdy, _32),
+              _32,
+              _48
+            ), _48);
+            const len2 = scale(abttlen, abtt, cdytail, _8$1);
+            finlen = finadd$1(finlen, sum_three(
+              scale(len2, _8$1, 2 * cdy, _16$1),
+              _16$1,
+              scale(len2, _8$1, cdytail, _16b),
+              _16b,
+              scale(len, _16c, cdytail, _32),
+              _32,
+              _32b,
+              _64
+            ), _64);
+          }
+        }
+        return fin$1[finlen - 1];
+      }
+      function incircle(ax, ay, bx, by, cx, cy, dx, dy) {
+        const adx = ax - dx;
+        const bdx = bx - dx;
+        const cdx = cx - dx;
+        const ady = ay - dy;
+        const bdy = by - dy;
+        const cdy = cy - dy;
+        const bdxcdy = bdx * cdy;
+        const cdxbdy = cdx * bdy;
+        const alift = adx * adx + ady * ady;
+        const cdxady = cdx * ady;
+        const adxcdy = adx * cdy;
+        const blift = bdx * bdx + bdy * bdy;
+        const adxbdy = adx * bdy;
+        const bdxady = bdx * ady;
+        const clift = cdx * cdx + cdy * cdy;
+        const det = alift * (bdxcdy - cdxbdy) + blift * (cdxady - adxcdy) + clift * (adxbdy - bdxady);
+        const permanent = (Math.abs(bdxcdy) + Math.abs(cdxbdy)) * alift + (Math.abs(cdxady) + Math.abs(adxcdy)) * blift + (Math.abs(adxbdy) + Math.abs(bdxady)) * clift;
+        const errbound = iccerrboundA * permanent;
+        if (det > errbound || -det > errbound) {
+          return det;
+        }
+        return incircleadapt(ax, ay, bx, by, cx, cy, dx, dy, permanent);
+      }
+      function incirclefast(ax, ay, bx, by, cx, cy, dx, dy) {
+        const adx = ax - dx;
+        const ady = ay - dy;
+        const bdx = bx - dx;
+        const bdy = by - dy;
+        const cdx = cx - dx;
+        const cdy = cy - dy;
+        const abdet2 = adx * bdy - bdx * ady;
+        const bcdet = bdx * cdy - cdx * bdy;
+        const cadet = cdx * ady - adx * cdy;
+        const alift = adx * adx + ady * ady;
+        const blift = bdx * bdx + bdy * bdy;
+        const clift = cdx * cdx + cdy * cdy;
+        return alift * bcdet + blift * cadet + clift * abdet2;
+      }
+      const isperrboundA = (16 + 224 * epsilon) * epsilon;
+      const isperrboundB = (5 + 72 * epsilon) * epsilon;
+      const isperrboundC = (71 + 1408 * epsilon) * epsilon * epsilon;
+      const ab$2 = vec(4);
+      const bc$2 = vec(4);
+      const cd = vec(4);
+      const de = vec(4);
+      const ea = vec(4);
+      const ac = vec(4);
+      const bd = vec(4);
+      const ce = vec(4);
+      const da = vec(4);
+      const eb = vec(4);
+      const abc = vec(24);
+      const bcd = vec(24);
+      const cde = vec(24);
+      const dea = vec(24);
+      const eab = vec(24);
+      const abd = vec(24);
+      const bce = vec(24);
+      const cda = vec(24);
+      const deb = vec(24);
+      const eac = vec(24);
+      const adet = vec(1152);
+      const bdet = vec(1152);
+      const cdet = vec(1152);
+      const ddet = vec(1152);
+      const edet = vec(1152);
+      const abdet = vec(2304);
+      const cddet = vec(2304);
+      const cdedet = vec(3456);
+      const deter = vec(5760);
+      const _8$2 = vec(8);
+      const _8b$1 = vec(8);
+      const _8c = vec(8);
+      const _16$2 = vec(16);
+      const _24 = vec(24);
+      const _48$1 = vec(48);
+      const _48b = vec(48);
+      const _96 = vec(96);
+      const _192 = vec(192);
+      const _384x = vec(384);
+      const _384y = vec(384);
+      const _384z = vec(384);
+      const _768 = vec(768);
+      function sum_three_scale(a, b2, c, az, bz, cz, out) {
+        return sum_three(
+          scale(4, a, az, _8$2),
+          _8$2,
+          scale(4, b2, bz, _8b$1),
+          _8b$1,
+          scale(4, c, cz, _8c),
+          _8c,
+          _16$2,
+          out
+        );
+      }
+      function liftexact(alen, a, blen, b2, clen, c, dlen, d, x2, y2, z2, out) {
+        const len = sum(
+          sum(alen, a, blen, b2, _48$1),
+          _48$1,
+          negate(sum(clen, c, dlen, d, _48b), _48b),
+          _48b,
+          _96
+        );
+        return sum_three(
+          scale(scale(len, _96, x2, _192), _192, x2, _384x),
+          _384x,
+          scale(scale(len, _96, y2, _192), _192, y2, _384y),
+          _384y,
+          scale(scale(len, _96, z2, _192), _192, z2, _384z),
+          _384z,
+          _768,
+          out
+        );
+      }
+      function insphereexact(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, ex, ey, ez) {
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0, u3;
+        s1 = ax * by;
+        c = splitter * ax;
+        ahi = c - (c - ax);
+        alo = ax - ahi;
+        c = splitter * by;
+        bhi = c - (c - by);
+        blo = by - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = bx * ay;
+        c = splitter * bx;
+        ahi = c - (c - bx);
+        alo = bx - ahi;
+        c = splitter * ay;
+        bhi = c - (c - ay);
+        blo = ay - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ab$2[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ab$2[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ab$2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ab$2[3] = u3;
+        s1 = bx * cy;
+        c = splitter * bx;
+        ahi = c - (c - bx);
+        alo = bx - ahi;
+        c = splitter * cy;
+        bhi = c - (c - cy);
+        blo = cy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cx * by;
+        c = splitter * cx;
+        ahi = c - (c - cx);
+        alo = cx - ahi;
+        c = splitter * by;
+        bhi = c - (c - by);
+        blo = by - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bc$2[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bc$2[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        bc$2[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        bc$2[3] = u3;
+        s1 = cx * dy;
+        c = splitter * cx;
+        ahi = c - (c - cx);
+        alo = cx - ahi;
+        c = splitter * dy;
+        bhi = c - (c - dy);
+        blo = dy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = dx * cy;
+        c = splitter * dx;
+        ahi = c - (c - dx);
+        alo = dx - ahi;
+        c = splitter * cy;
+        bhi = c - (c - cy);
+        blo = cy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        cd[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        cd[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        cd[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        cd[3] = u3;
+        s1 = dx * ey;
+        c = splitter * dx;
+        ahi = c - (c - dx);
+        alo = dx - ahi;
+        c = splitter * ey;
+        bhi = c - (c - ey);
+        blo = ey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = ex * dy;
+        c = splitter * ex;
+        ahi = c - (c - ex);
+        alo = ex - ahi;
+        c = splitter * dy;
+        bhi = c - (c - dy);
+        blo = dy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        de[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        de[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        de[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        de[3] = u3;
+        s1 = ex * ay;
+        c = splitter * ex;
+        ahi = c - (c - ex);
+        alo = ex - ahi;
+        c = splitter * ay;
+        bhi = c - (c - ay);
+        blo = ay - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = ax * ey;
+        c = splitter * ax;
+        ahi = c - (c - ax);
+        alo = ax - ahi;
+        c = splitter * ey;
+        bhi = c - (c - ey);
+        blo = ey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ea[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ea[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ea[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ea[3] = u3;
+        s1 = ax * cy;
+        c = splitter * ax;
+        ahi = c - (c - ax);
+        alo = ax - ahi;
+        c = splitter * cy;
+        bhi = c - (c - cy);
+        blo = cy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cx * ay;
+        c = splitter * cx;
+        ahi = c - (c - cx);
+        alo = cx - ahi;
+        c = splitter * ay;
+        bhi = c - (c - ay);
+        blo = ay - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ac[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ac[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ac[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ac[3] = u3;
+        s1 = bx * dy;
+        c = splitter * bx;
+        ahi = c - (c - bx);
+        alo = bx - ahi;
+        c = splitter * dy;
+        bhi = c - (c - dy);
+        blo = dy - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = dx * by;
+        c = splitter * dx;
+        ahi = c - (c - dx);
+        alo = dx - ahi;
+        c = splitter * by;
+        bhi = c - (c - by);
+        blo = by - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bd[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bd[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        bd[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        bd[3] = u3;
+        s1 = cx * ey;
+        c = splitter * cx;
+        ahi = c - (c - cx);
+        alo = cx - ahi;
+        c = splitter * ey;
+        bhi = c - (c - ey);
+        blo = ey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = ex * cy;
+        c = splitter * ex;
+        ahi = c - (c - ex);
+        alo = ex - ahi;
+        c = splitter * cy;
+        bhi = c - (c - cy);
+        blo = cy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ce[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ce[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        ce[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        ce[3] = u3;
+        s1 = dx * ay;
+        c = splitter * dx;
+        ahi = c - (c - dx);
+        alo = dx - ahi;
+        c = splitter * ay;
+        bhi = c - (c - ay);
+        blo = ay - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = ax * dy;
+        c = splitter * ax;
+        ahi = c - (c - ax);
+        alo = ax - ahi;
+        c = splitter * dy;
+        bhi = c - (c - dy);
+        blo = dy - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        da[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        da[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        da[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        da[3] = u3;
+        s1 = ex * by;
+        c = splitter * ex;
+        ahi = c - (c - ex);
+        alo = ex - ahi;
+        c = splitter * by;
+        bhi = c - (c - by);
+        blo = by - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = bx * ey;
+        c = splitter * bx;
+        ahi = c - (c - bx);
+        alo = bx - ahi;
+        c = splitter * ey;
+        bhi = c - (c - ey);
+        blo = ey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        eb[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        eb[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        u3 = _j + _i;
+        bvirt = u3 - _j;
+        eb[2] = _j - (u3 - bvirt) + (_i - bvirt);
+        eb[3] = u3;
+        const abclen = sum_three_scale(ab$2, bc$2, ac, cz, az, -bz, abc);
+        const bcdlen = sum_three_scale(bc$2, cd, bd, dz, bz, -cz, bcd);
+        const cdelen = sum_three_scale(cd, de, ce, ez, cz, -dz, cde);
+        const dealen = sum_three_scale(de, ea, da, az, dz, -ez, dea);
+        const eablen = sum_three_scale(ea, ab$2, eb, bz, ez, -az, eab);
+        const abdlen = sum_three_scale(ab$2, bd, da, dz, az, bz, abd);
+        const bcelen = sum_three_scale(bc$2, ce, eb, ez, bz, cz, bce);
+        const cdalen = sum_three_scale(cd, da, ac, az, cz, dz, cda);
+        const deblen = sum_three_scale(de, eb, bd, bz, dz, ez, deb);
+        const eaclen = sum_three_scale(ea, ac, ce, cz, ez, az, eac);
+        const deterlen = sum_three(
+          liftexact(cdelen, cde, bcelen, bce, deblen, deb, bcdlen, bcd, ax, ay, az, adet),
+          adet,
+          liftexact(dealen, dea, cdalen, cda, eaclen, eac, cdelen, cde, bx, by, bz, bdet),
+          bdet,
+          sum_three(
+            liftexact(eablen, eab, deblen, deb, abdlen, abd, dealen, dea, cx, cy, cz, cdet),
+            cdet,
+            liftexact(abclen, abc, eaclen, eac, bcelen, bce, eablen, eab, dx, dy, dz, ddet),
+            ddet,
+            liftexact(bcdlen, bcd, abdlen, abd, cdalen, cda, abclen, abc, ex, ey, ez, edet),
+            edet,
+            cddet,
+            cdedet
+          ),
+          cdedet,
+          abdet,
+          deter
+        );
+        return deter[deterlen - 1];
+      }
+      const xdet = vec(96);
+      const ydet = vec(96);
+      const zdet = vec(96);
+      const fin$2 = vec(1152);
+      function liftadapt(a, b2, c, az, bz, cz, x2, y2, z2, out) {
+        const len = sum_three_scale(a, b2, c, az, bz, cz, _24);
+        return sum_three(
+          scale(scale(len, _24, x2, _48$1), _48$1, x2, xdet),
+          xdet,
+          scale(scale(len, _24, y2, _48$1), _48$1, y2, ydet),
+          ydet,
+          scale(scale(len, _24, z2, _48$1), _48$1, z2, zdet),
+          zdet,
+          _192,
+          out
+        );
+      }
+      function insphereadapt(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, ex, ey, ez, permanent) {
+        let ab3, bc3, cd3, da3, ac3, bd3;
+        let aextail, bextail, cextail, dextail;
+        let aeytail, beytail, ceytail, deytail;
+        let aeztail, beztail, ceztail, deztail;
+        let bvirt, c, ahi, alo, bhi, blo, _i, _j, _0, s1, s0, t1, t0;
+        const aex = ax - ex;
+        const bex = bx - ex;
+        const cex = cx - ex;
+        const dex = dx - ex;
+        const aey = ay - ey;
+        const bey = by - ey;
+        const cey = cy - ey;
+        const dey = dy - ey;
+        const aez = az - ez;
+        const bez = bz - ez;
+        const cez = cz - ez;
+        const dez = dz - ez;
+        s1 = aex * bey;
+        c = splitter * aex;
+        ahi = c - (c - aex);
+        alo = aex - ahi;
+        c = splitter * bey;
+        bhi = c - (c - bey);
+        blo = bey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = bex * aey;
+        c = splitter * bex;
+        ahi = c - (c - bex);
+        alo = bex - ahi;
+        c = splitter * aey;
+        bhi = c - (c - aey);
+        blo = aey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ab$2[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ab$2[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        ab3 = _j + _i;
+        bvirt = ab3 - _j;
+        ab$2[2] = _j - (ab3 - bvirt) + (_i - bvirt);
+        ab$2[3] = ab3;
+        s1 = bex * cey;
+        c = splitter * bex;
+        ahi = c - (c - bex);
+        alo = bex - ahi;
+        c = splitter * cey;
+        bhi = c - (c - cey);
+        blo = cey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cex * bey;
+        c = splitter * cex;
+        ahi = c - (c - cex);
+        alo = cex - ahi;
+        c = splitter * bey;
+        bhi = c - (c - bey);
+        blo = bey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bc$2[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bc$2[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        bc3 = _j + _i;
+        bvirt = bc3 - _j;
+        bc$2[2] = _j - (bc3 - bvirt) + (_i - bvirt);
+        bc$2[3] = bc3;
+        s1 = cex * dey;
+        c = splitter * cex;
+        ahi = c - (c - cex);
+        alo = cex - ahi;
+        c = splitter * dey;
+        bhi = c - (c - dey);
+        blo = dey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = dex * cey;
+        c = splitter * dex;
+        ahi = c - (c - dex);
+        alo = dex - ahi;
+        c = splitter * cey;
+        bhi = c - (c - cey);
+        blo = cey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        cd[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        cd[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        cd3 = _j + _i;
+        bvirt = cd3 - _j;
+        cd[2] = _j - (cd3 - bvirt) + (_i - bvirt);
+        cd[3] = cd3;
+        s1 = dex * aey;
+        c = splitter * dex;
+        ahi = c - (c - dex);
+        alo = dex - ahi;
+        c = splitter * aey;
+        bhi = c - (c - aey);
+        blo = aey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = aex * dey;
+        c = splitter * aex;
+        ahi = c - (c - aex);
+        alo = aex - ahi;
+        c = splitter * dey;
+        bhi = c - (c - dey);
+        blo = dey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        da[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        da[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        da3 = _j + _i;
+        bvirt = da3 - _j;
+        da[2] = _j - (da3 - bvirt) + (_i - bvirt);
+        da[3] = da3;
+        s1 = aex * cey;
+        c = splitter * aex;
+        ahi = c - (c - aex);
+        alo = aex - ahi;
+        c = splitter * cey;
+        bhi = c - (c - cey);
+        blo = cey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = cex * aey;
+        c = splitter * cex;
+        ahi = c - (c - cex);
+        alo = cex - ahi;
+        c = splitter * aey;
+        bhi = c - (c - aey);
+        blo = aey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        ac[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        ac[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        ac3 = _j + _i;
+        bvirt = ac3 - _j;
+        ac[2] = _j - (ac3 - bvirt) + (_i - bvirt);
+        ac[3] = ac3;
+        s1 = bex * dey;
+        c = splitter * bex;
+        ahi = c - (c - bex);
+        alo = bex - ahi;
+        c = splitter * dey;
+        bhi = c - (c - dey);
+        blo = dey - bhi;
+        s0 = alo * blo - (s1 - ahi * bhi - alo * bhi - ahi * blo);
+        t1 = dex * bey;
+        c = splitter * dex;
+        ahi = c - (c - dex);
+        alo = dex - ahi;
+        c = splitter * bey;
+        bhi = c - (c - bey);
+        blo = bey - bhi;
+        t0 = alo * blo - (t1 - ahi * bhi - alo * bhi - ahi * blo);
+        _i = s0 - t0;
+        bvirt = s0 - _i;
+        bd[0] = s0 - (_i + bvirt) + (bvirt - t0);
+        _j = s1 + _i;
+        bvirt = _j - s1;
+        _0 = s1 - (_j - bvirt) + (_i - bvirt);
+        _i = _0 - t1;
+        bvirt = _0 - _i;
+        bd[1] = _0 - (_i + bvirt) + (bvirt - t1);
+        bd3 = _j + _i;
+        bvirt = bd3 - _j;
+        bd[2] = _j - (bd3 - bvirt) + (_i - bvirt);
+        bd[3] = bd3;
+        const finlen = sum(
+          sum(
+            negate(liftadapt(bc$2, cd, bd, dez, bez, -cez, aex, aey, aez, adet), adet),
+            adet,
+            liftadapt(cd, da, ac, aez, cez, dez, bex, bey, bez, bdet),
+            bdet,
+            abdet
+          ),
+          abdet,
+          sum(
+            negate(liftadapt(da, ab$2, bd, bez, dez, aez, cex, cey, cez, cdet), cdet),
+            cdet,
+            liftadapt(ab$2, bc$2, ac, cez, aez, -bez, dex, dey, dez, ddet),
+            ddet,
+            cddet
+          ),
+          cddet,
+          fin$2
+        );
+        let det = estimate(finlen, fin$2);
+        let errbound = isperrboundB * permanent;
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        bvirt = ax - aex;
+        aextail = ax - (aex + bvirt) + (bvirt - ex);
+        bvirt = ay - aey;
+        aeytail = ay - (aey + bvirt) + (bvirt - ey);
+        bvirt = az - aez;
+        aeztail = az - (aez + bvirt) + (bvirt - ez);
+        bvirt = bx - bex;
+        bextail = bx - (bex + bvirt) + (bvirt - ex);
+        bvirt = by - bey;
+        beytail = by - (bey + bvirt) + (bvirt - ey);
+        bvirt = bz - bez;
+        beztail = bz - (bez + bvirt) + (bvirt - ez);
+        bvirt = cx - cex;
+        cextail = cx - (cex + bvirt) + (bvirt - ex);
+        bvirt = cy - cey;
+        ceytail = cy - (cey + bvirt) + (bvirt - ey);
+        bvirt = cz - cez;
+        ceztail = cz - (cez + bvirt) + (bvirt - ez);
+        bvirt = dx - dex;
+        dextail = dx - (dex + bvirt) + (bvirt - ex);
+        bvirt = dy - dey;
+        deytail = dy - (dey + bvirt) + (bvirt - ey);
+        bvirt = dz - dez;
+        deztail = dz - (dez + bvirt) + (bvirt - ez);
+        if (aextail === 0 && aeytail === 0 && aeztail === 0 && bextail === 0 && beytail === 0 && beztail === 0 && cextail === 0 && ceytail === 0 && ceztail === 0 && dextail === 0 && deytail === 0 && deztail === 0) {
+          return det;
+        }
+        errbound = isperrboundC * permanent + resulterrbound * Math.abs(det);
+        const abeps = aex * beytail + bey * aextail - (aey * bextail + bex * aeytail);
+        const bceps = bex * ceytail + cey * bextail - (bey * cextail + cex * beytail);
+        const cdeps = cex * deytail + dey * cextail - (cey * dextail + dex * ceytail);
+        const daeps = dex * aeytail + aey * dextail - (dey * aextail + aex * deytail);
+        const aceps = aex * ceytail + cey * aextail - (aey * cextail + cex * aeytail);
+        const bdeps = bex * deytail + dey * bextail - (bey * dextail + dex * beytail);
+        det += (bex * bex + bey * bey + bez * bez) * (cez * daeps + dez * aceps + aez * cdeps + (ceztail * da3 + deztail * ac3 + aeztail * cd3)) + (dex * dex + dey * dey + dez * dez) * (aez * bceps - bez * aceps + cez * abeps + (aeztail * bc3 - beztail * ac3 + ceztail * ab3)) - ((aex * aex + aey * aey + aez * aez) * (bez * cdeps - cez * bdeps + dez * bceps + (beztail * cd3 - ceztail * bd3 + deztail * bc3)) + (cex * cex + cey * cey + cez * cez) * (dez * abeps + aez * bdeps + bez * daeps + (deztail * ab3 + aeztail * bd3 + beztail * da3))) + 2 * ((bex * bextail + bey * beytail + bez * beztail) * (cez * da3 + dez * ac3 + aez * cd3) + (dex * dextail + dey * deytail + dez * deztail) * (aez * bc3 - bez * ac3 + cez * ab3) - ((aex * aextail + aey * aeytail + aez * aeztail) * (bez * cd3 - cez * bd3 + dez * bc3) + (cex * cextail + cey * ceytail + cez * ceztail) * (dez * ab3 + aez * bd3 + bez * da3)));
+        if (det >= errbound || -det >= errbound) {
+          return det;
+        }
+        return insphereexact(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, ex, ey, ez);
+      }
+      function insphere(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, ex, ey, ez) {
+        const aex = ax - ex;
+        const bex = bx - ex;
+        const cex = cx - ex;
+        const dex = dx - ex;
+        const aey = ay - ey;
+        const bey = by - ey;
+        const cey = cy - ey;
+        const dey = dy - ey;
+        const aez = az - ez;
+        const bez = bz - ez;
+        const cez = cz - ez;
+        const dez = dz - ez;
+        const aexbey = aex * bey;
+        const bexaey = bex * aey;
+        const ab2 = aexbey - bexaey;
+        const bexcey = bex * cey;
+        const cexbey = cex * bey;
+        const bc2 = bexcey - cexbey;
+        const cexdey = cex * dey;
+        const dexcey = dex * cey;
+        const cd2 = cexdey - dexcey;
+        const dexaey = dex * aey;
+        const aexdey = aex * dey;
+        const da2 = dexaey - aexdey;
+        const aexcey = aex * cey;
+        const cexaey = cex * aey;
+        const ac2 = aexcey - cexaey;
+        const bexdey = bex * dey;
+        const dexbey = dex * bey;
+        const bd2 = bexdey - dexbey;
+        const abc2 = aez * bc2 - bez * ac2 + cez * ab2;
+        const bcd2 = bez * cd2 - cez * bd2 + dez * bc2;
+        const cda2 = cez * da2 + dez * ac2 + aez * cd2;
+        const dab = dez * ab2 + aez * bd2 + bez * da2;
+        const alift = aex * aex + aey * aey + aez * aez;
+        const blift = bex * bex + bey * bey + bez * bez;
+        const clift = cex * cex + cey * cey + cez * cez;
+        const dlift = dex * dex + dey * dey + dez * dez;
+        const det = clift * dab - dlift * abc2 + (alift * bcd2 - blift * cda2);
+        const aezplus = Math.abs(aez);
+        const bezplus = Math.abs(bez);
+        const cezplus = Math.abs(cez);
+        const dezplus = Math.abs(dez);
+        const aexbeyplus = Math.abs(aexbey);
+        const bexaeyplus = Math.abs(bexaey);
+        const bexceyplus = Math.abs(bexcey);
+        const cexbeyplus = Math.abs(cexbey);
+        const cexdeyplus = Math.abs(cexdey);
+        const dexceyplus = Math.abs(dexcey);
+        const dexaeyplus = Math.abs(dexaey);
+        const aexdeyplus = Math.abs(aexdey);
+        const aexceyplus = Math.abs(aexcey);
+        const cexaeyplus = Math.abs(cexaey);
+        const bexdeyplus = Math.abs(bexdey);
+        const dexbeyplus = Math.abs(dexbey);
+        const permanent = ((cexdeyplus + dexceyplus) * bezplus + (dexbeyplus + bexdeyplus) * cezplus + (bexceyplus + cexbeyplus) * dezplus) * alift + ((dexaeyplus + aexdeyplus) * cezplus + (aexceyplus + cexaeyplus) * dezplus + (cexdeyplus + dexceyplus) * aezplus) * blift + ((aexbeyplus + bexaeyplus) * dezplus + (bexdeyplus + dexbeyplus) * aezplus + (dexaeyplus + aexdeyplus) * bezplus) * clift + ((bexceyplus + cexbeyplus) * aezplus + (cexaeyplus + aexceyplus) * bezplus + (aexbeyplus + bexaeyplus) * cezplus) * dlift;
+        const errbound = isperrboundA * permanent;
+        if (det > errbound || -det > errbound) {
+          return det;
+        }
+        return -insphereadapt(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, ex, ey, ez, permanent);
+      }
+      function inspherefast(pax, pay, paz, pbx, pby, pbz, pcx, pcy, pcz, pdx, pdy, pdz, pex, pey, pez) {
+        const aex = pax - pex;
+        const bex = pbx - pex;
+        const cex = pcx - pex;
+        const dex = pdx - pex;
+        const aey = pay - pey;
+        const bey = pby - pey;
+        const cey = pcy - pey;
+        const dey = pdy - pey;
+        const aez = paz - pez;
+        const bez = pbz - pez;
+        const cez = pcz - pez;
+        const dez = pdz - pez;
+        const ab2 = aex * bey - bex * aey;
+        const bc2 = bex * cey - cex * bey;
+        const cd2 = cex * dey - dex * cey;
+        const da2 = dex * aey - aex * dey;
+        const ac2 = aex * cey - cex * aey;
+        const bd2 = bex * dey - dex * bey;
+        const abc2 = aez * bc2 - bez * ac2 + cez * ab2;
+        const bcd2 = bez * cd2 - cez * bd2 + dez * bc2;
+        const cda2 = cez * da2 + dez * ac2 + aez * cd2;
+        const dab = dez * ab2 + aez * bd2 + bez * da2;
+        const alift = aex * aex + aey * aey + aez * aez;
+        const blift = bex * bex + bey * bey + bez * bez;
+        const clift = cex * cex + cey * cey + cez * cez;
+        const dlift = dex * dex + dey * dey + dez * dez;
+        return clift * dab - dlift * abc2 + (alift * bcd2 - blift * cda2);
+      }
+      exports2.incircle = incircle;
+      exports2.incirclefast = incirclefast;
+      exports2.insphere = insphere;
+      exports2.inspherefast = inspherefast;
+      exports2.orient2d = orient2d;
+      exports2.orient2dfast = orient2dfast;
+      exports2.orient3d = orient3d;
+      exports2.orient3dfast = orient3dfast;
+      Object.defineProperty(exports2, "__esModule", { value: true });
+    });
+  }
+});
+
+// routeprofit-pro/node_modules/martinez-polygon-clipping/dist/martinez.js
+var import_splaytree = __toESM(require_splay(), 1);
+var import_robust_predicates = __toESM(require_predicates(), 1);
+
+// routeprofit-pro/node_modules/tinyqueue/index.js
+var TinyQueue = class {
+  constructor(data = [], compare = (a, b2) => a < b2 ? -1 : a > b2 ? 1 : 0) {
+    this.data = data;
+    this.length = this.data.length;
+    this.compare = compare;
+    if (this.length > 0) {
+      for (let i = (this.length >> 1) - 1; i >= 0; i--) this._down(i);
+    }
+  }
+  push(item) {
+    this.data.push(item);
+    this._up(this.length++);
+  }
+  pop() {
+    if (this.length === 0) return void 0;
+    const top = this.data[0];
+    const bottom = this.data.pop();
+    if (--this.length > 0) {
+      this.data[0] = bottom;
+      this._down(0);
+    }
+    return top;
+  }
+  peek() {
+    return this.data[0];
+  }
+  _up(pos) {
+    const { data, compare } = this;
+    const item = data[pos];
+    while (pos > 0) {
+      const parent = pos - 1 >> 1;
+      const current = data[parent];
+      if (compare(item, current) >= 0) break;
+      data[pos] = current;
+      pos = parent;
+    }
+    data[pos] = item;
+  }
+  _down(pos) {
+    const { data, compare } = this;
+    const halfLength = this.length >> 1;
+    const item = data[pos];
+    while (pos < halfLength) {
+      let bestChild = (pos << 1) + 1;
+      const right = bestChild + 1;
+      if (right < this.length && compare(data[right], data[bestChild]) < 0) {
+        bestChild = right;
+      }
+      if (compare(data[bestChild], item) >= 0) break;
+      data[pos] = data[bestChild];
+      pos = bestChild;
+    }
+    data[pos] = item;
+  }
+};
+
+// routeprofit-pro/node_modules/martinez-polygon-clipping/dist/martinez.js
+var U = 0;
+var _ = 1;
+var z = 2;
+var G = 3;
+var R = 0;
+var y = 1;
+var g = 2;
+var T = 3;
+function P(n, t, e) {
+  t === null ? (n.inOut = false, n.otherInOut = true) : (n.isSubject === t.isSubject ? (n.inOut = !t.inOut, n.otherInOut = t.otherInOut) : (n.inOut = !t.otherInOut, n.otherInOut = t.isVertical() ? !t.inOut : t.inOut), t && (n.prevInResult = !F(t, e) || t.isVertical() ? t.prevInResult : t)), F(n, e) ? n.resultTransition = J(n, e) : n.resultTransition = 0;
+}
+function F(n, t) {
+  switch (n.type) {
+    case U:
+      switch (t) {
+        case R:
+          return !n.otherInOut;
+        case y:
+          return n.otherInOut;
+        case g:
+          return n.isSubject && n.otherInOut || !n.isSubject && !n.otherInOut;
+        case T:
+          return true;
+      }
+      break;
+    case z:
+      return t === R || t === y;
+    case G:
+      return t === g;
+    case _:
+      return false;
+  }
+  return false;
+}
+function J(n, t) {
+  let e = !n.inOut, i = !n.otherInOut, o;
+  switch (t) {
+    case R:
+      o = e && i;
+      break;
+    case y:
+      o = e || i;
+      break;
+    case T:
+      o = e !== i;
+      break;
+    case g:
+      n.isSubject ? o = e && !i : o = i && !e;
+      break;
+  }
+  return o ? 1 : -1;
+}
+var S = class _S {
+  /**
+   * Sweepline event
+   *
+   * @class {SweepEvent}
+   * @param {Position}        point
+   * @param {boolean}         left
+   * @param {SweepEvent=}     otherEvent
+   * @param {boolean}         isSubject
+   * @param {EdgeType}        edgeType
+   */
+  constructor(t, e, i, o, r) {
+    this.left = e, this.point = t, this.otherEvent = i, this.isSubject = o ?? false, this.type = r || U, this.inOut = false, this.otherInOut = false, this.prevInResult = null, this.resultTransition = 0, this.otherPos = -1, this.outputContourId = -1, this.isExteriorRing = true;
+  }
+  /**
+   * @param  {Position}  p
+   * @return {boolean}
+   */
+  isBelow(t) {
+    const e = this.point, i = this.otherEvent.point;
+    return this.left ? (e[0] - t[0]) * (i[1] - t[1]) - (i[0] - t[0]) * (e[1] - t[1]) > 0 : (i[0] - t[0]) * (e[1] - t[1]) - (e[0] - t[0]) * (i[1] - t[1]) > 0;
+  }
+  /**
+   * @param  {Position}  p
+   * @return {boolean}
+   */
+  isAbove(t) {
+    return !this.isBelow(t);
+  }
+  /**
+   * @return {boolean}
+   */
+  isVertical() {
+    return this.point[0] === this.otherEvent.point[0];
+  }
+  /**
+   * Does event belong to result?
+   * @return {boolean}
+   */
+  get inResult() {
+    return this.resultTransition !== 0;
+  }
+  clone() {
+    const t = new _S(
+      this.point,
+      this.left,
+      this.otherEvent,
+      this.isSubject,
+      this.type
+    );
+    return t.contourId = this.contourId, t.resultTransition = this.resultTransition, t.prevInResult = this.prevInResult, t.isExteriorRing = this.isExteriorRing, t.inOut = this.inOut, t.otherInOut = this.otherInOut, t;
+  }
+};
+function v(n, t) {
+  return n[0] === t[0] ? n[1] === t[1] : false;
+}
+function A(n, t, e) {
+  const i = (0, import_robust_predicates.orient2d)(n[0], n[1], t[0], t[1], e[0], e[1]);
+  return i > 0 ? -1 : i < 0 ? 1 : 0;
+}
+function w(n, t) {
+  const e = n.point, i = t.point;
+  return e[0] > i[0] ? 1 : e[0] < i[0] ? -1 : e[1] !== i[1] ? e[1] > i[1] ? 1 : -1 : W(n, t, e);
+}
+function W(n, t, e, i) {
+  return n.left !== t.left ? n.left ? 1 : -1 : A(e, n.otherEvent.point, t.otherEvent.point) !== 0 ? n.isBelow(t.otherEvent.point) ? -1 : 1 : !n.isSubject && t.isSubject ? 1 : -1;
+}
+function m(n, t, e) {
+  const i = new S(t, false, n, n.isSubject), o = new S(t, true, n.otherEvent, n.isSubject);
+  return v(n.point, n.otherEvent.point) && console.warn("what is that, a collapsed segment?", n), i.contourId = o.contourId = n.contourId, w(o, n.otherEvent) > 0 && (n.otherEvent.left = true, o.left = false), n.otherEvent.otherEvent = o, n.otherEvent = i, e.push(o), e.push(i), e;
+}
+function k(n, t) {
+  return n[0] * t[1] - n[1] * t[0];
+}
+function M(n, t) {
+  return n[0] * t[0] + n[1] * t[1];
+}
+function Z(n, t, e, i, o) {
+  const r = [t[0] - n[0], t[1] - n[1]], s = [i[0] - e[0], i[1] - e[1]];
+  function l(d, O, B) {
+    return [
+      d[0] + O * B[0],
+      d[1] + O * B[1]
+    ];
+  }
+  const c = [e[0] - n[0], e[1] - n[1]];
+  let u = k(r, s), f = u * u;
+  const p = M(r, r);
+  if (f > 0) {
+    const d = k(c, s) / u;
+    if (d < 0 || d > 1)
+      return null;
+    const O = k(c, r) / u;
+    return O < 0 || O > 1 ? null : d === 0 || d === 1 ? [l(n, d, r)] : O === 0 || O === 1 ? [l(e, O, s)] : [l(n, d, r)];
+  }
+  if (u = k(c, r), f = u * u, f > 0)
+    return null;
+  const h = M(r, c) / p, E = h + M(r, s) / p, a = Math.min(h, E), I = Math.max(h, E);
+  return a <= 1 && I >= 0 ? a === 1 ? [l(n, a > 0 ? a : 0, r)] : I === 0 ? [l(n, I < 1 ? I : 1, r)] : [
+    l(n, a > 0 ? a : 0, r),
+    l(n, I < 1 ? I : 1, r)
+  ] : null;
+}
+function x(n, t, e) {
+  const i = Z(
+    n.point,
+    n.otherEvent.point,
+    t.point,
+    t.otherEvent.point
+  ), o = i ? i.length : 0;
+  if (o === 0 || o === 1 && (v(n.point, t.point) || v(n.otherEvent.point, t.otherEvent.point)) || o === 2 && n.isSubject === t.isSubject)
+    return 0;
+  if (o === 1)
+    return !v(n.point, i[0]) && !v(n.otherEvent.point, i[0]) && m(n, i[0], e), !v(t.point, i[0]) && !v(t.otherEvent.point, i[0]) && m(t, i[0], e), 1;
+  const r = [];
+  let s = false, l = false;
+  return v(n.point, t.point) ? s = true : w(n, t) === 1 ? r.push(t, n) : r.push(n, t), v(n.otherEvent.point, t.otherEvent.point) ? l = true : w(n.otherEvent, t.otherEvent) === 1 ? r.push(t.otherEvent, n.otherEvent) : r.push(n.otherEvent, t.otherEvent), s && l || s ? (t.type = _, n.type = t.inOut === n.inOut ? z : G, s && !l && m(r[1].otherEvent, r[0].point, e), 2) : l ? (m(r[0], r[1].point, e), 3) : r[0] !== r[3].otherEvent ? (m(r[0], r[1].point, e), m(r[1], r[2].point, e), 3) : (m(r[0], r[1].point, e), m(r[3].otherEvent, r[2].point, e), 3);
+}
+function $(n, t) {
+  if (n === t) return 0;
+  if (A(n.point, n.otherEvent.point, t.point) !== 0 || A(n.point, n.otherEvent.point, t.otherEvent.point) !== 0)
+    return v(n.point, t.point) ? n.isBelow(t.otherEvent.point) ? -1 : 1 : n.point[0] === t.point[0] ? n.point[1] < t.point[1] ? -1 : 1 : w(n, t) === 1 ? t.isAbove(n.point) ? -1 : 1 : n.isBelow(t.point) ? -1 : 1;
+  if (n.isSubject === t.isSubject) {
+    let e = n.point, i = t.point;
+    if (e[0] === i[0] && e[1] === i[1])
+      return e = n.otherEvent.point, i = t.otherEvent.point, e[0] === i[0] && e[1] === i[1] ? 0 : (n.contourId ?? 0) > (t.contourId ?? 0) ? 1 : -1;
+  } else
+    return n.isSubject ? -1 : 1;
+  return w(n, t) === 1 ? 1 : -1;
+}
+function Q(n, t, e, i, o, r) {
+  const s = new import_splaytree.default($), l = [], c = Math.min(i[2], o[2]);
+  let u, f, p;
+  for (; n.length !== 0; ) {
+    let h = n.pop();
+    if (l.push(h), r === R && h.point[0] > c || r === g && h.point[0] > i[2])
+      break;
+    if (h.left) {
+      f = u = s.insert(h), p = s.minNode(), u !== p ? u = s.prev(u) : u = null, f = s.next(f);
+      const E = u ? u.key : null;
+      let a;
+      if (P(h, E, r), f && x(h, f.key, n) === 2 && (P(h, E, r), P(f.key, h, r)), u && x(u.key, h, n) === 2) {
+        let I = u;
+        I !== p ? I = s.prev(I) : I = null, a = I ? I.key : null, P(E, a, r), P(h, E, r);
+      }
+    } else
+      h = h.otherEvent, f = u = s.find(h), u && f && (u !== p ? u = s.prev(u) : u = null, f = s.next(f), s.remove(h), f && u && x(u.key, f.key, n));
+  }
+  return l;
+}
+var H = class {
+  /**
+   * Contour
+   *
+   * @class {Contour}
+   */
+  constructor() {
+    this.points = [], this.holeIds = [], this.holeOf = null, this.depth = null;
+  }
+  isExterior() {
+    return this.holeOf == null;
+  }
+};
+function b(n) {
+  let t, e, i, o, r;
+  const s = [];
+  for (e = 0, i = n.length; e < i; e++)
+    t = n[e], (t.left && t.inResult || !t.left && t.otherEvent.inResult) && s.push(t);
+  let l = false;
+  for (; !l; )
+    for (l = true, e = 0, i = s.length; e < i; e++)
+      e + 1 < i && w(s[e], s[e + 1]) === 1 && (o = s[e], s[e] = s[e + 1], s[e + 1] = o, l = false);
+  for (e = 0, i = s.length; e < i; e++)
+    t = s[e], t.otherPos = e;
+  for (e = 0, i = s.length; e < i; e++)
+    t = s[e], t.left || (r = t.otherPos, t.otherPos = t.otherEvent.otherPos, t.otherEvent.otherPos = r);
+  return s;
+}
+function q(n, t, e, i) {
+  let o = n + 1, r = t[n].point, s;
+  const l = t.length;
+  for (o < l && (s = t[o].point); o < l && s[0] === r[0] && s[1] === r[1]; ) {
+    if (e[o])
+      o++;
+    else
+      return o;
+    o < l && (s = t[o].point);
+  }
+  for (o = n - 1; e[o] && o > i; )
+    o--;
+  return o;
+}
+function tt(n, t, e) {
+  const i = new H();
+  if (n.prevInResult != null) {
+    const o = n.prevInResult, r = o.outputContourId;
+    if (o.resultTransition > 0) {
+      const l = t[r];
+      if (l.holeOf != null) {
+        const c = l.holeOf;
+        t[c].holeIds.push(e), i.holeOf = c, i.depth = t[r].depth;
+      } else
+        t[r].holeIds.push(e), i.holeOf = r, i.depth = t[r].depth + 1;
+    } else
+      i.holeOf = null, i.depth = t[r].depth;
+  } else
+    i.holeOf = null, i.depth = 0;
+  return i;
+}
+function nt(n) {
+  let t, e;
+  const i = b(n), o = {}, r = [];
+  for (t = 0, e = i.length; t < e; t++) {
+    if (o[t])
+      continue;
+    const s = r.length, l = tt(i[t], r, s), c = (h) => {
+      o[h] = true, h < i.length && i[h] && (i[h].outputContourId = s);
+    };
+    let u = t, f = t;
+    const p = i[t].point;
+    for (l.points.push(p); c(u), u = i[u].otherPos, c(u), l.points.push(i[u].point), u = q(u, i, o, f), !(u == f || u >= i.length || !i[u]); )
+      ;
+    r.push(l);
+  }
+  return r;
+}
+var L = Math.max;
+var V = Math.min;
+var N = 0;
+function D(n, t, e, i, o, r) {
+  let s, l, c, u, f, p;
+  for (s = 0, l = n.length - 1; s < l; s++) {
+    if (c = n[s], u = n[s + 1], f = new S(c, false, void 0, t), p = new S(u, false, f, t), f.otherEvent = p, c[0] === u[0] && c[1] === u[1])
+      continue;
+    f.contourId = p.contourId = e, r || (f.isExteriorRing = false, p.isExteriorRing = false), w(f, p) > 0 ? p.left = true : f.left = true;
+    const h = c[0], E = c[1];
+    o[0] = V(o[0], h), o[1] = V(o[1], E), o[2] = L(o[2], h), o[3] = L(o[3], E), i.push(f), i.push(p);
+  }
+}
+function et(n, t, e, i, o) {
+  const r = new TinyQueue(void 0, w);
+  let s, l, c, u, f, p;
+  for (c = 0, u = n.length; c < u; c++)
+    for (s = n[c], f = 0, p = s.length; f < p; f++)
+      l = f === 0, l && N++, D(
+        s[f],
+        true,
+        N,
+        r,
+        e,
+        l
+      );
+  for (c = 0, u = t.length; c < u; c++)
+    for (s = t[c], f = 0, p = s.length; f < p; f++)
+      l = f === 0, o === g && (l = false), l && N++, D(
+        s[f],
+        false,
+        N,
+        r,
+        i,
+        l
+      );
+  return r;
+}
+var C = [];
+function it(n, t, e) {
+  let i = null;
+  return n.length * t.length === 0 && (e === R ? i = C : e === g ? i = n : (e === y || e === T) && (i = n.length === 0 ? t : n)), i;
+}
+function rt(n, t, e, i, o) {
+  let r = null;
+  return (e[0] > i[2] || i[0] > e[2] || e[1] > i[3] || i[1] > e[3]) && (o === R ? r = C : o === g ? r = n : (o === y || o === T) && (r = n.concat(t))), r;
+}
+function j(n, t, e) {
+  let i = n, o = t;
+  typeof n[0][0][0] == "number" && (i = [n]), typeof t[0][0][0] == "number" && (o = [t]);
+  let r = it(i, o, e);
+  if (r)
+    return r === C ? null : r;
+  const s = [1 / 0, 1 / 0, -1 / 0, -1 / 0], l = [1 / 0, 1 / 0, -1 / 0, -1 / 0], c = et(i, o, s, l, e);
+  if (r = rt(i, o, s, l, e), r)
+    return r === C ? null : r;
+  const u = Q(
+    c,
+    i,
+    o,
+    s,
+    l,
+    e
+  ), f = nt(u), p = [];
+  for (let h = 0; h < f.length; h++) {
+    let E = f[h];
+    if (E.isExterior()) {
+      let a = [E.points];
+      for (let I = 0; I < E.holeIds.length; I++) {
+        let d = E.holeIds[I];
+        a.push(f[d].points);
+      }
+      p.push(a);
+    }
+  }
+  return p;
+}
+function ct(n, t) {
+  return j(n, t, R);
+}
+
+// routeprofit-pro/src/features/floorplans/automaticRooms.ts
+var SNAP = 0.01;
+var EPS = 1e-7;
+var MIN_AREA = 0.09;
+var MAX_WALLS = 5e3;
+var MAX_NODES = 2e4;
+var MAX_EDGES = 3e4;
+var MAX_FACES = 500;
+var MAX_POINTS = 500;
+var MAX_PAIRS = 15e5;
+var round = (n) => Math.round(n * 1e8) / 1e8;
+var dist = (a, b2) => Math.hypot(a.x - b2.x, a.y - b2.y);
+var cross = (a, b2) => a.x * b2.y - a.y * b2.x;
+var sub = (a, b2) => ({ x: a.x - b2.x, y: a.y - b2.y });
+var signedArea = (p) => p.reduce((n, a, i) => {
+  const b2 = p[(i + 1) % p.length];
+  return n + a.x * b2.y - b2.x * a.y;
+}, 0) / 2;
+function project(p, a, b2) {
+  const d = sub(b2, a), t = Math.max(0, Math.min(1, ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / (d.x * d.x + d.y * d.y)));
+  const point3 = { x: a.x + d.x * t, y: a.y + d.y * t };
+  return { t, point: point3, distance: dist(p, point3) };
+}
+function inside(p, polygon) {
+  let value = false;
+  for (let i = 0, j2 = polygon.length - 1; i < polygon.length; j2 = i++) {
+    const a = polygon[i], b2 = polygon[j2];
+    if (a.y > p.y !== b2.y > p.y && p.x < (b2.x - a.x) * (p.y - a.y) / (b2.y - a.y) + a.x) value = !value;
+  }
+  return value;
+}
+function canonical(points) {
+  let p = points.map((v2) => ({ x: round(v2.x), y: round(v2.y) }));
+  let changed = true;
+  while (changed && p.length > 3) {
+    changed = false;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[(i + p.length - 1) % p.length], b2 = p[i], c = p[(i + 1) % p.length];
+      if (dist(a, c) > EPS && project(b2, a, c).distance < EPS && !p.some((v2, j2) => j2 !== i && dist(v2, b2) < EPS)) {
+        p.splice(i, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (signedArea(p) < 0) p.reverse();
+  let start = 0;
+  for (let i = 1; i < p.length; i++) if (p[i].x < p[start].x - EPS || Math.abs(p[i].x - p[start].x) < EPS && p[i].y < p[start].y) start = i;
+  return [...p.slice(start), ...p.slice(0, start)];
+}
+var polygonKey = (polygon) => JSON.stringify(canonical(polygon).map((p) => [p.x, p.y]));
+function detect(walls) {
+  const failed = () => ({ faces: [], complete: false });
+  if (walls.length > MAX_WALLS || walls.some((w2) => ![w2.start.x, w2.start.y, w2.end.x, w2.end.y].every(Number.isFinite) || dist(w2.start, w2.end) < 9e-3)) return failed();
+  if (!walls.length) return { faces: [], complete: true };
+  const nodes = [], buckets = /* @__PURE__ */ new Map();
+  const nodeFor = (p) => {
+    const x2 = Math.floor(p.x / SNAP), y2 = Math.floor(p.y / SNAP);
+    let best = -1, distance3 = SNAP + EPS;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const id3 of buckets.get(`${x2 + dx}:${y2 + dy}`) || []) {
+      const d = dist(p, nodes[id3].point);
+      if (d < distance3 - EPS || Math.abs(d - distance3) < EPS && id3 < best) {
+        best = id3;
+        distance3 = d;
+      }
+    }
+    if (best >= 0) return best;
+    const id2 = nodes.length;
+    nodes.push({ point: { x: round(p.x), y: round(p.y) }, links: /* @__PURE__ */ new Map() });
+    const key = `${x2}:${y2}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(id2);
+    return id2;
+  };
+  const ordered = walls.slice().sort((a, b2) => a.id.localeCompare(b2.id));
+  const ends = ordered.flatMap((w2) => [w2.start, w2.end]).sort((a, b2) => a.x - b2.x || a.y - b2.y);
+  for (const p of ends) nodeFor(p);
+  const segments = ordered.map((wall2) => {
+    const start = nodes[nodeFor(wall2.start)].point, end = nodes[nodeFor(wall2.end)].point;
+    return { wall: wall2, start, end, cuts: [0, 1], minX: Math.min(start.x, end.x), maxX: Math.max(start.x, end.x), minY: Math.min(start.y, end.y), maxY: Math.max(start.y, end.y) };
+  }).filter((s) => dist(s.start, s.end) > EPS).sort((a, b2) => a.minX - b2.minX || a.minY - b2.minY || a.wall.id.localeCompare(b2.wall.id));
+  let pairs = 0;
+  for (let i = 0; i < segments.length; i++) for (let j2 = i + 1; j2 < segments.length; j2++) {
+    const a = segments[i], b2 = segments[j2];
+    if (b2.minX > a.maxX + SNAP) break;
+    if (b2.minY > a.maxY + SNAP || a.minY > b2.maxY + SNAP) continue;
+    if (++pairs > MAX_PAIRS) return failed();
+    const r = sub(a.end, a.start), s = sub(b2.end, b2.start), q2 = sub(b2.start, a.start), denominator = cross(r, s);
+    if (Math.abs(denominator) > EPS * dist(a.start, a.end) * dist(b2.start, b2.end)) {
+      const t = cross(q2, s) / denominator, u = cross(q2, r) / denominator;
+      if (t >= -EPS && t <= 1 + EPS && u >= -EPS && u <= 1 + EPS) {
+        a.cuts.push(Math.max(0, Math.min(1, t)));
+        b2.cuts.push(Math.max(0, Math.min(1, u)));
+      }
+    }
+    for (const p of [a.start, a.end]) {
+      const hit = project(p, b2.start, b2.end);
+      if (hit.distance <= SNAP + EPS) b2.cuts.push(hit.t);
+    }
+    for (const p of [b2.start, b2.end]) {
+      const hit = project(p, a.start, a.end);
+      if (hit.distance <= SNAP + EPS) a.cuts.push(hit.t);
+    }
+  }
+  let countEdges = 0;
+  for (const segment of segments) {
+    const cuts = segment.cuts.sort((a, b2) => a - b2).filter((v2, i, all) => i === 0 || v2 - all[i - 1] > EPS);
+    const ids = cuts.map((t) => nodeFor({ x: segment.start.x + (segment.end.x - segment.start.x) * t, y: segment.start.y + (segment.end.y - segment.start.y) * t }));
+    for (let i = 1; i < ids.length; i++) {
+      const a = ids[i - 1], b2 = ids[i];
+      if (a === b2) continue;
+      if (!nodes[a].links.has(b2)) {
+        nodes[a].links.set(b2, /* @__PURE__ */ new Set());
+        nodes[b2].links.set(a, /* @__PURE__ */ new Set());
+        countEdges++;
+      }
+      nodes[a].links.get(b2).add(segment.wall.id);
+      nodes[b2].links.get(a).add(segment.wall.id);
+    }
+    if (nodes.length > MAX_NODES || countEdges > MAX_EDGES) return failed();
+  }
+  const discovered = new Int32Array(nodes.length), low = new Int32Array(nodes.length), parent = new Int32Array(nodes.length).fill(-1), bridges = [];
+  let clock = 0;
+  for (let root = 0; root < nodes.length; root++) {
+    if (discovered[root]) continue;
+    discovered[root] = low[root] = ++clock;
+    const stack = [{ id: root, neighbours: [...nodes[root].links.keys()], index: 0 }];
+    while (stack.length) {
+      const frame = stack[stack.length - 1], a = frame.id;
+      if (frame.index < frame.neighbours.length) {
+        const b2 = frame.neighbours[frame.index++];
+        if (b2 === parent[a]) continue;
+        if (!discovered[b2]) {
+          parent[b2] = a;
+          discovered[b2] = low[b2] = ++clock;
+          stack.push({ id: b2, neighbours: [...nodes[b2].links.keys()], index: 0 });
+        } else low[a] = Math.min(low[a], discovered[b2]);
+      } else {
+        stack.pop();
+        const p = parent[a];
+        if (p >= 0) {
+          low[p] = Math.min(low[p], low[a]);
+          if (low[a] > discovered[p]) bridges.push([p, a]);
+        }
+      }
+    }
+  }
+  for (const [a, b2] of bridges) {
+    nodes[a].links.delete(b2);
+    nodes[b2].links.delete(a);
+  }
+  const component = new Int32Array(nodes.length).fill(-1);
+  let nextComponent = 0;
+  for (let i = 0; i < nodes.length; i++) if (component[i] < 0) {
+    const queue = [i];
+    component[i] = nextComponent++;
+    while (queue.length) {
+      const a = queue.pop();
+      for (const b2 of nodes[a].links.keys()) if (component[b2] < 0) {
+        component[b2] = component[a];
+        queue.push(b2);
+      }
+    }
+  }
+  const adjacency = nodes.map((node) => [...node.links.keys()].sort((a, b2) => Math.atan2(nodes[a].point.y - node.point.y, nodes[a].point.x - node.point.x) - Math.atan2(nodes[b2].point.y - node.point.y, nodes[b2].point.x - node.point.x)));
+  const visited = /* @__PURE__ */ new Set(), positive = [], negative = [];
+  for (let a = 0; a < nodes.length; a++) for (const b2 of adjacency[a]) {
+    if (visited.has(`${a}:${b2}`)) continue;
+    const ids = [], walls2 = /* @__PURE__ */ new Set();
+    let from = a, to = b2, closed = false;
+    for (let count = 0; count <= countEdges * 2; count++) {
+      const key = `${from}:${to}`;
+      if (visited.has(key)) {
+        closed = from === a && to === b2;
+        break;
+      }
+      visited.add(key);
+      ids.push(from);
+      for (const id2 of nodes[from].links.get(to)) walls2.add(id2);
+      const neighbours = adjacency[to], back = neighbours.indexOf(from), next = neighbours[(back - 1 + neighbours.length) % neighbours.length];
+      from = to;
+      to = next;
+    }
+    if (!closed || ids.length < 3) continue;
+    const polygon = ids.map((i) => nodes[i].point), area = signedArea(polygon);
+    if (area >= MIN_AREA) positive.push({ polygon: canonical(polygon), wallIds: [...walls2].sort(), area, component: component[a], holes: [] });
+    else if (area < -MIN_AREA) negative.push({ polygon, component: component[a] });
+    if (positive.length > MAX_FACES) return failed();
+  }
+  for (const hole of negative) {
+    const owner = positive.filter((face) => face.component !== hole.component && inside(hole.polygon[0], face.polygon)).sort((a, b2) => a.area - b2.area)[0];
+    if (owner) owner.holes.push(hole.polygon);
+  }
+  const faces = [];
+  for (const face of positive) {
+    let polygon = face.polygon;
+    for (const hole of face.holes.sort((a, b2) => Math.max(...b2.map((p) => p.x)) - Math.max(...a.map((p) => p.x)))) {
+      polygon = bridgeHole(polygon, hole);
+      if (!polygon.length) return failed();
+    }
+    polygon = canonical(polygon);
+    const area = signedArea(polygon);
+    if (polygon.length > MAX_POINTS) return failed();
+    if (area >= MIN_AREA) faces.push({ polygon, area, wallIds: face.wallIds });
+  }
+  return { complete: true, faces: faces.sort((a, b2) => polygonKey(a.polygon).localeCompare(polygonKey(b2.polygon))) };
+}
+function bridgeHole(outer, hole) {
+  let h = 0;
+  for (let i = 1; i < hole.length; i++) if (hole[i].x > hole[h].x || hole[i].x === hole[h].x && hole[i].y < hole[h].y) h = i;
+  const point3 = hole[h];
+  let nearest = Infinity, edge = -1, connection;
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i], b2 = outer[(i + 1) % outer.length];
+    if (a.y > point3.y === b2.y > point3.y) continue;
+    const x2 = a.x + (point3.y - a.y) * (b2.x - a.x) / (b2.y - a.y);
+    if (x2 > point3.x + EPS && x2 < nearest) {
+      nearest = x2;
+      edge = i;
+      connection = { x: x2, y: point3.y };
+    }
+  }
+  if (!connection || edge < 0) return [];
+  return [...outer.slice(0, edge + 1), connection, ...hole.slice(h), ...hole.slice(0, h), point3, connection, ...outer.slice(edge + 1)];
+}
+function overlapArea(a, b2) {
+  if (Math.max(...a.map((p) => p.x)) < Math.min(...b2.map((p) => p.x)) - EPS || Math.max(...b2.map((p) => p.x)) < Math.min(...a.map((p) => p.x)) - EPS || Math.max(...a.map((p) => p.y)) < Math.min(...b2.map((p) => p.y)) - EPS || Math.max(...b2.map((p) => p.y)) < Math.min(...a.map((p) => p.y)) - EPS) return 0;
+  try {
+    const ring = (p) => [...p, p[0]].map((v2) => [v2.x, v2.y]);
+    const clipped = ct([ring(a)], [ring(b2)]);
+    const polygons = !clipped?.length ? [] : typeof clipped[0]?.[0]?.[0] === "number" ? [clipped] : clipped;
+    return polygons.reduce((sum, polygon) => sum + polygon.reduce((n, ring2, i) => n + (i === 0 ? 1 : -1) * Math.abs(signedArea(ring2.map((p) => ({ x: p[0], y: p[1] })))), 0), 0);
+  } catch {
+    return 0;
+  }
+}
+function samePolygon(a, b2) {
+  return polygonKey(a) === polygonKey(b2);
+}
+function matchingFace(room2, faces, keys) {
+  return keys.get(polygonKey(room2.polygon)) || faces.find((face) => {
+    const area = Math.abs(signedArea(room2.polygon));
+    if (Math.abs(area - face.area) > Math.max(0.01, face.area * 2e-3)) return false;
+    return overlapArea(room2.polygon, face.polygon) >= Math.max(area, face.area) - Math.max(0.01, face.area * 2e-3);
+  });
+}
+function hash(value) {
+  let a = 2166136261, b2 = 5381;
+  for (let i = 0; i < value.length; i++) {
+    a = Math.imul(a ^ value.charCodeAt(i), 16777619);
+    b2 = Math.imul(b2, 33) ^ value.charCodeAt(i);
+  }
+  return `${(a >>> 0).toString(16).padStart(8, "0")}${(b2 >>> 0).toString(16).padStart(8, "0")}`;
+}
+function reconcileAutomaticRooms(beforeFloor, candidateFloor) {
+  const before = detect(beforeFloor.walls), after = detect(candidateFloor.walls);
+  if (!before.complete || !after.complete) return candidateFloor;
+  const beforeKeys = new Map(before.faces.map((face) => [polygonKey(face.polygon), face])), afterKeys = new Map(after.faces.map((face) => [polygonKey(face.polygon), face])), afterIndex = new Map(after.faces.map((face, i) => [polygonKey(face.polygon), i]));
+  const oldRooms = new Map(beforeFloor.rooms.map((room2) => [room2.id, room2])), assigned = /* @__PURE__ */ new Map(), used = /* @__PURE__ */ new Set();
+  const managed = [], untouched = [];
+  for (const room2 of candidateFloor.rooms) {
+    const exact = afterIndex.get(polygonKey(room2.polygon));
+    if (exact !== void 0 && !assigned.has(exact)) {
+      assigned.set(exact, room2);
+      used.add(room2.id);
+      continue;
+    }
+    const old = oldRooms.get(room2.id), prior = old && matchingFace(old, before.faces, beforeKeys);
+    if (prior) managed.push({ room: room2, beforeFace: prior });
+    else if (matchingFace(room2, after.faces, afterKeys)) managed.push({ room: room2 });
+    else untouched.push(room2);
+  }
+  const options = [];
+  for (const { room: room2, beforeFace } of managed) for (let i = 0; i < after.faces.length; i++) {
+    if (assigned.has(i)) continue;
+    const face = after.faces[i], shared = beforeFace ? face.wallIds.filter((id2) => beforeFace.wallIds.includes(id2)).length / Math.max(1, Math.min(face.wallIds.length, beforeFace.wallIds.length)) : 0;
+    const overlap2 = overlapArea(room2.polygon, face.polygon), area = Math.abs(signedArea(room2.polygon));
+    if (shared < 0.45 && overlap2 < Math.min(area, face.area) * 0.35) continue;
+    options.push({ face: i, room: room2, score: overlap2 / Math.max(area, face.area, 0.01) * 5 + shared * 2 + Math.min(overlap2, 1e5) * 1e-7 });
+  }
+  options.sort((a, b2) => b2.score - a.score || a.room.id.localeCompare(b2.room.id) || a.face - b2.face);
+  for (const option of options) if (!used.has(option.room.id) && !assigned.has(option.face)) {
+    assigned.set(option.face, option.room);
+    used.add(option.room.id);
+  }
+  const reserved = /* @__PURE__ */ new Set([candidateFloor.id, ...candidateFloor.walls.map((w2) => w2.id), ...candidateFloor.openings.map((o) => o.id), ...candidateFloor.symbols.map((s) => s.id), ...candidateFloor.routes.map((r) => r.id), ...candidateFloor.print.viewpoints.map((v2) => v2.id), ...(candidateFloor.furnishings || []).map((v2) => v2.id), ...candidateFloor.rooms.map((r) => r.id)]);
+  const labels = new Set(candidateFloor.rooms.map((room2) => room2.label));
+  let number = 1;
+  const rooms = after.faces.map((face, index) => {
+    const current = assigned.get(index);
+    if (current) return samePolygon(current.polygon, face.polygon) ? current : { ...current, polygon: face.polygon };
+    const base = `room-auto-${hash(`${candidateFloor.id}:${polygonKey(face.polygon)}`)}`;
+    let id2 = base, suffix = 1;
+    while (reserved.has(id2)) id2 = `${base}-${suffix++}`;
+    reserved.add(id2);
+    while (labels.has(`Ruimte ${number}`)) number++;
+    const label = `Ruimte ${number++}`;
+    labels.add(label);
+    return { id: id2, label, polygon: face.polygon };
+  });
+  rooms.push(...untouched);
+  if (JSON.stringify(rooms) === JSON.stringify(candidateFloor.rooms)) return candidateFloor;
+  return { ...candidateFloor, rooms };
+}
+
+// routeprofit-pro/src/features/floorplans/roomScanOrientation.ts
+var radians = Math.PI / 180;
 
 // routeprofit-pro/src/features/floorplans/planRegistration.ts
 var TAU = 2 * Math.PI;
@@ -41,24 +3709,32 @@ function scanWalls(event) {
   if (!validRoomScanEvent(event)) return [];
   return event.snapshot.surfaces.filter((s) => s.kind === "wall" && !s.isCurved).map((s) => ({ id: s.id, start: { ...s.start }, end: { ...s.end }, thickness: 0.12 }));
 }
-function positionedRoomScan(event, floor2, transform) {
-  const walls = scanWalls(event).map((w) => ({ ...w, start: transformPlanPoint(w.start, transform), end: transformPlanPoint(w.end, transform) }));
+function positionedRoomScan(event, floor2, transform, { includeDetails = false } = {}) {
+  if (!validRoomScanEvent(event)) return { ...floor2, walls: [], openings: [], rooms: [], symbols: [], routes: [], furnishings: void 0, background: void 0 };
+  const bases = event.snapshot.surfaces.filter((s) => s.kind === "wall" && !s.isCurved).map((s) => s.bottomElevation).sort((a, b2) => a - b2);
+  const base = bases.length ? bases[Math.floor(bases.length / 2)] : 0;
+  const surfaces = new Map(event.snapshot.surfaces.map((s) => [s.id, s]));
+  const walls = scanWalls(event).map((w2) => ({ ...w2, start: transformPlanPoint(w2.start, transform), end: transformPlanPoint(w2.end, transform), ...includeDetails && surfaces.get(w2.id).height >= 0.01 ? { height: surfaces.get(w2.id).height } : {} }));
   const openings = [];
   for (const s of event.snapshot.surfaces.filter((s2) => s2.kind !== "wall" && !s2.isCurved)) {
-    const a = transformPlanPoint(s.start, transform), b = transformPlanPoint(s.end, transform), width = Math.hypot(b.x - a.x, b.y - a.y);
-    const candidates = walls.filter((w) => !s.parentWallId || w.id === s.parentWallId).map((w) => {
-      const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, length = Math.hypot(dx, dy);
+    const a = transformPlanPoint(s.start, transform), b2 = transformPlanPoint(s.end, transform), width = Math.hypot(b2.x - a.x, b2.y - a.y);
+    const candidates = walls.filter((w2) => !s.parentWallId || w2.id === s.parentWallId).map((w2) => {
+      const dx = w2.end.x - w2.start.x, dy = w2.end.y - w2.start.y, length = Math.hypot(dx, dy);
       const u = { x: dx / length, y: dy / length };
-      const p = (v) => (v.x - w.start.x) * u.x + (v.y - w.start.y) * u.y;
-      const offset = Math.min(p(a), p(b));
-      const gap2 = Math.max(Math.abs((a.x - w.start.x) * u.y - (a.y - w.start.y) * u.x), Math.abs((b.x - w.start.x) * u.y - (b.y - w.start.y) * u.x));
-      return { w, offset, length, gap: gap2 };
-    }).filter((c) => c.gap < 0.2 && c.offset >= -0.05 && c.offset + width <= c.length + 0.05).sort((a2, b2) => a2.gap - b2.gap);
+      const p = (v2) => (v2.x - w2.start.x) * u.x + (v2.y - w2.start.y) * u.y;
+      const offset = Math.min(p(a), p(b2));
+      const gap2 = Math.max(Math.abs((a.x - w2.start.x) * u.y - (a.y - w2.start.y) * u.x), Math.abs((b2.x - w2.start.x) * u.y - (b2.y - w2.start.y) * u.x));
+      return { w: w2, offset, length, gap: gap2 };
+    }).filter((c) => c.gap < 0.2 && c.offset >= -0.05 && c.offset + width <= c.length + 0.05).sort((a2, b3) => a2.gap - b3.gap);
     const hit = candidates[0];
     if (!hit || width < 0.05) continue;
-    openings.push({ id: s.id, wallId: hit.w.id, type: s.kind, offset: Math.max(0, hit.offset), width: Math.min(width, hit.length - Math.max(0, hit.offset)), hinge: "left", swing: "in" });
+    openings.push({ id: s.id, wallId: hit.w.id, type: s.kind, offset: Math.max(0, hit.offset), width: Math.min(width, hit.length - Math.max(0, hit.offset)), hinge: "left", swing: "in", ...includeDetails && s.height >= 0.01 ? { height: s.height, bottomElevation: Math.max(0, s.bottomElevation - base) } : {} });
   }
-  return { ...floor2, walls, openings, rooms: [], symbols: [], routes: [], background: void 0 };
+  const furnishings = (includeDetails ? event.snapshot.objects || [] : []).flatMap((raw) => {
+    if (!Number.isFinite(raw.height) || raw.height < 0.01 || raw.height > 1e3 || !Number.isFinite(raw.bottomElevation) || raw.bottomElevation - base > 1e3 || raw.width < 0.01 || raw.depth < 0.01) return [];
+    return [{ id: raw.id, category: raw.category, position: transformPlanPoint(raw.center, transform), rotation: (raw.rotationRadians + transform.angleRadians) * 180 / Math.PI, width: raw.width, depth: raw.depth, height: raw.height, bottomElevation: Math.max(0, raw.bottomElevation - base), confidence: ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "unknown" }];
+  });
+  return { ...floor2, walls, openings, rooms: [], symbols: [], routes: [], furnishings: includeDetails ? furnishings : void 0, background: void 0 };
 }
 
 // routeprofit-pro/node_modules/zod/v3/external.js
@@ -176,7 +3852,7 @@ __export(external_exports, {
 // routeprofit-pro/node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
-  util2.assertEqual = (_) => {
+  util2.assertEqual = (_2) => {
   };
   function assertIs(_arg) {
   }
@@ -193,10 +3869,10 @@ var util;
     return obj;
   };
   util2.getValidEnumValues = (obj) => {
-    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+    const validKeys = util2.objectKeys(obj).filter((k2) => typeof obj[obj[k2]] !== "number");
     const filtered = {};
-    for (const k of validKeys) {
-      filtered[k] = obj[k];
+    for (const k2 of validKeys) {
+      filtered[k2] = obj[k2];
     }
     return util2.objectValues(filtered);
   };
@@ -226,7 +3902,7 @@ var util;
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
   util2.joinValues = joinValues;
-  util2.jsonStringifyReplacer = (_, value) => {
+  util2.jsonStringifyReplacer = (_2, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -337,8 +4013,8 @@ var ZodError = class _ZodError extends Error {
   constructor(issues) {
     super();
     this.issues = [];
-    this.addIssue = (sub) => {
-      this.issues = [...this.issues, sub];
+    this.addIssue = (sub2) => {
+      this.issues = [...this.issues, sub2];
     };
     this.addIssues = (subs = []) => {
       this.issues = [...this.issues, ...subs];
@@ -405,13 +4081,13 @@ var ZodError = class _ZodError extends Error {
   flatten(mapper = (issue) => issue.message) {
     const fieldErrors = {};
     const formErrors = [];
-    for (const sub of this.issues) {
-      if (sub.path.length > 0) {
-        const firstEl = sub.path[0];
+    for (const sub2 of this.issues) {
+      if (sub2.path.length > 0) {
+        const firstEl = sub2.path[0];
         fieldErrors[firstEl] = fieldErrors[firstEl] || [];
-        fieldErrors[firstEl].push(mapper(sub));
+        fieldErrors[firstEl].push(mapper(sub2));
       } else {
-        formErrors.push(mapper(sub));
+        formErrors.push(mapper(sub2));
       }
     }
     return { formErrors, fieldErrors };
@@ -553,7 +4229,7 @@ var makeIssue = (params) => {
     };
   }
   let errorMessage = "";
-  const maps = errorMaps.filter((m) => !!m).slice().reverse();
+  const maps = errorMaps.filter((m2) => !!m2).slice().reverse();
   for (const map of maps) {
     errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
   }
@@ -579,7 +4255,7 @@ function addIssueToContext(ctx, issueData) {
       // then global override map
       overrideMap === en_default ? void 0 : en_default
       // then global default map
-    ].filter((x) => !!x)
+    ].filter((x2) => !!x2)
   });
   ctx.common.issues.push(issue);
 }
@@ -642,10 +4318,10 @@ var INVALID = Object.freeze({
 });
 var DIRTY = (value) => ({ status: "dirty", value });
 var OK = (value) => ({ status: "valid", value });
-var isAborted = (x) => x.status === "aborted";
-var isDirty = (x) => x.status === "dirty";
-var isValid = (x) => x.status === "valid";
-var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
+var isAborted = (x2) => x2.status === "aborted";
+var isDirty = (x2) => x2.status === "dirty";
+var isValid = (x2) => x2.status === "valid";
+var isAsync = (x2) => typeof Promise !== "undefined" && x2 instanceof Promise;
 
 // routeprofit-pro/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
@@ -2965,17 +6641,17 @@ var ZodDiscriminatedUnion = class _ZodDiscriminatedUnion extends ZodType {
     });
   }
 };
-function mergeValues(a, b) {
+function mergeValues(a, b2) {
   const aType = getParsedType(a);
-  const bType = getParsedType(b);
-  if (a === b) {
+  const bType = getParsedType(b2);
+  if (a === b2) {
     return { valid: true, data: a };
   } else if (aType === ZodParsedType.object && bType === ZodParsedType.object) {
-    const bKeys = util.objectKeys(b);
+    const bKeys = util.objectKeys(b2);
     const sharedKeys = util.objectKeys(a).filter((key) => bKeys.indexOf(key) !== -1);
-    const newObj = { ...a, ...b };
+    const newObj = { ...a, ...b2 };
     for (const key of sharedKeys) {
-      const sharedValue = mergeValues(a[key], b[key]);
+      const sharedValue = mergeValues(a[key], b2[key]);
       if (!sharedValue.valid) {
         return { valid: false };
       }
@@ -2983,13 +6659,13 @@ function mergeValues(a, b) {
     }
     return { valid: true, data: newObj };
   } else if (aType === ZodParsedType.array && bType === ZodParsedType.array) {
-    if (a.length !== b.length) {
+    if (a.length !== b2.length) {
       return { valid: false };
     }
     const newArray = [];
     for (let index = 0; index < a.length; index++) {
       const itemA = a[index];
-      const itemB = b[index];
+      const itemB = b2[index];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return { valid: false };
@@ -2997,7 +6673,7 @@ function mergeValues(a, b) {
       newArray.push(sharedValue.data);
     }
     return { valid: true, data: newArray };
-  } else if (aType === ZodParsedType.date && bType === ZodParsedType.date && +a === +b) {
+  } else if (aType === ZodParsedType.date && bType === ZodParsedType.date && +a === +b2) {
     return { valid: true, data: a };
   } else {
     return { valid: false };
@@ -3093,7 +6769,7 @@ var ZodTuple = class _ZodTuple extends ZodType {
       if (!schema)
         return null;
       return schema._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
-    }).filter((x) => !!x);
+    }).filter((x2) => !!x2);
     if (ctx.common.async) {
       return Promise.all(items).then((results) => {
         return ParseStatus.mergeArray(status, results);
@@ -3346,7 +7022,7 @@ var ZodFunction = class _ZodFunction extends ZodType {
       return makeIssue({
         data: args,
         path: ctx.path,
-        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
+        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x2) => !!x2),
         issueData: {
           code: ZodIssueCode.invalid_arguments,
           argumentsError: error
@@ -3357,7 +7033,7 @@ var ZodFunction = class _ZodFunction extends ZodType {
       return makeIssue({
         data: returns,
         path: ctx.path,
-        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
+        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x2) => !!x2),
         issueData: {
           code: ZodIssueCode.invalid_return_type,
           returnTypeError: error
@@ -3951,10 +7627,10 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
       }
     }
   }
-  static create(a, b) {
+  static create(a, b2) {
     return new _ZodPipeline({
       in: a,
-      out: b,
+      out: b2,
       typeName: ZodFirstPartyTypeKind.ZodPipeline
     });
   }
@@ -4108,8 +7784,8 @@ var id = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/);
 var coordinate = external_exports.number().finite().min(-1e5).max(1e5);
 var point = external_exports.object({ x: coordinate, y: coordinate }).strict();
 var angle = external_exports.number().finite().min(-3600).max(3600);
-var wall = external_exports.object({ id, start: point, end: point, thickness: external_exports.number().finite().min(0.01).max(5) }).strict().refine((w) => Math.hypot(w.start.x - w.end.x, w.start.y - w.end.y) >= 0.01);
-var opening = external_exports.object({ id, wallId: id, type: external_exports.enum(["door", "window", "opening"]), offset: external_exports.number().finite().min(0).max(1e5), width: external_exports.number().finite().min(0.05).max(50), hinge: external_exports.enum(["left", "right"]), swing: external_exports.enum(["in", "out"]) }).strict();
+var wall = external_exports.object({ id, start: point, end: point, thickness: external_exports.number().finite().min(0.01).max(5), height: external_exports.number().finite().min(0.01).max(50).optional() }).strict().refine((w2) => Math.hypot(w2.start.x - w2.end.x, w2.start.y - w2.end.y) >= 0.01);
+var opening = external_exports.object({ id, wallId: id, type: external_exports.enum(["door", "window", "opening"]), offset: external_exports.number().finite().min(0).max(1e5), width: external_exports.number().finite().min(0.05).max(50), hinge: external_exports.enum(["left", "right"]), swing: external_exports.enum(["in", "out"]), height: external_exports.number().finite().min(0.01).max(50).optional(), bottomElevation: external_exports.number().finite().min(0).max(1e3).optional() }).strict();
 var room = external_exports.object({ id, label: text(), polygon: external_exports.array(point).min(3).max(500) }).strict().refine((room2) => Math.abs(room2.polygon.reduce((sum, p, i) => {
   const next = room2.polygon[(i + 1) % room2.polygon.length];
   return sum + p.x * next.y - next.x * p.y;
@@ -4118,30 +7794,33 @@ var symbol = external_exports.object({ id, kind: external_exports.enum(["camera"
 var route = external_exports.object({ id, points: external_exports.array(point).min(2).max(500), label: text() }).strict();
 var background = external_exports.object({ fileId: id, width: external_exports.number().finite().min(1).max(2e4), height: external_exports.number().finite().min(1).max(2e4), origin: point, metresPerPixel: external_exports.number().finite().min(1e-6).max(100), opacity: external_exports.number().finite().min(0).max(1), calibrated: external_exports.boolean() }).strict();
 var print = external_exports.object({ paper: external_exports.enum(["A4", "A3"]), orientation: external_exports.enum(["portrait", "landscape"]), scale: external_exports.number().finite().min(1).max(1e4), profile: external_exports.enum(["evacuation", "installation"]), title: text(), address: text(500), drawingNumber: text(120), instructions: text(4e3), secondaryInstructions: text(4e3), language2: text(40), viewpoints: external_exports.array(external_exports.object({ id, label: text(), position: point, rotation: angle }).strict()).max(100), cropCenter: point.optional(), logoFileId: id.optional() }).strict();
-var floor = external_exports.object({ id, name: text(120).refine((name) => !!name.trim()), elevation: external_exports.number().finite().min(-1e3).max(1e4), walls: external_exports.array(wall).max(5e3), rooms: external_exports.array(room).max(2e3), openings: external_exports.array(opening).max(4e3), symbols: external_exports.array(symbol).max(5e3), routes: external_exports.array(route).max(1e3), background: background.optional(), print }).strict();
+var furnishingSchema = external_exports.object({ id, category: text(128), position: point, rotation: angle, width: external_exports.number().finite().min(0.01).max(1e3), depth: external_exports.number().finite().min(0.01).max(1e3), height: external_exports.number().finite().min(0.01).max(1e3), bottomElevation: external_exports.number().finite().min(0).max(1e3), confidence: external_exports.enum(["low", "medium", "high", "unknown"]) }).strict();
+var floor = external_exports.object({ id, name: text(120).refine((name) => !!name.trim()), elevation: external_exports.number().finite().min(-1e3).max(1e4), walls: external_exports.array(wall).max(5e3), rooms: external_exports.array(room).max(2e3), openings: external_exports.array(opening).max(4e3), symbols: external_exports.array(symbol).max(5e3), routes: external_exports.array(route).max(1e3), furnishings: external_exports.array(furnishingSchema).max(2500).optional(), background: background.optional(), print }).strict();
 var geoReference = external_exports.object({ crs: external_exports.literal("EPSG:28992"), origin: external_exports.object({ x: external_exports.number().finite().min(-1e6).max(1e6), y: external_exports.number().finite().min(-1e6).max(1e6) }).strict(), rotation: external_exports.literal(0), verticalDatum: external_exports.literal("NAP"), axis: external_exports.literal("x-east-y-north") }).strict();
 var buildingReference = external_exports.object({ id, manifestFileId: id, manifestSha256: external_exports.string().regex(/^[a-f0-9]{64}$/), usedParts: external_exports.array(external_exports.enum(["footprint", "aerial", "roof"])).min(1).max(3), floorId: id, wallIds: external_exports.array(id).max(5e3), interpretation: external_exports.enum(["closed_building", "open_structure"]), measurementStatus: external_exports.enum(["unchecked", "user_checked"]), attributions: external_exports.array(text(400)).max(8), modelFileId: id.optional() }).strict().refine((reference) => reference.usedParts.includes("roof") === Boolean(reference.modelFileId));
 var documentFields = { id, title: text(), unit: external_exports.literal("m"), floors: external_exports.array(floor).min(1).max(30) };
 var floorPlanDocumentSchema = external_exports.discriminatedUnion("schemaVersion", [
   external_exports.object({ ...documentFields, schemaVersion: external_exports.literal(1) }).strict(),
-  external_exports.object({ ...documentFields, schemaVersion: external_exports.literal(2), geoReference: geoReference.optional(), buildingReferences: external_exports.array(buildingReference).max(30).optional() }).strict()
+  external_exports.object({ ...documentFields, schemaVersion: external_exports.literal(2), geoReference: geoReference.optional(), buildingReferences: external_exports.array(buildingReference).max(30).optional() }).strict(),
+  external_exports.object({ ...documentFields, schemaVersion: external_exports.literal(3), geoReference: geoReference.optional(), buildingReferences: external_exports.array(buildingReference).max(30).optional() }).strict()
 ]).superRefine((doc, context) => {
   const ids = /* @__PURE__ */ new Set([doc.id]);
   let entries = doc.floors.length;
   for (const f of doc.floors) {
-    for (const item of [f, ...f.walls, ...f.rooms, ...f.openings, ...f.symbols, ...f.routes, ...f.print.viewpoints]) {
+    if (doc.schemaVersion < 3 && (f.furnishings !== void 0 || f.walls.some((w2) => w2.height !== void 0) || f.openings.some((o) => o.height !== void 0 || o.bottomElevation !== void 0))) context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Gemeten hoogtes en inrichting vereisen tekenbestandversie 3." });
+    for (const item of [f, ...f.walls, ...f.rooms, ...f.openings, ...f.symbols, ...f.routes, ...f.print.viewpoints, ...f.furnishings || []]) {
       if (ids.has(item.id)) context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Alle tekenonderdelen moeten een uniek ID hebben." });
       ids.add(item.id);
     }
-    entries += f.walls.length + f.rooms.length + f.openings.length + f.symbols.length + f.routes.length + f.print.viewpoints.length;
+    entries += f.walls.length + f.rooms.length + f.openings.length + f.symbols.length + f.routes.length + f.print.viewpoints.length + (f.furnishings?.length || 0);
     entries += f.rooms.reduce((n, r) => n + r.polygon.length, 0) + f.routes.reduce((n, r) => n + r.points.length, 0);
-    const walls = new Map(f.walls.map((w) => [w.id, w]));
+    const walls = new Map(f.walls.map((w2) => [w2.id, w2]));
     for (const opening2 of f.openings) {
       const wall2 = walls.get(opening2.wallId);
       if (!wall2 || opening2.offset + opening2.width > Math.hypot(wall2.end.x - wall2.start.x, wall2.end.y - wall2.start.y) + 1e-3) context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Een deur of raam valt buiten de bijbehorende muur." });
     }
   }
-  if (doc.schemaVersion === 2 && doc.buildingReferences?.length) {
+  if (doc.schemaVersion !== 1 && doc.buildingReferences?.length) {
     if (!doc.geoReference) context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "De geografische oorsprong ontbreekt." });
     const references = /* @__PURE__ */ new Set();
     for (const reference of doc.buildingReferences) {
@@ -4165,38 +7844,43 @@ function parseFloorPlanDocument(value) {
 
 // routeprofit-pro/src/features/floorplans/liveScanMerge.ts
 var safeId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(value);
-var sameScope = (a, b) => a.customerId === b.customerId && a.objectId === b.objectId && a.buildingSelectionKey === b.buildingSelectionKey && a.documentId === b.documentId && a.floorId === b.floorId && a.mapVersion === b.mapVersion;
+var sameScope = (a, b2) => a.customerId === b2.customerId && a.objectId === b2.objectId && a.buildingSelectionKey === b2.buildingSelectionKey && a.documentId === b2.documentId && a.floorId === b2.floorId && a.mapVersion === b2.mapVersion;
 var validScope = (scope) => scope && [scope.customerId, scope.objectId, scope.documentId, scope.floorId].every(safeId) && typeof scope.buildingSelectionKey === "string" && /^(bag|point|manual):[A-Za-z0-9_.:-]{1,120}$/.test(scope.buildingSelectionKey) && Number.isSafeInteger(scope.mapVersion) && scope.mapVersion >= 0;
-var collection = (floor2, kind) => kind === "wall" ? floor2.walls : kind === "room" ? floor2.rooms : floor2.openings;
+var collection = (floor2, kind) => kind === "wall" ? floor2.walls : kind === "room" ? floor2.rooms : kind === "furnishing" ? floor2.furnishings ||= [] : floor2.openings;
 var elementFingerprint = (kind, value) => {
   if (kind === "wall") {
-    const v2 = value;
-    return JSON.stringify([v2.start.x, v2.start.y, v2.end.x, v2.end.y, v2.thickness]);
+    const v3 = value;
+    return JSON.stringify([v3.start.x, v3.start.y, v3.end.x, v3.end.y, v3.thickness, ...v3.height === void 0 ? [] : [v3.height]]);
   }
   if (kind === "room") {
-    const v2 = value;
-    return JSON.stringify([v2.label, v2.polygon.map((p) => [p.x, p.y])]);
+    const v3 = value;
+    return JSON.stringify([v3.label, v3.polygon.map((p) => [p.x, p.y])]);
   }
-  const v = value;
-  return JSON.stringify([v.wallId, v.type, v.offset, v.width, v.hinge, v.swing]);
+  if (kind === "furnishing") {
+    const v3 = value;
+    return JSON.stringify([v3.category, v3.position.x, v3.position.y, v3.rotation, v3.width, v3.depth, v3.height, v3.bottomElevation, v3.confidence]);
+  }
+  const v2 = value;
+  return JSON.stringify([v2.wallId, v2.type, v2.offset, v2.width, v2.hinge, v2.swing, ...v2.height === void 0 && v2.bottomElevation === void 0 ? [] : [v2.height ?? null, v2.bottomElevation ?? null]]);
 };
 var point2 = (value) => value && [value.x, value.y].every((n) => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e5);
 var text2 = (value) => typeof value === "string" && value.length <= 250 && !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 function validElement(element) {
   if (!element || !safeId(element.sourceId) || !element.value) return false;
-  const v = element.value;
+  const v2 = element.value;
   if (element.kind === "wall") {
-    const wall2 = v;
+    const wall2 = v2;
     return point2(wall2.start) && point2(wall2.end) && Math.hypot(wall2.start.x - wall2.end.x, wall2.start.y - wall2.end.y) >= 0.01 && Number.isFinite(wall2.thickness) && wall2.thickness >= 0.01 && wall2.thickness <= 5;
   }
   if (element.kind === "room") {
-    const room2 = v;
+    const room2 = v2;
     return text2(room2.label) && Array.isArray(room2.polygon) && room2.polygon.length >= 3 && room2.polygon.length <= 500 && room2.polygon.every(point2);
   }
   if (element.kind === "opening") {
-    const opening2 = v;
+    const opening2 = v2;
     return safeId(element.sourceWallId) && ["door", "window", "opening"].includes(opening2.type) && Number.isFinite(opening2.offset) && opening2.offset >= 0 && opening2.offset <= 1e5 && Number.isFinite(opening2.width) && opening2.width >= 0.05 && opening2.width <= 50 && ["left", "right"].includes(opening2.hinge) && ["in", "out"].includes(opening2.swing);
   }
+  if (element.kind === "furnishing") return furnishingSchema.safeParse({ id: element.sourceId, ...element.value }).success;
   return false;
 }
 function createScanMergeState(scope, sessionId, epoch) {
@@ -4213,10 +7897,11 @@ function mergeScanSnapshot(document, state, snapshot) {
   const sourceIds = new Set(snapshot.elements.map((element) => element.sourceId));
   if (sourceIds.size !== snapshot.elements.length || snapshot.elements.reduce((total, element) => total + (element.kind === "room" ? element.value.polygon.length : 2), 0) > 2e4 || snapshot.elements.some((element) => element.kind === "opening" && !snapshot.elements.some((wall2) => wall2.sourceId === element.sourceWallId && wall2.kind === "wall"))) return reject("invalid", "invalid_snapshot");
   const next = structuredClone(document), nextState = structuredClone(state);
+  if (snapshot.elements.some((e) => e.kind === "furnishing" || e.kind === "wall" && e.value.height !== void 0 || e.kind === "opening" && (e.value.height !== void 0 || e.value.bottomElevation !== void 0))) next.schemaVersion = 3;
   const floor2 = next.floors.find((f) => f.id === state.scope.floorId);
   const owned = new Map(nextState.elements.map((entry) => [entry.sourceId, entry]));
   const byId = new Map(nextState.elements.map((entry) => [entry.elementId, entry]));
-  const usedIds = /* @__PURE__ */ new Set([document.id, ...document.floors.flatMap((f) => [f.id, ...[f.walls, f.rooms, f.openings, f.symbols, f.routes, f.print.viewpoints].flat().map((item) => item.id)])]);
+  const usedIds = /* @__PURE__ */ new Set([document.id, ...document.floors.flatMap((f) => [f.id, ...[f.walls, f.rooms, f.openings, f.symbols, f.routes, f.print.viewpoints, f.furnishings || []].flat().map((item) => item.id)])]);
   const protect = (entry) => {
     entry.status = "protected";
     if (!result.protected.includes(entry.elementId)) result.protected.push(entry.elementId);
@@ -4234,7 +7919,7 @@ function mergeScanSnapshot(document, state, snapshot) {
     const owner = byId.get(opening2.id);
     if (owner && byId.get(opening2.wallId)?.status === "protected") protect(owner);
   }
-  for (const incoming of [...snapshot.elements].sort((a, b) => Number(a.kind === "opening") - Number(b.kind === "opening"))) {
+  for (const incoming of [...snapshot.elements].sort((a, b2) => Number(a.kind === "opening") - Number(b2.kind === "opening"))) {
     let entry = owned.get(incoming.sourceId);
     if (entry && entry.kind !== incoming.kind) return reject("invalid", "invalid_snapshot");
     if (entry?.status === "protected") continue;
@@ -4257,14 +7942,16 @@ function mergeScanSnapshot(document, state, snapshot) {
         protect(entry);
         continue;
       }
-      const v = incoming.value;
-      value = { id: entry.elementId, wallId: wall2.elementId, type: v.type, offset: v.offset, width: v.width, hinge: v.hinge, swing: v.swing };
+      const v2 = incoming.value;
+      value = { ...structuredClone(v2), id: entry.elementId, wallId: wall2.elementId };
     } else if (incoming.kind === "wall") {
-      const v = incoming.value;
-      value = { id: entry.elementId, start: { ...v.start }, end: { ...v.end }, thickness: v.thickness };
+      const v2 = incoming.value;
+      value = { ...structuredClone(v2), id: entry.elementId };
+    } else if (incoming.kind === "furnishing") {
+      value = { ...structuredClone(incoming.value), id: entry.elementId };
     } else {
-      const v = incoming.value;
-      value = { id: entry.elementId, label: v.label, polygon: v.polygon.map((p) => ({ ...p })) };
+      const v2 = incoming.value;
+      value = { id: entry.elementId, label: v2.label, polygon: v2.polygon.map((p) => ({ ...p })) };
     }
     const fingerprint = elementFingerprint(incoming.kind, value);
     if (existingIndex < 0) {
@@ -4277,7 +7964,7 @@ function mergeScanSnapshot(document, state, snapshot) {
     entry.baseline = fingerprint;
     entry.status = "active";
   }
-  for (const entry of [...nextState.elements].sort((a, b) => Number(b.kind === "opening") - Number(a.kind === "opening"))) {
+  for (const entry of [...nextState.elements].sort((a, b2) => Number(b2.kind === "opening") - Number(a.kind === "opening"))) {
     if (sourceIds.has(entry.sourceId) || entry.status !== "active") continue;
     const target = collection(floor2, entry.kind), index = target.findIndex((item) => item.id === entry.elementId);
     if (entry.kind === "wall" && floor2.openings.some((opening2) => opening2.wallId === entry.elementId)) {
@@ -4298,14 +7985,14 @@ function mergeScanSnapshot(document, state, snapshot) {
 }
 
 // routeprofit-pro/src/features/floorplans/collabDocument.mjs
-var COLLECTIONS = Object.freeze(["walls", "openings", "rooms", "symbols", "routes"]);
+var COLLECTIONS = Object.freeze(["walls", "openings", "rooms", "symbols", "routes", "furnishings"]);
 var clone = (value) => structuredClone(value);
-var EPS = 1e-3;
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  return value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+var EPS2 = 1e-3;
+function canonical2(value) {
+  if (Array.isArray(value)) return value.map(canonical2);
+  return value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical2(value[key])])) : value;
 }
-var equalValue = (left, right) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+var equalValue = (left, right) => JSON.stringify(canonical2(left)) === JSON.stringify(canonical2(right));
 var floorResourceId = (floorId) => `floor:${encodeURIComponent(floorId)}`;
 var resourceId = (floorId, collection3, id2) => `element:${encodeURIComponent(floorId)}:${collection3}:${encodeURIComponent(id2)}`;
 function parseResourceId(key) {
@@ -4322,8 +8009,8 @@ function parseResourceId(key) {
   throw new Error("Ongeldige onderdeelverwijzing.");
 }
 function resourcesConflict(left, right) {
-  const a = parseResourceId(left), b = parseResourceId(right);
-  return a.kind === "document" || b.kind === "document" || left === right || a.floorId === b.floorId && (a.kind === "floor" || b.kind === "floor");
+  const a = parseResourceId(left), b2 = parseResourceId(right);
+  return a.kind === "document" || b2.kind === "document" || left === right || a.floorId === b2.floorId && (a.kind === "floor" || b2.kind === "floor");
 }
 function splitDocument(document) {
   const { floors, ...metadata } = document;
@@ -4346,8 +8033,8 @@ function splitDocument(document) {
   return result;
 }
 function diffDocuments(before, after) {
-  const a = splitDocument(before), b = splitDocument(after);
-  return [.../* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)])].sort().filter((key) => !equalValue(a[key] ?? null, b[key] ?? null)).map((resource_id) => ({ resource_id, before: a[resource_id] ?? null, after: b[resource_id] ?? null }));
+  const a = splitDocument(before), b2 = splitDocument(after);
+  return [.../* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b2)])].sort().filter((key) => !equalValue(a[key] ?? null, b2[key] ?? null)).map((resource_id) => ({ resource_id, before: a[resource_id] ?? null, after: b2[resource_id] ?? null }));
 }
 function validateChanges(changes) {
   if (!Array.isArray(changes) || !changes.length || changes.length > 2e4) throw new Error("Ongeldige wijziging.");
@@ -4393,7 +8080,8 @@ function applyChanges(document, changes) {
         return parsed.kind === "element" && parsed.floorId === id2 && parsed.collection === collection3;
       }).map((key) => resources[key]);
       const order = new Map((previous?.[collection3] || []).map((element, index) => [element.id, index]));
-      result[collection3] = elements.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) || a.id.localeCompare(b.id));
+      if (collection3 === "furnishings" && !elements.length && metadata.schemaVersion < 3) continue;
+      result[collection3] = elements.sort((a, b2) => (order.get(a.id) ?? Infinity) - (order.get(b2.id) ?? Infinity) || a.id.localeCompare(b2.id));
     }
     return result;
   });
@@ -4403,29 +8091,29 @@ function applyChanges(document, changes) {
   }
   return { ...metadata, floors };
 }
-var distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+var distance = (a, b2) => Math.hypot(a.x - b2.x, a.y - b2.y);
 var onSegment = (p, wall2) => {
   const dx = wall2.end.x - wall2.start.x, dy = wall2.end.y - wall2.start.y, denominator = dx * dx + dy * dy;
   const t = denominator ? Math.max(0, Math.min(1, ((p.x - wall2.start.x) * dx + (p.y - wall2.start.y) * dy) / denominator)) : 0;
-  return distance(p, { x: wall2.start.x + t * dx, y: wall2.start.y + t * dy }) <= EPS;
+  return distance(p, { x: wall2.start.x + t * dx, y: wall2.start.y + t * dy }) <= EPS2;
 };
-var crosses = (a, b) => {
-  if ([a.start, a.end].some((p) => onSegment(p, b)) || [b.start, b.end].some((p) => onSegment(p, a))) return true;
-  const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  return cross(a.start, a.end, b.start) * cross(a.start, a.end, b.end) < 0 && cross(b.start, b.end, a.start) * cross(b.start, b.end, a.end) < 0;
+var crosses = (a, b2) => {
+  if ([a.start, a.end].some((p) => onSegment(p, b2)) || [b2.start, b2.end].some((p) => onSegment(p, a))) return true;
+  const cross2 = (p, q2, r) => (q2.x - p.x) * (r.y - p.y) - (q2.y - p.y) * (r.x - p.x);
+  return cross2(a.start, a.end, b2.start) * cross2(a.start, a.end, b2.end) < 0 && cross2(b2.start, b2.end, a.start) * cross2(b2.start, b2.end, a.end) < 0;
 };
 var roomEdges = (room2) => room2.polygon.map((start, index) => ({ start, end: room2.polygon[(index + 1) % room2.polygon.length] }));
 var insideRoom = (point3, room2) => {
-  let inside = false;
+  let inside2 = false;
   for (const edge of roomEdges(room2)) {
     if (onSegment(point3, edge)) return true;
-    const { start: a, end: b } = edge;
-    if (a.y > point3.y !== b.y > point3.y && point3.x < (b.x - a.x) * (point3.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+    const { start: a, end: b2 } = edge;
+    if (a.y > point3.y !== b2.y > point3.y && point3.x < (b2.x - a.x) * (point3.y - a.y) / (b2.y - a.y) + a.x) inside2 = !inside2;
   }
-  return inside;
+  return inside2;
 };
 var roomTouchesWall = (room2, wall2) => insideRoom(wall2.start, room2) || insideRoom(wall2.end, room2) || roomEdges(room2).some((edge) => crosses(edge, wall2));
-var roomsOverlap = (a, b) => a.polygon.some((point3) => insideRoom(point3, b)) || b.polygon.some((point3) => insideRoom(point3, a)) || roomEdges(a).some((edge) => roomEdges(b).some((other) => crosses(edge, other)));
+var roomsOverlap = (a, b2) => a.polygon.some((point3) => insideRoom(point3, b2)) || b2.polygon.some((point3) => insideRoom(point3, a)) || roomEdges(a).some((edge) => roomEdges(b2).some((other) => crosses(edge, other)));
 function dependencyResources(document, { resourceIds = [], changes = [] } = {}) {
   resourceIds.forEach(parseResourceId);
   if (changes.length) validateChanges(changes);
@@ -4446,7 +8134,7 @@ function dependencyResources(document, { resourceIds = [], changes = [] } = {}) 
     if (!floor2 || !element) continue;
     const change = changes.find((item) => item.resource_id === key);
     const labelOnly = parsed.collection === "rooms" && change && equalValue(change.before?.polygon, change.after?.polygon);
-    if (labelOnly || ["symbols", "routes"].includes(parsed.collection)) continue;
+    if (labelOnly || ["symbols", "routes", "furnishings"].includes(parsed.collection)) continue;
     const affectedWalls2 = /* @__PURE__ */ new Set();
     if (parsed.collection === "walls") {
       for (const wall2 of floor2.walls) if (wall2.id === element.id || crosses(element, wall2)) affectedWalls2.add(wall2.id);
@@ -4474,7 +8162,7 @@ function createDocument(title = "Gebouwplattegrond") {
   return { schemaVersion: 1, id: uid(), title, unit: "m", floors: [createFloor()] };
 }
 
-// Reference/LOQ-scan-wall-merge-2026-10-11/server/scanGeometry.ts
+// Reference/LOQ-room-details-2026-10-11/server/scanGeometry.ts
 function validateDocument(document) {
   if (!parseFloorPlanDocument(document)) throw new Error("invalid_document");
   return document;
@@ -4482,17 +8170,17 @@ function validateDocument(document) {
 function dependencies(before, after, readResources = []) {
   return dependencyResources(before, { changes: diffDocuments(before, after), resourceIds: readResources });
 }
-var gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-var wallStamp = (w) => JSON.stringify([w.id, w.start.x, w.start.y, w.end.x, w.end.y, w.thickness]);
-var openingStamp = (o) => JSON.stringify([o.id, o.wallId, o.type, o.offset, o.width, o.hinge, o.swing]);
+var gap = (a, b2) => Math.hypot(a.x - b2.x, a.y - b2.y);
+var wallStamp = (w2) => JSON.stringify([w2.id, w2.start.x, w2.start.y, w2.end.x, w2.end.y, w2.thickness, ...w2.height === void 0 ? [] : [w2.height]]);
+var openingStamp = (o) => JSON.stringify([o.id, o.wallId, o.type, o.offset, o.width, o.hinge, o.swing, ...o.height === void 0 && o.bottomElevation === void 0 ? [] : [o.height ?? null, o.bottomElevation ?? null]]);
 function closedPolygon(walls) {
   if (walls.length < 3 || walls.length > 500) return null;
   const remaining = walls.slice(1), points = [walls[0].start, walls[0].end];
   while (remaining.length) {
-    const end = points[points.length - 1], i = remaining.findIndex((w2) => Math.min(gap(w2.start, end), gap(w2.end, end)) < 0.08);
+    const end = points[points.length - 1], i = remaining.findIndex((w3) => Math.min(gap(w3.start, end), gap(w3.end, end)) < 0.08);
     if (i < 0) return null;
-    const w = remaining.splice(i, 1)[0];
-    points.push(gap(w.start, end) < gap(w.end, end) ? w.end : w.start);
+    const w2 = remaining.splice(i, 1)[0];
+    points.push(gap(w2.start, end) < gap(w2.end, end) ? w2.end : w2.start);
   }
   if (gap(points[0], points[points.length - 1]) >= 0.08) return null;
   points.pop();
@@ -4501,13 +8189,13 @@ function closedPolygon(walls) {
 function onExistingWall(opening2, incomingWall, existingWall) {
   const length = gap(incomingWall.start, incomingWall.end), targetLength = gap(existingWall.start, existingWall.end);
   const u = { x: (incomingWall.end.x - incomingWall.start.x) / length, y: (incomingWall.end.y - incomingWall.start.y) / length };
-  const v = { x: (existingWall.end.x - existingWall.start.x) / targetLength, y: (existingWall.end.y - existingWall.start.y) / targetLength };
+  const v2 = { x: (existingWall.end.x - existingWall.start.x) / targetLength, y: (existingWall.end.y - existingWall.start.y) / targetLength };
   const endpoints = [opening2.offset, opening2.offset + opening2.width].map((d) => ({ x: incomingWall.start.x + u.x * d, y: incomingWall.start.y + u.y * d }));
-  const offsets = endpoints.map((p) => (p.x - existingWall.start.x) * v.x + (p.y - existingWall.start.y) * v.y);
-  const perpendicular = endpoints.map((p) => Math.abs((p.x - existingWall.start.x) * v.y - (p.y - existingWall.start.y) * v.x));
+  const offsets = endpoints.map((p) => (p.x - existingWall.start.x) * v2.x + (p.y - existingWall.start.y) * v2.y);
+  const perpendicular = endpoints.map((p) => Math.abs((p.x - existingWall.start.x) * v2.y - (p.y - existingWall.start.y) * v2.x));
   const offset = Math.min(...offsets), width = Math.abs(offsets[1] - offsets[0]);
   if (Math.max(...perpendicular) > 0.061 || offset < -1e-3 || offset + width > targetLength + 1e-3 || width < 0.05) return null;
-  const reversed = u.x * v.x + u.y * v.y < 0;
+  const reversed = u.x * v2.x + u.y * v2.y < 0;
   return { ...opening2, wallId: existingWall.id, offset: Math.max(0, offset), width: Math.min(width, targetLength - Math.max(0, offset)), hinge: reversed ? opening2.hinge === "left" ? "right" : "left" : opening2.hinge, swing: reversed ? opening2.swing === "in" ? "out" : "in" : opening2.swing };
 }
 function mergeExternalOpenings(document, session, positioned, bindings, conflicts, heldWallSources = /* @__PURE__ */ new Set()) {
@@ -4515,41 +8203,41 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
   const owned = structuredClone(session.externalOpenings || []), protectedIds = [];
   const bySource = new Map(owned.map((o) => [o.sourceId, o])), seen = /* @__PURE__ */ new Set();
   const incomingSources = new Set(positioned.openings.map((o) => o.id));
-  const used = /* @__PURE__ */ new Set([next.id, ...next.floors.flatMap((f) => [f.id, ...[f.walls, f.rooms, f.openings, f.symbols, f.routes, f.print.viewpoints].flat().map((x) => x.id)])]);
+  const used = /* @__PURE__ */ new Set([next.id, ...next.floors.flatMap((f) => [f.id, ...[f.walls, f.rooms, f.openings, f.symbols, f.routes, f.print.viewpoints, f.furnishings || []].flat().map((x2) => x2.id)])]);
   const protect = (entry, reason) => {
     entry.status = "protected";
     protectedIds.push(entry.elementId);
     conflicts.push({ code: reason, sourceId: entry.sourceId, elementId: entry.elementId });
   };
   for (const entry of owned) {
-    const current = floor2.openings.find((o) => o.id === entry.elementId), wall2 = floor2.walls.find((w) => w.id === entry.wallId);
+    const current = floor2.openings.find((o) => o.id === entry.elementId), wall2 = floor2.walls.find((w2) => w2.id === entry.wallId);
     if (entry.status === "active" && (!current || openingStamp(current) !== entry.baseline)) protect(entry, "manual_opening_preserved");
     if (entry.status === "withdrawn" && current) protect(entry, "manual_opening_preserved");
     if (entry.status !== "protected" && (!wall2 || wallStamp(wall2) !== entry.wallBaseline)) protect(entry, "changed_parent_wall_preserved");
     if (heldWallSources.has(entry.sourceWallId)) seen.add(entry.sourceId);
   }
   for (const source of positioned.openings) {
-    const matches = bindings.filter((b) => b.sourceId === source.wallId);
+    const matches = bindings.filter((b2) => b2.sourceId === source.wallId);
     if (!matches.length) continue;
     seen.add(source.id);
     if (heldWallSources.has(source.wallId)) continue;
     let entry = bySource.get(source.id);
     if (entry?.status === "protected") continue;
-    const incoming = positioned.walls.find((w) => w.id === source.wallId);
-    if (matches.some((b) => b.status === "protected")) {
+    const incoming = positioned.walls.find((w2) => w2.id === source.wallId);
+    if (matches.some((b2) => b2.status === "protected")) {
       if (entry) protect(entry, "changed_parent_wall_preserved");
       else conflicts.push({ code: "changed_parent_wall_preserved", sourceId: source.id });
       continue;
     }
-    const usable = matches.filter((b) => {
-      const w = floor2.walls.find((w2) => w2.id === b.elementId);
-      return w && wallStamp(w) === b.baseline && onExistingWall(source, incoming, w);
+    const usable = matches.filter((b2) => {
+      const w2 = floor2.walls.find((w3) => w3.id === b2.elementId);
+      return w2 && wallStamp(w2) === b2.baseline && onExistingWall(source, incoming, w2);
     });
     if (usable.length !== 1) {
       conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: source.id });
       continue;
     }
-    const binding = usable[0], wall2 = floor2.walls.find((w) => w.id === binding.elementId);
+    const binding = usable[0], wall2 = floor2.walls.find((w2) => w2.id === binding.elementId);
     if (entry && entry.wallId !== binding.elementId) {
       protect(entry, "changed_parent_wall_preserved");
       continue;
@@ -4568,8 +8256,8 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
       const tombstone = owned.find((o) => {
         if (o.status !== "protected" || o.wallId !== wall2.id || !o.baseline) return false;
         try {
-          const b = JSON.parse(o.baseline);
-          return b[2] === value.type && Math.abs(b[3] - value.offset) < 0.05 && Math.abs(b[4] - value.width) < 0.05;
+          const b2 = JSON.parse(o.baseline);
+          return b2[2] === value.type && Math.abs(b2[3] - value.offset) < 0.05 && Math.abs(b2[4] - value.width) < 0.05;
         } catch {
           return false;
         }
@@ -4635,25 +8323,25 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
   }
   return { document: next, owned, protectedIds: [.../* @__PURE__ */ new Set([...protectedIds, ...owned.filter((o) => o.status === "protected").map((o) => o.elementId)])] };
 }
-var wallLength = (w) => gap(w.start, w.end);
-var wallUnit = (w) => {
-  const n = wallLength(w);
-  return { x: (w.end.x - w.start.x) / n, y: (w.end.y - w.start.y) / n };
+var wallLength = (w2) => gap(w2.start, w2.end);
+var wallUnit = (w2) => {
+  const n = wallLength(w2);
+  return { x: (w2.end.x - w2.start.x) / n, y: (w2.end.y - w2.start.y) / n };
 };
-var along = (p, w) => {
-  const u = wallUnit(w);
-  return (p.x - w.start.x) * u.x + (p.y - w.start.y) * u.y;
+var along = (p, w2) => {
+  const u = wallUnit(w2);
+  return (p.x - w2.start.x) * u.x + (p.y - w2.start.y) * u.y;
 };
-var at = (w, d) => {
-  const u = wallUnit(w);
-  return { x: w.start.x + u.x * d, y: w.start.y + u.y * d };
+var at = (w2, d) => {
+  const u = wallUnit(w2);
+  return { x: w2.start.x + u.x * d, y: w2.start.y + u.y * d };
 };
-var lineGap = (p, w) => {
-  const u = wallUnit(w);
-  return Math.abs((p.x - w.start.x) * u.y - (p.y - w.start.y) * u.x);
+var lineGap = (p, w2) => {
+  const u = wallUnit(w2);
+  return Math.abs((p.x - w2.start.x) * u.y - (p.y - w2.start.y) * u.x);
 };
 function overlap(incoming, host) {
-  const a = wallUnit(incoming), b = wallUnit(host), angle2 = Math.abs(a.x * b.y - a.y * b.x);
+  const a = wallUnit(incoming), b2 = wallUnit(host), angle2 = Math.abs(a.x * b2.y - a.y * b2.x);
   if (angle2 > Math.sin(Math.PI / 90)) return null;
   const low = Math.max(0, Math.min(along(host.start, incoming), along(host.end, incoming))), high = Math.min(wallLength(incoming), Math.max(along(host.start, incoming), along(host.end, incoming)));
   const normal = Math.max(lineGap(at(incoming, low), host), lineGap(at(incoming, high), host));
@@ -4661,19 +8349,20 @@ function overlap(incoming, host) {
   return { low, high, normal, angle: angle2 };
 }
 function ownedStamp(kind, value) {
-  if (kind === "wall") return JSON.stringify([value.start.x, value.start.y, value.end.x, value.end.y, value.thickness]);
-  if (kind === "opening") return JSON.stringify([value.wallId, value.type, value.offset, value.width, value.hinge, value.swing]);
+  if (kind === "wall") return JSON.stringify([value.start.x, value.start.y, value.end.x, value.end.y, value.thickness, ...value.height === void 0 ? [] : [value.height]]);
+  if (kind === "opening") return JSON.stringify([value.wallId, value.type, value.offset, value.width, value.hinge, value.swing, ...value.height === void 0 && value.bottomElevation === void 0 ? [] : [value.height ?? null, value.bottomElevation ?? null]]);
+  if (kind === "furnishing") return JSON.stringify([value.category, value.position.x, value.position.y, value.rotation, value.width, value.depth, value.height, value.bottomElevation, value.confidence]);
   return JSON.stringify([value.label, value.polygon.map((p) => [p.x, p.y])]);
 }
-var collection2 = (floor2, kind) => kind === "wall" ? floor2.walls : kind === "opening" ? floor2.openings : floor2.rooms;
+var collection2 = (floor2, kind) => kind === "wall" ? floor2.walls : kind === "opening" ? floor2.openings : kind === "furnishing" ? floor2.furnishings || [] : floor2.rooms;
 function affectedWalls(before, after, floorId) {
-  const a = before.floors.find((f) => f.id === floorId), b = after.floors.find((f) => f.id === floorId), ids = /* @__PURE__ */ new Set();
-  for (const w of [...a.walls, ...b.walls]) {
-    const old = a.walls.find((x) => x.id === w.id), next = b.walls.find((x) => x.id === w.id);
-    if (!old || !next || wallStamp(old) !== wallStamp(next)) ids.add(w.id);
+  const a = before.floors.find((f) => f.id === floorId), b2 = after.floors.find((f) => f.id === floorId), ids = /* @__PURE__ */ new Set();
+  for (const w2 of [...a.walls, ...b2.walls]) {
+    const old = a.walls.find((x2) => x2.id === w2.id), next = b2.walls.find((x2) => x2.id === w2.id);
+    if (!old || !next || wallStamp(old) !== wallStamp(next)) ids.add(w2.id);
   }
-  for (const o of [...a.openings, ...b.openings]) {
-    const old = a.openings.find((x) => x.id === o.id), next = b.openings.find((x) => x.id === o.id);
+  for (const o of [...a.openings, ...b2.openings]) {
+    const old = a.openings.find((x2) => x2.id === o.id), next = b2.openings.find((x2) => x2.id === o.id);
     if (!old || !next || openingStamp(old) !== openingStamp(next)) {
       if (old) ids.add(old.wallId);
       if (next) ids.add(next.wallId);
@@ -4686,20 +8375,20 @@ function merge(document, session, event, transform) {
   const scope = { customerId: session.context.customerId, objectId: session.context.objectId, buildingSelectionKey: session.context.buildingSelectionKey, documentId: session.context.documentId, floorId: session.context.floorId, mapVersion: session.context.mapVersion };
   const previous = structuredClone(session.mergeState || createScanMergeState(scope, session.context.captureSessionId, event.coordinateFrameId));
   if (previous.sequence === event.sequence) return { document, state: previous, status: "unchanged", protected: [], conflicts: [], readResources: [], affectedWallIds: [] };
-  const positioned = positionedRoomScan(event, floor2, transform), ownedIds = new Set(previous.elements.map((e) => e.elementId));
+  const positioned = positionedRoomScan(event, floor2, transform, { includeDetails: session.richDetails === true }), ownedIds = new Set(previous.elements.map((e) => e.elementId));
   const bindings = structuredClone(session.externalWallBindings || []), ledgers = structuredClone(session.wallSources || []), conflicts = [], reads = /* @__PURE__ */ new Set();
   const contacts = session.placement?.wallContacts || [], elements = [], routes = /* @__PURE__ */ new Map(), held = /* @__PURE__ */ new Set();
   const incomingIds = new Set(event.snapshot.surfaces.map((s) => s.id)), reservedFragments = /* @__PURE__ */ new Set();
   let fragmentCollision = false;
-  const hostById = new Map(floor2.walls.map((w) => [w.id, w]));
+  const hostById = new Map(floor2.walls.map((w2) => [w2.id, w2]));
   const holdEntries = (ids) => {
-    const selected = previous.elements.filter((e) => ids.includes(e.sourceId) || e.kind === "opening" && ids.some((id2) => previous.elements.find((w) => w.sourceId === id2)?.elementId === floor2.openings.find((o) => o.id === e.elementId)?.wallId));
+    const selected = previous.elements.filter((e) => ids.includes(e.sourceId) || e.kind === "opening" && ids.some((id2) => previous.elements.find((w2) => w2.sourceId === id2)?.elementId === floor2.openings.find((o) => o.id === e.elementId)?.wallId));
     for (const e of selected) {
-      const value = collection2(floor2, e.kind).find((v) => v.id === e.elementId);
-      if (!value || elements.some((x) => x.sourceId === e.sourceId)) continue;
+      const value = collection2(floor2, e.kind).find((v2) => v2.id === e.elementId);
+      if (!value || elements.some((x2) => x2.sourceId === e.sourceId)) continue;
       const { id: id2, ...rest } = value;
       if (e.kind === "opening") {
-        const owner = previous.elements.find((w) => w.kind === "wall" && w.elementId === value.wallId);
+        const owner = previous.elements.find((w2) => w2.kind === "wall" && w2.elementId === value.wallId);
         if (owner) {
           const { wallId, ...opening2 } = rest;
           elements.push({ sourceId: e.sourceId, sourceWallId: owner.sourceId, kind: "opening", value: opening2 });
@@ -4708,7 +8397,7 @@ function merge(document, session, event, transform) {
     }
   };
   const isManual = (e) => {
-    const value = collection2(floor2, e.kind).find((v) => v.id === e.elementId);
+    const value = collection2(floor2, e.kind).find((v2) => v2.id === e.elementId);
     return e.status === "protected" || e.status === "active" && (!value || ownedStamp(e.kind, value) !== e.baseline) || e.status === "withdrawn" && !!value;
   };
   for (const binding of bindings) {
@@ -4720,8 +8409,8 @@ function merge(document, session, event, transform) {
     const sourceIds = [ledger.sourceId, ...ledger.fragments || []], entries = previous.elements.filter((e) => sourceIds.includes(e.sourceId));
     const wallIds = new Set(entries.filter((e) => e.kind === "wall").map((e) => e.elementId));
     const manualOpening = floor2.openings.some((o) => wallIds.has(o.wallId) && (!previous.elements.some((e) => e.elementId === o.id) || isManual(previous.elements.find((e) => e.elementId === o.id))));
-    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === ledger.sourceId && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v) => v.id === o.elementId) || openingStamp(floor2.openings.find((v) => v.id === o.elementId)) !== o.baseline)));
-    if (entries.some(isManual) || manualOpening || manualExternal || bindings.some((b) => b.sourceId === ledger.sourceId && b.status === "protected")) ledger.protected = true;
+    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === ledger.sourceId && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v2) => v2.id === o.elementId) || openingStamp(floor2.openings.find((v2) => v2.id === o.elementId)) !== o.baseline)));
+    if (entries.some(isManual) || manualOpening || manualExternal || bindings.some((b2) => b2.sourceId === ledger.sourceId && b2.status === "protected")) ledger.protected = true;
     if (ledger.protected) {
       for (const e of previous.elements) if (sourceIds.includes(e.sourceId) || e.kind === "opening" && wallIds.has(floor2.openings.find((o) => o.id === e.elementId)?.wallId)) e.status = "protected";
     }
@@ -4732,7 +8421,7 @@ function merge(document, session, event, transform) {
       const alias = ledgers.find((l) => {
         if (!l.protected || !l.baseline) return false;
         try {
-          const b = JSON.parse(l.baseline), old = { start: { x: b[1], y: b[2] }, end: { x: b[3], y: b[4] } };
+          const b2 = JSON.parse(l.baseline), old = { start: { x: b2[1], y: b2[2] }, end: { x: b2[3], y: b2[4] } };
           return Math.min(Math.max(gap(incoming.start, old.start), gap(incoming.end, old.end)), Math.max(gap(incoming.start, old.end), gap(incoming.end, old.start))) < 0.1;
         } catch {
           return false;
@@ -4741,16 +8430,16 @@ function merge(document, session, event, transform) {
       ledger = { sourceId: incoming.id, baseline: wallStamp(incoming), fragments: [], protected: !!alias };
       ledgers.push(ledger);
     }
-    const bound = bindings.filter((b) => b.sourceId === incoming.id), members = [incoming.id, ...ledger.fragments];
+    const bound = bindings.filter((b2) => b2.sourceId === incoming.id), members = [incoming.id, ...ledger.fragments];
     const oldEntries = previous.elements.filter((e) => members.includes(e.sourceId));
     const oldWallIds = new Set(oldEntries.filter((e) => e.kind === "wall").map((e) => e.elementId));
     const manualChild = floor2.openings.some((o) => oldWallIds.has(o.wallId) && (!previous.elements.some((e) => e.elementId === o.id) || isManual(previous.elements.find((e) => e.elementId === o.id))));
-    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === incoming.id && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v) => v.id === o.elementId) || openingStamp(floor2.openings.find((v) => v.id === o.elementId)) !== o.baseline)));
-    if (oldEntries.some(isManual) || manualChild || manualExternal || bound.some((b) => b.status === "protected")) ledger.protected = true;
+    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === incoming.id && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v2) => v2.id === o.elementId) || openingStamp(floor2.openings.find((v2) => v2.id === o.elementId)) !== o.baseline)));
+    if (oldEntries.some(isManual) || manualChild || manualExternal || bound.some((b2) => b2.status === "protected")) ledger.protected = true;
     if (ledger.protected) {
       held.add(incoming.id);
       holdEntries(members);
-      for (const b of bound) b.status = "protected";
+      for (const b2 of bound) b2.status = "protected";
       conflicts.push({ code: "manual_scan_wall_preserved", sourceId: incoming.id });
       continue;
     }
@@ -4759,7 +8448,7 @@ function merge(document, session, event, transform) {
       if (ownedIds.has(host.id)) continue;
       const part = overlap(incoming, host);
       if (!part) continue;
-      const requested = explicit.some((c) => c.targetWallId === host.id), remembered = bound.find((b) => b.elementId === host.id);
+      const requested = explicit.some((c) => c.targetWallId === host.id), remembered = bound.find((b2) => b2.elementId === host.id);
       const nearby = part.normal <= Math.min(0.35, (incoming.thickness + host.thickness) / 2 + 0.03);
       if (nearby || requested || remembered) {
         reads.add(resourceId(floor2.id, "walls", host.id));
@@ -4767,9 +8456,9 @@ function merge(document, session, event, transform) {
       }
       if (part.angle <= Math.sin(Math.PI / 180) && part.normal <= (requested || remembered?.contact === "explicit" ? 0.06 : 0.012)) candidates.push({ host, ...part, explicit: requested || remembered?.contact === "explicit" });
     }
-    let review = explicit.some((c) => !candidates.some((p) => p.host.id === c.targetWallId)) || bound.some((b) => !candidates.some((p) => p.host.id === b.elementId));
+    let review = explicit.some((c) => !candidates.some((p) => p.host.id === c.targetWallId)) || bound.some((b2) => !candidates.some((p) => p.host.id === b2.elementId));
     const accepted = [];
-    for (const candidate of candidates.sort((a, b) => Number(b.explicit) - Number(a.explicit) || a.low - b.low || a.host.id.localeCompare(b.host.id))) {
+    for (const candidate of candidates.sort((a, b2) => Number(b2.explicit) - Number(a.explicit) || a.low - b2.low || a.host.id.localeCompare(b2.host.id))) {
       const overlaps = accepted.filter((p) => Math.min(p.high, candidate.high) - Math.max(p.low, candidate.low) > 0.02);
       if (overlaps.length) {
         review = true;
@@ -4788,7 +8477,7 @@ function merge(document, session, event, transform) {
     const segments = [];
     routes.set(incoming.id, segments);
     for (const hit of accepted) {
-      let binding = bound.find((b) => b.elementId === hit.host.id);
+      let binding = bound.find((b2) => b2.elementId === hit.host.id);
       if (!binding) {
         binding = { sourceId: incoming.id, elementId: hit.host.id, baseline: wallStamp(hit.host) };
         bindings.push(binding);
@@ -4797,13 +8486,13 @@ function merge(document, session, event, transform) {
       segments.push({ kind: "external", low: hit.low, high: hit.high, binding, wall: hit.host });
     }
     if (!accepted.length) {
-      elements.push({ sourceId: incoming.id, kind: "wall", value: { start: incoming.start, end: incoming.end, thickness: incoming.thickness } });
+      elements.push({ sourceId: incoming.id, kind: "wall", value: { start: incoming.start, end: incoming.end, thickness: incoming.thickness, ...incoming.height === void 0 ? {} : { height: incoming.height } } });
       segments.push({ kind: "owned", low: 0, high: wallLength(incoming), sourceId: incoming.id, wall: incoming });
       ledger.fragments = [];
       ledger.baseline = wallStamp(incoming);
       continue;
     }
-    accepted.sort((a, b) => a.low - b.low);
+    accepted.sort((a, b2) => a.low - b2.low);
     let cursor = 0, index = 0;
     const fragments = [];
     const append = (low, high) => {
@@ -4817,7 +8506,7 @@ function merge(document, session, event, transform) {
       fragments.push(id2);
       const wall2 = { ...incoming, start: at(incoming, low), end: at(incoming, high) };
       for (const end of ["start", "end"]) for (const hit of accepted) for (const point3 of [hit.host.start, hit.host.end]) if (gap(wall2[end], point3) <= 0.061) wall2[end] = { ...point3 };
-      elements.push({ sourceId: id2, kind: "wall", value: { start: wall2.start, end: wall2.end, thickness: wall2.thickness } });
+      elements.push({ sourceId: id2, kind: "wall", value: { start: wall2.start, end: wall2.end, thickness: wall2.thickness, ...wall2.height === void 0 ? {} : { height: wall2.height } } });
       segments.push({ kind: "owned", sourceId: id2, low, high, wall: wall2 });
     };
     for (const hit of accepted) {
@@ -4833,7 +8522,7 @@ function merge(document, session, event, transform) {
     const entry = previous.elements.find((e) => e.kind === "opening" && e.sourceId === opening2.id);
     if (!entry || !floor2.openings.some((o) => o.id === entry.elementId)) continue;
     const segments = routes.get(opening2.wallId) || [], fitting = segments.filter((s) => opening2.offset >= s.low - 1e-3 && opening2.offset + opening2.width <= s.high + 1e-3);
-    const incoming = positioned.walls.find((w) => w.id === opening2.wallId);
+    const incoming = positioned.walls.find((w2) => w2.id === opening2.wallId);
     if (fitting.length === 1 && onExistingWall(opening2, incoming, fitting[0].wall)) continue;
     held.add(opening2.wallId);
     routes.delete(opening2.wallId);
@@ -4842,7 +8531,7 @@ function merge(document, session, event, transform) {
     const openingIds = positioned.openings.filter((o) => o.wallId === opening2.wallId).map((o) => o.id);
     for (let i = elements.length - 1; i >= 0; i--) if (members.includes(elements[i].sourceId) || openingIds.includes(elements[i].sourceId)) elements.splice(i, 1);
     for (let i = bindings.length - 1; i >= 0; i--) if (bindings[i].sourceId === opening2.wallId) bindings.splice(i, 1);
-    bindings.push(...structuredClone((session.externalWallBindings || []).filter((b) => b.sourceId === opening2.wallId)));
+    bindings.push(...structuredClone((session.externalWallBindings || []).filter((b2) => b2.sourceId === opening2.wallId)));
     if (oldLedger) Object.assign(ledger, structuredClone(oldLedger));
     holdEntries(members);
     conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: opening2.id });
@@ -4850,14 +8539,14 @@ function merge(document, session, event, transform) {
   const externalOpenings = [];
   for (const opening2 of positioned.openings) {
     if (held.has(opening2.wallId)) {
-      if (bindings.some((b) => b.sourceId === opening2.wallId)) externalOpenings.push(opening2);
+      if (bindings.some((b2) => b2.sourceId === opening2.wallId)) externalOpenings.push(opening2);
       continue;
     }
     const segments = routes.get(opening2.wallId) || [], low = opening2.offset, high = opening2.offset + opening2.width;
     const fitting = segments.filter((s) => low >= s.low - 1e-3 && high <= s.high + 1e-3);
     if (fitting.length !== 1) {
       conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: opening2.id });
-      if (bindings.some((b) => b.sourceId === opening2.wallId)) externalOpenings.push(opening2);
+      if (bindings.some((b2) => b2.sourceId === opening2.wallId)) externalOpenings.push(opening2);
       continue;
     }
     const segment = fitting[0];
@@ -4865,13 +8554,43 @@ function merge(document, session, event, transform) {
       externalOpenings.push(opening2);
       continue;
     }
-    const incoming = positioned.walls.find((w) => w.id === opening2.wallId), mapped = onExistingWall(opening2, incoming, segment.wall);
+    const incoming = positioned.walls.find((w2) => w2.id === opening2.wallId), mapped = onExistingWall(opening2, incoming, segment.wall);
     if (!mapped) {
       conflicts.push({ code: "opening_position_requires_review", sourceId: opening2.id });
       continue;
     }
     const { id: id2, wallId, ...value } = mapped;
     elements.push({ sourceId: id2, sourceWallId: segment.sourceId, kind: "opening", value });
+  }
+  const furnishingIds = new Set((positioned.furnishings || []).map((f) => `object:${f.id}`.slice(0, 119)));
+  for (const furnishing of positioned.furnishings || []) {
+    const { id: id2, ...value } = furnishing, sourceId = `object:${id2}`.slice(0, 119);
+    const equivalent = (entry) => {
+      try {
+        const b2 = JSON.parse(entry.baseline);
+        return b2 && b2[0] === value.category && Math.hypot(b2[1] - value.position.x, b2[2] - value.position.y) < 0.08 && Math.abs((b2[3] - value.rotation + 540) % 360 - 180) < 5 && Math.abs(b2[4] - value.width) < 0.05 && Math.abs(b2[5] - value.depth) < 0.05 && Math.abs(b2[6] - value.height) < 0.08 && Math.abs(b2[7] - value.bottomElevation) < 0.08;
+      } catch {
+        return false;
+      }
+    };
+    const sameSource = previous.elements.find((e) => e.kind === "furnishing" && e.sourceId === sourceId);
+    if (!sameSource) {
+      const alias = previous.elements.find((e) => e.kind === "furnishing" && equivalent(e));
+      if (alias) {
+        if (isManual(alias)) {
+          alias.status = "protected";
+          conflicts.push({ code: "manual_furnishing_preserved", sourceId, elementId: alias.elementId });
+          continue;
+        }
+        if (alias.status === "active" && !furnishingIds.has(alias.sourceId)) {
+          alias.sourceId = sourceId;
+        } else if (alias.status === "active") {
+          conflicts.push({ code: "duplicate_scan_furnishing_ignored", sourceId, elementId: alias.elementId });
+          continue;
+        }
+      }
+    }
+    elements.push({ sourceId, kind: "furnishing", value });
   }
   const polygon = !held.size && !session.context.targetRoomId && closedPolygon(positioned.walls);
   if (polygon) elements.push({ sourceId: `room:${event.snapshot.roomId}`.slice(0, 119), kind: "room", value: { label: session.context.targetRoomLabel || "Gescande ruimte", polygon } });
@@ -4880,6 +8599,26 @@ function merge(document, session, event, transform) {
   const result = mergeScanSnapshot(document, previous, { schemaVersion: 1, sessionId: session.context.captureSessionId, epoch: event.coordinateFrameId, sequence: event.sequence, scope, elements });
   if (result.status === "invalid" || result.status === "ignored") return result;
   const external = mergeExternalOpenings(result.document, session, { ...positioned, openings: externalOpenings }, bindings, conflicts, held);
+  const mergedFloor = external.document.floors.find((f) => f.id === floor2.id);
+  for (const entry of previous.elements.filter((e) => e.kind === "room" && e.status === "active")) {
+    const prior = floor2.rooms.find((r) => r.id === entry.elementId);
+    if (prior && ownedStamp("room", prior) === entry.baseline && !mergedFloor.rooms.some((r) => r.id === entry.elementId)) mergedFloor.rooms.push(structuredClone(prior));
+  }
+  const reconciledFloor = reconcileAutomaticRooms(floor2, mergedFloor);
+  external.document.floors = external.document.floors.map((f) => f.id === floor2.id ? reconciledFloor : f);
+  for (const entry of result.state.elements.filter((e) => e.kind === "room" && e.status !== "protected")) {
+    const prior = mergedFloor.rooms.find((r) => r.id === entry.elementId), current = reconciledFloor.rooms.find((r) => r.id === entry.elementId);
+    const old = previous.elements.find((e) => e.sourceId === entry.sourceId);
+    if (!prior || ownedStamp("room", prior) !== (entry.baseline ?? old?.baseline)) continue;
+    if (current) {
+      entry.baseline = ownedStamp("room", current);
+      entry.status = "active";
+    } else {
+      entry.status = "withdrawn";
+      entry.baseline = null;
+    }
+  }
+  if (session.richDetails === true && external.document.floors.some((f) => f.furnishings !== void 0 || f.walls.some((w2) => w2.height !== void 0) || f.openings.some((o) => o.height !== void 0 || o.bottomElevation !== void 0))) external.document.schemaVersion = 3;
   if (bindings.length > 2500 || ledgers.length > 2500 || external.owned.length > 4e3 || !parseFloorPlanDocument(external.document)) return { ...result, status: "invalid", document, state: session.mergeState || previous };
   const unsupported = event.snapshot.surfaces.filter((s) => s.isCurved).map((s) => ({ code: "curved_surface_requires_review", sourceId: s.id }));
   return { ...result, document: external.document, protected: [.../* @__PURE__ */ new Set([...result.protected, ...previous.elements.filter((e) => e.status === "protected").map((e) => e.elementId), ...external.protectedIds])], conflicts: [...conflicts, ...unsupported], readResources: [...reads].sort(), affectedWallIds: affectedWalls(document, external.document, floor2.id), sessionPatch: { externalWallBindings: bindings, externalOpenings: external.owned, wallSources: ledgers } };
@@ -4891,3 +8630,15 @@ export {
   resourcesConflict,
   validateDocument
 };
+/*! Bundled license information:
+
+splaytree/dist/splay.js:
+  (**
+   * splaytree v0.1.4
+   * Fast Splay tree for Node and browser
+   *
+   * @author Alexander Milevski <info@w8r.name>
+   * @license MIT
+   * @preserve
+   *)
+*/

@@ -24,6 +24,9 @@ export function createBase44BuildingCollaboration({base44, entity, floorPlans, v
   }
   async function validateDocument(document, loaded) {
     const normalized = validateDesktopDocument(document, ApiError);
+    // Schema 3 holds measured heights and furniture. Never let an older client
+    // rewrite it as a legacy document, even under a valid whole-document lease.
+    if (loaded.document?.schemaVersion >= 3 && normalized.schemaVersion < loaded.document.schemaVersion) fail(409, 'floor_plan_client_update_required', 'Werk LOQ Desktop bij voordat je deze tekening wijzigt.');
     if (typeof floorPlans.serverOnly.validateReferences !== 'function') fail(503, 'collaboration_validation_unavailable', 'De samenwerkingsvalidatie is nog niet beschikbaar.');
     await floorPlans.serverOnly.validateReferences(base44, loaded.scope, normalized);
     return normalized;
