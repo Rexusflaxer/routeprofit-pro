@@ -1,15 +1,16 @@
 import { distance, wallPoint } from './geometry';
 export type Point = { x: number; y: number };
-export type Wall = { id: string; start: Point; end: Point; thickness: number };
-export type Opening = { id: string; wallId: string; type: 'door' | 'window' | 'opening'; offset: number; width: number; hinge: 'left' | 'right'; swing: 'in' | 'out' };
+export type Wall = { id: string; start: Point; end: Point; thickness: number; height?: number };
+export type Opening = { id: string; wallId: string; type: 'door' | 'window' | 'opening'; offset: number; width: number; hinge: 'left' | 'right'; swing: 'in' | 'out'; height?: number; bottomElevation?: number };
 export type Room = { id: string; label: string; polygon: Point[] };
 export type PlanSymbol = { id: string; kind: string; position: Point; rotation: number; label: string; installationId?: string };
+export type Furnishing = { id: string; category: string; position: Point; rotation: number; width: number; depth: number; height: number; bottomElevation: number; confidence: 'low'|'medium'|'high'|'unknown' };
 export type Route = { id: string; points: Point[]; label: string };
 export type PrintSettings = { paper: 'A4' | 'A3'; orientation: 'portrait' | 'landscape'; scale: number; profile: 'evacuation' | 'installation'; title: string; address: string; drawingNumber: string; instructions: string; secondaryInstructions: string; language2: string; cropCenter?: Point; logoFileId?:string; viewpoints: { id: string; label: string; position: Point; rotation: number }[] };
-export type Floor = { id: string; name: string; elevation: number; walls: Wall[]; rooms: Room[]; openings: Opening[]; symbols: PlanSymbol[]; routes: Route[]; background?: { fileId: string; width: number; height: number; origin: Point; metresPerPixel: number; opacity: number; calibrated: boolean }; print: PrintSettings };
+export type Floor = { id: string; name: string; elevation: number; walls: Wall[]; rooms: Room[]; openings: Opening[]; symbols: PlanSymbol[]; routes: Route[]; furnishings?: Furnishing[]; background?: { fileId: string; width: number; height: number; origin: Point; metresPerPixel: number; opacity: number; calibrated: boolean }; print: PrintSettings };
 export type BuildingGeoReference = { crs: 'EPSG:28992'; origin: Point; rotation: 0; verticalDatum: 'NAP'; axis: 'x-east-y-north' };
 export type BuildingReference = { id: string; manifestFileId: string; manifestSha256: string; usedParts: ('footprint' | 'aerial' | 'roof')[]; floorId: string; wallIds: string[]; interpretation: 'closed_building' | 'open_structure'; measurementStatus: 'unchecked' | 'user_checked'; attributions: string[]; modelFileId?:string };
-export type FloorPlanDocument = { schemaVersion: 1 | 2; id: string; title: string; unit: 'm'; floors: Floor[]; geoReference?: BuildingGeoReference; buildingReferences?: BuildingReference[] };
+export type FloorPlanDocument = { schemaVersion: 1 | 2 | 3; id: string; title: string; unit: 'm'; floors: Floor[]; geoReference?: BuildingGeoReference; buildingReferences?: BuildingReference[] };
 export type Issue = { severity: 'error' | 'warning'; floorId: string; elementId?: string; message: string };
 export const uid = () => globalThis.crypto?.randomUUID?.() || `fp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 export function createFloor(name = 'Begane grond'): Floor {

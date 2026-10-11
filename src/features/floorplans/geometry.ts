@@ -1,3 +1,4 @@
+import {furnishingCorners} from './furnishings';
 import type { Floor, Point, Wall } from './model';
 export const distance = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
 export const add = (a: Point, b: Point): Point => ({ x: a.x + b.x, y: a.y + b.y });
@@ -33,7 +34,7 @@ export function resizeWall(floor: Floor, wallId: string, length: number): Floor 
 export function polygonArea(points: Point[]) { return Math.abs(points.reduce((total, p, i) => { const next = points[(i + 1) % points.length]; return total + p.x * next.y - next.x * p.y; }, 0)) / 2; }
 export function centre(points: Point[]): Point { return points.length ? { x: points.reduce((a, p) => a + p.x, 0) / points.length, y: points.reduce((a, p) => a + p.y, 0) / points.length } : { x: 0, y: 0 }; }
 export function floorBounds(floor: Floor, includeBackground = true) {
-  const points = [...floor.walls.flatMap(w => [w.start, w.end]), ...floor.rooms.flatMap(r => r.polygon), ...floor.symbols.map(s => s.position), ...floor.routes.flatMap(r => r.points)];
+  const points = [...floor.walls.flatMap(w => [w.start, w.end]), ...floor.rooms.flatMap(r => r.polygon), ...floor.symbols.map(s => s.position), ...floor.routes.flatMap(r => r.points), ...(floor.furnishings||[]).flatMap(furnishingCorners)];
   if (includeBackground && floor.background) { const b = floor.background; points.push(b.origin, { x: b.origin.x + b.width * b.metresPerPixel, y: b.origin.y + b.height * b.metresPerPixel }); }
   if (!points.length) return { minX: 0, maxX: 20, minY: 0, maxY: 14, width: 20, height: 14 };
   const minX = Math.min(...points.map(p => p.x)) - .6, maxX = Math.max(...points.map(p => p.x)) + .6, minY = Math.min(...points.map(p => p.y)) - .6, maxY = Math.max(...points.map(p => p.y)) + .6;
