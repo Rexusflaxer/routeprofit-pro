@@ -4,9 +4,12 @@ export const PROTOCOL = 'building-room-scan-v1';
 export const WALL_MERGE = 'room-scan-wall-merge-v1';
 export const ROOM_DETAILS = 'room-scan-details-v1';
 export const ROOM_ORIENTATION = 'room-scan-orientation-v1';
-export const CAPABILITIES = Object.freeze({wall_merge:WALL_MERGE,room_details:ROOM_DETAILS,room_orientation:ROOM_ORIENTATION});
-const captureCapabilities=rich=>rich?CAPABILITIES:{wall_merge:WALL_MERGE,room_orientation:ROOM_ORIENTATION};
-export const ACTIONS = Object.freeze({targets:'get_building_room_scan_targets',begin:'begin_building_room_scan',submit:'submit_building_room_scan_event',end:'end_building_room_scan',get:'get_object_building_room_scans',place:'place_object_building_room_scan'});
+export const ROOM_OBSERVATIONS='room-scan-observations-v1';
+export const CAPABILITIES = Object.freeze({room_observations:ROOM_OBSERVATIONS,wall_merge:WALL_MERGE,room_details:ROOM_DETAILS,room_orientation:ROOM_ORIENTATION});
+// Keep index receipts bounded: analysis results live in the queue, never in scan history.
+const observationJobSummary=job=>{if(!job||typeof job.id!=='string'||job.id.length>180||!['queued','running','completed','failed','cancelled','expired'].includes(job.status))fail(503,'room_observations_unavailable','De analysewachtrij bevestigde de opdracht niet.');return Object.fromEntries(['id','status','created_at','expires_at','poll_after_ms'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]]));};
+const captureCapabilities=(rich,observations=false)=>({wall_merge:WALL_MERGE,room_orientation:ROOM_ORIENTATION,...(rich?{room_details:ROOM_DETAILS}:{}),...(rich&&observations?{room_observations:ROOM_OBSERVATIONS}:{})});
+export const ACTIONS = Object.freeze({observe:'submit_object_building_room_observations',targets:'get_building_room_scan_targets',begin:'begin_building_room_scan',submit:'submit_building_room_scan_event',end:'end_building_room_scan',get:'get_object_building_room_scans',place:'place_object_building_room_scan'});
 export class RoomScanError extends Error { constructor(status,code,message,details={}) { super(message);this.status=status;this.details={code,...details}; } }
 const fail=(status,code,message,details)=>{throw new RoomScanError(status,code,message,details);};
 const clone=v=>structuredClone(v), iso=t=>new Date(t).toISOString();
@@ -88,7 +91,7 @@ const stateOf=entry=>clone({archiveHead:null,archiveCount:0,closedReceipts:{},..
 /** load must authenticate scope on EVERY attempt, including receipt replay.
  * commit stages immutable events/documents then atomically swaps pointer+entry.
  * listTargets/stageRoute expose no authority beyond an authenticated lookup. */
-export function createRoomScanService({load,commit,listTargets,stageRoute,getEvent,readArchives,merge,dependencies,resourcesConflict,validateDocument,hash,now=Date.now,randomId=()=>crypto.randomUUID()}){
+export function createRoomScanService({load,commit,listTargets,stageRoute,getEvent,readArchives,merge,dependencies,resourcesConflict,validateDocument,observe,hash,now=Date.now,randomId=()=>crypto.randomUUID()}){
  const actions=new Set(Object.values(ACTIONS));
  const currentSession=(loaded,state,id)=>{const s=state.sessions[id];if(!s)fail(404,'room_scan_not_found','Deze scansessie bestaat niet.');const floor=loaded.document.floors.find(f=>f.id===s.context.floorId);if(!floor||s.context.documentId!==loaded.document.id||s.context.mapVersion!==loaded.mapVersion)fail(409,'room_scan_scope_changed','De tekening of gebouwselectie is veranderd. Start een nieuwe scan.');return s;};
  const assertOwner=(session,user)=>{if(session.userId!==user.id)fail(403,'room_scan_forbidden','Deze scan behoort aan een andere gebruiker.');};
@@ -117,11 +120,13 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
  async function handle(action,user,body){
    if(!actions.has(action))fail(400,'invalid_room_scan_action','Onbekende scanactie.');
    if(!user?.id||user.role!=='admin')fail(403,'room_scan_forbidden','Alleen bevoegde LOQ-beheerders kunnen gebouwen scannen.');
-   if(!body||byteLength(body)>1100000)fail(413,'room_scan_too_large','Dit scanverzoek is te groot.');
+   if(!body||byteLength(body)>(action===ACTIONS.observe?9*1024*1024:1100000))fail(413,'room_scan_too_large','Dit scanverzoek is te groot.');
+   if(action===ACTIONS.observe&&(!keys(body,['capture_session_id','coordinate_frame_id','snapshot_sequence','observation_batch'])||!uuid(body.coordinate_frame_id)||!Number.isSafeInteger(body.snapshot_sequence)||body.snapshot_sequence<1||!body.observation_batch||typeof body.observation_batch!=='object'||Array.isArray(body.observation_batch)))fail(400,'invalid_room_observations','Ongeldige inrichtingbeelden.');
    if(action===ACTIONS.targets){if(!identifier(body.object_id))fail(400,'invalid_room_scan_scope','Kies een geldig object.');return {protocol:PROTOCOL,capabilities:CAPABILITIES,targets:await listTargets(user,body.object_id)};}
    if(action===ACTIONS.begin&&!identifier(body.target_id))fail(400,'invalid_room_scan_scope','Kies een geldig scandoel.');
-   if([ACTIONS.submit,ACTIONS.end,ACTIONS.place].includes(action)&&!uuid(body.capture_session_id))fail(400,'invalid_room_scan_scope','Kies een geldige scansessie.');
+   if([ACTIONS.submit,ACTIONS.end,ACTIONS.place,ACTIONS.observe].includes(action)&&!uuid(body.capture_session_id))fail(400,'invalid_room_scan_scope','Kies een geldige scansessie.');
    if([ACTIONS.begin,ACTIONS.place].includes(action)&&body.required_room_details!==undefined&&body.required_room_details!==ROOM_DETAILS)fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor deze scangegevens.',{capabilities:CAPABILITIES});
+   if(action===ACTIONS.begin&&body.required_room_observations!==undefined&&(body.required_room_observations!==ROOM_OBSERVATIONS||body.required_room_details!==ROOM_DETAILS))fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor inrichtingherkenning.',{capabilities:CAPABILITIES});
    if(action===ACTIONS.place){
      if(body.required_wall_merge!==undefined&&body.required_wall_merge!==WALL_MERGE)fail(409,'room_scan_capability_mismatch','Werk LOQ bij om deze scan veilig samen te voegen.',{capabilities:CAPABILITIES});
      // Order is not a semantic difference, so an identical retry may reorder
@@ -143,14 +148,14 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        for(const [s,isArchived] of [...Object.values(state.sessions).map(s=>[s,false]),...archived.sessions.map(s=>[s,true])]){
          if(s.context.documentId!==document.id||s.context.mapVersion!==loaded.mapVersion||!document.floors.some(f=>f.id===s.context.floorId)||s.status==='cancelled'&&!s.placement?.appliedSequence)continue;
          const event=s.latest?await getEvent(loaded,s.latest):null;
-         sessions.push({capture_session_id:s.context.captureSessionId,status:s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time?'expired':s.status,context:s.context,sequence:s.sequence,event,placement:s.placement||null,placement_revision:s.placementRevision||0,rich_details:s.richDetails===true,archived:isArchived});
+         sessions.push({capture_session_id:s.context.captureSessionId,status:s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time?'expired':s.status,context:s.context,sequence:s.sequence,event,placement:s.placement||null,placement_revision:s.placementRevision||0,rich_details:s.richDetails===true,observation_job:s.observationJob||null,furnishing_bindings:(s.mergeState?.elements||[]).filter(e=>e.kind==='furnishing'&&e.status==='active').map(e=>({source_id:e.sourceId,element_id:e.elementId,baseline:e.baseline})),archived:isArchived});
        }
        return {protocol:PROTOCOL,capabilities:CAPABILITIES,server_time:iso(time),cursor:state.generation,workspace_version:entry.version,sessions,archive_offset:offset,next_archive_offset:archived.nextOffset,archive_count:state.archiveCount};
      }
      if(action===ACTIONS.begin){
        if(!uuid(body.request_id))fail(400,'invalid_room_scan_request','Een scansleutel is verplicht.');
        const beginKey=await hash(`${user.id}:${body.request_id}`),prior=state.begins[beginKey];
-       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,capabilities:captureCapabilities(prior.richDetails===true),context};}
+       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,capabilities:captureCapabilities(prior.richDetails===true,prior.observationsEnabled===true),context};}
        const floor=document.floors.find(f=>f.id===loaded.floorId);
        if(!floor)fail(409,'room_scan_scope_changed','Deze verdieping bestaat niet meer.');
        const existing=typeof body.room_id==='string',creating=typeof body.new_room_label==='string';
@@ -162,8 +167,8 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        if(Object.values(state.sessions).filter(s=>s.status==='capturing'&&Date.parse(s.context.expiresAt)>time).length>=32)fail(429,'room_scan_session_limit','Er zijn te veel gelijktijdige scans in dit gebouw.');
        const id=randomId(),context={captureSessionId:id,...scopeOf(loaded),expiresAt:iso(Math.floor((time+1200000)/1000)*1000),...(room?{targetRoomId:room.id}:{}),targetRoomLabel:label};
        const richDetails=body.required_room_details===ROOM_DETAILS;
-       state.sessions[id]={context,richDetails,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
-       state.begins[beginKey]={fingerprint,sessionId:id,context,richDetails,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,capabilities:captureCapabilities(richDetails),context};
+       state.sessions[id]={context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
+       state.begins[beginKey]={fingerprint,sessionId:id,context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,capabilities:captureCapabilities(richDetails,body.required_room_observations===ROOM_OBSERVATIONS),context};
      }else{
        if(action===ACTIONS.end&&!state.sessions[body.capture_session_id]){
          const receipt=state.closedReceipts[body.capture_session_id];
@@ -180,8 +185,27 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
            return placementReceipt(prior,entry,true);
          }
        }
+       if(action===ACTIONS.observe&&!state.sessions[body.capture_session_id]){
+         const receipt=state.closedReceipts[body.capture_session_id],prior=receipt?.observation;
+         if(prior){
+           assertOwner(receipt,user);
+           const context=prior.context;
+           if(receipt.status==='cancelled'||prior.observationsEnabled!==true||prior.richDetails!==true||time>=prior.expiresAt||context.customerId!==loaded.customer.id||context.objectId!==loaded.object.id||context.buildingSelectionKey!==loaded.key||context.documentId!==document.id||context.mapVersion!==loaded.mapVersion||!document.floors.some(f=>f.id===context.floorId))fail(409,'room_observation_scope_changed','Deze beelden horen niet meer bij de actuele ruimtescan.');
+           if(prior.fingerprint!==fingerprint)fail(409,'room_observation_reused','Deze scanbeelden zijn met andere inhoud herhaald.');
+           return {accepted:true,job:clone(prior.job),replayed:true};
+         }
+       }
        const session=currentSession(loaded,state,body.capture_session_id);
-       if(action===ACTIONS.submit){
+       if(action===ACTIONS.observe){
+         assertOwner(session,user);
+         if(!session.observationsEnabled||!session.richDetails||session.status==='cancelled'||!session.finalSequence||session.finalSequence!==body.snapshot_sequence||session.sequence!==body.snapshot_sequence||session.coordinateFrameId!==body.coordinate_frame_id||!session.latest||time>=session.createdAt+86400000)fail(409,'room_observation_scope_changed','Deze beelden horen niet bij de afgeronde meting.');
+         if(session.observationFingerprint){if(session.observationFingerprint!==fingerprint)fail(409,'room_observation_reused','Deze scanbeelden zijn met andere inhoud herhaald.');return {accepted:true,job:session.observationJob,replayed:true};}
+         if(!observe)fail(503,'room_observations_unavailable','Inrichtingherkenning is nog niet beschikbaar.');
+         const event=await getEvent(loaded,session.latest);
+         const result=await observe(loaded,session,event,user,body);
+         session.observationJob=observationJobSummary(result.job);session.observationFingerprint=fingerprint;
+         response={accepted:true,job:session.observationJob};
+       }else if(action===ACTIONS.submit){
          assertOwner(session,user);
          const event=validateEvent(body.event,session.context,{richDetails:session.richDetails===true});
          if(body.event_id!==`${body.capture_session_id}:${event.coordinateFrameId}:${event.sequence}`)fail(400,'invalid_room_scan_event_id','Ongeldige scanmetingssleutel.');
@@ -237,9 +261,9 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
      const archives=[];
      for(const [id,s] of Object.entries(state.sessions)){
        const expired=s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time||s.status==='completed'&&time>=s.createdAt+86400000;
-       if(s.status!=='cancelled'&&!expired&&!(s.status==='completed'&&s.placement?.status==='applied'))continue;
+       if(s.status!=='cancelled'&&!expired&&!(s.status==='completed'&&s.placement?.status==='applied'&&(!s.observationsEnabled||s.observationJob)))continue;
        if(s.latest)archives.push({...s,status:expired?'expired':s.status,archivedAt:time});
-       state.closedReceipts[id]={userId:s.userId,status:s.status==='capturing'?'expired':s.status};
+       state.closedReceipts[id]={userId:s.userId,status:s.status==='capturing'?'expired':s.status,...(s.observationFingerprint?{observation:{fingerprint:s.observationFingerprint,job:s.observationJob,context:s.context,observationsEnabled:s.observationsEnabled===true,richDetails:s.richDetails===true,expiresAt:s.createdAt+86400000}}:{})};
        delete state.sessions[id];
      }
      state.closedReceipts=Object.fromEntries(Object.entries(state.closedReceipts).slice(-128));

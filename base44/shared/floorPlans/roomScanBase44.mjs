@@ -1,5 +1,6 @@
 import {createRoomScanService,RoomScanError,ACTIONS,canonical} from './roomScanCore.mjs';
 import {merge,dependencies,resourcesConflict} from './scanGeometry.mjs';
+import {storeRoomObservations} from './roomObservationStorage.ts';
 const ROUTES='ObjectBuildingRoomScanRoute',EVENTS='ObjectBuildingRoomScanEvent',ARCHIVES='ObjectBuildingRoomScanArchive',WORKSPACE='ObjectBuildingFloorPlanWorkspace';
 const bytes=value=>new TextEncoder().encode(JSON.stringify(value)).length;
 /** Prepared concrete provider adapter; requires the three private entity schemas
@@ -13,7 +14,7 @@ export function createBase44RoomScanService({base44,entity,floorPlans,selectionK
   if(body.target_id){route=await one(ROUTES,{id:body.target_id,kind:'target'});if(route.user_id!==user.id||Date.parse(route.expires_at)<=now())fail(410,'room_scan_target_expired','Kies de ruimte opnieuw.');}
   else if(!body.customer_id&&body.capture_session_id)route=await one(ROUTES,{capture_session_id:body.capture_session_id,kind:'capture'});
   if(route)scopeBody={customer_id:route.customer_id,object_id:route.object_id,building_selection_key:route.building_selection_key};
-  const mutable=[ACTIONS.begin,ACTIONS.submit,ACTIONS.end,ACTIONS.place].includes(action);
+  const mutable=[ACTIONS.begin,ACTIONS.submit,ACTIONS.end,ACTIONS.place,ACTIONS.observe].includes(action);
   // Mutation scope also rejects archived customers, unlike the read scope.
   // Keep the target/request's original map version; never silently substitute
   // the freshly loaded server version for a stale mobile or desktop request.
@@ -99,5 +100,5 @@ export function createBase44RoomScanService({base44,entity,floorPlans,selectionK
   const result=await entity(base44,'SurveillanceObject').updateMany({id:loaded.object.id,$and:conditions},{$set:{floor_plan_workspace_index:index,floor_plan_workspace_index_version:(Number.isSafeInteger(currentVersion)?currentVersion:0)+1}});
   return result?.success===true&&result.updated===1;
  }
- return createRoomScanService({load,commit,listTargets,stageRoute,getEvent,readArchives,merge,dependencies,resourcesConflict,validateDocument,hash:sha256,now});
+ return createRoomScanService({observe:(loaded,session,event,user,body)=>storeRoomObservations({base44,floorPlans:floorPlans.serverOnly,loaded,session,event,user,body,hash:sha256}),load,commit,listTargets,stageRoute,getEvent,readArchives,merge,dependencies,resourcesConflict,validateDocument,hash:sha256,now});
 }

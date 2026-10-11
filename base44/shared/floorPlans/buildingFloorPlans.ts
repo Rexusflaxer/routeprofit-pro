@@ -329,10 +329,10 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     return crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, usage);
   };
   const assetData = (data: any, serverMetadata?: RecordValue) => {
-    if (serverMetadata && ['reference_manifest', 'reference_aerial', 'reference_model'].includes(data?.kind)) {
+    if (serverMetadata && ['reference_manifest', 'reference_aerial', 'reference_model', 'room_observations'].includes(data?.kind)) {
       let bytes: ReturnType<typeof from64>; try { bytes = from64(data.content_base64); } catch { return fail(400, 'Ongeldig bronbestand', 'invalid_floor_plan_asset'); }
       if (!bytes.length || bytes.length > MAX_ASSET_BYTES) return fail(400, 'Het bronbestand is te groot', 'invalid_floor_plan_asset');
-      if (['reference_manifest', 'reference_model'].includes(data.kind)) {
+      if (['reference_manifest', 'reference_model', 'room_observations'].includes(data.kind)) {
         if (data.mime_type !== 'application/json') return fail(400, 'Ongeldig bronmanifest', 'invalid_floor_plan_asset');
         try { JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail(400, 'Ongeldig bronmanifest', 'invalid_floor_plan_asset'); }
         return { bytes, extension: 'json' };
@@ -447,6 +447,12 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     const current = new Set(entries.map(entry => entry.current_published_floor_plan_id).filter(Boolean));
     return records.filter(record => !record.metadata?.immutable_desktop_revision || committed.has(record.id)).map(record => record.metadata?.immutable_desktop_revision || committed.has(record.id) ? { ...record, is_current: current.has(record.id) } : record);
   };
+  const storeRoomObservationAsset = async (base44: any, user: any, body: any, data: any, metadata: RecordValue, requestFingerprint: string) => {
+    if(data?.kind!=='room_observations'||metadata?.capture_user_id!==user.id)fail(400,'Ongeldige scanbeelden','invalid_floor_plan_asset');
+    const operation=await sha256(`${user.id}:room-observations:${body.idempotency_key}`);
+    const state=await scope(base44,body,true);
+    return uploadAsset(base44,user,{...body,action:'submit_object_building_room_observations',expected_version:0,data},state,operation,requestFingerprint,metadata);
+  };
   const storeReferenceAsset = async (base44: any, user: any, body: any, suffix: string, data: any, metadata: RecordValue, requestFingerprint: string) => {
     if (!['manifest', 'aerial', 'model'].includes(suffix) || data?.kind !== `reference_${suffix}`) fail(400, 'Ongeldig bronbestand', 'invalid_floor_plan_asset');
     const operation = await sha256(`${user.id}:building-reference:${body.idempotency_key}:${suffix}`);
@@ -463,6 +469,6 @@ export function createBuildingFloorPlanHandlers(deps: RecordValue) {
     if (files[0].metadata?.request_fingerprint !== requestFingerprint) fail(409, 'Deze importsleutel is eerder met andere inhoud gebruikt', 'floor_plan_idempotency_conflict');
     return assetScope(base44, state, files[0].id, [`reference_${suffix}`]);
   };
-  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset, storeReferenceAsset, findReferenceAsset, validateReferences, desktopLegacyFloor } };
+  return { readActions: READS, mutationActions: WRITES, read, mutate, resolveCurrent, committedFloorPlans, serverOnly: { scope, assetScope, decryptAsset, storeRoomObservationAsset, storeReferenceAsset, findReferenceAsset, validateReferences, desktopLegacyFloor } };
 
 }
