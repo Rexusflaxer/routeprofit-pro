@@ -1,6 +1,8 @@
 /** Prepared server core. Not deployed. Every mutation is one object-index CAS.
  * Adapter contract is documented in SERVER-INTEGRATION.md. */
 export const PROTOCOL = 'building-room-scan-v1';
+export const WALL_MERGE = 'room-scan-wall-merge-v1';
+export const CAPABILITIES = Object.freeze({wall_merge:WALL_MERGE});
 export const ACTIONS = Object.freeze({targets:'get_building_room_scan_targets',begin:'begin_building_room_scan',submit:'submit_building_room_scan_event',end:'end_building_room_scan',get:'get_object_building_room_scans',place:'place_object_building_room_scan'});
 export class RoomScanError extends Error { constructor(status,code,message,details={}) { super(message);this.status=status;this.details={code,...details}; } }
 const fail=(status,code,message,details)=>{throw new RoomScanError(status,code,message,details);};
@@ -40,6 +42,28 @@ export function validateTransform(value){
  if(!keys(value,['angleRadians','scale','translation'])||!number(value.angleRadians,-Math.PI*2,Math.PI*2)||value.scale!==1||!keys(value.translation,['x','y'])||!number(value.translation.x,-100000,100000)||!number(value.translation.y,-100000,100000))fail(400,'invalid_room_scan_transform','Een scan wordt op ware grootte geplaatst.');
  return clone(value);
 }
+export function validateWallContacts(value=[]){
+ if(!Array.isArray(value)||value.length>2)fail(400,'invalid_room_scan_wall_contacts','Kies maximaal twee aansluitende muren.');
+ const contacts=value.map(item=>{
+  if(!keys(item,['source_wall_id','target_wall_id'])||!identifier(item.source_wall_id)||!identifier(item.target_wall_id))fail(400,'invalid_room_scan_wall_contacts','Ongeldige muuraansluiting.');
+  return {source_wall_id:item.source_wall_id,target_wall_id:item.target_wall_id};
+ }).sort((a,b)=>a.source_wall_id.localeCompare(b.source_wall_id)||a.target_wall_id.localeCompare(b.target_wall_id));
+ if(new Set(contacts.map(item=>JSON.stringify(item))).size!==contacts.length)fail(400,'invalid_room_scan_wall_contacts','Een muuraansluiting mag maar eenmaal worden opgegeven.');
+ return contacts;
+}
+function boundOperationReceipts(operations){
+ const entries=Object.entries(operations).slice(-128);
+ const size=([key,value])=>byteLength(key)+1+byteLength(value);
+ let bytes=2+entries.reduce((total,item)=>total+size(item),0)+Math.max(0,entries.length-1);
+ // Retain the newest outcome even when a single receipt exceeds the budget.
+ // Evicted operations still cannot reapply with an old placement revision.
+ while(entries.length>1&&bytes>1048576)bytes-=size(entries.shift())+1;
+ return Object.fromEntries(entries);
+}
+const placementReceipt=(receipt,entry,replayed=false)=>({protocol:PROTOCOL,capabilities:CAPABILITIES,
+ applied_sequence:receipt.appliedSequence,placement_status:receipt.status,placement_revision:receipt.placementRevision,
+ workspace_version:receipt.workspaceVersion??entry.version,committed_version:receipt.committedVersion??null,
+ affected_wall_ids:receipt.affectedWallIds||[],protected_ids:receipt.protectedIds||[],conflicts:receipt.conflicts||[],...(replayed?{replayed:true}:{})});
 const scopeOf=loaded=>({customerId:loaded.customer.id,objectId:loaded.object.id,buildingSelectionKey:loaded.key,documentId:loaded.document.id,floorId:loaded.floorId,mapVersion:loaded.mapVersion});
 const stateOf=entry=>clone({archiveHead:null,archiveCount:0,closedReceipts:{},...(entry.room_scans||{protocol:PROTOCOL,generation:0,sessions:{},begins:{},operations:{}})});
 /** load must authenticate scope on EVERY attempt, including receipt replay.
@@ -54,15 +78,22 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
    if(!session.placement)return {document:loaded.document,changed:false};
    const result=await merge(loaded.document,session,event,session.placement.transform);
    if(result.status==='invalid'||result.status==='ignored')fail(409,'room_scan_merge_invalid','De scan kan niet veilig in deze tekening worden verwerkt.');
-   const required=dependencies(loaded.document,result.document);
+   // The geometry reads existing host walls even when the document does not
+   // change. Expand those reads through the same joint/room/opening rules as
+   // ordinary edits. The object-index CAS rechecks leases on concurrent writes.
+   const readResources=result.readResources||[];
+   if(!Array.isArray(readResources)||readResources.length>10000)fail(409,'room_scan_merge_invalid','De scan bevat te veel muurafhankelijkheden.');
+   const required=dependencies(loaded.document,result.document,readResources);
    const leases=Object.values(entry.collaboration?.leases||{}).filter(l=>l.expires_at_ms>time&&entry.collaboration?.sessions?.[l.session_id]?.expires_at_ms>time);
    const blocked=leases.find(l=>l.resource_ids.some(a=>required.some(b=>resourcesConflict(a,b))));
-   if(blocked){session.placement.status='waiting_for_edit';session.placement.conflicts=[{code:'resource_busy',resourceIds:required}];return {document:loaded.document,changed:false};}
+   if(blocked){session.placement.status='waiting_for_edit';session.placement.committedVersion=null;session.placement.affectedWallIds=[];session.placement.conflicts=[{code:'resource_busy',resourceIds:required}];return {document:loaded.document,changed:false};}
    const document=await validateDocument(result.document,loaded);
    session.mergeState=result.state;
    if(result.sessionPatch)Object.assign(session,clone(result.sessionPatch));
-   session.placement={...session.placement,status:'applied',appliedSequence:event.sequence,protectedIds:result.protected||[],conflicts:result.conflicts||[]};
-   return {document,changed:!same(loaded.document,document)};
+   const changed=!same(loaded.document,document);
+   session.placement={...session.placement,status:'applied',appliedSequence:event.sequence,protectedIds:result.protected||[],conflicts:result.conflicts||[],
+     committedVersion:entry.version+(changed?1:0),affectedWallIds:[...new Set(result.affectedWallIds||[])]};
+   return {document,changed};
  }
  async function handle(action,user,body){
    if(!actions.has(action))fail(400,'invalid_room_scan_action','Onbekende scanactie.');
@@ -71,6 +102,12 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
    if(action===ACTIONS.targets){if(!identifier(body.object_id))fail(400,'invalid_room_scan_scope','Kies een geldig object.');return {protocol:PROTOCOL,targets:await listTargets(user,body.object_id)};}
    if(action===ACTIONS.begin&&!identifier(body.target_id))fail(400,'invalid_room_scan_scope','Kies een geldig scandoel.');
    if([ACTIONS.submit,ACTIONS.end,ACTIONS.place].includes(action)&&!uuid(body.capture_session_id))fail(400,'invalid_room_scan_scope','Kies een geldige scansessie.');
+   if(action===ACTIONS.place){
+     if(body.required_wall_merge!==undefined&&body.required_wall_merge!==WALL_MERGE)fail(409,'room_scan_capability_mismatch','Werk LOQ bij om deze scan veilig samen te voegen.',{capabilities:CAPABILITIES});
+     // Order is not a semantic difference, so an identical retry may reorder
+     // its two confirmed contacts without creating another operation.
+     if(body.wall_contacts!==undefined)body={...body,wall_contacts:validateWallContacts(body.wall_contacts)};
+   }
    const fingerprint=await hash(JSON.stringify(canonical({action,body})));
    for(let attempt=0;attempt<8;attempt++){
      const loaded=await load(user,body,action),time=now();
@@ -88,7 +125,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
          const event=s.latest?await getEvent(loaded,s.latest):null;
          sessions.push({capture_session_id:s.context.captureSessionId,status:s.status==='capturing'&&Date.parse(s.context.expiresAt)<=time?'expired':s.status,context:s.context,sequence:s.sequence,event,placement:s.placement||null,placement_revision:s.placementRevision||0,archived:isArchived});
        }
-       return {protocol:PROTOCOL,server_time:iso(time),cursor:state.generation,workspace_version:entry.version,sessions,archive_offset:offset,next_archive_offset:archived.nextOffset,archive_count:state.archiveCount};
+       return {protocol:PROTOCOL,capabilities:CAPABILITIES,server_time:iso(time),cursor:state.generation,workspace_version:entry.version,sessions,archive_offset:offset,next_archive_offset:archived.nextOffset,archive_count:state.archiveCount};
      }
      if(action===ACTIONS.begin){
        if(!uuid(body.request_id))fail(400,'invalid_room_scan_request','Een scansleutel is verplicht.');
@@ -119,7 +156,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
          if(prior){
            if(body.document_id!==document.id||body.map_version!==loaded.mapVersion)fail(409,'room_scan_scope_changed','De tekening of kaart is veranderd.');
            if(prior.fingerprint!==fingerprint)fail(409,'room_scan_operation_reused','Deze plaatsingssleutel is anders gebruikt.');
-           return {protocol:PROTOCOL,applied_sequence:prior.appliedSequence,placement_status:prior.status,placement_revision:prior.placementRevision,workspace_version:entry.version,replayed:true};
+           return placementReceipt(prior,entry,true);
          }
        }
        const session=currentSession(loaded,state,body.capture_session_id);
@@ -150,7 +187,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
          if(!uuid(body.operation_id))fail(400,'invalid_room_scan_request','Een plaatsingssleutel is verplicht.');
          if(body.document_id!==document.id||body.map_version!==loaded.mapVersion||body.coordinate_frame_id!==session.coordinateFrameId)fail(409,'room_scan_scope_changed','De tekening, kaart of scanrichting is veranderd.');
          const operationKey=await hash(`${user.id}:${body.operation_id}`),prior=state.operations[operationKey];
-         if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_operation_reused','Deze plaatsingssleutel is anders gebruikt.');return {protocol:PROTOCOL,applied_sequence:prior.appliedSequence,placement_status:prior.status,placement_revision:prior.placementRevision,workspace_version:entry.version,replayed:true};}
+         if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_operation_reused','Deze plaatsingssleutel is anders gebruikt.');return placementReceipt(prior,entry,true);}
          if(session.status==='cancelled'||(session.status==='capturing'&&Date.parse(session.context.expiresAt)<=time)||session.status==='completed'&&time>=session.createdAt+86400000)fail(409,'room_scan_closed','Deze scan is afgesloten.');
          if(!Number.isSafeInteger(body.expected_placement_revision)||body.expected_placement_revision!==(session.placementRevision||0))fail(409,'room_scan_placement_changed','Deze scanplaatsing is bijgewerkt. Controleer de actuele plaatsing.');
          if(body.expected_version!==entry.version)fail(409,'room_scan_workspace_changed','De tekening is bijgewerkt. Controleer de actuele plaatsing.');
@@ -158,12 +195,18 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
          const transform=validateTransform(body.transform);
          if(session.placement&&session.placement.appliedSequence&&!same(session.placement.transform,transform))fail(409,'room_scan_already_placed','Deze scan is al ingevoegd. Pas de muren in de tekening aan.');
          const event=await getEvent(loaded,session.latest);
-         session.placement={...(session.placement||{}),transform,sequence:event.sequence,status:'placing'};
+         const floor=document.floors.find(f=>f.id===session.context.floorId);
+         const wallContacts=(body.wall_contacts||[]).map(item=>({sourceWallId:item.source_wall_id,targetWallId:item.target_wall_id}));
+         for(const contact of wallContacts)if(!event.snapshot.surfaces.some(s=>s.id===contact.sourceWallId&&s.kind==='wall'&&!s.isCurved)||!floor?.walls.some(w=>w.id===contact.targetWallId))fail(409,'room_scan_wall_contact_changed','Deze muuraansluiting is veranderd. Controleer de plaatsing opnieuw.');
+         if(session.placement?.appliedSequence&&!same(session.placement.wallContacts||[],wallContacts))fail(409,'room_scan_already_placed','Deze scan is al ingevoegd. Pas de muren in de tekening aan.');
+         session.placement={...(session.placement||{}),transform,wallContacts,sequence:event.sequence,status:'placing'};
          const applied=await applySnapshot(loaded,entry,session,event,time);document=applied.document;changed=applied.changed;
          session.placementRevision=(session.placementRevision||0)+1;
-         state.operations[operationKey]={fingerprint,sessionId:session.context.captureSessionId,sequence:event.sequence,appliedSequence:session.placement.appliedSequence||0,status:session.placement.status,placementRevision:session.placementRevision};
-         state.operations=Object.fromEntries(Object.entries(state.operations).slice(-128));
-         response={protocol:PROTOCOL,applied_sequence:session.placement.appliedSequence||0,placement_status:session.placement.status,placement_revision:session.placementRevision,protected_ids:session.placement.protectedIds||[],conflicts:session.placement.conflicts||[]};
+         state.operations[operationKey]={fingerprint,sessionId:session.context.captureSessionId,sequence:event.sequence,appliedSequence:session.placement.appliedSequence||0,status:session.placement.status,placementRevision:session.placementRevision,
+           workspaceVersion:entry.version+(changed?1:0),committedVersion:session.placement.status==='applied'?session.placement.committedVersion:null,
+           affectedWallIds:session.placement.affectedWallIds||[],protectedIds:session.placement.protectedIds||[],conflicts:session.placement.conflicts||[]};
+         state.operations=boundOperationReceipts(state.operations);
+         response=placementReceipt(state.operations[operationKey],entry);
        }
      }
      // Terminal session history is immutable and linked from one authoritative
@@ -185,7 +228,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
      // Adapter validates active session deadline again immediately before CAS.
      // A staged event/doc on failed CAS remains unreachable and is not accepted.
      const committed=await commit(loaded,entry,changed?document:undefined,eventToStage,{action,user,body,fingerprint,archives});
-     if(committed)return {...response,...(action===ACTIONS.place?{workspace_version:entry.version}:{})};
+     if(committed)return response;
    }
    fail(409,'room_scan_busy','De tekening is gelijktijdig bijgewerkt. Probeer opnieuw.',{retryable:true});
  }

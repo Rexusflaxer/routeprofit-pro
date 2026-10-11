@@ -11,6 +11,9 @@ function transformPlanPoint(point3, transform) {
   return { x: transform.scale * (point3.x * c - point3.y * s) + transform.translation.x, y: transform.scale * (point3.x * s + point3.y * c) + transform.translation.y };
 }
 
+// routeprofit-pro/src/features/floorplans/roomScanWallPlacement.ts
+var TAU2 = 2 * Math.PI;
+
 // routeprofit-pro/src/features/floorplans/roomScanPlacement.ts
 var finitePoint = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) <= 1e3 && Math.abs(p.y) <= 1e3;
 var validId = (value) => typeof value === "string" && value.length > 0 && value.length <= 256;
@@ -4304,7 +4307,7 @@ function canonical(value) {
 }
 var equalValue = (left, right) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 var floorResourceId = (floorId) => `floor:${encodeURIComponent(floorId)}`;
-var resourceId = (floorId, collection2, id2) => `element:${encodeURIComponent(floorId)}:${collection2}:${encodeURIComponent(id2)}`;
+var resourceId = (floorId, collection3, id2) => `element:${encodeURIComponent(floorId)}:${collection3}:${encodeURIComponent(id2)}`;
 function parseResourceId(key) {
   if (key === "document") return { kind: "document" };
   if (typeof key !== "string" || key.length > 800) throw new Error("Ongeldige onderdeelverwijzing.");
@@ -4333,8 +4336,8 @@ function splitDocument(document) {
     parseResourceId(key);
     if (Object.hasOwn(result, key)) throw new Error("Dubbele verdieping.");
     result[key] = clone(meta);
-    for (const collection2 of COLLECTIONS) for (const element of floor2[collection2] || []) {
-      const key2 = resourceId(floor2.id, collection2, element.id);
+    for (const collection3 of COLLECTIONS) for (const element of floor2[collection3] || []) {
+      const key2 = resourceId(floor2.id, collection3, element.id);
       parseResourceId(key2);
       if (Object.hasOwn(result, key2)) throw new Error("Dubbel tekenonderdeel.");
       result[key2] = clone(element);
@@ -4384,13 +4387,13 @@ function applyChanges(document, changes) {
     if (!floor2) throw new Error("Een verdieping ontbreekt.");
     const previous = document.floors.find((item) => item.id === id2);
     const result = clone(floor2);
-    for (const collection2 of COLLECTIONS) {
+    for (const collection3 of COLLECTIONS) {
       const elements = Object.keys(resources).filter((key) => {
         const parsed = parseResourceId(key);
-        return parsed.kind === "element" && parsed.floorId === id2 && parsed.collection === collection2;
+        return parsed.kind === "element" && parsed.floorId === id2 && parsed.collection === collection3;
       }).map((key) => resources[key]);
-      const order = new Map((previous?.[collection2] || []).map((element, index) => [element.id, index]));
-      result[collection2] = elements.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) || a.id.localeCompare(b.id));
+      const order = new Map((previous?.[collection3] || []).map((element, index) => [element.id, index]));
+      result[collection3] = elements.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity) || a.id.localeCompare(b.id));
     }
     return result;
   });
@@ -4444,17 +4447,17 @@ function dependencyResources(document, { resourceIds = [], changes = [] } = {}) 
     const change = changes.find((item) => item.resource_id === key);
     const labelOnly = parsed.collection === "rooms" && change && equalValue(change.before?.polygon, change.after?.polygon);
     if (labelOnly || ["symbols", "routes"].includes(parsed.collection)) continue;
-    const affectedWalls = /* @__PURE__ */ new Set();
+    const affectedWalls2 = /* @__PURE__ */ new Set();
     if (parsed.collection === "walls") {
-      for (const wall2 of floor2.walls) if (wall2.id === element.id || crosses(element, wall2)) affectedWalls.add(wall2.id);
+      for (const wall2 of floor2.walls) if (wall2.id === element.id || crosses(element, wall2)) affectedWalls2.add(wall2.id);
       for (const room2 of floor2.rooms) if (roomEdges(room2).some((edge) => crosses(edge, element))) output.add(resourceId(floor2.id, "rooms", room2.id));
-    } else if (parsed.collection === "openings") affectedWalls.add(element.wallId);
+    } else if (parsed.collection === "openings") affectedWalls2.add(element.wallId);
     else if (parsed.collection === "rooms") {
-      for (const wall2 of floor2.walls) if (roomTouchesWall(element, wall2)) affectedWalls.add(wall2.id);
+      for (const wall2 of floor2.walls) if (roomTouchesWall(element, wall2)) affectedWalls2.add(wall2.id);
       for (const room2 of floor2.rooms) if (room2.id !== element.id && roomsOverlap(room2, element)) output.add(resourceId(floor2.id, "rooms", room2.id));
     }
-    for (const id2 of affectedWalls) output.add(resourceId(floor2.id, "walls", id2));
-    for (const opening2 of floor2.openings) if (affectedWalls.has(opening2.wallId)) output.add(resourceId(floor2.id, "openings", opening2.id));
+    for (const id2 of affectedWalls2) output.add(resourceId(floor2.id, "walls", id2));
+    for (const opening2 of floor2.openings) if (affectedWalls2.has(opening2.wallId)) output.add(resourceId(floor2.id, "openings", opening2.id));
   }
   return [...output].filter((key) => {
     const parsed = parseResourceId(key);
@@ -4471,13 +4474,13 @@ function createDocument(title = "Gebouwplattegrond") {
   return { schemaVersion: 1, id: uid(), title, unit: "m", floors: [createFloor()] };
 }
 
-// Reference/LOQ-room-scan-2026-10-10/server/scanGeometry.ts
+// Reference/LOQ-scan-wall-merge-2026-10-11/server/scanGeometry.ts
 function validateDocument(document) {
   if (!parseFloorPlanDocument(document)) throw new Error("invalid_document");
   return document;
 }
-function dependencies(before, after) {
-  return dependencyResources(before, { changes: diffDocuments(before, after) });
+function dependencies(before, after, readResources = []) {
+  return dependencyResources(before, { changes: diffDocuments(before, after), resourceIds: readResources });
 }
 var gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 var wallStamp = (w) => JSON.stringify([w.id, w.start.x, w.start.y, w.end.x, w.end.y, w.thickness]);
@@ -4503,10 +4506,11 @@ function onExistingWall(opening2, incomingWall, existingWall) {
   const offsets = endpoints.map((p) => (p.x - existingWall.start.x) * v.x + (p.y - existingWall.start.y) * v.y);
   const perpendicular = endpoints.map((p) => Math.abs((p.x - existingWall.start.x) * v.y - (p.y - existingWall.start.y) * v.x));
   const offset = Math.min(...offsets), width = Math.abs(offsets[1] - offsets[0]);
-  if (Math.max(...perpendicular) > 0.15 || offset < -0.03 || offset + width > targetLength + 0.03 || width < 0.05) return null;
-  return { ...opening2, wallId: existingWall.id, offset: Math.max(0, offset), width: Math.min(width, targetLength - Math.max(0, offset)) };
+  if (Math.max(...perpendicular) > 0.061 || offset < -1e-3 || offset + width > targetLength + 1e-3 || width < 0.05) return null;
+  const reversed = u.x * v.x + u.y * v.y < 0;
+  return { ...opening2, wallId: existingWall.id, offset: Math.max(0, offset), width: Math.min(width, targetLength - Math.max(0, offset)), hinge: reversed ? opening2.hinge === "left" ? "right" : "left" : opening2.hinge, swing: reversed ? opening2.swing === "in" ? "out" : "in" : opening2.swing };
 }
-function mergeExternalOpenings(document, session, positioned, bindings, conflicts) {
+function mergeExternalOpenings(document, session, positioned, bindings, conflicts, heldWallSources = /* @__PURE__ */ new Set()) {
   const next = structuredClone(document), floor2 = next.floors.find((f) => f.id === session.context.floorId);
   const owned = structuredClone(session.externalOpenings || []), protectedIds = [];
   const bySource = new Map(owned.map((o) => [o.sourceId, o])), seen = /* @__PURE__ */ new Set();
@@ -4522,14 +4526,30 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
     if (entry.status === "active" && (!current || openingStamp(current) !== entry.baseline)) protect(entry, "manual_opening_preserved");
     if (entry.status === "withdrawn" && current) protect(entry, "manual_opening_preserved");
     if (entry.status !== "protected" && (!wall2 || wallStamp(wall2) !== entry.wallBaseline)) protect(entry, "changed_parent_wall_preserved");
+    if (heldWallSources.has(entry.sourceWallId)) seen.add(entry.sourceId);
   }
   for (const source of positioned.openings) {
-    const binding = bindings.find((b) => b.sourceId === source.wallId);
-    if (!binding) continue;
+    const matches = bindings.filter((b) => b.sourceId === source.wallId);
+    if (!matches.length) continue;
     seen.add(source.id);
+    if (heldWallSources.has(source.wallId)) continue;
     let entry = bySource.get(source.id);
     if (entry?.status === "protected") continue;
-    const wall2 = floor2.walls.find((w) => w.id === binding.elementId), incoming = positioned.walls.find((w) => w.id === source.wallId);
+    const incoming = positioned.walls.find((w) => w.id === source.wallId);
+    if (matches.some((b) => b.status === "protected")) {
+      if (entry) protect(entry, "changed_parent_wall_preserved");
+      else conflicts.push({ code: "changed_parent_wall_preserved", sourceId: source.id });
+      continue;
+    }
+    const usable = matches.filter((b) => {
+      const w = floor2.walls.find((w2) => w2.id === b.elementId);
+      return w && wallStamp(w) === b.baseline && onExistingWall(source, incoming, w);
+    });
+    if (usable.length !== 1) {
+      conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: source.id });
+      continue;
+    }
+    const binding = usable[0], wall2 = floor2.walls.find((w) => w.id === binding.elementId);
     if (entry && entry.wallId !== binding.elementId) {
       protect(entry, "changed_parent_wall_preserved");
       continue;
@@ -4586,8 +4606,8 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
         }
       }
     }
-    const overlap = others.some((o) => Math.min(o.offset + o.width, value.offset + value.width) - Math.max(o.offset, value.offset) > 0.01);
-    if (overlap) {
+    const overlap2 = others.some((o) => Math.min(o.offset + o.width, value.offset + value.width) - Math.max(o.offset, value.offset) > 0.01);
+    if (overlap2) {
       conflicts.push({ code: "overlapping_opening_requires_review", sourceId: source.id });
       continue;
     }
@@ -4613,36 +4633,256 @@ function mergeExternalOpenings(document, session, positioned, bindings, conflict
     entry.status = "withdrawn";
     entry.baseline = null;
   }
-  return { document: next, owned, protectedIds };
+  return { document: next, owned, protectedIds: [.../* @__PURE__ */ new Set([...protectedIds, ...owned.filter((o) => o.status === "protected").map((o) => o.elementId)])] };
+}
+var wallLength = (w) => gap(w.start, w.end);
+var wallUnit = (w) => {
+  const n = wallLength(w);
+  return { x: (w.end.x - w.start.x) / n, y: (w.end.y - w.start.y) / n };
+};
+var along = (p, w) => {
+  const u = wallUnit(w);
+  return (p.x - w.start.x) * u.x + (p.y - w.start.y) * u.y;
+};
+var at = (w, d) => {
+  const u = wallUnit(w);
+  return { x: w.start.x + u.x * d, y: w.start.y + u.y * d };
+};
+var lineGap = (p, w) => {
+  const u = wallUnit(w);
+  return Math.abs((p.x - w.start.x) * u.y - (p.y - w.start.y) * u.x);
+};
+function overlap(incoming, host) {
+  const a = wallUnit(incoming), b = wallUnit(host), angle2 = Math.abs(a.x * b.y - a.y * b.x);
+  if (angle2 > Math.sin(Math.PI / 90)) return null;
+  const low = Math.max(0, Math.min(along(host.start, incoming), along(host.end, incoming))), high = Math.min(wallLength(incoming), Math.max(along(host.start, incoming), along(host.end, incoming)));
+  const normal = Math.max(lineGap(at(incoming, low), host), lineGap(at(incoming, high), host));
+  if (high - low < Math.min(0.1, wallLength(incoming) * 0.2)) return null;
+  return { low, high, normal, angle: angle2 };
+}
+function ownedStamp(kind, value) {
+  if (kind === "wall") return JSON.stringify([value.start.x, value.start.y, value.end.x, value.end.y, value.thickness]);
+  if (kind === "opening") return JSON.stringify([value.wallId, value.type, value.offset, value.width, value.hinge, value.swing]);
+  return JSON.stringify([value.label, value.polygon.map((p) => [p.x, p.y])]);
+}
+var collection2 = (floor2, kind) => kind === "wall" ? floor2.walls : kind === "opening" ? floor2.openings : floor2.rooms;
+function affectedWalls(before, after, floorId) {
+  const a = before.floors.find((f) => f.id === floorId), b = after.floors.find((f) => f.id === floorId), ids = /* @__PURE__ */ new Set();
+  for (const w of [...a.walls, ...b.walls]) {
+    const old = a.walls.find((x) => x.id === w.id), next = b.walls.find((x) => x.id === w.id);
+    if (!old || !next || wallStamp(old) !== wallStamp(next)) ids.add(w.id);
+  }
+  for (const o of [...a.openings, ...b.openings]) {
+    const old = a.openings.find((x) => x.id === o.id), next = b.openings.find((x) => x.id === o.id);
+    if (!old || !next || openingStamp(old) !== openingStamp(next)) {
+      if (old) ids.add(old.wallId);
+      if (next) ids.add(next.wallId);
+    }
+  }
+  return [...ids].sort();
 }
 function merge(document, session, event, transform) {
   const floor2 = document.floors.find((f) => f.id === session.context.floorId);
   const scope = { customerId: session.context.customerId, objectId: session.context.objectId, buildingSelectionKey: session.context.buildingSelectionKey, documentId: session.context.documentId, floorId: session.context.floorId, mapVersion: session.context.mapVersion };
-  const previous = session.mergeState || createScanMergeState(scope, session.context.captureSessionId, event.coordinateFrameId);
-  if (previous.sequence === event.sequence) return { document, state: previous, status: "unchanged", protected: [], conflicts: [] };
+  const previous = structuredClone(session.mergeState || createScanMergeState(scope, session.context.captureSessionId, event.coordinateFrameId));
+  if (previous.sequence === event.sequence) return { document, state: previous, status: "unchanged", protected: [], conflicts: [], readResources: [], affectedWallIds: [] };
   const positioned = positionedRoomScan(event, floor2, transform), ownedIds = new Set(previous.elements.map((e) => e.elementId));
-  const bindings = structuredClone(session.externalWallBindings || []), ignored = new Set(bindings.map((b) => b.sourceId)), conflicts = [];
-  for (const incoming of positioned.walls) {
-    if (previous.elements.some((e) => e.sourceId === incoming.id) || ignored.has(incoming.id)) continue;
-    const equivalent = floor2.walls.find((existing) => !ownedIds.has(existing.id) && Math.min(Math.max(gap(incoming.start, existing.start), gap(incoming.end, existing.end)), Math.max(gap(incoming.start, existing.end), gap(incoming.end, existing.start))) < 0.1);
-    if (equivalent) {
-      ignored.add(incoming.id);
-      bindings.push({ sourceId: incoming.id, elementId: equivalent.id, baseline: wallStamp(equivalent) });
-      conflicts.push({ code: "existing_wall_preserved", sourceId: incoming.id, elementId: equivalent.id });
+  const bindings = structuredClone(session.externalWallBindings || []), ledgers = structuredClone(session.wallSources || []), conflicts = [], reads = /* @__PURE__ */ new Set();
+  const contacts = session.placement?.wallContacts || [], elements = [], routes = /* @__PURE__ */ new Map(), held = /* @__PURE__ */ new Set();
+  const incomingIds = new Set(event.snapshot.surfaces.map((s) => s.id)), reservedFragments = /* @__PURE__ */ new Set();
+  let fragmentCollision = false;
+  const hostById = new Map(floor2.walls.map((w) => [w.id, w]));
+  const holdEntries = (ids) => {
+    const selected = previous.elements.filter((e) => ids.includes(e.sourceId) || e.kind === "opening" && ids.some((id2) => previous.elements.find((w) => w.sourceId === id2)?.elementId === floor2.openings.find((o) => o.id === e.elementId)?.wallId));
+    for (const e of selected) {
+      const value = collection2(floor2, e.kind).find((v) => v.id === e.elementId);
+      if (!value || elements.some((x) => x.sourceId === e.sourceId)) continue;
+      const { id: id2, ...rest } = value;
+      if (e.kind === "opening") {
+        const owner = previous.elements.find((w) => w.kind === "wall" && w.elementId === value.wallId);
+        if (owner) {
+          const { wallId, ...opening2 } = rest;
+          elements.push({ sourceId: e.sourceId, sourceWallId: owner.sourceId, kind: "opening", value: opening2 });
+        }
+      } else elements.push({ sourceId: e.sourceId, kind: e.kind, value: rest });
+    }
+  };
+  const isManual = (e) => {
+    const value = collection2(floor2, e.kind).find((v) => v.id === e.elementId);
+    return e.status === "protected" || e.status === "active" && (!value || ownedStamp(e.kind, value) !== e.baseline) || e.status === "withdrawn" && !!value;
+  };
+  for (const binding of bindings) {
+    const host = hostById.get(binding.elementId);
+    reads.add(resourceId(floor2.id, "walls", binding.elementId));
+    if (!host || wallStamp(host) !== binding.baseline) binding.status = "protected";
+  }
+  for (const ledger of ledgers) {
+    const sourceIds = [ledger.sourceId, ...ledger.fragments || []], entries = previous.elements.filter((e) => sourceIds.includes(e.sourceId));
+    const wallIds = new Set(entries.filter((e) => e.kind === "wall").map((e) => e.elementId));
+    const manualOpening = floor2.openings.some((o) => wallIds.has(o.wallId) && (!previous.elements.some((e) => e.elementId === o.id) || isManual(previous.elements.find((e) => e.elementId === o.id))));
+    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === ledger.sourceId && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v) => v.id === o.elementId) || openingStamp(floor2.openings.find((v) => v.id === o.elementId)) !== o.baseline)));
+    if (entries.some(isManual) || manualOpening || manualExternal || bindings.some((b) => b.sourceId === ledger.sourceId && b.status === "protected")) ledger.protected = true;
+    if (ledger.protected) {
+      for (const e of previous.elements) if (sourceIds.includes(e.sourceId) || e.kind === "opening" && wallIds.has(floor2.openings.find((o) => o.id === e.elementId)?.wallId)) e.status = "protected";
     }
   }
-  const elements = positioned.walls.filter((w) => !ignored.has(w.id)).map(({ id: id2, ...value }) => ({ sourceId: id2, kind: "wall", value }));
-  for (const { id: id2, wallId, ...value } of positioned.openings) {
-    if (!ignored.has(wallId)) elements.push({ sourceId: id2, sourceWallId: wallId, kind: "opening", value });
+  for (const incoming of positioned.walls) {
+    let ledger = ledgers.find((l) => l.sourceId === incoming.id);
+    if (!ledger) {
+      const alias = ledgers.find((l) => {
+        if (!l.protected || !l.baseline) return false;
+        try {
+          const b = JSON.parse(l.baseline), old = { start: { x: b[1], y: b[2] }, end: { x: b[3], y: b[4] } };
+          return Math.min(Math.max(gap(incoming.start, old.start), gap(incoming.end, old.end)), Math.max(gap(incoming.start, old.end), gap(incoming.end, old.start))) < 0.1;
+        } catch {
+          return false;
+        }
+      });
+      ledger = { sourceId: incoming.id, baseline: wallStamp(incoming), fragments: [], protected: !!alias };
+      ledgers.push(ledger);
+    }
+    const bound = bindings.filter((b) => b.sourceId === incoming.id), members = [incoming.id, ...ledger.fragments];
+    const oldEntries = previous.elements.filter((e) => members.includes(e.sourceId));
+    const oldWallIds = new Set(oldEntries.filter((e) => e.kind === "wall").map((e) => e.elementId));
+    const manualChild = floor2.openings.some((o) => oldWallIds.has(o.wallId) && (!previous.elements.some((e) => e.elementId === o.id) || isManual(previous.elements.find((e) => e.elementId === o.id))));
+    const manualExternal = (session.externalOpenings || []).some((o) => o.sourceWallId === incoming.id && (o.status === "protected" || o.status === "active" && (!floor2.openings.some((v) => v.id === o.elementId) || openingStamp(floor2.openings.find((v) => v.id === o.elementId)) !== o.baseline)));
+    if (oldEntries.some(isManual) || manualChild || manualExternal || bound.some((b) => b.status === "protected")) ledger.protected = true;
+    if (ledger.protected) {
+      held.add(incoming.id);
+      holdEntries(members);
+      for (const b of bound) b.status = "protected";
+      conflicts.push({ code: "manual_scan_wall_preserved", sourceId: incoming.id });
+      continue;
+    }
+    const explicit = contacts.filter((c) => c.sourceWallId === incoming.id), candidates = [], near = [];
+    for (const host of floor2.walls) {
+      if (ownedIds.has(host.id)) continue;
+      const part = overlap(incoming, host);
+      if (!part) continue;
+      const requested = explicit.some((c) => c.targetWallId === host.id), remembered = bound.find((b) => b.elementId === host.id);
+      const nearby = part.normal <= Math.min(0.35, (incoming.thickness + host.thickness) / 2 + 0.03);
+      if (nearby || requested || remembered) {
+        reads.add(resourceId(floor2.id, "walls", host.id));
+        near.push({ host, ...part });
+      }
+      if (part.angle <= Math.sin(Math.PI / 180) && part.normal <= (requested || remembered?.contact === "explicit" ? 0.06 : 0.012)) candidates.push({ host, ...part, explicit: requested || remembered?.contact === "explicit" });
+    }
+    let review = explicit.some((c) => !candidates.some((p) => p.host.id === c.targetWallId)) || bound.some((b) => !candidates.some((p) => p.host.id === b.elementId));
+    const accepted = [];
+    for (const candidate of candidates.sort((a, b) => Number(b.explicit) - Number(a.explicit) || a.low - b.low || a.host.id.localeCompare(b.host.id))) {
+      const overlaps = accepted.filter((p) => Math.min(p.high, candidate.high) - Math.max(p.low, candidate.low) > 0.02);
+      if (overlaps.length) {
+        review = true;
+        conflicts.push({ code: "overlapping_host_walls_require_review", sourceId: incoming.id });
+        continue;
+      }
+      accepted.push(candidate);
+    }
+    if (near.some((p) => !accepted.some((a) => a.host.id === p.host.id))) review = true;
+    if (review) {
+      held.add(incoming.id);
+      holdEntries(members);
+      conflicts.push({ code: "wall_contact_requires_review", sourceId: incoming.id });
+      continue;
+    }
+    const segments = [];
+    routes.set(incoming.id, segments);
+    for (const hit of accepted) {
+      let binding = bound.find((b) => b.elementId === hit.host.id);
+      if (!binding) {
+        binding = { sourceId: incoming.id, elementId: hit.host.id, baseline: wallStamp(hit.host) };
+        bindings.push(binding);
+      }
+      Object.assign(binding, { status: "active", contact: hit.explicit ? "explicit" : "axis", range: [hit.low, hit.high], sourceBaseline: wallStamp(incoming) });
+      segments.push({ kind: "external", low: hit.low, high: hit.high, binding, wall: hit.host });
+    }
+    if (!accepted.length) {
+      elements.push({ sourceId: incoming.id, kind: "wall", value: { start: incoming.start, end: incoming.end, thickness: incoming.thickness } });
+      segments.push({ kind: "owned", low: 0, high: wallLength(incoming), sourceId: incoming.id, wall: incoming });
+      ledger.fragments = [];
+      ledger.baseline = wallStamp(incoming);
+      continue;
+    }
+    accepted.sort((a, b) => a.low - b.low);
+    let cursor = 0, index = 0;
+    const fragments = [];
+    const append = (low, high) => {
+      if (high - low < 0.01) return;
+      const id2 = `scanpart:${incoming.id.slice(0, 96)}:${index++}`;
+      if (incomingIds.has(id2) || reservedFragments.has(id2)) {
+        fragmentCollision = true;
+        return;
+      }
+      reservedFragments.add(id2);
+      fragments.push(id2);
+      const wall2 = { ...incoming, start: at(incoming, low), end: at(incoming, high) };
+      for (const end of ["start", "end"]) for (const hit of accepted) for (const point3 of [hit.host.start, hit.host.end]) if (gap(wall2[end], point3) <= 0.061) wall2[end] = { ...point3 };
+      elements.push({ sourceId: id2, kind: "wall", value: { start: wall2.start, end: wall2.end, thickness: wall2.thickness } });
+      segments.push({ kind: "owned", sourceId: id2, low, high, wall: wall2 });
+    };
+    for (const hit of accepted) {
+      append(cursor, hit.low);
+      cursor = Math.max(cursor, hit.high);
+    }
+    append(cursor, wallLength(incoming));
+    ledger.fragments = fragments;
+    ledger.baseline = wallStamp(incoming);
   }
-  const polygon = !session.context.targetRoomId && closedPolygon(positioned.walls);
+  for (const opening2 of positioned.openings) {
+    if (held.has(opening2.wallId)) continue;
+    const entry = previous.elements.find((e) => e.kind === "opening" && e.sourceId === opening2.id);
+    if (!entry || !floor2.openings.some((o) => o.id === entry.elementId)) continue;
+    const segments = routes.get(opening2.wallId) || [], fitting = segments.filter((s) => opening2.offset >= s.low - 1e-3 && opening2.offset + opening2.width <= s.high + 1e-3);
+    const incoming = positioned.walls.find((w) => w.id === opening2.wallId);
+    if (fitting.length === 1 && onExistingWall(opening2, incoming, fitting[0].wall)) continue;
+    held.add(opening2.wallId);
+    routes.delete(opening2.wallId);
+    const ledger = ledgers.find((l) => l.sourceId === opening2.wallId), oldLedger = (session.wallSources || []).find((l) => l.sourceId === opening2.wallId);
+    const members = [opening2.wallId, ...ledger?.fragments || [], ...oldLedger?.fragments || []];
+    const openingIds = positioned.openings.filter((o) => o.wallId === opening2.wallId).map((o) => o.id);
+    for (let i = elements.length - 1; i >= 0; i--) if (members.includes(elements[i].sourceId) || openingIds.includes(elements[i].sourceId)) elements.splice(i, 1);
+    for (let i = bindings.length - 1; i >= 0; i--) if (bindings[i].sourceId === opening2.wallId) bindings.splice(i, 1);
+    bindings.push(...structuredClone((session.externalWallBindings || []).filter((b) => b.sourceId === opening2.wallId)));
+    if (oldLedger) Object.assign(ledger, structuredClone(oldLedger));
+    holdEntries(members);
+    conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: opening2.id });
+  }
+  const externalOpenings = [];
+  for (const opening2 of positioned.openings) {
+    if (held.has(opening2.wallId)) {
+      if (bindings.some((b) => b.sourceId === opening2.wallId)) externalOpenings.push(opening2);
+      continue;
+    }
+    const segments = routes.get(opening2.wallId) || [], low = opening2.offset, high = opening2.offset + opening2.width;
+    const fitting = segments.filter((s) => low >= s.low - 1e-3 && high <= s.high + 1e-3);
+    if (fitting.length !== 1) {
+      conflicts.push({ code: "opening_crosses_wall_segments_requires_review", sourceId: opening2.id });
+      if (bindings.some((b) => b.sourceId === opening2.wallId)) externalOpenings.push(opening2);
+      continue;
+    }
+    const segment = fitting[0];
+    if (segment.kind === "external") {
+      externalOpenings.push(opening2);
+      continue;
+    }
+    const incoming = positioned.walls.find((w) => w.id === opening2.wallId), mapped = onExistingWall(opening2, incoming, segment.wall);
+    if (!mapped) {
+      conflicts.push({ code: "opening_position_requires_review", sourceId: opening2.id });
+      continue;
+    }
+    const { id: id2, wallId, ...value } = mapped;
+    elements.push({ sourceId: id2, sourceWallId: segment.sourceId, kind: "opening", value });
+  }
+  const polygon = !held.size && !session.context.targetRoomId && closedPolygon(positioned.walls);
   if (polygon) elements.push({ sourceId: `room:${event.snapshot.roomId}`.slice(0, 119), kind: "room", value: { label: session.context.targetRoomLabel || "Gescande ruimte", polygon } });
+  else if (held.size) holdEntries(previous.elements.filter((e) => e.kind === "room").map((e) => e.sourceId));
+  if (fragmentCollision) return { document, state: session.mergeState || previous, status: "invalid", reason: "invalid_snapshot", protected: [], conflicts: [], readResources: [], affectedWallIds: [] };
   const result = mergeScanSnapshot(document, previous, { schemaVersion: 1, sessionId: session.context.captureSessionId, epoch: event.coordinateFrameId, sequence: event.sequence, scope, elements });
   if (result.status === "invalid" || result.status === "ignored") return result;
-  const external = mergeExternalOpenings(result.document, session, positioned, bindings, conflicts);
-  if (bindings.length > 2500 || external.owned.length > 4e3 || !parseFloorPlanDocument(external.document)) return { ...result, status: "invalid", document, state: previous };
+  const external = mergeExternalOpenings(result.document, session, { ...positioned, openings: externalOpenings }, bindings, conflicts, held);
+  if (bindings.length > 2500 || ledgers.length > 2500 || external.owned.length > 4e3 || !parseFloorPlanDocument(external.document)) return { ...result, status: "invalid", document, state: session.mergeState || previous };
   const unsupported = event.snapshot.surfaces.filter((s) => s.isCurved).map((s) => ({ code: "curved_surface_requires_review", sourceId: s.id }));
-  return { ...result, document: external.document, protected: [...result.protected, ...external.protectedIds], conflicts: [...conflicts, ...unsupported], sessionPatch: { externalWallBindings: bindings, externalOpenings: external.owned } };
+  return { ...result, document: external.document, protected: [.../* @__PURE__ */ new Set([...result.protected, ...previous.elements.filter((e) => e.status === "protected").map((e) => e.elementId), ...external.protectedIds])], conflicts: [...conflicts, ...unsupported], readResources: [...reads].sort(), affectedWallIds: affectedWalls(document, external.document, floor2.id), sessionPatch: { externalWallBindings: bindings, externalOpenings: external.owned, wallSources: ledgers } };
 }
 export {
   createDocument,
