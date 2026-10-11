@@ -17,7 +17,9 @@ const strict = (value, keys) => { if (!value || typeof value !== 'object' || Arr
 const scopeKeys = ['customer_id', 'object_id', 'building_selection_key'];
 const sourceKeys = ['file_id', 'width', 'height', 'source_kind'];
 const ROOM_OBJECT_TASK='room-object-classification-v1';
-const roomSource=source=>source?.source_kind==='room-objects';
+const ROOM_DISCOVERY_TASK='room-object-discovery-v2';
+const roomSource=source=>['room-objects','room-discovery'].includes(source?.source_kind);
+const roomTask=source=>source?.source_kind==='room-discovery'?ROOM_DISCOVERY_TASK:ROOM_OBJECT_TASK;
 
 /** deps.store: getService(), getSnapshot(id), stageSnapshot(job),
  * casService(expectedVersion, next)->boolean (exactly one DB record updated).
@@ -101,7 +103,7 @@ export function createFloorPlanAnalysisQueue(deps) {
     }
     if (body.action !== 'create_object_floor_plan_analysis_job') fail(400, 'invalid_analysis_action', 'Onbekende analyseactie.');
     strict(body, ['action', ...scopeKeys, 'expected_map_version', 'idempotency_key', 'source']); strict(body.source, sourceKeys); requireKey(body);
-    if (!isId(body.source.file_id) || ![body.source.width, body.source.height].every(n => Number.isInteger(n) && n > 0 && n <= 4096) || !['photo', 'scan', 'pdf', 'vector-pdf', 'image', 'room-objects'].includes(body.source.source_kind)) fail(400, 'invalid_analysis_source', 'Ongeldige bronafbeelding.');
+    if (!isId(body.source.file_id) || ![body.source.width, body.source.height].every(n => Number.isInteger(n) && n > 0 && n <= 4096) || !['photo', 'scan', 'pdf', 'vector-pdf', 'image', 'room-objects', 'room-discovery'].includes(body.source.source_kind)) fail(400, 'invalid_analysis_source', 'Ongeldige bronafbeelding.');
     const key = await hash(`${actor.id}:${body.action}:${body.idempotency_key}`), fingerprint = await digest(body);
     const id = `analysis-${await hash(`${actor.id}:${body.idempotency_key}`)}`;
     return transact(async state => {
@@ -113,7 +115,7 @@ export function createFloorPlanAnalysisQueue(deps) {
         if (!previous || previous.actor_id !== actor.id || !sameScope(previous, body)) fail(409, 'analysis_receipt_invalid', 'De eerdere analyse kan niet veilig worden hersteld.');
         return {value: {job: dto(previous), replayed: true}};
       }
-      if (!serviceStatus(state, roomSource(body.source)?ROOM_OBJECT_TASK:undefined).available) fail(503, 'analysis_service_unavailable', 'De AI-server is tijdelijk niet bereikbaar. Je kunt lokaal herkennen of handmatig verdergaan.');
+      if (!serviceStatus(state, roomSource(body.source)?roomTask(body.source):undefined).available) fail(503, 'analysis_service_unavailable', 'De AI-server is tijdelijk niet bereikbaar. Je kunt lokaal herkennen of handmatig verdergaan.');
       if (Object.values(state.jobs).some(entry => entry.actor_id === actor.id && !terminal.has(entry.status) && epoch(entry.expires_at) > now())) fail(429, 'analysis_user_busy', 'Er loopt al een analyse voor je account. Rond die af of annuleer hem eerst.');
       if (Object.keys(state.jobs).length >= policy.maxJobs || Object.keys(state.receipts).length >= policy.maxJobs * 4) fail(429, 'analysis_queue_full', 'De analysewachtrij is vol. Probeer later opnieuw.');
       const scope = await authorizeScope(actor, body, true);
@@ -131,7 +133,7 @@ export function createFloorPlanAnalysisQueue(deps) {
     if (['heartbeat', 'lease'].includes(body.action)) {
       strict(body, ['action', 'worker_id', 'protocol_version', 'model_id', 'capabilities']);
       if (body.protocol_version !== 1 || !isId(body.model_id)) fail(400, 'invalid_worker_request', 'Ongeldig workerprotocol.');
-      if(body.capabilities!==undefined&&(!Array.isArray(body.capabilities)||body.capabilities.length>1||body.capabilities.some(value=>value!==ROOM_OBJECT_TASK)))fail(400,'invalid_worker_request','Ongeldige workermogelijkheden.');
+      if(body.capabilities!==undefined&&(!Array.isArray(body.capabilities)||body.capabilities.length>2||new Set(body.capabilities).size!==body.capabilities.length||body.capabilities.some(value=>![ROOM_OBJECT_TASK,ROOM_DISCOVERY_TASK].includes(value))))fail(400,'invalid_worker_request','Ongeldige workermogelijkheden.');
       const leased = await transact(async state => {
         state.workers[identity.id] = {last_seen_at: iso(now()), model_id: body.model_id, capabilities:body.capabilities||[], ready: true};
         if (body.action === 'heartbeat') return {write: true, value: {ok: true, protocol_version: 1}};
@@ -141,7 +143,7 @@ export function createFloorPlanAnalysisQueue(deps) {
         const candidates = Object.entries(state.jobs).filter(([, entry]) => !terminal.has(entry.status) && epoch(entry.expires_at) > now() && !(entry.status === 'running' && epoch(entry.lease_expires_at) > now())).sort((a, b) => epoch(a[1].created_at) - epoch(b[1].created_at));
         for (const [id] of candidates) {
           const job = await jobAt(state, id);
-          if (!job || roomSource(job.source)&&!body.capabilities?.includes(ROOM_OBJECT_TASK)) continue;
+          if (!job || roomSource(job.source)&&!body.capabilities?.includes(roomTask(job.source))) continue;
           if (job.lease_attempts >= policy.maxAttempts) { await snapshot(state, {...job, version: job.version + 1, status: 'failed', error_code: 'analysis_timeout', finished_at: iso(now())}); continue; }
           try { await validateJobScope(job); } catch { await snapshot(state, {...job, version: job.version + 1, status: 'failed', error_code: 'analysis_failed', finished_at: iso(now())}); continue; }
           const token = randomToken(), tokenHash = await hash(token);

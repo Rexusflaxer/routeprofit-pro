@@ -5,10 +5,11 @@ export const WALL_MERGE = 'room-scan-wall-merge-v1';
 export const ROOM_DETAILS = 'room-scan-details-v1';
 export const ROOM_ORIENTATION = 'room-scan-orientation-v1';
 export const ROOM_OBSERVATIONS='room-scan-observations-v1';
-export const CAPABILITIES = Object.freeze({room_observations:ROOM_OBSERVATIONS,wall_merge:WALL_MERGE,room_details:ROOM_DETAILS,room_orientation:ROOM_ORIENTATION});
+export const ROOM_DISCOVERY='room-object-discovery-v2';
+export const CAPABILITIES = Object.freeze({room_discovery:ROOM_DISCOVERY,room_observations:ROOM_OBSERVATIONS,wall_merge:WALL_MERGE,room_details:ROOM_DETAILS,room_orientation:ROOM_ORIENTATION});
 // Keep index receipts bounded: analysis results live in the queue, never in scan history.
 const observationJobSummary=job=>{if(!job||typeof job.id!=='string'||job.id.length>180||!['queued','running','completed','failed','cancelled','expired'].includes(job.status))fail(503,'room_observations_unavailable','De analysewachtrij bevestigde de opdracht niet.');return Object.fromEntries(['id','status','created_at','expires_at','poll_after_ms'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]]));};
-const captureCapabilities=(rich,observations=false)=>({wall_merge:WALL_MERGE,room_orientation:ROOM_ORIENTATION,...(rich?{room_details:ROOM_DETAILS}:{}),...(rich&&observations?{room_observations:ROOM_OBSERVATIONS}:{})});
+const captureCapabilities=(rich,observations=false,discovery=false)=>({wall_merge:WALL_MERGE,room_orientation:ROOM_ORIENTATION,...(rich?{room_details:ROOM_DETAILS}:{}),...(rich&&observations?{room_observations:ROOM_OBSERVATIONS}:{}),...(rich&&observations&&discovery?{room_discovery:ROOM_DISCOVERY}:{})});
 export const ACTIONS = Object.freeze({observe:'submit_object_building_room_observations',targets:'get_building_room_scan_targets',begin:'begin_building_room_scan',submit:'submit_building_room_scan_event',end:'end_building_room_scan',get:'get_object_building_room_scans',place:'place_object_building_room_scan'});
 export class RoomScanError extends Error { constructor(status,code,message,details={}) { super(message);this.status=status;this.details={code,...details}; } }
 const fail=(status,code,message,details)=>{throw new RoomScanError(status,code,message,details);};
@@ -127,6 +128,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
    if([ACTIONS.submit,ACTIONS.end,ACTIONS.place,ACTIONS.observe].includes(action)&&!uuid(body.capture_session_id))fail(400,'invalid_room_scan_scope','Kies een geldige scansessie.');
    if([ACTIONS.begin,ACTIONS.place].includes(action)&&body.required_room_details!==undefined&&body.required_room_details!==ROOM_DETAILS)fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor deze scangegevens.',{capabilities:CAPABILITIES});
    if(action===ACTIONS.begin&&body.required_room_observations!==undefined&&(body.required_room_observations!==ROOM_OBSERVATIONS||body.required_room_details!==ROOM_DETAILS))fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor inrichtingherkenning.',{capabilities:CAPABILITIES});
+   if(action===ACTIONS.begin&&body.required_room_discovery!==undefined&&(body.required_room_discovery!==ROOM_DISCOVERY||body.required_room_observations!==ROOM_OBSERVATIONS||body.required_room_details!==ROOM_DETAILS))fail(409,'room_scan_capability_mismatch','Werk LOQ bij voor het herkennen van extra objecten.',{capabilities:CAPABILITIES});
    if(action===ACTIONS.place){
      if(body.required_wall_merge!==undefined&&body.required_wall_merge!==WALL_MERGE)fail(409,'room_scan_capability_mismatch','Werk LOQ bij om deze scan veilig samen te voegen.',{capabilities:CAPABILITIES});
      // Order is not a semantic difference, so an identical retry may reorder
@@ -155,7 +157,7 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
      if(action===ACTIONS.begin){
        if(!uuid(body.request_id))fail(400,'invalid_room_scan_request','Een scansleutel is verplicht.');
        const beginKey=await hash(`${user.id}:${body.request_id}`),prior=state.begins[beginKey];
-       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,capabilities:captureCapabilities(prior.richDetails===true,prior.observationsEnabled===true),context};}
+       if(prior){if(prior.fingerprint!==fingerprint)fail(409,'room_scan_request_reused','Deze scansleutel is anders gebruikt.');const context=prior.context||state.sessions[prior.sessionId]?.context;if(!context)fail(410,'room_scan_expired','Deze scansessie is verlopen.');return {protocol:PROTOCOL,capabilities:captureCapabilities(prior.richDetails===true,prior.observationsEnabled===true,prior.discoveryEnabled===true),context};}
        const floor=document.floors.find(f=>f.id===loaded.floorId);
        if(!floor)fail(409,'room_scan_scope_changed','Deze verdieping bestaat niet meer.');
        const existing=typeof body.room_id==='string',creating=typeof body.new_room_label==='string';
@@ -167,8 +169,8 @@ export function createRoomScanService({load,commit,listTargets,stageRoute,getEve
        if(Object.values(state.sessions).filter(s=>s.status==='capturing'&&Date.parse(s.context.expiresAt)>time).length>=32)fail(429,'room_scan_session_limit','Er zijn te veel gelijktijdige scans in dit gebouw.');
        const id=randomId(),context={captureSessionId:id,...scopeOf(loaded),expiresAt:iso(Math.floor((time+1200000)/1000)*1000),...(room?{targetRoomId:room.id}:{}),targetRoomLabel:label};
        const richDetails=body.required_room_details===ROOM_DETAILS;
-       state.sessions[id]={context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
-       state.begins[beginKey]={fingerprint,sessionId:id,context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,capabilities:captureCapabilities(richDetails,body.required_room_observations===ROOM_OBSERVATIONS),context};
+       state.sessions[id]={context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,discoveryEnabled:body.required_room_discovery===ROOM_DISCOVERY,userId:user.id,createdAt:time,status:'capturing',sequence:0,latest:null,receipts:{},placement:null,placementRevision:0,mergeState:null};
+       state.begins[beginKey]={fingerprint,sessionId:id,context,richDetails,observationsEnabled:body.required_room_observations===ROOM_OBSERVATIONS,discoveryEnabled:body.required_room_discovery===ROOM_DISCOVERY,expiresAt:Date.parse(loaded.route?.expires_at)||time+600000};routeToStage={context,userId:user.id};response={protocol:PROTOCOL,capabilities:captureCapabilities(richDetails,body.required_room_observations===ROOM_OBSERVATIONS,body.required_room_discovery===ROOM_DISCOVERY),context};
      }else{
        if(action===ACTIONS.end&&!state.sessions[body.capture_session_id]){
          const receipt=state.closedReceipts[body.capture_session_id];

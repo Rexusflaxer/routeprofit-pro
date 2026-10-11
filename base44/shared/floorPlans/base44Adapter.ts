@@ -1,6 +1,8 @@
 import {createFloorPlanAnalysisQueue, QueueError} from './queueCore.ts';
-import {readRoomObservationSource,validateRoomObservationBinding,validateRoomObjectResult} from './roomObservationStorage.ts';
+import {readRoomObservationSource,validateRoomObservationBinding,validateRoomObservationResult} from './roomObservationStorage.ts';
 const reject = (code, message = 'Deze analyse is niet beschikbaar.') => {throw new QueueError(403, code, message);};
+const isRoomSource=source=>['room-objects','room-discovery'].includes(source?.source_kind);
+const roomProtocol=source=>source?.source_kind==='room-discovery'?'room-object-discovery-v2':'room-scan-observations-v1';
 const PNG_MAX = 8 * 1024 * 1024;
 const states = new Set(['get_floor_plan_analysis_service_status', 'create_object_floor_plan_analysis_job', 'get_object_floor_plan_analysis_job', 'cancel_object_floor_plan_analysis_job']);
 export const ANALYSIS_ACTIONS = states;
@@ -44,8 +46,8 @@ export function createBase44AnalysisQueue({base44, settings, floorPlans, getUser
     return floorPlans.scope(base44,body,mutable);
   }
   async function asset(state,source){
-    const file=await floorPlans.assetScope(base44,state,source.file_id,source.source_kind==='room-objects'?['room_observations']:['background']);
-    if(source.source_kind==='room-objects'){if(!Number.isFinite(Date.parse(file.metadata?.observation_expires_at))||file.mime_type!=='application/json'||file.metadata?.observation_protocol!=='room-scan-observations-v1'||Date.parse(file.metadata?.observation_expires_at)<=Date.now())reject('analysis_source_unavailable');return file;}
+    const file=await floorPlans.assetScope(base44,state,source.file_id,isRoomSource(source)?['room_observations']:['background']);
+    if(isRoomSource(source)){if(!Number.isFinite(Date.parse(file.metadata?.observation_expires_at))||file.mime_type!=='application/json'||file.metadata?.observation_protocol!==roomProtocol(source)||Date.parse(file.metadata?.observation_expires_at)<=Date.now())reject('analysis_source_unavailable');return file;}
     if(file.mime_type!=='image/png'||!Number.isSafeInteger(file.size_bytes)||file.size_bytes<=0||file.size_bytes>PNG_MAX||typeof file.plaintext_sha256!=='string'||!/^[A-Za-z0-9+/]{43}=$/.test(file.plaintext_sha256))reject('analysis_source_unavailable');
     return file;
   }
@@ -56,12 +58,12 @@ export function createBase44AnalysisQueue({base44, settings, floorPlans, getUser
     return {actor,state};
   }
   return createFloorPlanAnalysisQueue({store,workerIds:Object.keys(settings.workerSecrets),hash,randomToken,authorizeScope:scope,
-    validateSource:async(state,source,actor)=>{const file=await asset(state,source);if(source.source_kind==='room-objects')await readRoomObservationSource({base44,floorPlans,state,file,actorId:actor.id});return {sha256:file.plaintext_sha256};},
-    validateJobScope:async job=>{const {state}=await liveScope(job);const file=await asset(state,job.source);if(file.plaintext_sha256!==job.source.sha256)reject('analysis_source_changed');if(job.source.source_kind==='room-objects')await validateRoomObservationBinding({base44,state,file,actorId:job.actor_id});},validateResult:async(value,width,height,job)=>{if(job.source.source_kind!=='room-objects')return validatePixelResult(value,width,height);const {state}=await liveScope(job),file=await asset(state,job.source);const source=await readRoomObservationSource({base44,floorPlans,state,file,actorId:job.actor_id});return validateRoomObjectResult(value,source);},
+    validateSource:async(state,source,actor)=>{const file=await asset(state,source);if(isRoomSource(source))await readRoomObservationSource({base44,floorPlans,state,file,actorId:actor.id});return {sha256:file.plaintext_sha256};},
+    validateJobScope:async job=>{const {state}=await liveScope(job);const file=await asset(state,job.source);if(file.plaintext_sha256!==job.source.sha256)reject('analysis_source_changed');if(isRoomSource(job.source))await validateRoomObservationBinding({base44,state,file,actorId:job.actor_id});},validateResult:async(value,width,height,job)=>{if(!isRoomSource(job.source))return validatePixelResult(value,width,height);const {state}=await liveScope(job),file=await asset(state,job.source);const source=await readRoomObservationSource({base44,floorPlans,state,file,actorId:job.actor_id});return validateRoomObservationResult(value,source);},
     loadSource:async job=>{
       const {actor,state}=await liveScope(job),file=await asset(state,job.source);
       if(file.plaintext_sha256!==job.source.sha256)reject('analysis_source_changed');
-      if(job.source.source_kind==='room-objects'){
+      if(isRoomSource(job.source)){
         const source=await readRoomObservationSource({base44,floorPlans,state,file,actorId:job.actor_id});
         // Cancellation, archive changes or loss of file rights during decryption
         // must prevent releasing images to a worker. Recheck without decrypting twice.

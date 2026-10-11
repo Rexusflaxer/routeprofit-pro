@@ -1,4 +1,5 @@
 import {QueueError} from './queueCore.ts';
+import {RoomDiscoveryError} from './roomDiscoveryContract.mjs';
 import {RoomObjectContractError} from './roomObjectContract.mjs';
 import {ACTIONS,RoomScanError} from './roomScanCore.mjs';
 import {createBase44RoomScanService} from './roomScanBase44.mjs';
@@ -22,7 +23,7 @@ export async function handleMobileRoomScan(req:Request,body:any,createClientFrom
   const result=await roomScanForRequest(base44).handle(body.action,user,payload);
   return Response.json(result);
  }catch(error){
-  if(error instanceof RoomObjectContractError)return Response.json({error:'De scanbeelden konden niet worden gecontroleerd. De gemeten ruimte blijft bewaard.',details:{code:error.code}},{status:400});
+  if(error instanceof RoomObjectContractError||error instanceof RoomDiscoveryError)return Response.json({error:'De scanbeelden konden niet worden gecontroleerd. De gemeten ruimte blijft bewaard.',details:{code:error.code}},{status:400});
   const known=error instanceof ApiError||error instanceof RoomScanError||error instanceof QueueError,status=known?Number((error as any).status||500):500;
   // Never log raw RoomPlan geometry, source photos, token, names or request body.
   console.error('[room-scan]',{action:String(body?.action||''),status,code:known?(error as any).details?.code:'room_scan_unavailable'});
